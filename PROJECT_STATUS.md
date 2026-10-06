@@ -2,9 +2,11 @@
 
 ## Current phase
 
-**Phase 0 — establish the simulation foundation.**
+**Phase 1 — exercise the AI stack against the whole-run prototype.**
 
-The parent research scaffold exists, but strategic experiments are intentionally secondary until `sts2-emulator` satisfies its first milestone: trustworthy, practically fast whole-run simulation with native parity evidence.
+The parent now has a real deterministic integration with the pinned `sts2-emulator` prototype.
+This is sufficient for research-harness and search-plumbing experiments, but not for native-STs2
+strategic claims because parity and production-speed binding work are still pending.
 
 ## Present capabilities
 
@@ -13,13 +15,17 @@ The parent research scaffold exists, but strategic experiments are intentionally
 - experiment/reproducibility manifest utilities;
 - SQLite strategic-evidence store prototype;
 - dataset/scenario manifest types;
-- mock backend used for architectural tests;
+- mock backend used for isolated architectural tests;
+- real long-lived JSONL emulator backend with schema handshake;
+- pinned emulator submodule and cross-repository integration test;
+- prototype fair-information observation path;
+- deterministic reset/legal/step/fork/hash/observe/terminal operations;
 - configuration and experiment directory conventions;
 - submodule bootstrap tooling.
 
 ## Explicitly absent
 
-- real emulator bindings;
+- production native/high-throughput emulator binding;
 - learned models;
 - serious tree search;
 - whole-run training;
@@ -27,9 +33,9 @@ The parent research scaffold exists, but strategic experiments are intentionally
 
 ## Next parent-repo tasks
 
-1. Add the real `sts2-emulator` Git submodule.
-2. Define the first stable Python/native binding adapter once the emulator API settles.
-3. Add integration tests that compare binding-visible transitions with emulator CLI/native fixtures.
-4. Build a deterministic random-policy run generator for smoke testing.
-5. Establish experiment manifest generation and dataset provenance in actual runs.
-6. Wait for sufficient emulator parity before investing heavily in strategic learning.
+1. Add deterministic prototype whole-run evaluation through `JsonlPrototypeBackend`.
+2. Add a first search baseline using stable action IDs and exact-state hashes.
+3. Record emulator commit, AI schema, ruleset, and information policy in real experiment manifests.
+4. Start collecting representative search/branching workloads for emulator performance profiling.
+5. Replace the JSONL developer transport with a native/high-throughput binding when profiling justifies it.
+6. Keep native parity work gating any strategic claim about the actual game.
