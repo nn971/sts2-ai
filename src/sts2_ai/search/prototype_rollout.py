@@ -4,6 +4,7 @@ import json
 import math
 import random
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from sts2_ai.emulator import EmulatorBackend, InformationPolicy, LegalAction, Observation, StateHandle
@@ -49,6 +50,7 @@ class PrototypeFlatRolloutSearch:
         *,
         seed: int = 0,
         rollout_depth: int = 64,
+        leaf_value: Callable[[Observation], float] | None = None,
     ) -> None:
         if rollout_depth <= 0:
             raise ValueError("rollout_depth must be positive")
@@ -56,6 +58,7 @@ class PrototypeFlatRolloutSearch:
         self._policy = policy
         self._rng = random.Random(seed)
         self._rollout_depth = rollout_depth
+        self._leaf_value = leaf_value or self._prototype_leaf_value
 
     def search(self, state: StateHandle, budget: SearchBudget) -> SearchResult:
         root_hash = self._backend.exact_hash(state)
@@ -155,7 +158,7 @@ class PrototypeFlatRolloutSearch:
             used += 1
 
         observation = self._backend.observe(state, self._policy)
-        return self._prototype_leaf_value(observation), used
+        return self._leaf_value(observation), used
 
     @staticmethod
     def _prototype_leaf_value(observation: Observation) -> float:
