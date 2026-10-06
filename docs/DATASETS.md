@@ -53,7 +53,26 @@ Strategically important states deliberately retained for repeated study:
 - boss relic choices;
 - historically misplayed states.
 
-The scenario archive prevents training from spending nearly all compute rediscovering ordinary early-run positions.
+The first prototype archive is **replay-first** rather than snapshot-first. A scenario records:
+
+```text
+run seed
+stable action-ID prefix
+decision index
+exact state hash
+emulator revision
+information policy
+root action values / visits / uncertainty
+reason / tags
+```
+
+Loading a scenario resets the emulator, replays the stable action prefix, and refuses the result if
+the emulator revision or exact state hash differs. This avoids inventing a state-deserialization ABI
+before we need one.
+
+Current mining prioritizes small best-vs-second value margins, then larger reported uncertainty.
+The scenario archive prevents repeated analysis from spending nearly all compute rediscovering
+ordinary early-run positions.
 
 ## Storage policy
 
