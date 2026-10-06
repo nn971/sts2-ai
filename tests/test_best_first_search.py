@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-
 from collections.abc import Sequence
 
 from sts2_ai.emulator import InformationPolicy, Observation, StateHandle, Transition
