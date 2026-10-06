@@ -31,6 +31,10 @@ class MockLinearBackend:
     def emulator_revision(self) -> str:
         return "mock"
 
+    def reset(self, seed: str) -> StateHandle:
+        del seed
+        return "0"
+
     def legal_actions(self, state: StateHandle) -> Sequence[LegalAction]:
         if self.is_terminal(state):
             return ()
