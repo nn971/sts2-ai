@@ -54,8 +54,20 @@ class MockLinearBackend:
             terminal=self.is_terminal(child),
         )
 
+    def batch_step(
+        self,
+        items: Sequence[tuple[StateHandle, LegalAction]],
+    ) -> Sequence[Transition]:
+        return tuple(self.step(state, action) for state, action in items)
+
     def expand(self, state: StateHandle) -> Sequence[Transition]:
         return tuple(self.step(state, action) for action in self.legal_actions(state))
+
+    def batch_expand(
+        self,
+        states: Sequence[StateHandle],
+    ) -> Sequence[Sequence[Transition]]:
+        return tuple(self.expand(state) for state in states)
 
     def fork(self, state: StateHandle) -> StateHandle:
         return str(state)
@@ -71,6 +83,16 @@ class MockLinearBackend:
             payload_json=payload,
             observation_hash=digest,
         )
+
+    def batch_observe(
+        self,
+        states: Sequence[StateHandle],
+        policy: InformationPolicy,
+    ) -> Sequence[Observation]:
+        return tuple(self.observe(state, policy) for state in states)
+
+    def release_many(self, states: Sequence[StateHandle]) -> int:
+        return len(tuple(states))
 
     def is_terminal(self, state: StateHandle) -> bool:
         return int(state) >= self._terminal_at
