@@ -21,7 +21,7 @@ class PrototypeHeuristicEvaluator:
             raise ValueError("Prototype observation payload must be a JSON object")
         payload = cast(dict[str, Any], raw)
 
-        outcome = payload.get("terminalOutcome")
+        outcome = payload.get("terminal_outcome")
         if terminal:
             if outcome == "victory":
                 return 1_000_000.0
@@ -31,7 +31,7 @@ class PrototypeHeuristicEvaluator:
         act = _number(payload.get("act"), default=0.0)
         floor = _number(payload.get("floor"), default=0.0)
         hp = _number(payload.get("hp"), default=0.0)
-        max_hp = max(1.0, _number(payload.get("maxHp"), default=1.0))
+        max_hp = max(1.0, _number(payload.get("max_hp"), default=1.0))
         gold = _number(payload.get("gold"), default=0.0)
 
         deck = payload.get("deck")
@@ -41,7 +41,7 @@ class PrototypeHeuristicEvaluator:
         upgraded_cards = 0
         if isinstance(deck, list):
             for card in deck:
-                if isinstance(card, dict) and _number(card.get("upgradeLevel"), default=0.0) > 0:
+                if isinstance(card, dict) and _number(card.get("upgrade_level"), default=0.0) > 0:
                     upgraded_cards += 1
 
         relic_count = len(relics) if isinstance(relics, list) else 0
