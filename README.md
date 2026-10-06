@@ -49,11 +49,14 @@ This starter repository contains **research scaffolding, not a trained agent**. 
 
 - `sts2-emulator` is pinned as a Git submodule at `emulator/`, and its commit is part of experiment provenance;
 - the public Python-side emulator protocol is present so research code can be written against a stable boundary;
-- a mock backend is used by tests;
+- a mock backend remains for isolated tests;
+- a real `JsonlPrototypeBackend` drives the pinned C# prototype through a long-lived JSONL process;
 - a small SQLite-backed strategic evidence store is included as a starting point, not as a final schema;
 - search/model/training modules define interfaces and baseline plumbing rather than claiming strategic competence.
 
-The immediate project dependency is **Milestone 1 of `sts2-emulator`: a trustworthy, practically fast whole-run emulator**.
+The project can now run against the emulator's **AI-ready prototype** through a correctness-oriented
+developer bridge. Native STS2 parity and a high-throughput production binding remain prerequisites
+for serious strategic claims.
 
 ## First-time setup
 
@@ -120,9 +123,13 @@ python -m pip install -e '.[dev]'
 Run the local checks:
 
 ```fish
+git submodule update --init --recursive
 ./scripts/test.fish
 ./scripts/doctor.fish
 ```
+
+The real prototype backend additionally requires the .NET 9 SDK. It builds the pinned emulator
+submodule and launches one long-running `prototype-ai-jsonl` process.
 
 ## Research architecture
 

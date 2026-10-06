@@ -7,7 +7,7 @@
 Conceptually:
 
 ```text
-load/create state
+reset(seed) -> state
 legal_actions(state) -> actions
 step(state, action) -> next_state
 fork(state) -> independent branch
@@ -63,3 +63,24 @@ binding_version
 ```
 
 Any semantic correction that changes transitions may invalidate cached strategic evidence.
+
+
+## Current prototype transport
+
+The first real adapter is `JsonlPrototypeBackend`. It launches the pinned emulator CLI once and
+uses the emulator's `prototype-ai-jsonl-v0` JSONL protocol over stdin/stdout.
+
+It is a **developer/integration transport**, not the intended high-throughput binding. Its purpose
+is to make parent-repo research code exercise real deterministic emulator semantics immediately
+while preserving the backend protocol that a future native binding will implement.
+
+The pinned emulator currently advertises:
+
+```text
+wire schema       prototype-ai-jsonl-v0
+AI schema         prototype-ai-v0
+fair policy       prototype-fair-v0
+ruleset           prototype-silent-v0
+```
+
+Search code must not depend on JSONL process details.

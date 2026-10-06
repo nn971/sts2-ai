@@ -84,7 +84,10 @@ git push
 
 This two-commit workflow is intentional: one commit changes emulator code; another parent commit chooses to consume that emulator revision.
 
-## 6. Python environment
+## 6. Python + .NET environment
+
+The real prototype backend currently uses the emulator CLI bridge, so install both Python 3.12+
+and the .NET 9 SDK.
 
 ```fish
 python -m venv .venv
@@ -112,3 +115,29 @@ For integration CI, configure an explicit read credential (for example an organi
 A Git submodule is a reference to another Git repository at an exact commit. A source ZIP cannot faithfully encode the parent's `gitlink` without the surrounding Git repository metadata and the actual emulator remote.
 
 Therefore this starter contains the bootstrap script and integration contract. Run the submodule command after both remotes exist; from that point onward normal Git commits preserve the exact emulator revision.
+
+
+## 7. Real prototype backend
+
+With the submodule initialized, Python research code can exercise the pinned emulator directly:
+
+```python
+from pathlib import Path
+
+from sts2_ai.emulator import InformationPolicy, JsonlPrototypeBackend
+
+with JsonlPrototypeBackend(Path("emulator")) as backend:
+    root = backend.reset("demo-seed")
+    observation = backend.observe(
+        root,
+        InformationPolicy(backend.fair_policy_id),
+    )
+    actions = backend.legal_actions(root)
+    transition = backend.step(root, actions[0])
+```
+
+The backend builds the pinned C# CLI in Release mode and keeps one
+`prototype-ai-jsonl` process alive for the lifetime of the context manager.
+
+This is intentionally a developer bridge. Do not optimize Python search around subprocess/JSONL
+details; a future native binding should implement the same `EmulatorBackend` contract.

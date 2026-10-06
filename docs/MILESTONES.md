@@ -17,12 +17,13 @@ This is the project's current gating milestone.
 
 ## M1 — End-to-end research harness
 
-- real emulator adapter;
-- deterministic random-policy whole-run smoke tests;
-- experiment manifests;
-- scenario serialization;
-- exact-state strategic store;
-- baseline evaluation metrics.
+- [x] real emulator developer adapter against the pinned whole-run prototype;
+- [ ] deterministic whole-run evaluation through the parent backend;
+- [x] cross-repository reset/observe/legal/step/fork/hash integration test;
+- [ ] experiment manifests populated from the real backend;
+- [ ] scenario serialization;
+- [ ] exact-state strategic-store integration with real emulator hashes;
+- [ ] baseline evaluation metrics.
 
 No strong strategic claim is required.
 
