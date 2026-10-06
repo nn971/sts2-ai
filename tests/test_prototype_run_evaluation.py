@@ -1,8 +1,25 @@
 from __future__ import annotations
 
-from sts2_ai.emulator import InformationPolicy
+import json
+
+from sts2_ai.emulator import InformationPolicy, Observation
 from sts2_ai.evaluation import PrototypeSearchRunEvaluator
 from sts2_ai.testing import MockLinearBackend
+
+
+
+
+class OutcomeMockBackend(MockLinearBackend):
+    def observe(self, state: str, policy: InformationPolicy) -> Observation:
+        base = super().observe(state, policy)
+        payload = json.loads(base.payload_json)
+        if self.is_terminal(state):
+            payload["terminal_outcome"] = "victory"
+        return Observation(
+            policy_id=base.policy_id,
+            payload_json=json.dumps(payload, sort_keys=True),
+            observation_hash=base.observation_hash,
+        )
 
 
 class TrackingMockBackend(MockLinearBackend):
@@ -84,3 +101,20 @@ def test_empty_seed_set_returns_zero_summary() -> None:
     assert summary.nodes_per_second == 0.0
     assert summary.total_decisions == 0
     assert summary.total_expanded_nodes == 0
+
+
+def test_evaluator_reads_snake_case_terminal_outcome() -> None:
+    summary = PrototypeSearchRunEvaluator(
+        OutcomeMockBackend(terminal_at=3),
+        InformationPolicy("fair-test"),
+        nodes_per_decision=4,
+        rollout_depth=1,
+        rollout_batch_size=2,
+        search_seed=3,
+    ).evaluate(("terminal-outcome",))
+
+    assert summary.victories == 1
+    assert summary.defeats == 0
+    assert summary.unknown_terminal_outcomes == 0
+    assert summary.victory_rate == 1.0
+    assert summary.runs[0].outcome == "victory"
