@@ -5,6 +5,7 @@ from .prototype_runs import (
     PrototypeRandomRunEvaluation,
     PrototypeRandomRunEvaluator,
     PrototypeRunEvaluation,
+    PrototypeSearchDecision,
     PrototypeSearchRunEvaluator,
 )
 
@@ -15,6 +16,7 @@ __all__ = [
     "PrototypeRandomRunEvaluation",
     "PrototypeRandomRunEvaluator",
     "PrototypeRunEvaluation",
+    "PrototypeSearchDecision",
     "PrototypeSearchRunEvaluator",
     "collect_experiment_manifest",
 ]
