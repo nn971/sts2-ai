@@ -9,7 +9,6 @@ from sts2_ai.emulator import (
     EmulatorBackend,
     InformationPolicy,
     LegalAction,
-    StateHandle,
 )
 from sts2_ai.search import ActionEvaluation, PrototypeFlatRolloutSearch, SearchBudget
 
