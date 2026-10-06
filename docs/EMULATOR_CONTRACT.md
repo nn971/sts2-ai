@@ -63,3 +63,39 @@ binding_version
 ```
 
 Any semantic correction that changes transitions may invalidate cached strategic evidence.
+
+
+## Current prototype transport
+
+The first concrete implementation is `PrototypeJsonlBackend`.
+
+It launches the pinned emulator CLI as one long-lived subprocess and negotiates:
+
+```text
+wire schema: prototype-ai-jsonl-v0
+AI schema:   prototype-ai-v0
+fair policy: prototype-fair-v0
+```
+
+The process bridge currently supports:
+
+```text
+reset(seed)
+legal_actions(state)
+step(state, action)
+fork(state)
+exact_hash(state)
+observe(state, prototype-fair-v0)
+is_terminal(state)
+manifest()
+```
+
+State handles are process-local opaque identifiers. Search code must not infer semantics from them.
+
+This transport is intentionally a correctness/integration boundary rather than the final performance
+binding. Once representative search workloads show where overhead lies, the same semantic contract
+can move to batched IPC, an in-process binding, or another optimized transport without changing
+search code.
+
+The parent integration tests require a clean checkout with the pinned `emulator/` submodule and
+build the emulator CLI in Release mode before running Python tests.

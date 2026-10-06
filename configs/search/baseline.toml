@@ -1,9 +1,11 @@
 [search]
-name = "baseline-placeholder"
-max_nodes = 1000
+name = "prototype-flat-rollout-v0"
+max_nodes = 256
+rollout_depth = 32
+random_seed = 0
 
 [information]
-policy = "fair-v1"
+policy = "prototype-fair-v0"
 
 [notes]
-text = "Placeholder only. Replace once a real search baseline exists."
+text = "First real emulator-backed workload. Baseline plumbing only; not a strategic-strength claim."

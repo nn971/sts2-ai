@@ -15,3 +15,18 @@ class StrategicEvidence:
     model_id: str | None
     emulator_revision: str
     game_build: str
+
+
+@dataclass(frozen=True, slots=True)
+class CachedActionEvaluation:
+    state_hash: str
+    information_policy: str
+    action_id: str
+    value: float
+    visits: int
+    uncertainty: float | None
+    search_version: str
+    search_config_id: str
+    model_id: str | None
+    emulator_revision: str
+    game_build: str
