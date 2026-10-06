@@ -1,0 +1,3 @@
+[submodule "emulator"]
+	path = emulator
+	url = ../sts2-emulator.git
