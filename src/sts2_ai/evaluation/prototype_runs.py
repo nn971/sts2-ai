@@ -170,7 +170,7 @@ class PrototypeSearchRunEvaluator:
             if not isinstance(payload, dict):
                 raise RuntimeError("Prototype terminal observation must be an object")
 
-            raw_outcome = payload.get("terminalOutcome")
+            raw_outcome = payload.get("terminal_outcome")
             outcome = raw_outcome if isinstance(raw_outcome, str) else None
             final_hash = self._backend.exact_hash(state)
             elapsed = time.perf_counter() - started
