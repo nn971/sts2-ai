@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
-
 from sts2_ai.emulator import InformationPolicy, PrototypeJsonlBackend
 
 
