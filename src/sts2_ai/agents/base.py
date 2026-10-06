@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol, Sequence
+from typing import Protocol
 
 from sts2_ai.emulator import LegalAction, Observation
 
@@ -14,4 +15,8 @@ class Decision:
 
 
 class Agent(Protocol):
-    def choose(self, observation: Observation, legal_actions: Sequence[LegalAction]) -> Decision: ...
+    def choose(
+        self,
+        observation: Observation,
+        legal_actions: Sequence[LegalAction],
+    ) -> Decision: ...

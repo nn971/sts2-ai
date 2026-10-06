@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
 import json
-from pathlib import Path
 import subprocess
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 
@@ -66,10 +66,12 @@ def collect_experiment_manifest(
     emulator_root = repo_root / "emulator"
     return ExperimentManifest(
         experiment_id=experiment_id,
-        created_at_utc=datetime.now(timezone.utc).isoformat(),
+        created_at_utc=datetime.now(UTC).isoformat(),
         ai_commit=_git(repo_root, "rev-parse", "HEAD"),
         ai_dirty=_git_dirty(repo_root),
-        emulator_commit=_git(emulator_root, "rev-parse", "HEAD") if emulator_root.exists() else None,
+        emulator_commit=(
+            _git(emulator_root, "rev-parse", "HEAD") if emulator_root.exists() else None
+        ),
         emulator_dirty=_git_dirty(emulator_root) if emulator_root.exists() else None,
         game_build=game_build,
         emulator_schema_version=emulator_schema_version,

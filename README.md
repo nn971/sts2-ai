@@ -47,7 +47,7 @@ sts2-emulator  <---  sts2-ai
 
 This starter repository contains **research scaffolding, not a trained agent**. In particular:
 
-- the emulator submodule is intentionally not embedded in this archive;
+- `sts2-emulator` is pinned as a Git submodule at `emulator/`, and its commit is part of experiment provenance;
 - the public Python-side emulator protocol is present so research code can be written against a stable boundary;
 - a mock backend is used by tests;
 - a small SQLite-backed strategic evidence store is included as a starting point, not as a final schema;

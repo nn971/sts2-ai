@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import random
-from typing import Sequence
+from collections.abc import Sequence
 
 from sts2_ai.agents.base import Decision
 from sts2_ai.emulator import LegalAction, Observation

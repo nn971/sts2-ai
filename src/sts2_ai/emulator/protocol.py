@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol, Sequence, TypeAlias
+from typing import Protocol
 
-StateHandle: TypeAlias = str
+type StateHandle = str
 
 
 @dataclass(frozen=True, slots=True)

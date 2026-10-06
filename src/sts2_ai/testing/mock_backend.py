@@ -2,9 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Sequence
+from collections.abc import Sequence
 
-from sts2_ai.emulator import InformationPolicy, LegalAction, Observation, StateHandle, Transition
+from sts2_ai.emulator import (
+    InformationPolicy,
+    LegalAction,
+    Observation,
+    StateHandle,
+    Transition,
+)
 
 
 class MockLinearBackend:
@@ -37,7 +43,12 @@ class MockLinearBackend:
         value = int(state)
         amount = json.loads(action.payload_json)["amount"]
         child = str(value + int(amount))
-        return Transition(parent=state, action=action, child=child, terminal=self.is_terminal(child))
+        return Transition(
+            parent=state,
+            action=action,
+            child=child,
+            terminal=self.is_terminal(child),
+        )
 
     def fork(self, state: StateHandle) -> StateHandle:
         return str(state)
@@ -48,7 +59,11 @@ class MockLinearBackend:
     def observe(self, state: StateHandle, policy: InformationPolicy) -> Observation:
         payload = json.dumps({"value": int(state)}, sort_keys=True)
         digest = hashlib.sha256((policy.policy_id + payload).encode()).hexdigest()
-        return Observation(policy_id=policy.policy_id, payload_json=payload, observation_hash=digest)
+        return Observation(
+            policy_id=policy.policy_id,
+            payload_json=payload,
+            observation_hash=digest,
+        )
 
     def is_terminal(self, state: StateHandle) -> bool:
         return int(state) >= self._terminal_at

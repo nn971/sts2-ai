@@ -47,7 +47,7 @@ class SQLiteStrategyStore:
     def close(self) -> None:
         self._connection.close()
 
-    def __enter__(self) -> "SQLiteStrategyStore":
+    def __enter__(self) -> SQLiteStrategyStore:
         return self
 
     def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
