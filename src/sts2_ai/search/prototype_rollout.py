@@ -243,11 +243,11 @@ class PrototypeFlatRolloutSearch:
         if not isinstance(payload, dict):
             raise RuntimeError("Prototype observation payload must be an object")
 
-        terminal = payload.get("terminalOutcome")
+        terminal = payload.get("terminal_outcome")
         act = float(payload.get("act") or 0)
         floor = float(payload.get("floor") or 0)
         hp = float(payload.get("hp") or 0)
-        max_hp = max(1.0, float(payload.get("maxHp") or 1))
+        max_hp = max(1.0, float(payload.get("max_hp") or 1))
         gold = float(payload.get("gold") or 0)
         deck = payload.get("deck")
         deck_size = float(len(deck)) if isinstance(deck, list) else 0.0
