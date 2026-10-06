@@ -54,3 +54,15 @@ or:
 ```text
 information_policy = "oracle-full-state-v1"
 ```
+
+
+## Current prototype fair projection
+
+The pinned prototype emulator exposes `prototype-fair-v0`. It includes the persistent deck,
+relics/potions, complete generated map graph, visible combat zones, enemy intent/status/powers,
+reward/shop/event state, and legal actions. It deliberately omits emulator RNG state, run seed,
+and hidden draw-pile order.
+
+This policy is provisional and must not be conflated with a verified native STS2 information
+model. It gives early AI experiments a disciplined non-oracle boundary while fidelity work is
+still pending.
