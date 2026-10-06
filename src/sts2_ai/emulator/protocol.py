@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 type StateHandle = str
 
@@ -36,6 +36,7 @@ class Transition:
     action: LegalAction
     child: StateHandle
     terminal: bool
+    exact_hash: str | None = None
 
 
 class EmulatorBackend(Protocol):
@@ -60,3 +61,17 @@ class EmulatorBackend(Protocol):
     def observe(self, state: StateHandle, policy: InformationPolicy) -> Observation: ...
 
     def is_terminal(self, state: StateHandle) -> bool: ...
+
+
+@runtime_checkable
+class ExpandableEmulatorBackend(Protocol):
+    """Optional optimized sibling-expansion capability."""
+
+    def expand(self, state: StateHandle) -> Sequence[Transition]: ...
+
+
+@runtime_checkable
+class ReleasableEmulatorBackend(Protocol):
+    """Optional lifetime-management capability for temporary state handles."""
+
+    def release_many(self, states: Sequence[StateHandle]) -> int: ...
