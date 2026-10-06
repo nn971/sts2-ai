@@ -4,10 +4,16 @@ import json
 import math
 import random
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
+from collections.abc import Callable
 
-from sts2_ai.emulator import EmulatorBackend, InformationPolicy, LegalAction, Observation, StateHandle
+from sts2_ai.emulator import (
+    EmulatorBackend,
+    InformationPolicy,
+    LegalAction,
+    Observation,
+    StateHandle,
+)
 from sts2_ai.search.base import ActionEvaluation, SearchBudget, SearchResult
 
 
