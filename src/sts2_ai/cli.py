@@ -34,7 +34,7 @@ def main() -> None:
 
     args = parser.parse_args()
     if args.command == "manifest":
-        result = collect_experiment_manifest(
+        manifest_result = collect_experiment_manifest(
             repo_root=args.repo_root,
             experiment_id=args.experiment_id,
             game_build=args.game_build,
@@ -44,7 +44,7 @@ def main() -> None:
             config={},
             seeds={},
         )
-        result.write_json(args.output)
+        manifest_result.write_json(args.output)
         print(args.output)
     elif args.command == "prototype-search-smoke":
         if args.nodes <= 0:
@@ -66,21 +66,21 @@ def main() -> None:
                 rollout_depth=args.depth,
             )
             started = time.perf_counter()
-            result = search.search(state, SearchBudget(max_nodes=args.nodes))
+            search_result = search.search(state, SearchBudget(max_nodes=args.nodes))
             elapsed = time.perf_counter() - started
 
             print(f"Emulator revision: {backend.emulator_revision}")
             print(f"Binding: {backend.binding_version}")
             print(f"Ruleset: {backend.ruleset_id}")
-            print(f"Search: {result.search_version}")
-            print(f"Expanded nodes: {result.expanded_nodes}")
+            print(f"Search: {search_result.search_version}")
+            print(f"Expanded nodes: {search_result.expanded_nodes}")
             print(f"Elapsed: {elapsed:.3f}s")
             if elapsed > 0:
-                print(f"Nodes/sec: {result.expanded_nodes / elapsed:.1f}")
+                print(f"Nodes/sec: {search_result.expanded_nodes / elapsed:.1f}")
 
             print("Root actions:")
             for evaluation in sorted(
-                result.evaluations,
+                search_result.evaluations,
                 key=lambda item: item.value,
                 reverse=True,
             ):
