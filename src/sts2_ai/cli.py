@@ -31,6 +31,11 @@ def main() -> None:
     search_smoke.add_argument("--nodes", type=int, default=256)
     search_smoke.add_argument("--depth", type=int, default=32)
     search_smoke.add_argument("--search-seed", type=int, default=0)
+    search_smoke.add_argument("--manifest-output", type=Path)
+    search_smoke.add_argument(
+        "--experiment-id",
+        default="prototype-search-smoke",
+    )
 
     args = parser.parse_args()
     if args.command == "manifest":
@@ -96,6 +101,25 @@ def main() -> None:
                     f"stderr={uncertainty} "
                     f"id={evaluation.action.action_id}"
                 )
+
+            if args.manifest_output is not None:
+                search_manifest = collect_experiment_manifest(
+                    repo_root=args.repo_root,
+                    experiment_id=args.experiment_id,
+                    game_build="prototype-unbound",
+                    emulator_schema_version=PrototypeJsonlBackend.EXPECTED_AI_SCHEMA,
+                    binding_version=backend.binding_version,
+                    information_policy=backend.fair_policy.policy_id,
+                    config={
+                        "search_version": search_result.search_version,
+                        "max_nodes": args.nodes,
+                        "rollout_depth": args.depth,
+                        "run_seed": args.seed,
+                    },
+                    seeds={"search_seed": args.search_seed},
+                )
+                search_manifest.write_json(args.manifest_output)
+                print(f"Manifest: {args.manifest_output}")
 
 
 if __name__ == "__main__":
