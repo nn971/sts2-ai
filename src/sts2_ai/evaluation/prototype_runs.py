@@ -126,6 +126,7 @@ class PrototypeSearchRunEvaluator:
         game_build: str = "prototype-unbound",
         model_id: str | None = None,
         on_search_decision: Callable[[PrototypeSearchDecision], None] | None = None,
+        search_type: type[PrototypeFlatRolloutSearch] = PrototypeFlatRolloutSearch,
     ) -> None:
         if nodes_per_decision <= 0:
             raise ValueError("nodes_per_decision must be positive")
@@ -147,6 +148,7 @@ class PrototypeSearchRunEvaluator:
         self._game_build = game_build
         self._model_id = model_id
         self._on_search_decision = on_search_decision
+        self._search_type = search_type
 
     def evaluate(self, seeds: tuple[str, ...]) -> PrototypeEvaluationSummary:
         started = time.perf_counter()
@@ -162,7 +164,7 @@ class PrototypeSearchRunEvaluator:
         unknown = len(runs) - victories - defeats
 
         return PrototypeEvaluationSummary(
-            search_version=PrototypeFlatRolloutSearch.search_version,
+            search_version=self._search_type.search_version,
             runs=runs,
             victories=victories,
             defeats=defeats,
@@ -183,7 +185,7 @@ class PrototypeSearchRunEvaluator:
         seen_search_states: set[str],
     ) -> PrototypeRunEvaluation:
         run_search_seed = self._search_seed + run_index
-        search = PrototypeFlatRolloutSearch(
+        search = self._search_type(
             self._backend,
             self._policy,
             seed=run_search_seed,
@@ -314,7 +316,7 @@ class PrototypeSearchRunEvaluator:
         entries = self._strategy_store.cached_action_evaluations(
             state_hash=state_hash,
             information_policy=self._policy.policy_id,
-            search_version=PrototypeFlatRolloutSearch.search_version,
+            search_version=self._search_type.search_version,
             search_config_id=search_config_id,
             emulator_revision=self._backend.emulator_revision,
             game_build=self._game_build,
@@ -355,7 +357,7 @@ class PrototypeSearchRunEvaluator:
                     value=evaluation.value,
                     visits=evaluation.visits,
                     uncertainty=evaluation.uncertainty,
-                    search_version=PrototypeFlatRolloutSearch.search_version,
+                    search_version=self._search_type.search_version,
                     search_config_id=search_config_id,
                     model_id=self._model_id,
                     emulator_revision=self._backend.emulator_revision,
