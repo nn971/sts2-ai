@@ -42,6 +42,14 @@ def test_real_prototype_jsonl_backend_round_trip() -> None:
         assert map_actions
         assert all(action.kind == "choose_map_node" for action in map_actions)
 
+        expansions = backend.expand(transition.child)
+        assert len(expansions) == len(map_actions)
+        assert {item.action.action_id for item in expansions} == {
+            action.action_id for action in map_actions
+        }
+        assert all(item.parent == transition.child for item in expansions)
+        assert len({item.child for item in expansions}) == len(expansions)
+
 
 def test_real_backend_rejects_nonfair_observation_policy() -> None:
     repo_root = Path(__file__).resolve().parents[1]
