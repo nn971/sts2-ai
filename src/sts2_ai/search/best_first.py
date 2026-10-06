@@ -5,7 +5,7 @@ import itertools
 import time
 from dataclasses import dataclass
 
-from sts2_ai.emulator import EmulatorBackend, InformationPolicy, LegalAction, StateHandle
+from sts2_ai.emulator import EmulatorBackend, InformationPolicy, StateHandle
 from sts2_ai.search.base import ActionEvaluation, SearchBudget, SearchResult
 from sts2_ai.search.evaluator import StateEvaluator
 
