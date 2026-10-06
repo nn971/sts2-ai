@@ -39,15 +39,24 @@ class _Accumulator:
         return math.sqrt(variance / self.visits)
 
 
+@dataclass(slots=True)
+class _Rollout:
+    root_action: LegalAction
+    state: StateHandle
+    terminal: bool
+    used_nodes: int
+
+
 class PrototypeFlatRolloutSearch:
     """Small deterministic baseline that exercises the real whole-run emulator.
 
-    This is deliberately not a claim of strategic strength. Each root action receives
-    round-robin random rollouts, and leaf states are scored with a simple progress/HP
-    heuristic over the fair observation.
+    This is deliberately not a claim of strategic strength. Root actions receive
+    round-robin random rollouts, while independent rollout states advance in batched
+    wavefronts to reduce transport overhead. Leaf states are scored by an injectable
+    evaluator; the default is a simple fair-observation progress/HP heuristic.
     """
 
-    search_version = "prototype-flat-rollout-v0"
+    search_version = "prototype-flat-rollout-v1"
 
     def __init__(
         self,
@@ -56,14 +65,19 @@ class PrototypeFlatRolloutSearch:
         *,
         seed: int = 0,
         rollout_depth: int = 64,
+        rollout_batch_size: int = 16,
         leaf_value: Callable[[Observation], float] | None = None,
     ) -> None:
         if rollout_depth <= 0:
             raise ValueError("rollout_depth must be positive")
+        if rollout_batch_size <= 0:
+            raise ValueError("rollout_batch_size must be positive")
+
         self._backend = backend
         self._policy = policy
         self._rng = random.Random(seed)
         self._rollout_depth = rollout_depth
+        self._rollout_batch_size = rollout_batch_size
         self._leaf_value = leaf_value or self._prototype_leaf_value
 
     def search(self, state: StateHandle, budget: SearchBudget) -> SearchResult:
@@ -82,36 +96,130 @@ class PrototypeFlatRolloutSearch:
         max_nodes = budget.max_nodes if budget.max_nodes is not None else 256
         if max_nodes < 0:
             raise ValueError("max_nodes cannot be negative")
+        if budget.max_seconds is not None and budget.max_seconds < 0:
+            raise ValueError("max_seconds cannot be negative")
 
         deadline = (
             time.monotonic() + budget.max_seconds
             if budget.max_seconds is not None
             else None
         )
-        if budget.max_seconds is not None and budget.max_seconds < 0:
-            raise ValueError("max_seconds cannot be negative")
-
         accumulators = {action.action_id: _Accumulator() for action in root_actions}
         expanded_nodes = 0
-        action_index = 0
+        next_root_action = 0
 
         while expanded_nodes < max_nodes:
             if deadline is not None and time.monotonic() >= deadline:
                 break
 
-            action = root_actions[action_index % len(root_actions)]
-            action_index += 1
+            wave_size = min(self._rollout_batch_size, max_nodes - expanded_nodes)
+            assigned_actions = tuple(
+                root_actions[(next_root_action + index) % len(root_actions)]
+                for index in range(wave_size)
+            )
+            next_root_action += wave_size
 
-            remaining = max_nodes - expanded_nodes
-            if remaining <= 0:
-                break
+            root_transitions = tuple(
+                self._backend.batch_step(
+                    tuple((state, action) for action in assigned_actions)
+                )
+            )
+            if len(root_transitions) != wave_size:
+                raise RuntimeError(
+                    "Emulator batch_step returned a different number of transitions "
+                    "than requested"
+                )
 
-            value, used = self._rollout(state, action, remaining, deadline)
-            if used == 0:
-                break
+            rollouts = [
+                _Rollout(
+                    root_action=action,
+                    state=transition.child,
+                    terminal=transition.terminal,
+                    used_nodes=1,
+                )
+                for action, transition in zip(
+                    assigned_actions,
+                    root_transitions,
+                    strict=True,
+                )
+            ]
+            expanded_nodes += wave_size
 
-            expanded_nodes += used
-            accumulators[action.action_id].add(value)
+            while expanded_nodes < max_nodes:
+                if deadline is not None and time.monotonic() >= deadline:
+                    break
+
+                eligible = [
+                    index
+                    for index, rollout in enumerate(rollouts)
+                    if not rollout.terminal
+                    and rollout.used_nodes < self._rollout_depth
+                ]
+                if not eligible:
+                    break
+
+                allowance = min(len(eligible), max_nodes - expanded_nodes)
+                eligible = eligible[:allowance]
+                parent_handles = tuple(rollouts[index].state for index in eligible)
+                batches = tuple(self._backend.batch_expand(parent_handles))
+                if len(batches) != len(parent_handles):
+                    raise RuntimeError(
+                        "Emulator batch_expand returned a different number of batches "
+                        "than requested"
+                    )
+
+                release_handles: list[StateHandle] = []
+                for rollout_index, parent, expansions in zip(
+                    eligible,
+                    parent_handles,
+                    batches,
+                    strict=True,
+                ):
+                    ordered = tuple(
+                        sorted(
+                            expansions,
+                            key=lambda item: item.action.action_id,
+                        )
+                    )
+                    if not ordered:
+                        rollouts[rollout_index].terminal = True
+                        continue
+
+                    chosen = self._rng.choice(ordered)
+                    release_handles.append(parent)
+                    release_handles.extend(
+                        transition.child
+                        for transition in ordered
+                        if transition.child != chosen.child
+                    )
+
+                    rollout = rollouts[rollout_index]
+                    rollout.state = chosen.child
+                    rollout.terminal = chosen.terminal
+                    rollout.used_nodes += 1
+                    expanded_nodes += 1
+
+                if release_handles:
+                    self._backend.release_many(tuple(release_handles))
+
+            observations = tuple(
+                self._backend.batch_observe(
+                    tuple(rollout.state for rollout in rollouts),
+                    self._policy,
+                )
+            )
+            if len(observations) != len(rollouts):
+                raise RuntimeError(
+                    "Emulator batch_observe returned a different number of observations "
+                    "than requested"
+                )
+
+            for rollout, observation in zip(rollouts, observations, strict=True):
+                accumulators[rollout.root_action.action_id].add(
+                    self._leaf_value(observation)
+                )
+
+            self._backend.release_many(tuple(rollout.state for rollout in rollouts))
 
         evaluations = tuple(
             ActionEvaluation(
@@ -128,41 +236,6 @@ class PrototypeFlatRolloutSearch:
             expanded_nodes=expanded_nodes,
             search_version=self.search_version,
         )
-
-    def _rollout(
-        self,
-        root: StateHandle,
-        root_action: LegalAction,
-        remaining_nodes: int,
-        deadline: float | None,
-    ) -> tuple[float, int]:
-        transition = self._backend.step(root, root_action)
-        state = transition.child
-        used = 1
-
-        while (
-            used < remaining_nodes
-            and used < self._rollout_depth
-            and not transition.terminal
-        ):
-            if deadline is not None and time.monotonic() >= deadline:
-                break
-
-            expansions = tuple(
-                sorted(
-                    self._backend.expand(state),
-                    key=lambda item: item.action.action_id,
-                )
-            )
-            if not expansions:
-                break
-
-            transition = self._rng.choice(expansions)
-            state = transition.child
-            used += 1
-
-        observation = self._backend.observe(state, self._policy)
-        return self._leaf_value(observation), used
 
     @staticmethod
     def _prototype_leaf_value(observation: Observation) -> float:
