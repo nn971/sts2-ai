@@ -114,7 +114,10 @@ class PrototypeFlatRolloutSearch:
             if deadline is not None and time.monotonic() >= deadline:
                 break
 
-            wave_size = min(self._rollout_batch_size, max_nodes - expanded_nodes)
+            wave_size = self._root_wave_size(
+                max_nodes - expanded_nodes,
+                len(root_actions),
+            )
             assigned_actions, next_root_action = self._assign_root_actions(
                 root_actions,
                 accumulators,
@@ -240,6 +243,14 @@ class PrototypeFlatRolloutSearch:
             search_version=self.search_version,
         )
 
+    def _root_wave_size(
+        self,
+        remaining_nodes: int,
+        action_count: int,
+    ) -> int:
+        del action_count
+        return min(self._rollout_batch_size, remaining_nodes)
+
     def _assign_root_actions(
         self,
         root_actions: tuple[LegalAction, ...],
@@ -304,9 +315,12 @@ class PrototypeUcbRolloutSearch(PrototypeFlatRolloutSearch):
         rollout_batch_size: int = 16,
         leaf_value: Callable[[Observation], float] | None = None,
         exploration: float = 1.25,
+        feedback_wave_size: int = 2,
     ) -> None:
         if exploration < 0:
             raise ValueError("exploration cannot be negative")
+        if feedback_wave_size <= 0:
+            raise ValueError("feedback_wave_size must be positive")
         super().__init__(
             backend,
             policy,
@@ -316,6 +330,15 @@ class PrototypeUcbRolloutSearch(PrototypeFlatRolloutSearch):
             leaf_value=leaf_value,
         )
         self._exploration = exploration
+        self._feedback_wave_size = feedback_wave_size
+
+    def _root_wave_size(
+        self,
+        remaining_nodes: int,
+        action_count: int,
+    ) -> int:
+        del action_count
+        return min(self._feedback_wave_size, remaining_nodes)
 
     def _assign_root_actions(
         self,
@@ -345,8 +368,11 @@ class PrototypeUcbRolloutSearch(PrototypeFlatRolloutSearch):
         for _ in range(wave_size):
             def priority(action: LegalAction) -> tuple[float, str]:
                 visits = virtual_visits[action.action_id]
-                if visits == 0:
-                    return (float("inf"), action.action_id)
+                actual_visits = accumulators[action.action_id].visits
+                if actual_visits == 0:
+                    if visits == 0:
+                        return (float("inf"), action.action_id)
+                    return (-float(visits), action.action_id)
 
                 mean = accumulators[action.action_id].mean()
                 bonus = self._exploration * value_scale * math.sqrt(
