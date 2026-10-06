@@ -4,6 +4,7 @@ import json
 
 from sts2_ai.emulator import InformationPolicy, Observation
 from sts2_ai.evaluation import PrototypeSearchRunEvaluator
+from sts2_ai.strategy_db import SQLiteStrategyStore
 from sts2_ai.testing import MockLinearBackend
 
 
@@ -118,3 +119,45 @@ def test_evaluator_reads_snake_case_terminal_outcome() -> None:
     assert summary.unknown_terminal_outcomes == 0
     assert summary.victory_rate == 1.0
     assert summary.runs[0].outcome == "victory"
+
+
+def test_exact_search_cache_reuses_state_evaluations(tmp_path) -> None:
+    database = tmp_path / "strategy.sqlite"
+
+    with SQLiteStrategyStore(database) as store:
+        first_backend = MockLinearBackend(terminal_at=8)
+        first = PrototypeSearchRunEvaluator(
+            first_backend,
+            InformationPolicy("fair-test"),
+            nodes_per_decision=12,
+            rollout_depth=3,
+            rollout_batch_size=4,
+            search_seed=29,
+            strategy_store=store,
+            game_build="test-build",
+        ).evaluate(("cache-a", "cache-b"))
+
+        second_backend = MockLinearBackend(terminal_at=8)
+        second = PrototypeSearchRunEvaluator(
+            second_backend,
+            InformationPolicy("fair-test"),
+            nodes_per_decision=12,
+            rollout_depth=3,
+            rollout_batch_size=4,
+            search_seed=29,
+            strategy_store=store,
+            game_build="test-build",
+        ).evaluate(("cache-a", "cache-b"))
+
+    assert first.total_expanded_nodes > 0
+    assert second.total_expanded_nodes == 0
+    assert second.total_cache_hits == second.total_search_decisions
+    assert second.total_cache_hits > 0
+
+    assert [
+        (run.decisions, run.final_state_hash)
+        for run in first.runs
+    ] == [
+        (run.decisions, run.final_state_hash)
+        for run in second.runs
+    ]
