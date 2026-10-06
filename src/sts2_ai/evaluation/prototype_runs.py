@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from sts2_ai.emulator import EmulatorBackend, InformationPolicy, LegalAction, StateHandle
-from sts2_ai.search import PrototypeFlatRolloutSearch, SearchBudget
+from sts2_ai.search import ActionEvaluation, PrototypeFlatRolloutSearch, SearchBudget
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,29 +184,19 @@ class PrototypeSearchRunEvaluator:
             self._backend.release_many((state,))
 
     @staticmethod
-    def _best_action(evaluations: tuple[object, ...]) -> LegalAction:
-        typed = tuple(evaluations)
-        if not typed:
+    def _best_action(evaluations: tuple[ActionEvaluation, ...]) -> LegalAction:
+        if not evaluations:
             raise RuntimeError("Search returned no root evaluations")
 
         # ActionEvaluation is intentionally duck-typed here only to keep this helper local and
         # avoid widening the public evaluator API.
         best = max(
-            typed,
-            key=lambda item: (
-                getattr(item, "value"),
-                getattr(item, "visits"),
-                # Reverse lexicographic tie-breaking by negating is awkward for strings; the
-                # sorted pass below makes stable IDs deterministic instead.
-            ),
+            evaluations,
+            key=lambda item: (item.value, item.visits),
         )
-        best_value = getattr(best, "value")
-        best_visits = getattr(best, "visits")
         tied = [
             item
-            for item in typed
-            if getattr(item, "value") == best_value
-            and getattr(item, "visits") == best_visits
+            for item in evaluations
+            if item.value == best.value and item.visits == best.visits
         ]
-        selected = min(tied, key=lambda item: getattr(item, "action").action_id)
-        return getattr(selected, "action")
+        return min(tied, key=lambda item: item.action.action_id).action
