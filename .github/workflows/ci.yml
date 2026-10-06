@@ -20,6 +20,11 @@ jobs:
       - run: python -m pip install -U pip
       - run: python -m pip install -e '.[dev]'
       - run: dotnet build emulator/src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj -c Release
+      - run: >-
+          dotnet run
+          --project emulator/benchmarks/Sts2Emulator.Microbench/Sts2Emulator.Microbench.csproj
+          -c Release
+          -- 10000
       - run: python -m ruff check src tests
       - run: python -m mypy src/sts2_ai
       - run: python -m pytest
