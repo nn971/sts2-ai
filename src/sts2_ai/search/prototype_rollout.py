@@ -115,11 +115,12 @@ class PrototypeFlatRolloutSearch:
                 break
 
             wave_size = min(self._rollout_batch_size, max_nodes - expanded_nodes)
-            assigned_actions = tuple(
-                root_actions[(next_root_action + index) % len(root_actions)]
-                for index in range(wave_size)
+            assigned_actions, next_root_action = self._assign_root_actions(
+                root_actions,
+                accumulators,
+                wave_size,
+                next_root_action,
             )
-            next_root_action += wave_size
 
             root_transitions = tuple(
                 self._backend.batch_step(
@@ -239,6 +240,20 @@ class PrototypeFlatRolloutSearch:
             search_version=self.search_version,
         )
 
+    def _assign_root_actions(
+        self,
+        root_actions: tuple[LegalAction, ...],
+        accumulators: dict[str, _Accumulator],
+        wave_size: int,
+        next_root_action: int,
+    ) -> tuple[tuple[LegalAction, ...], int]:
+        del accumulators
+        assigned = tuple(
+            root_actions[(next_root_action + index) % len(root_actions)]
+            for index in range(wave_size)
+        )
+        return assigned, next_root_action + wave_size
+
     def _state_seed(self, root_hash: str) -> int:
         digest = hashlib.sha256(
             f"{self._seed}:{root_hash}".encode()
@@ -271,3 +286,76 @@ class PrototypeFlatRolloutSearch:
             score -= 10_000.0
 
         return score
+
+
+
+class PrototypeUcbRolloutSearch(PrototypeFlatRolloutSearch):
+    """Adaptive root allocation over the same random-rollout mechanics as the flat baseline."""
+
+    search_version = "prototype-ucb-rollout-v0"
+
+    def __init__(
+        self,
+        backend: EmulatorBackend,
+        policy: InformationPolicy,
+        *,
+        seed: int = 0,
+        rollout_depth: int = 64,
+        rollout_batch_size: int = 16,
+        leaf_value: Callable[[Observation], float] | None = None,
+        exploration: float = 1.25,
+    ) -> None:
+        if exploration < 0:
+            raise ValueError("exploration cannot be negative")
+        super().__init__(
+            backend,
+            policy,
+            seed=seed,
+            rollout_depth=rollout_depth,
+            rollout_batch_size=rollout_batch_size,
+            leaf_value=leaf_value,
+        )
+        self._exploration = exploration
+
+    def _assign_root_actions(
+        self,
+        root_actions: tuple[LegalAction, ...],
+        accumulators: dict[str, _Accumulator],
+        wave_size: int,
+        next_root_action: int,
+    ) -> tuple[tuple[LegalAction, ...], int]:
+        del next_root_action
+
+        finite_means = [
+            accumulator.mean()
+            for accumulator in accumulators.values()
+            if accumulator.visits > 0
+        ]
+        value_scale = 1.0
+        if len(finite_means) >= 2:
+            value_scale = max(1.0, max(finite_means) - min(finite_means))
+
+        virtual_visits = {
+            action.action_id: accumulators[action.action_id].visits
+            for action in root_actions
+        }
+        total_visits = sum(virtual_visits.values())
+        assigned: list[LegalAction] = []
+
+        for _ in range(wave_size):
+            def priority(action: LegalAction) -> tuple[float, str]:
+                visits = virtual_visits[action.action_id]
+                if visits == 0:
+                    return (float("inf"), action.action_id)
+
+                mean = accumulators[action.action_id].mean()
+                bonus = self._exploration * value_scale * math.sqrt(
+                    math.log(total_visits + len(assigned) + 2) / visits
+                )
+                return (mean + bonus, action.action_id)
+
+            chosen = max(root_actions, key=priority)
+            assigned.append(chosen)
+            virtual_visits[chosen.action_id] += 1
+
+        return tuple(assigned), 0
