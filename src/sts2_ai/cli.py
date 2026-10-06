@@ -8,8 +8,14 @@ from pathlib import Path
 from sts2_ai.emulator import PrototypeJsonlBackend
 from sts2_ai.evaluation import (
     PrototypeRandomRunEvaluator,
+    PrototypeSearchDecision,
     PrototypeSearchRunEvaluator,
     collect_experiment_manifest,
+)
+from sts2_ai.scenarios import (
+    mine_close_search_scenarios,
+    replay_scenario,
+    write_replay_scenario_archive,
 )
 from sts2_ai.search import PrototypeFlatRolloutSearch, SearchBudget
 from sts2_ai.strategy_db import SQLiteStrategyStore
@@ -79,6 +85,12 @@ def main() -> None:
     evaluate.add_argument("--max-decisions", type=int, default=5000)
     evaluate.add_argument("--output", type=Path)
     evaluate.add_argument("--manifest-output", type=Path)
+    evaluate.add_argument(
+        "--scenario-output",
+        type=Path,
+        help="optional replayable archive of close/high-uncertainty searched decisions",
+    )
+    evaluate.add_argument("--scenario-limit", type=int, default=20)
     evaluate.add_argument(
         "--strategy-db",
         type=Path,
@@ -238,8 +250,11 @@ def main() -> None:
             parser.error("--batch-size must be positive")
         if args.max_decisions <= 0:
             parser.error("--max-decisions must be positive")
+        if args.scenario_limit < 0:
+            parser.error("--scenario-limit cannot be negative")
 
         seeds = tuple(f"{args.seed_prefix}-{index}" for index in range(args.runs))
+        search_decisions: list[PrototypeSearchDecision] = []
 
         with PrototypeJsonlBackend.from_repo(args.repo_root) as backend:
             strategy_store = (
@@ -257,6 +272,11 @@ def main() -> None:
                     search_seed=args.search_seed,
                     max_decisions=args.max_decisions,
                     strategy_store=strategy_store,
+                    on_search_decision=(
+                        search_decisions.append
+                        if args.scenario_output is not None
+                        else None
+                    ),
                 )
                 summary = evaluator.evaluate(seeds)
             finally:
@@ -279,6 +299,12 @@ def main() -> None:
             print(f"Expanded nodes: {summary.total_expanded_nodes}")
             print(f"Search cache hits: {summary.total_cache_hits}")
             print(f"Search cache hit rate: {summary.cache_hit_rate:.3f}")
+            print(
+                "Exact decision-state recurrence: "
+                f"{summary.repeated_search_states}/"
+                f"{summary.unique_search_states + summary.repeated_search_states} "
+                f"({summary.exact_state_recurrence_rate:.3f})"
+            )
             print(f"Elapsed: {summary.elapsed_seconds:.3f}s")
             print(f"Decisions/sec: {summary.decisions_per_second:.1f}")
             print(f"Search nodes/sec: {summary.nodes_per_second:.1f}")
@@ -286,6 +312,22 @@ def main() -> None:
             if args.output is not None:
                 summary.write_json(args.output)
                 print(f"Results: {args.output}")
+
+            if args.scenario_output is not None:
+                scenarios = mine_close_search_scenarios(
+                    search_decisions,
+                    limit=args.scenario_limit,
+                    emulator_revision=backend.emulator_revision,
+                    information_policy=backend.fair_policy.policy_id,
+                )
+                for scenario in scenarios:
+                    replayed = replay_scenario(backend, scenario)
+                    backend.release_many((replayed,))
+                write_replay_scenario_archive(args.scenario_output, scenarios)
+                print(
+                    f"Scenarios: {args.scenario_output} "
+                    f"({len(scenarios)} verified)"
+                )
 
             if args.manifest_output is not None:
                 evaluation_manifest = collect_experiment_manifest(
@@ -309,6 +351,12 @@ def main() -> None:
                             if args.strategy_db is not None
                             else None
                         ),
+                        "scenario_output": (
+                            str(args.scenario_output)
+                            if args.scenario_output is not None
+                            else None
+                        ),
+                        "scenario_limit": args.scenario_limit,
                     },
                     seeds={"search_seed": args.search_seed},
                     strategy_db_snapshot=(
