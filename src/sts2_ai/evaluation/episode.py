@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from sts2_ai.agents.base import Agent, Decision
-from sts2_ai.emulator import EmulatorBackend, InformationPolicy, Observation
+from sts2_ai.emulator import EmulatorBackend, InformationPolicy, LegalAction, Observation
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,12 +118,9 @@ def _finish(
 
 def _ensure_legal_decision(
     decision: Decision,
-    legal_actions: object,
+    legal_actions: Sequence[LegalAction],
 ) -> None:
-    legal_ids = {
-        action.action_id
-        for action in legal_actions  # type: ignore[union-attr]
-    }
+    legal_ids = {action.action_id for action in legal_actions}
     if decision.action.action_id not in legal_ids:
         raise ValueError(
             f"Agent selected illegal action {decision.action.action_id!r}"
