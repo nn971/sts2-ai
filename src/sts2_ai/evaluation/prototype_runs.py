@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -25,6 +26,8 @@ class PrototypeRunEvaluation:
     search_decisions: int
     expanded_nodes: int
     cache_hits: int
+    unique_search_states: int
+    repeated_search_states: int
     final_state_hash: str
     elapsed_seconds: float
 
@@ -40,6 +43,8 @@ class PrototypeEvaluationSummary:
     total_search_decisions: int
     total_expanded_nodes: int
     total_cache_hits: int
+    unique_search_states: int
+    repeated_search_states: int
     elapsed_seconds: float
 
     @property
@@ -53,6 +58,11 @@ class PrototypeEvaluationSummary:
             if self.total_search_decisions
             else 0.0
         )
+
+    @property
+    def exact_state_recurrence_rate(self) -> float:
+        total = self.unique_search_states + self.repeated_search_states
+        return self.repeated_search_states / total if total else 0.0
 
     @property
     def decisions_per_second(self) -> float:
@@ -75,6 +85,7 @@ class PrototypeEvaluationSummary:
         payload = asdict(self)
         payload["victory_rate"] = self.victory_rate
         payload["cache_hit_rate"] = self.cache_hit_rate
+        payload["exact_state_recurrence_rate"] = self.exact_state_recurrence_rate
         payload["decisions_per_second"] = self.decisions_per_second
         payload["nodes_per_second"] = self.nodes_per_second
         path.write_text(
@@ -127,8 +138,9 @@ class PrototypeSearchRunEvaluator:
 
     def evaluate(self, seeds: tuple[str, ...]) -> PrototypeEvaluationSummary:
         started = time.perf_counter()
+        seen_search_states: set[str] = set()
         runs = tuple(
-            self._evaluate_one(seed, run_index)
+            self._evaluate_one(seed, run_index, seen_search_states)
             for run_index, seed in enumerate(seeds)
         )
         elapsed = time.perf_counter() - started
@@ -147,10 +159,17 @@ class PrototypeSearchRunEvaluator:
             total_search_decisions=sum(run.search_decisions for run in runs),
             total_expanded_nodes=sum(run.expanded_nodes for run in runs),
             total_cache_hits=sum(run.cache_hits for run in runs),
+            unique_search_states=len(seen_search_states),
+            repeated_search_states=sum(run.repeated_search_states for run in runs),
             elapsed_seconds=elapsed,
         )
 
-    def _evaluate_one(self, seed: str, run_index: int) -> PrototypeRunEvaluation:
+    def _evaluate_one(
+        self,
+        seed: str,
+        run_index: int,
+        seen_search_states: set[str],
+    ) -> PrototypeRunEvaluation:
         run_search_seed = self._search_seed + run_index
         search = PrototypeFlatRolloutSearch(
             self._backend,
@@ -165,6 +184,8 @@ class PrototypeSearchRunEvaluator:
         search_decisions = 0
         expanded_nodes = 0
         cache_hits = 0
+        run_search_states: set[str] = set()
+        repeated_search_states = 0
         search_config_id = self._search_config_id(run_search_seed)
         started = time.perf_counter()
 
@@ -187,6 +208,12 @@ class PrototypeSearchRunEvaluator:
                 else:
                     search_decisions += 1
                     state_hash = self._backend.exact_hash(state)
+                    if state_hash in seen_search_states:
+                        repeated_search_states += 1
+                    else:
+                        seen_search_states.add(state_hash)
+                    run_search_states.add(state_hash)
+
                     cached = self._cached_evaluations(
                         state_hash=state_hash,
                         legal=legal,
@@ -232,6 +259,8 @@ class PrototypeSearchRunEvaluator:
                 search_decisions=search_decisions,
                 expanded_nodes=expanded_nodes,
                 cache_hits=cache_hits,
+                unique_search_states=len(run_search_states),
+                repeated_search_states=repeated_search_states,
                 final_state_hash=final_hash,
                 elapsed_seconds=elapsed,
             )
@@ -327,3 +356,136 @@ class PrototypeSearchRunEvaluator:
             if item.value == best.value and item.visits == best.visits
         ]
         return min(tied, key=lambda item: item.action.action_id).action
+
+
+
+@dataclass(frozen=True, slots=True)
+class PrototypeRandomRunEvaluation:
+    seed: str
+    outcome: str | None
+    decisions: int
+    final_state_hash: str
+    elapsed_seconds: float
+
+
+@dataclass(frozen=True, slots=True)
+class PrototypeRandomEvaluationSummary:
+    runs: tuple[PrototypeRandomRunEvaluation, ...]
+    victories: int
+    defeats: int
+    unknown_terminal_outcomes: int
+    total_decisions: int
+    elapsed_seconds: float
+
+    @property
+    def victory_rate(self) -> float:
+        return self.victories / len(self.runs) if self.runs else 0.0
+
+    @property
+    def decisions_per_second(self) -> float:
+        return (
+            self.total_decisions / self.elapsed_seconds
+            if self.elapsed_seconds > 0
+            else 0.0
+        )
+
+    def write_json(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = asdict(self)
+        payload["victory_rate"] = self.victory_rate
+        payload["decisions_per_second"] = self.decisions_per_second
+        path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+
+class PrototypeRandomRunEvaluator:
+    """Same-seed deterministic random-policy control for search evaluation."""
+
+    def __init__(
+        self,
+        backend: EmulatorBackend,
+        policy: InformationPolicy,
+        *,
+        random_seed: int = 0,
+        max_decisions: int = 5_000,
+    ) -> None:
+        if max_decisions <= 0:
+            raise ValueError("max_decisions must be positive")
+        self._backend = backend
+        self._policy = policy
+        self._random_seed = random_seed
+        self._max_decisions = max_decisions
+
+    def evaluate(self, seeds: tuple[str, ...]) -> PrototypeRandomEvaluationSummary:
+        started = time.perf_counter()
+        runs = tuple(
+            self._evaluate_one(seed, run_index)
+            for run_index, seed in enumerate(seeds)
+        )
+        elapsed = time.perf_counter() - started
+
+        victories = sum(run.outcome == "victory" for run in runs)
+        defeats = sum(run.outcome == "defeat" for run in runs)
+        return PrototypeRandomEvaluationSummary(
+            runs=runs,
+            victories=victories,
+            defeats=defeats,
+            unknown_terminal_outcomes=len(runs) - victories - defeats,
+            total_decisions=sum(run.decisions for run in runs),
+            elapsed_seconds=elapsed,
+        )
+
+    def _evaluate_one(
+        self,
+        seed: str,
+        run_index: int,
+    ) -> PrototypeRandomRunEvaluation:
+        rng = random.Random(self._random_seed + run_index)
+        state = self._backend.reset(seed)
+        decisions = 0
+        started = time.perf_counter()
+
+        try:
+            while not self._backend.is_terminal(state):
+                if decisions >= self._max_decisions:
+                    raise RuntimeError(
+                        f"Prototype random run {seed!r} exceeded "
+                        f"{self._max_decisions} decisions"
+                    )
+
+                legal = tuple(
+                    sorted(
+                        self._backend.legal_actions(state),
+                        key=lambda action: action.action_id,
+                    )
+                )
+                if not legal:
+                    raise RuntimeError(
+                        f"Nonterminal prototype state for seed {seed!r} has no legal actions"
+                    )
+
+                action = legal[0] if len(legal) == 1 else rng.choice(legal)
+                transition = self._backend.step(state, action)
+                previous = state
+                state = transition.child
+                self._backend.release_many((previous,))
+                decisions += 1
+
+            observation = self._backend.observe(state, self._policy)
+            payload = json.loads(observation.payload_json)
+            if not isinstance(payload, dict):
+                raise RuntimeError("Prototype terminal observation must be an object")
+
+            raw_outcome = payload.get("terminal_outcome")
+            outcome = raw_outcome if isinstance(raw_outcome, str) else None
+            return PrototypeRandomRunEvaluation(
+                seed=seed,
+                outcome=outcome,
+                decisions=decisions,
+                final_state_hash=self._backend.exact_hash(state),
+                elapsed_seconds=time.perf_counter() - started,
+            )
+        finally:
+            self._backend.release_many((state,))
