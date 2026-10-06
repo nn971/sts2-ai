@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
@@ -32,7 +33,9 @@ def test_live_emulator_bridge_supports_reset_observe_step_and_search() -> None:
 
         observation = backend.observe(state, backend.fair_policy)
         assert observation.policy_id == "prototype-fair-v0"
-        assert '"phase":"mapChoice"' in observation.payload_json
+        payload = json.loads(observation.payload_json)
+        assert payload["act"] == 1
+        assert payload["floor"] == 0
 
         search = BestFirstSearch(
             backend=backend,
