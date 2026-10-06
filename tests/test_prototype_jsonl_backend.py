@@ -9,7 +9,7 @@ def test_real_prototype_jsonl_backend_round_trip() -> None:
 
     with PrototypeJsonlBackend.from_repo(repo_root, ensure_built=False) as backend:
         assert backend.binding_version == "prototype-ai-jsonl-v0"
-        assert backend.ruleset_id.startswith("proto.")
+        assert backend.ruleset_id == "prototype-silent-v0"
         assert backend.emulator_revision != "unknown"
 
         state = backend.reset("parent-integration-test")
