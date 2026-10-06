@@ -1,3 +1,4 @@
+from .prototype_jsonl import PrototypeJsonlBackend
 from .protocol import (
     EmulatorBackend,
     InformationPolicy,
@@ -12,6 +13,7 @@ __all__ = [
     "InformationPolicy",
     "LegalAction",
     "Observation",
+    "PrototypeJsonlBackend",
     "StateHandle",
     "Transition",
 ]
