@@ -9,7 +9,6 @@ from sts2_ai.agents import RandomAgent
 from sts2_ai.emulator import InformationPolicy, JsonlPrototypeBackend
 from sts2_ai.evaluation import run_episode
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EMULATOR_ROOT = REPO_ROOT / "emulator"
 EMULATOR_PROJECT = EMULATOR_ROOT / "src" / "Sts2Emulator.Cli" / "Sts2Emulator.Cli.csproj"
