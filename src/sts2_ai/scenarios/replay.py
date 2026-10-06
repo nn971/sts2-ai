@@ -14,6 +14,16 @@ def replay_scenario(
     The returned handle is owned by the caller and must eventually be released.
     """
 
+    if (
+        scenario.emulator_revision != "unknown"
+        and backend.emulator_revision != "unknown"
+        and scenario.emulator_revision != backend.emulator_revision
+    ):
+        raise RuntimeError(
+            f"Scenario {scenario.scenario_id!r} was recorded with emulator "
+            f"{scenario.emulator_revision}, active backend is {backend.emulator_revision}"
+        )
+
     state = backend.reset(scenario.run_seed)
     try:
         for action_id in scenario.action_history:
