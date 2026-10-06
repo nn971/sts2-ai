@@ -2,34 +2,46 @@
 
 ## Current phase
 
-**Phase 0 — establish the simulation foundation.**
+**Phase 1 — real emulator integration and first search workloads.**
 
-The parent research scaffold exists, but strategic experiments are intentionally secondary until `sts2-emulator` satisfies its first milestone: trustworthy, practically fast whole-run simulation with native parity evidence.
+The parent project now consumes the restrictive Silent whole-run prototype through a versioned,
+long-lived JSONL process bridge. This is sufficient for end-to-end search experiments before a
+high-performance native/Python binding exists.
+
+The emulator is still prototype semantics rather than native STS2 parity, so no strategic result
+should be interpreted as a claim about the released game yet.
 
 ## Present capabilities
 
-- public Python-side protocol for an emulator backend;
-- baseline random agent and search interfaces;
+- pinned `sts2-emulator` Git submodule with experiment-visible revision;
+- binding-neutral Python emulator protocol including deterministic reset;
+- concrete `PrototypeJsonlBackend` with schema negotiation and strict error propagation;
+- fair player-facing observation policy from the emulator;
+- stable semantic legal-action IDs;
+- reset / legal-actions / step / fork / exact-hash / observe / terminal operations;
+- real emulator integration tests in CI;
+- deterministic flat Monte Carlo rollout search as the first whole-run workload;
+- configurable leaf evaluator so later value models can replace the bootstrap heuristic;
+- `prototype-search-smoke` CLI for local throughput and action-value measurements;
 - experiment/reproducibility manifest utilities;
 - SQLite strategic-evidence store prototype;
 - dataset/scenario manifest types;
-- mock backend used for architectural tests;
-- configuration and experiment directory conventions;
-- submodule bootstrap tooling.
+- mock backend for fast architecture tests.
 
 ## Explicitly absent
 
-- real emulator bindings;
-- learned models;
-- serious tree search;
-- whole-run training;
-- strategic claims or benchmark scores.
+- native or zero-copy Python binding;
+- batched process protocol;
+- serious tactical or strategic search;
+- learned policy/value models;
+- native STS2 parity;
+- strategic benchmark claims.
 
 ## Next parent-repo tasks
 
-1. Add the real `sts2-emulator` Git submodule.
-2. Define the first stable Python/native binding adapter once the emulator API settles.
-3. Add integration tests that compare binding-visible transitions with emulator CLI/native fixtures.
-4. Build a deterministic random-policy run generator for smoke testing.
-5. Establish experiment manifest generation and dataset provenance in actual runs.
-6. Wait for sufficient emulator parity before investing heavily in strategic learning.
+1. Run the flat-rollout workload locally at increasing budgets and identify process/fork/hash costs.
+2. Add batch expansion/step only where the first measurements justify it.
+3. Record emulator schema/revision and search configuration automatically in search experiment manifests.
+4. Add a deterministic prototype run-policy/evaluation harness over many seeds.
+5. Start a small scenario archive and persistent search-result cache.
+6. Replace the bootstrap leaf heuristic with increasingly informed tactical/run value estimates.
