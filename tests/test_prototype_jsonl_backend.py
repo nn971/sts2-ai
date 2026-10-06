@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from sts2_ai.emulator import InformationPolicy, PrototypeJsonlBackend
+from sts2_ai.search import PrototypeFlatRolloutSearch, SearchBudget
 
 
 def test_real_prototype_jsonl_backend_round_trip() -> None:
@@ -55,3 +56,29 @@ def test_real_backend_rejects_nonfair_observation_policy() -> None:
             assert "NotSupportedException" in str(error)
         else:
             raise AssertionError("backend accepted an unsupported information policy")
+
+
+def test_real_backend_supports_first_rollout_search_workload() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+
+    with PrototypeJsonlBackend.from_repo(repo_root, ensure_built=False) as backend:
+        state = backend.reset("parent-search-smoke")
+        start = backend.legal_actions(state)[0]
+        state = backend.step(state, start).child
+
+        root_actions = backend.legal_actions(state)
+        assert len(root_actions) >= 2
+
+        search = PrototypeFlatRolloutSearch(
+            backend,
+            backend.fair_policy,
+            seed=13,
+            rollout_depth=4,
+        )
+        result = search.search(state, SearchBudget(max_nodes=24))
+
+        assert result.root_state_hash == backend.exact_hash(state)
+        assert result.expanded_nodes == 24
+        assert len(result.evaluations) == len(root_actions)
+        assert sum(item.visits for item in result.evaluations) > 0
+        assert any(item.visits > 0 for item in result.evaluations)
