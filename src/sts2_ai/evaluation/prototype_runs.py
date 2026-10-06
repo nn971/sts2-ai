@@ -11,6 +11,10 @@ from sts2_ai.emulator import (
     LegalAction,
 )
 from sts2_ai.search import ActionEvaluation, PrototypeFlatRolloutSearch, SearchBudget
+from sts2_ai.strategy_db import (
+    CachedActionEvaluation,
+    SQLiteStrategyStore,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +24,7 @@ class PrototypeRunEvaluation:
     decisions: int
     search_decisions: int
     expanded_nodes: int
+    cache_hits: int
     final_state_hash: str
     elapsed_seconds: float
 
@@ -34,6 +39,7 @@ class PrototypeEvaluationSummary:
     total_decisions: int
     total_search_decisions: int
     total_expanded_nodes: int
+    total_cache_hits: int
     elapsed_seconds: float
 
     @property
@@ -77,6 +83,9 @@ class PrototypeSearchRunEvaluator:
         rollout_batch_size: int = 16,
         search_seed: int = 0,
         max_decisions: int = 5_000,
+        strategy_store: SQLiteStrategyStore | None = None,
+        game_build: str = "prototype-unbound",
+        model_id: str | None = None,
     ) -> None:
         if nodes_per_decision <= 0:
             raise ValueError("nodes_per_decision must be positive")
@@ -94,6 +103,9 @@ class PrototypeSearchRunEvaluator:
         self._rollout_batch_size = rollout_batch_size
         self._search_seed = search_seed
         self._max_decisions = max_decisions
+        self._strategy_store = strategy_store
+        self._game_build = game_build
+        self._model_id = model_id
 
     def evaluate(self, seeds: tuple[str, ...]) -> PrototypeEvaluationSummary:
         started = time.perf_counter()
@@ -116,14 +128,16 @@ class PrototypeSearchRunEvaluator:
             total_decisions=sum(run.decisions for run in runs),
             total_search_decisions=sum(run.search_decisions for run in runs),
             total_expanded_nodes=sum(run.expanded_nodes for run in runs),
+            total_cache_hits=sum(run.cache_hits for run in runs),
             elapsed_seconds=elapsed,
         )
 
     def _evaluate_one(self, seed: str, run_index: int) -> PrototypeRunEvaluation:
+        run_search_seed = self._search_seed + run_index
         search = PrototypeFlatRolloutSearch(
             self._backend,
             self._policy,
-            seed=self._search_seed + run_index,
+            seed=run_search_seed,
             rollout_depth=self._rollout_depth,
             rollout_batch_size=self._rollout_batch_size,
         )
@@ -132,6 +146,8 @@ class PrototypeSearchRunEvaluator:
         decisions = 0
         search_decisions = 0
         expanded_nodes = 0
+        cache_hits = 0
+        search_config_id = self._search_config_id(run_search_seed)
         started = time.perf_counter()
 
         try:
@@ -151,13 +167,29 @@ class PrototypeSearchRunEvaluator:
                 if len(legal) == 1:
                     action = legal[0]
                 else:
-                    result = search.search(
-                        state,
-                        SearchBudget(max_nodes=self._nodes_per_decision),
-                    )
                     search_decisions += 1
-                    expanded_nodes += result.expanded_nodes
-                    action = self._best_action(result.evaluations)
+                    state_hash = self._backend.exact_hash(state)
+                    cached = self._cached_evaluations(
+                        state_hash=state_hash,
+                        legal=legal,
+                        search_config_id=search_config_id,
+                    )
+
+                    if cached is not None:
+                        cache_hits += 1
+                        action = self._best_action(cached)
+                    else:
+                        result = search.search(
+                            state,
+                            SearchBudget(max_nodes=self._nodes_per_decision),
+                        )
+                        expanded_nodes += result.expanded_nodes
+                        action = self._best_action(result.evaluations)
+                        self._cache_evaluations(
+                            result.evaluations,
+                            state_hash=state_hash,
+                            search_config_id=search_config_id,
+                        )
 
                 transition = self._backend.step(state, action)
                 previous = state
@@ -181,11 +213,84 @@ class PrototypeSearchRunEvaluator:
                 decisions=decisions,
                 search_decisions=search_decisions,
                 expanded_nodes=expanded_nodes,
+                cache_hits=cache_hits,
                 final_state_hash=final_hash,
                 elapsed_seconds=elapsed,
             )
         finally:
             self._backend.release_many((state,))
+
+    def _search_config_id(self, search_seed: int) -> str:
+        return (
+            f"nodes={self._nodes_per_decision};"
+            f"depth={self._rollout_depth};"
+            f"batch={self._rollout_batch_size};"
+            f"seed={search_seed}"
+        )
+
+    def _cached_evaluations(
+        self,
+        *,
+        state_hash: str,
+        legal: tuple[LegalAction, ...],
+        search_config_id: str,
+    ) -> tuple[ActionEvaluation, ...] | None:
+        if self._strategy_store is None:
+            return None
+
+        entries = self._strategy_store.cached_action_evaluations(
+            state_hash=state_hash,
+            information_policy=self._policy.policy_id,
+            search_version=PrototypeFlatRolloutSearch.search_version,
+            search_config_id=search_config_id,
+            emulator_revision=self._backend.emulator_revision,
+            game_build=self._game_build,
+        )
+        if not entries:
+            return None
+
+        legal_by_id = {action.action_id: action for action in legal}
+        if set(legal_by_id) != {entry.action_id for entry in entries}:
+            return None
+
+        return tuple(
+            ActionEvaluation(
+                action=legal_by_id[entry.action_id],
+                value=entry.value,
+                visits=entry.visits,
+                uncertainty=entry.uncertainty,
+            )
+            for entry in entries
+        )
+
+    def _cache_evaluations(
+        self,
+        evaluations: tuple[ActionEvaluation, ...],
+        *,
+        state_hash: str,
+        search_config_id: str,
+    ) -> None:
+        if self._strategy_store is None:
+            return
+
+        self._strategy_store.cache_action_evaluations(
+            tuple(
+                CachedActionEvaluation(
+                    state_hash=state_hash,
+                    information_policy=self._policy.policy_id,
+                    action_id=evaluation.action.action_id,
+                    value=evaluation.value,
+                    visits=evaluation.visits,
+                    uncertainty=evaluation.uncertainty,
+                    search_version=PrototypeFlatRolloutSearch.search_version,
+                    search_config_id=search_config_id,
+                    model_id=self._model_id,
+                    emulator_revision=self._backend.emulator_revision,
+                    game_build=self._game_build,
+                )
+                for evaluation in evaluations
+            )
+        )
 
     @staticmethod
     def _best_action(evaluations: tuple[ActionEvaluation, ...]) -> LegalAction:
