@@ -71,3 +71,6 @@ class MockLinearBackend:
 
     def is_terminal(self, state: StateHandle) -> bool:
         return int(state) >= self._terminal_at
+
+    def release_many(self, states: Sequence[StateHandle]) -> int:
+        return len(states)
