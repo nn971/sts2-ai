@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from sts2_ai.emulator import InformationPolicy, Observation
-from sts2_ai.evaluation import PrototypeSearchRunEvaluator
+from sts2_ai.evaluation import PrototypeRandomRunEvaluator, PrototypeSearchRunEvaluator
 from sts2_ai.strategy_db import SQLiteStrategyStore
 from sts2_ai.testing import MockLinearBackend
 
@@ -157,5 +157,45 @@ def test_exact_search_cache_reuses_state_evaluations(tmp_path) -> None:
         for run in first.runs
     ] == [
         (run.decisions, run.final_state_hash)
+        for run in second.runs
+    ]
+
+
+
+def test_search_evaluator_reports_exact_state_recurrence_across_runs() -> None:
+    summary = PrototypeSearchRunEvaluator(
+        MockLinearBackend(terminal_at=6),
+        InformationPolicy("fair-test"),
+        nodes_per_decision=8,
+        rollout_depth=2,
+        rollout_batch_size=2,
+        search_seed=11,
+    ).evaluate(("same-shape-a", "same-shape-b"))
+
+    assert summary.unique_search_states > 0
+    assert summary.repeated_search_states > 0
+    assert 0.0 < summary.exact_state_recurrence_rate < 1.0
+
+
+def test_random_baseline_is_deterministic_under_seed() -> None:
+    first = PrototypeRandomRunEvaluator(
+        OutcomeMockBackend(terminal_at=7),
+        InformationPolicy("fair-test"),
+        random_seed=23,
+    ).evaluate(("baseline-a", "baseline-b"))
+
+    second = PrototypeRandomRunEvaluator(
+        OutcomeMockBackend(terminal_at=7),
+        InformationPolicy("fair-test"),
+        random_seed=23,
+    ).evaluate(("baseline-a", "baseline-b"))
+
+    assert first.victories == 2
+    assert first.defeats == 0
+    assert [
+        (run.seed, run.decisions, run.final_state_hash)
+        for run in first.runs
+    ] == [
+        (run.seed, run.decisions, run.final_state_hash)
         for run in second.runs
     ]
