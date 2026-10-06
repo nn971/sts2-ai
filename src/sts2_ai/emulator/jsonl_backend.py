@@ -5,7 +5,7 @@ import subprocess
 import threading
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Protocol, TextIO, cast
+from typing import Protocol, TextIO, cast
 
 from sts2_ai.emulator.protocol import (
     EmulatorBackend,
