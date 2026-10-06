@@ -1,0 +1,9 @@
+[training]
+name = "baseline-placeholder"
+seed = 0
+
+[data]
+manifest = ""
+
+[notes]
+text = "No ML framework is selected by the starter repository."

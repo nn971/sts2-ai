@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+
+# Models / generated data
+checkpoints/
+artifacts/
+wandb/
+mlruns/
+data/raw/
+data/generated/
+data/cache/
+*.sqlite-wal
+*.sqlite-shm
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Local experiment output
+runs/
+results/
+
+# The emulator directory is a git submodule after setup; do not ignore it.

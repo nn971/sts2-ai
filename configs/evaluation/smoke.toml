@@ -1,0 +1,7 @@
+[evaluation]
+name = "smoke"
+seeds = 10
+information_policy = "fair-v1"
+
+[notes]
+text = "Intended for end-to-end plumbing checks once the real emulator binding exists."

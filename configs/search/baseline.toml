@@ -1,0 +1,9 @@
+[search]
+name = "baseline-placeholder"
+max_nodes = 1000
+
+[information]
+policy = "fair-v1"
+
+[notes]
+text = "Placeholder only. Replace once a real search baseline exists."
