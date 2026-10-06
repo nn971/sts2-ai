@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import random
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -16,6 +17,15 @@ from sts2_ai.strategy_db import (
     CachedActionEvaluation,
     SQLiteStrategyStore,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class PrototypeSearchDecision:
+    seed: str
+    decision_index: int
+    state_hash: str
+    action_history: tuple[str, ...]
+    evaluations: tuple[ActionEvaluation, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +125,7 @@ class PrototypeSearchRunEvaluator:
         strategy_store: SQLiteStrategyStore | None = None,
         game_build: str = "prototype-unbound",
         model_id: str | None = None,
+        on_search_decision: Callable[[PrototypeSearchDecision], None] | None = None,
     ) -> None:
         if nodes_per_decision <= 0:
             raise ValueError("nodes_per_decision must be positive")
@@ -135,6 +146,7 @@ class PrototypeSearchRunEvaluator:
         self._strategy_store = strategy_store
         self._game_build = game_build
         self._model_id = model_id
+        self._on_search_decision = on_search_decision
 
     def evaluate(self, seeds: tuple[str, ...]) -> PrototypeEvaluationSummary:
         started = time.perf_counter()
@@ -187,6 +199,7 @@ class PrototypeSearchRunEvaluator:
         run_search_states: set[str] = set()
         repeated_search_states = 0
         search_config_id = self._search_config_id(run_search_seed)
+        action_history: list[str] = []
         started = time.perf_counter()
 
         try:
@@ -222,24 +235,37 @@ class PrototypeSearchRunEvaluator:
 
                     if cached is not None:
                         cache_hits += 1
-                        action = self._best_action(cached)
+                        evaluations = cached
                     else:
                         result = search.search(
                             state,
                             SearchBudget(max_nodes=self._nodes_per_decision),
                         )
                         expanded_nodes += result.expanded_nodes
-                        action = self._best_action(result.evaluations)
+                        evaluations = result.evaluations
                         self._cache_evaluations(
-                            result.evaluations,
+                            evaluations,
                             state_hash=state_hash,
                             search_config_id=search_config_id,
                         )
+
+                    if self._on_search_decision is not None:
+                        self._on_search_decision(
+                            PrototypeSearchDecision(
+                                seed=seed,
+                                decision_index=decisions,
+                                state_hash=state_hash,
+                                action_history=tuple(action_history),
+                                evaluations=evaluations,
+                            )
+                        )
+                    action = self._best_action(evaluations)
 
                 transition = self._backend.step(state, action)
                 previous = state
                 state = transition.child
                 self._backend.release_many((previous,))
+                action_history.append(action.action_id)
                 decisions += 1
 
             observation = self._backend.observe(state, self._policy)
