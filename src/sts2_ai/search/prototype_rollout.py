@@ -241,7 +241,7 @@ class PrototypeFlatRolloutSearch:
 
     def _state_seed(self, root_hash: str) -> int:
         digest = hashlib.sha256(
-            f"{self._seed}:{root_hash}".encode("utf-8")
+            f"{self._seed}:{root_hash}".encode()
         ).digest()
         return int.from_bytes(digest[:8], byteorder="big", signed=False)
 
