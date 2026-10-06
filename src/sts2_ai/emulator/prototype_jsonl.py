@@ -157,27 +157,29 @@ class PrototypeJsonlBackend:
             state_handle=state,
             action_id=action.action_id,
         )
-        raw_action = response.get("action")
-        if not isinstance(raw_action, dict):
-            raise RuntimeError("Emulator step response has no action object")
-
-        echoed = LegalAction(
-            action_id=self._required_string(raw_action, "actionId"),
-            kind=self._required_string(raw_action, "kind"),
-            payload_json=self._required_string(raw_action, "payloadJson"),
-        )
-        if echoed.action_id != action.action_id:
+        transition = self._parse_transition(response)
+        if transition.action.action_id != action.action_id:
             raise RuntimeError(
-                f"Emulator stepped action {echoed.action_id!r}, "
+                f"Emulator stepped action {transition.action.action_id!r}, "
                 f"not requested action {action.action_id!r}"
             )
+        return transition
 
-        return Transition(
-            parent=self._required_string(response, "parent"),
-            action=echoed,
-            child=self._required_string(response, "child"),
-            terminal=self._required_bool(response, "terminal"),
+    def batch_step(
+        self,
+        items: Sequence[tuple[StateHandle, LegalAction]],
+    ) -> Sequence[Transition]:
+        response = self._request(
+            "batch_step",
+            items=[
+                {"state_handle": state, "action_id": action.action_id}
+                for state, action in items
+            ],
         )
+        raw_transitions = response.get("transitions")
+        if not isinstance(raw_transitions, list):
+            raise RuntimeError("Emulator batch_step response has no transition list")
+        return tuple(self._parse_transition(raw) for raw in raw_transitions)
 
     def expand(self, state: StateHandle) -> Sequence[Transition]:
         response = self._request("expand", state_handle=state)
@@ -185,29 +187,26 @@ class PrototypeJsonlBackend:
         if not isinstance(raw_expansions, list):
             raise RuntimeError("Emulator expand response has no expansion list")
 
-        transitions: list[Transition] = []
-        for raw in raw_expansions:
-            if not isinstance(raw, dict):
-                raise RuntimeError("Emulator returned a non-object expansion")
-            raw_action = raw.get("action")
-            if not isinstance(raw_action, dict):
-                raise RuntimeError("Emulator expansion has no action object")
+        return tuple(self._parse_transition(raw) for raw in raw_expansions)
 
-            action = LegalAction(
-                action_id=self._required_string(raw_action, "actionId"),
-                kind=self._required_string(raw_action, "kind"),
-                payload_json=self._required_string(raw_action, "payloadJson"),
-            )
-            transitions.append(
-                Transition(
-                    parent=self._required_string(raw, "parent"),
-                    action=action,
-                    child=self._required_string(raw, "child"),
-                    terminal=self._required_bool(raw, "terminal"),
-                )
-            )
+    def batch_expand(
+        self,
+        states: Sequence[StateHandle],
+    ) -> Sequence[Sequence[Transition]]:
+        response = self._request("batch_expand", state_handles=list(states))
+        raw_batches = response.get("batches")
+        if not isinstance(raw_batches, list):
+            raise RuntimeError("Emulator batch_expand response has no batch list")
 
-        return tuple(transitions)
+        batches: list[tuple[Transition, ...]] = []
+        for raw_batch in raw_batches:
+            if not isinstance(raw_batch, dict):
+                raise RuntimeError("Emulator returned a non-object expansion batch")
+            raw_expansions = raw_batch.get("expansions")
+            if not isinstance(raw_expansions, list):
+                raise RuntimeError("Emulator expansion batch has no expansions")
+            batches.append(tuple(self._parse_transition(raw) for raw in raw_expansions))
+        return tuple(batches)
 
     def fork(self, state: StateHandle) -> StateHandle:
         response = self._request("fork", state_handle=state)
@@ -228,6 +227,40 @@ class PrototypeJsonlBackend:
             payload_json=self._required_string(response, "payloadJson"),
             observation_hash=self._required_string(response, "observationHash"),
         )
+
+    def batch_observe(
+        self,
+        states: Sequence[StateHandle],
+        policy: InformationPolicy,
+    ) -> Sequence[Observation]:
+        response = self._request(
+            "batch_observe",
+            state_handles=list(states),
+            policy_id=policy.policy_id,
+        )
+        raw_observations = response.get("observations")
+        if not isinstance(raw_observations, list):
+            raise RuntimeError("Emulator batch_observe response has no observation list")
+
+        observations: list[Observation] = []
+        for raw in raw_observations:
+            if not isinstance(raw, dict):
+                raise RuntimeError("Emulator returned a non-object observation")
+            observations.append(
+                Observation(
+                    policy_id=self._required_string(raw, "policyId"),
+                    payload_json=self._required_string(raw, "payloadJson"),
+                    observation_hash=self._required_string(raw, "observationHash"),
+                )
+            )
+        return tuple(observations)
+
+    def release_many(self, states: Sequence[StateHandle]) -> int:
+        response = self._request("release_many", state_handles=list(states))
+        released = response.get("released")
+        if not isinstance(released, int):
+            raise RuntimeError("Emulator release_many response has no integer count")
+        return released
 
     def is_terminal(self, state: StateHandle) -> bool:
         response = self._request("is_terminal", state_handle=state)
@@ -326,6 +359,25 @@ class PrototypeJsonlBackend:
             stderr = self._process.stderr.read().strip()
         suffix = f": {stderr}" if stderr else ""
         return f"Prototype emulator process terminated with code {code}{suffix}"
+
+    @classmethod
+    def _parse_transition(cls, raw: object) -> Transition:
+        if not isinstance(raw, dict):
+            raise RuntimeError("Emulator returned a non-object transition")
+        raw_action = raw.get("action")
+        if not isinstance(raw_action, dict):
+            raise RuntimeError("Emulator transition has no action object")
+        action = LegalAction(
+            action_id=cls._required_string(raw_action, "actionId"),
+            kind=cls._required_string(raw_action, "kind"),
+            payload_json=cls._required_string(raw_action, "payloadJson"),
+        )
+        return Transition(
+            parent=cls._required_string(raw, "parent"),
+            action=action,
+            child=cls._required_string(raw, "child"),
+            terminal=cls._required_bool(raw, "terminal"),
+        )
 
     @staticmethod
     def _required_string(value: dict[str, Any], name: str) -> str:
