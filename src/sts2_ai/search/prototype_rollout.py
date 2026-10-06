@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import random
@@ -56,7 +57,7 @@ class PrototypeFlatRolloutSearch:
     evaluator; the default is a simple fair-observation progress/HP heuristic.
     """
 
-    search_version = "prototype-flat-rollout-v1"
+    search_version = "prototype-flat-rollout-v2"
 
     def __init__(
         self,
@@ -75,13 +76,14 @@ class PrototypeFlatRolloutSearch:
 
         self._backend = backend
         self._policy = policy
-        self._rng = random.Random(seed)
+        self._seed = seed
         self._rollout_depth = rollout_depth
         self._rollout_batch_size = rollout_batch_size
         self._leaf_value = leaf_value or self._prototype_leaf_value
 
     def search(self, state: StateHandle, budget: SearchBudget) -> SearchResult:
         root_hash = self._backend.exact_hash(state)
+        rng = random.Random(self._state_seed(root_hash))
         root_actions = tuple(
             sorted(self._backend.legal_actions(state), key=lambda action: action.action_id)
         )
@@ -185,7 +187,7 @@ class PrototypeFlatRolloutSearch:
                         rollouts[rollout_index].terminal = True
                         continue
 
-                    chosen = self._rng.choice(ordered)
+                    chosen = rng.choice(ordered)
                     release_handles.append(parent)
                     release_handles.extend(
                         transition.child
@@ -236,6 +238,12 @@ class PrototypeFlatRolloutSearch:
             expanded_nodes=expanded_nodes,
             search_version=self.search_version,
         )
+
+    def _state_seed(self, root_hash: str) -> int:
+        digest = hashlib.sha256(
+            f"{self._seed}:{root_hash}".encode("utf-8")
+        ).digest()
+        return int.from_bytes(digest[:8], byteorder="big", signed=False)
 
     @staticmethod
     def _prototype_leaf_value(observation: Observation) -> float:
