@@ -1,7 +1,13 @@
 [evaluation]
-name = "smoke"
-seeds = 10
-information_policy = "fair-v1"
+name = "prototype-search-smoke"
+seed_prefix = "prototype-eval"
+runs = 10
+nodes_per_decision = 128
+rollout_depth = 32
+rollout_batch_size = 16
+search_seed = 0
+max_decisions = 5000
+information_policy = "prototype-fair-v0"
 
 [notes]
-text = "Intended for end-to-end plumbing checks once the real emulator binding exists."
+text = "Deterministic multi-seed whole-run evaluation for the prototype rollout-search baseline."
