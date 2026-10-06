@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import time
 from pathlib import Path
 
+from sts2_ai.emulator import PrototypeJsonlBackend
 from sts2_ai.evaluation import collect_experiment_manifest
+from sts2_ai.search import PrototypeFlatRolloutSearch, SearchBudget
 
 
 def main() -> None:
@@ -19,6 +22,16 @@ def main() -> None:
     manifest.add_argument("--binding-version", default="unknown")
     manifest.add_argument("--information-policy", default="fair-v1")
 
+    search_smoke = sub.add_parser(
+        "prototype-search-smoke",
+        help="run the first flat-rollout workload against the pinned prototype emulator",
+    )
+    search_smoke.add_argument("--repo-root", type=Path, default=Path.cwd())
+    search_smoke.add_argument("--seed", default="search-smoke")
+    search_smoke.add_argument("--nodes", type=int, default=256)
+    search_smoke.add_argument("--depth", type=int, default=32)
+    search_smoke.add_argument("--search-seed", type=int, default=0)
+
     args = parser.parse_args()
     if args.command == "manifest":
         result = collect_experiment_manifest(
@@ -33,6 +46,56 @@ def main() -> None:
         )
         result.write_json(args.output)
         print(args.output)
+    elif args.command == "prototype-search-smoke":
+        if args.nodes <= 0:
+            parser.error("--nodes must be positive")
+        if args.depth <= 0:
+            parser.error("--depth must be positive")
+
+        with PrototypeJsonlBackend.from_repo(args.repo_root) as backend:
+            state = backend.reset(args.seed)
+            start_actions = backend.legal_actions(state)
+            if len(start_actions) != 1 or start_actions[0].kind != "start_run":
+                raise RuntimeError("Prototype reset did not expose exactly one start_run action")
+            state = backend.step(state, start_actions[0]).child
+
+            search = PrototypeFlatRolloutSearch(
+                backend,
+                backend.fair_policy,
+                seed=args.search_seed,
+                rollout_depth=args.depth,
+            )
+            started = time.perf_counter()
+            result = search.search(state, SearchBudget(max_nodes=args.nodes))
+            elapsed = time.perf_counter() - started
+
+            print(f"Emulator revision: {backend.emulator_revision}")
+            print(f"Binding: {backend.binding_version}")
+            print(f"Ruleset: {backend.ruleset_id}")
+            print(f"Search: {result.search_version}")
+            print(f"Expanded nodes: {result.expanded_nodes}")
+            print(f"Elapsed: {elapsed:.3f}s")
+            if elapsed > 0:
+                print(f"Nodes/sec: {result.expanded_nodes / elapsed:.1f}")
+
+            print("Root actions:")
+            for evaluation in sorted(
+                result.evaluations,
+                key=lambda item: item.value,
+                reverse=True,
+            ):
+                uncertainty = (
+                    "n/a"
+                    if evaluation.uncertainty is None
+                    else f"{evaluation.uncertainty:.3f}"
+                )
+                print(
+                    f"  {evaluation.action.kind} "
+                    f"value={evaluation.value:.3f} "
+                    f"visits={evaluation.visits} "
+                    f"stderr={uncertainty} "
+                    f"id={evaluation.action.action_id}"
+                )
 
 
 if __name__ == "__main__":
