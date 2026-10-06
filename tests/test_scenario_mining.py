@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from sts2_ai.emulator import LegalAction
 from sts2_ai.evaluation import PrototypeSearchDecision
 from sts2_ai.scenarios import (
@@ -63,7 +65,8 @@ def test_close_decision_miner_ranks_by_margin_then_uncertainty() -> None:
     )
 
     assert [scenario.run_seed for scenario in scenarios] == ["b", "a"]
-    assert scenarios[0].value_margin == scenarios[1].value_margin == 0.1
+    assert scenarios[0].value_margin == pytest.approx(0.1)
+    assert scenarios[1].value_margin == pytest.approx(0.1)
     assert scenarios[0].max_uncertainty == 0.9
     assert scenarios[0].action_history == ("start", "right")
 
