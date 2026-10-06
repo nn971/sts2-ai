@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 from sts2_ai.emulator import InformationPolicy, JsonlPrototypeBackend
 
 
