@@ -47,6 +47,22 @@ class PrototypeEvaluationSummary:
         return self.victories / len(self.runs) if self.runs else 0.0
 
     @property
+    def cache_hit_rate(self) -> float:
+        return (
+            self.total_cache_hits / self.total_search_decisions
+            if self.total_search_decisions
+            else 0.0
+        )
+
+    @property
+    def decisions_per_second(self) -> float:
+        return (
+            self.total_decisions / self.elapsed_seconds
+            if self.elapsed_seconds > 0
+            else 0.0
+        )
+
+    @property
     def nodes_per_second(self) -> float:
         return (
             self.total_expanded_nodes / self.elapsed_seconds
@@ -58,6 +74,8 @@ class PrototypeEvaluationSummary:
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = asdict(self)
         payload["victory_rate"] = self.victory_rate
+        payload["cache_hit_rate"] = self.cache_hit_rate
+        payload["decisions_per_second"] = self.decisions_per_second
         payload["nodes_per_second"] = self.nodes_per_second
         path.write_text(
             json.dumps(payload, indent=2, sort_keys=True) + "\n",
