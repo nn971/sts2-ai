@@ -42,6 +42,8 @@ jobs:
           --batch-size 4
           --seed-prefix ci-eval
           --strategy-db /tmp/sts2-ai-ci-cache.sqlite
+          --scenario-output /tmp/sts2-ai-ci-scenarios.json
+          --scenario-limit 4
       - run: >-
           python -m sts2_ai.cli prototype-evaluate
           --runs 2
@@ -50,3 +52,10 @@ jobs:
           --batch-size 4
           --seed-prefix ci-eval
           --strategy-db /tmp/sts2-ai-ci-cache.sqlite
+      - run: >-
+          python -m sts2_ai.cli prototype-compare
+          --runs 2
+          --nodes-per-decision 8
+          --depth 3
+          --batch-size 4
+          --seed-prefix ci-compare
