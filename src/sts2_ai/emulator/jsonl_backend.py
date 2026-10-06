@@ -177,13 +177,33 @@ class PrototypeJsonlBackend(EmulatorBackend):
         *,
         configuration: str = "Release",
         emulator_revision: str | None = None,
+        build: bool = True,
     ) -> PrototypeJsonlBackend:
         emulator_root = repo_root / "emulator"
         project = emulator_root / "src" / "Sts2Emulator.Cli" / "Sts2Emulator.Cli.csproj"
+
+        if build:
+            subprocess.run(
+                [
+                    "dotnet",
+                    "build",
+                    str(project),
+                    "--configuration",
+                    configuration,
+                    "--nologo",
+                    "--verbosity",
+                    "quiet",
+                ],
+                cwd=str(repo_root),
+                check=True,
+                stdout=subprocess.DEVNULL,
+            )
+
         client = SubprocessJsonlClient(
             [
                 "dotnet",
                 "run",
+                "--no-build",
                 "--project",
                 str(project),
                 "--configuration",
