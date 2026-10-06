@@ -205,7 +205,9 @@ def main() -> None:
             print(f"Search decisions: {summary.total_search_decisions}")
             print(f"Expanded nodes: {summary.total_expanded_nodes}")
             print(f"Search cache hits: {summary.total_cache_hits}")
+            print(f"Search cache hit rate: {summary.cache_hit_rate:.3f}")
             print(f"Elapsed: {summary.elapsed_seconds:.3f}s")
+            print(f"Decisions/sec: {summary.decisions_per_second:.1f}")
             print(f"Search nodes/sec: {summary.nodes_per_second:.1f}")
 
             if args.output is not None:
