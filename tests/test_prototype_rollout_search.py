@@ -93,3 +93,26 @@ def test_prototype_leaf_value_uses_canonical_snake_case_fields() -> None:
     assert victory_value > 10_000
     assert defeat_value < 0
     assert victory_value - defeat_value > 19_000
+
+
+def test_same_search_object_repeats_exact_state_deterministically() -> None:
+    backend = MockLinearBackend(terminal_at=30)
+    policy = InformationPolicy("fair-test")
+
+    def value(observation: Observation) -> float:
+        payload = json.loads(observation.payload_json)
+        return float(payload["value"])
+
+    search = PrototypeFlatRolloutSearch(
+        backend,
+        policy,
+        seed=23,
+        rollout_depth=5,
+        leaf_value=value,
+    )
+
+    first = search.search("0", SearchBudget(max_nodes=40))
+    second = search.search("0", SearchBudget(max_nodes=40))
+
+    assert first == second
+    assert first.search_version == "prototype-flat-rollout-v2"
