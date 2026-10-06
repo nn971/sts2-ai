@@ -10,6 +10,7 @@ from sts2_ai.emulator import LegalAction, StateHandle
 class SearchBudget:
     max_nodes: int | None = None
     max_seconds: float | None = None
+    max_depth: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
