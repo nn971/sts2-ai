@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 
 from sts2_ai.emulator import PrototypeJsonlBackend
-from sts2_ai.evaluation import collect_experiment_manifest
+from sts2_ai.evaluation import PrototypeSearchRunEvaluator, collect_experiment_manifest
 from sts2_ai.search import PrototypeFlatRolloutSearch, SearchBudget
 
 
@@ -35,6 +35,26 @@ def main() -> None:
     search_smoke.add_argument(
         "--experiment-id",
         default="prototype-search-smoke",
+    )
+
+
+    evaluate = sub.add_parser(
+        "prototype-evaluate",
+        help="evaluate search-guided complete prototype runs over deterministic seeds",
+    )
+    evaluate.add_argument("--repo-root", type=Path, default=Path.cwd())
+    evaluate.add_argument("--seed-prefix", default="evaluation")
+    evaluate.add_argument("--runs", type=int, default=10)
+    evaluate.add_argument("--nodes-per-decision", type=int, default=128)
+    evaluate.add_argument("--depth", type=int, default=32)
+    evaluate.add_argument("--batch-size", type=int, default=16)
+    evaluate.add_argument("--search-seed", type=int, default=0)
+    evaluate.add_argument("--max-decisions", type=int, default=5000)
+    evaluate.add_argument("--output", type=Path)
+    evaluate.add_argument("--manifest-output", type=Path)
+    evaluate.add_argument(
+        "--experiment-id",
+        default="prototype-search-evaluation",
     )
 
     args = parser.parse_args()
@@ -119,6 +139,75 @@ def main() -> None:
                     seeds={"search_seed": args.search_seed},
                 )
                 search_manifest.write_json(args.manifest_output)
+                print(f"Manifest: {args.manifest_output}")
+    elif args.command == "prototype-evaluate":
+        if args.runs <= 0:
+            parser.error("--runs must be positive")
+        if args.nodes_per_decision <= 0:
+            parser.error("--nodes-per-decision must be positive")
+        if args.depth <= 0:
+            parser.error("--depth must be positive")
+        if args.batch_size <= 0:
+            parser.error("--batch-size must be positive")
+        if args.max_decisions <= 0:
+            parser.error("--max-decisions must be positive")
+
+        seeds = tuple(f"{args.seed_prefix}-{index}" for index in range(args.runs))
+
+        with PrototypeJsonlBackend.from_repo(args.repo_root) as backend:
+            evaluator = PrototypeSearchRunEvaluator(
+                backend,
+                backend.fair_policy,
+                nodes_per_decision=args.nodes_per_decision,
+                rollout_depth=args.depth,
+                rollout_batch_size=args.batch_size,
+                search_seed=args.search_seed,
+                max_decisions=args.max_decisions,
+            )
+            summary = evaluator.evaluate(seeds)
+
+            print(f"Emulator revision: {backend.emulator_revision}")
+            print(f"Binding: {backend.binding_version}")
+            print(f"Ruleset: {backend.ruleset_id}")
+            print(f"Search: {summary.search_version}")
+            print(f"Runs: {len(summary.runs)}")
+            print(
+                f"Outcomes: {summary.victories} victory / "
+                f"{summary.defeats} defeat / "
+                f"{summary.unknown_terminal_outcomes} unknown"
+            )
+            print(f"Victory rate: {summary.victory_rate:.3f}")
+            print(f"Decisions: {summary.total_decisions}")
+            print(f"Search decisions: {summary.total_search_decisions}")
+            print(f"Expanded nodes: {summary.total_expanded_nodes}")
+            print(f"Elapsed: {summary.elapsed_seconds:.3f}s")
+            print(f"Search nodes/sec: {summary.nodes_per_second:.1f}")
+
+            if args.output is not None:
+                summary.write_json(args.output)
+                print(f"Results: {args.output}")
+
+            if args.manifest_output is not None:
+                evaluation_manifest = collect_experiment_manifest(
+                    repo_root=args.repo_root,
+                    experiment_id=args.experiment_id,
+                    game_build="prototype-unbound",
+                    emulator_schema_version=PrototypeJsonlBackend.EXPECTED_AI_SCHEMA,
+                    binding_version=backend.binding_version,
+                    information_policy=backend.fair_policy.policy_id,
+                    config={
+                        "evaluation": "prototype-search-runs-v1",
+                        "search_version": summary.search_version,
+                        "runs": args.runs,
+                        "seed_prefix": args.seed_prefix,
+                        "nodes_per_decision": args.nodes_per_decision,
+                        "rollout_depth": args.depth,
+                        "rollout_batch_size": args.batch_size,
+                        "max_decisions": args.max_decisions,
+                    },
+                    seeds={"search_seed": args.search_seed},
+                )
+                evaluation_manifest.write_json(args.manifest_output)
                 print(f"Manifest: {args.manifest_output}")
 
 
