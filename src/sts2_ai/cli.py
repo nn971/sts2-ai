@@ -17,7 +17,11 @@ from sts2_ai.scenarios import (
     replay_scenario,
     write_replay_scenario_archive,
 )
-from sts2_ai.search import PrototypeFlatRolloutSearch, SearchBudget
+from sts2_ai.search import (
+    PrototypeFlatRolloutSearch,
+    PrototypeUcbRolloutSearch,
+    SearchBudget,
+)
 from sts2_ai.strategy_db import SQLiteStrategyStore
 
 
@@ -82,6 +86,11 @@ def main() -> None:
     evaluate.add_argument("--depth", type=int, default=32)
     evaluate.add_argument("--batch-size", type=int, default=16)
     evaluate.add_argument("--search-seed", type=int, default=0)
+    evaluate.add_argument(
+        "--search-kind",
+        choices=("flat", "ucb"),
+        default="flat",
+    )
     evaluate.add_argument("--max-decisions", type=int, default=5000)
     evaluate.add_argument("--output", type=Path)
     evaluate.add_argument("--manifest-output", type=Path)
@@ -206,7 +215,7 @@ def main() -> None:
                 max_decisions=args.max_decisions,
             ).evaluate(seeds)
 
-            search_summary = PrototypeSearchRunEvaluator(
+            flat_summary = PrototypeSearchRunEvaluator(
                 backend,
                 backend.fair_policy,
                 nodes_per_decision=args.nodes_per_decision,
@@ -214,9 +223,19 @@ def main() -> None:
                 rollout_batch_size=args.batch_size,
                 search_seed=args.search_seed,
                 max_decisions=args.max_decisions,
+                search_type=PrototypeFlatRolloutSearch,
+            ).evaluate(seeds)
+            ucb_summary = PrototypeSearchRunEvaluator(
+                backend,
+                backend.fair_policy,
+                nodes_per_decision=args.nodes_per_decision,
+                rollout_depth=args.depth,
+                rollout_batch_size=args.batch_size,
+                search_seed=args.search_seed,
+                max_decisions=args.max_decisions,
+                search_type=PrototypeUcbRolloutSearch,
             ).evaluate(seeds)
 
-            delta = search_summary.victory_rate - random_summary.victory_rate
             print(f"Emulator revision: {backend.emulator_revision}")
             print(f"Runs: {len(seeds)}")
             print(
@@ -224,21 +243,25 @@ def main() -> None:
                 f"decisions={random_summary.total_decisions} "
                 f"elapsed={random_summary.elapsed_seconds:.3f}s"
             )
-            print(
-                f"Search: victory_rate={search_summary.victory_rate:.3f} "
-                f"decisions={search_summary.total_decisions} "
-                f"search_decisions={search_summary.total_search_decisions} "
-                f"expanded_nodes={search_summary.total_expanded_nodes} "
-                f"elapsed={search_summary.elapsed_seconds:.3f}s"
-            )
-            print(f"Victory-rate delta (search-random): {delta:+.3f}")
-            print(
-                "Exact decision-state recurrence: "
-                f"{search_summary.repeated_search_states}/"
-                f"{search_summary.unique_search_states + search_summary.repeated_search_states} "
-                f"({search_summary.exact_state_recurrence_rate:.3f})"
-            )
-            print(f"Search nodes/sec: {search_summary.nodes_per_second:.1f}")
+            for label, summary in (("Flat", flat_summary), ("UCB", ucb_summary)):
+                delta = summary.victory_rate - random_summary.victory_rate
+                recurrence_total = (
+                    summary.unique_search_states + summary.repeated_search_states
+                )
+                print(
+                    f"{label}: victory_rate={summary.victory_rate:.3f} "
+                    f"decisions={summary.total_decisions} "
+                    f"search_decisions={summary.total_search_decisions} "
+                    f"expanded_nodes={summary.total_expanded_nodes} "
+                    f"elapsed={summary.elapsed_seconds:.3f}s "
+                    f"delta_vs_random={delta:+.3f}"
+                )
+                print(
+                    f"{label} exact decision-state recurrence: "
+                    f"{summary.repeated_search_states}/{recurrence_total} "
+                    f"({summary.exact_state_recurrence_rate:.3f})"
+                )
+                print(f"{label} search nodes/sec: {summary.nodes_per_second:.1f}")
     elif args.command == "prototype-evaluate":
         if args.runs <= 0:
             parser.error("--runs must be positive")
@@ -255,6 +278,11 @@ def main() -> None:
 
         seeds = tuple(f"{args.seed_prefix}-{index}" for index in range(args.runs))
         search_decisions: list[PrototypeSearchDecision] = []
+        search_type = (
+            PrototypeUcbRolloutSearch
+            if args.search_kind == "ucb"
+            else PrototypeFlatRolloutSearch
+        )
 
         with PrototypeJsonlBackend.from_repo(args.repo_root) as backend:
             strategy_store = (
@@ -277,6 +305,7 @@ def main() -> None:
                         if args.scenario_output is not None
                         else None
                     ),
+                    search_type=search_type,
                 )
                 summary = evaluator.evaluate(seeds)
             finally:
@@ -340,6 +369,7 @@ def main() -> None:
                     config={
                         "evaluation": "prototype-search-runs-v1",
                         "search_version": summary.search_version,
+                        "search_kind": args.search_kind,
                         "runs": args.runs,
                         "seed_prefix": args.seed_prefix,
                         "nodes_per_decision": args.nodes_per_decision,
