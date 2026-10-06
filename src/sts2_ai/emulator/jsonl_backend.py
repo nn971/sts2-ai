@@ -263,6 +263,7 @@ class PrototypeJsonlBackend(EmulatorBackend):
             action=wire_action,
             child=_required_str(response, "child"),
             terminal=_required_bool(response, "terminal"),
+            exact_hash=_required_str(response, "exactHash"),
         )
 
     def fork(self, state: StateHandle) -> StateHandle:
@@ -314,6 +315,7 @@ class PrototypeJsonlBackend(EmulatorBackend):
                     action=_parse_action(_required_mapping(mapping, "action")),
                     child=_required_str(mapping, "child"),
                     terminal=_required_bool(mapping, "terminal"),
+                    exact_hash=_required_str(mapping, "exactHash"),
                 )
             )
         return tuple(transitions)
