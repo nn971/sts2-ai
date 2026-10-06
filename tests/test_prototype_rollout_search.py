@@ -53,3 +53,43 @@ def test_flat_rollout_search_is_deterministic_under_node_budget() -> None:
     ).search("0", SearchBudget(max_nodes=40))
 
     assert first == second
+
+
+def test_prototype_leaf_value_uses_canonical_snake_case_fields() -> None:
+    victory = Observation(
+        policy_id="prototype-fair-v0",
+        payload_json=json.dumps(
+            {
+                "act": 3,
+                "floor": 6,
+                "hp": 20,
+                "max_hp": 70,
+                "gold": 100,
+                "deck": [{}, {}],
+                "terminal_outcome": "victory",
+            }
+        ),
+        observation_hash="victory",
+    )
+    defeat = Observation(
+        policy_id="prototype-fair-v0",
+        payload_json=json.dumps(
+            {
+                "act": 3,
+                "floor": 6,
+                "hp": 0,
+                "max_hp": 70,
+                "gold": 100,
+                "deck": [{}, {}],
+                "terminal_outcome": "defeat",
+            }
+        ),
+        observation_hash="defeat",
+    )
+
+    victory_value = PrototypeFlatRolloutSearch._prototype_leaf_value(victory)
+    defeat_value = PrototypeFlatRolloutSearch._prototype_leaf_value(defeat)
+
+    assert victory_value > 10_000
+    assert defeat_value < 0
+    assert victory_value - defeat_value > 19_000
