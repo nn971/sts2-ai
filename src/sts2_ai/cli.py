@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import time
 from pathlib import Path
 
@@ -8,6 +9,14 @@ from sts2_ai.emulator import PrototypeJsonlBackend
 from sts2_ai.evaluation import PrototypeSearchRunEvaluator, collect_experiment_manifest
 from sts2_ai.search import PrototypeFlatRolloutSearch, SearchBudget
 from sts2_ai.strategy_db import SQLiteStrategyStore
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def main() -> None:
@@ -37,7 +46,6 @@ def main() -> None:
         "--experiment-id",
         default="prototype-search-smoke",
     )
-
 
     evaluate = sub.add_parser(
         "prototype-evaluate",
@@ -221,10 +229,15 @@ def main() -> None:
                         "rollout_depth": args.depth,
                         "rollout_batch_size": args.batch_size,
                         "max_decisions": args.max_decisions,
+                        "strategy_db_path": (
+                            str(args.strategy_db)
+                            if args.strategy_db is not None
+                            else None
+                        ),
                     },
                     seeds={"search_seed": args.search_seed},
                     strategy_db_snapshot=(
-                        str(args.strategy_db)
+                        f"sha256:{_sha256_file(args.strategy_db)}"
                         if args.strategy_db is not None
                         else None
                     ),
