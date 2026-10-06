@@ -179,6 +179,36 @@ class PrototypeJsonlBackend:
             terminal=self._required_bool(response, "terminal"),
         )
 
+    def expand(self, state: StateHandle) -> Sequence[Transition]:
+        response = self._request("expand", state_handle=state)
+        raw_expansions = response.get("expansions")
+        if not isinstance(raw_expansions, list):
+            raise RuntimeError("Emulator expand response has no expansion list")
+
+        transitions: list[Transition] = []
+        for raw in raw_expansions:
+            if not isinstance(raw, dict):
+                raise RuntimeError("Emulator returned a non-object expansion")
+            raw_action = raw.get("action")
+            if not isinstance(raw_action, dict):
+                raise RuntimeError("Emulator expansion has no action object")
+
+            action = LegalAction(
+                action_id=self._required_string(raw_action, "actionId"),
+                kind=self._required_string(raw_action, "kind"),
+                payload_json=self._required_string(raw_action, "payloadJson"),
+            )
+            transitions.append(
+                Transition(
+                    parent=self._required_string(raw, "parent"),
+                    action=action,
+                    child=self._required_string(raw, "child"),
+                    terminal=self._required_bool(raw, "terminal"),
+                )
+            )
+
+        return tuple(transitions)
+
     def fork(self, state: StateHandle) -> StateHandle:
         response = self._request("fork", state_handle=state)
         return self._required_string(response, "child")
