@@ -27,14 +27,14 @@ class MonteCarloRolloutSearch:
         backend: EmulatorBackend,
         *,
         seed: int = 0,
-        information_policy: InformationPolicy = InformationPolicy("prototype-fair-v0"),
+        information_policy: InformationPolicy | None = None,
         max_rollout_depth: int = 512,
     ) -> None:
         if max_rollout_depth <= 0:
             raise ValueError("max_rollout_depth must be positive")
         self._backend = backend
         self._seed = seed
-        self._information_policy = information_policy
+        self._information_policy = information_policy or InformationPolicy("prototype-fair-v0")
         self._max_rollout_depth = max_rollout_depth
 
     def search(self, state: StateHandle, budget: SearchBudget) -> SearchResult:
