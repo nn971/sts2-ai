@@ -7,6 +7,7 @@ from pathlib import Path
 from sts2_ai.emulator import PrototypeJsonlBackend
 from sts2_ai.evaluation import PrototypeSearchRunEvaluator, collect_experiment_manifest
 from sts2_ai.search import PrototypeFlatRolloutSearch, SearchBudget
+from sts2_ai.strategy_db import SQLiteStrategyStore
 
 
 def main() -> None:
@@ -52,6 +53,11 @@ def main() -> None:
     evaluate.add_argument("--max-decisions", type=int, default=5000)
     evaluate.add_argument("--output", type=Path)
     evaluate.add_argument("--manifest-output", type=Path)
+    evaluate.add_argument(
+        "--strategy-db",
+        type=Path,
+        help="optional SQLite exact-state search cache",
+    )
     evaluate.add_argument(
         "--experiment-id",
         default="prototype-search-evaluation",
@@ -155,16 +161,26 @@ def main() -> None:
         seeds = tuple(f"{args.seed_prefix}-{index}" for index in range(args.runs))
 
         with PrototypeJsonlBackend.from_repo(args.repo_root) as backend:
-            evaluator = PrototypeSearchRunEvaluator(
-                backend,
-                backend.fair_policy,
-                nodes_per_decision=args.nodes_per_decision,
-                rollout_depth=args.depth,
-                rollout_batch_size=args.batch_size,
-                search_seed=args.search_seed,
-                max_decisions=args.max_decisions,
+            strategy_store = (
+                SQLiteStrategyStore(args.strategy_db)
+                if args.strategy_db is not None
+                else None
             )
-            summary = evaluator.evaluate(seeds)
+            try:
+                evaluator = PrototypeSearchRunEvaluator(
+                    backend,
+                    backend.fair_policy,
+                    nodes_per_decision=args.nodes_per_decision,
+                    rollout_depth=args.depth,
+                    rollout_batch_size=args.batch_size,
+                    search_seed=args.search_seed,
+                    max_decisions=args.max_decisions,
+                    strategy_store=strategy_store,
+                )
+                summary = evaluator.evaluate(seeds)
+            finally:
+                if strategy_store is not None:
+                    strategy_store.close()
 
             print(f"Emulator revision: {backend.emulator_revision}")
             print(f"Binding: {backend.binding_version}")
@@ -180,6 +196,7 @@ def main() -> None:
             print(f"Decisions: {summary.total_decisions}")
             print(f"Search decisions: {summary.total_search_decisions}")
             print(f"Expanded nodes: {summary.total_expanded_nodes}")
+            print(f"Search cache hits: {summary.total_cache_hits}")
             print(f"Elapsed: {summary.elapsed_seconds:.3f}s")
             print(f"Search nodes/sec: {summary.nodes_per_second:.1f}")
 
@@ -206,6 +223,11 @@ def main() -> None:
                         "max_decisions": args.max_decisions,
                     },
                     seeds={"search_seed": args.search_seed},
+                    strategy_db_snapshot=(
+                        str(args.strategy_db)
+                        if args.strategy_db is not None
+                        else None
+                    ),
                 )
                 evaluation_manifest.write_json(args.manifest_output)
                 print(f"Manifest: {args.manifest_output}")
