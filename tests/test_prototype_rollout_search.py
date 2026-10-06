@@ -1,7 +1,11 @@
 import json
 
 from sts2_ai.emulator import InformationPolicy, Observation
-from sts2_ai.search import PrototypeFlatRolloutSearch, SearchBudget
+from sts2_ai.search import (
+    PrototypeFlatRolloutSearch,
+    PrototypeUcbRolloutSearch,
+    SearchBudget,
+)
 from sts2_ai.testing import MockLinearBackend
 
 
@@ -116,3 +120,51 @@ def test_same_search_object_repeats_exact_state_deterministically() -> None:
 
     assert first == second
     assert first.search_version == "prototype-flat-rollout-v2"
+
+
+
+def test_ucb_rollout_search_concentrates_visits_on_better_root_action() -> None:
+    backend = MockLinearBackend(terminal_at=100)
+    policy = InformationPolicy("fair-test")
+
+    def value(observation: Observation) -> float:
+        payload = json.loads(observation.payload_json)
+        return float(payload["value"])
+
+    flat = PrototypeFlatRolloutSearch(
+        backend,
+        policy,
+        seed=31,
+        rollout_depth=1,
+        rollout_batch_size=1,
+        leaf_value=value,
+    ).search("0", SearchBudget(max_nodes=30))
+
+    adaptive = PrototypeUcbRolloutSearch(
+        backend,
+        policy,
+        seed=31,
+        rollout_depth=1,
+        rollout_batch_size=1,
+        leaf_value=value,
+        exploration=1.0,
+    ).search("0", SearchBudget(max_nodes=30))
+
+    flat_by_amount = {
+        evaluation.action.payload_json: evaluation
+        for evaluation in flat.evaluations
+    }
+    adaptive_by_amount = {
+        evaluation.action.payload_json: evaluation
+        for evaluation in adaptive.evaluations
+    }
+
+    assert abs(
+        flat_by_amount['{"amount":2}'].visits
+        - flat_by_amount['{"amount":1}'].visits
+    ) <= 1
+    assert (
+        adaptive_by_amount['{"amount":2}'].visits
+        > adaptive_by_amount['{"amount":1}'].visits
+    )
+    assert adaptive.search_version == "prototype-ucb-rollout-v0"
