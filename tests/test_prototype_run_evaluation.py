@@ -8,8 +8,6 @@ from sts2_ai.strategy_db import SQLiteStrategyStore
 from sts2_ai.testing import MockLinearBackend
 
 
-
-
 class OutcomeMockBackend(MockLinearBackend):
     def observe(self, state: str, policy: InformationPolicy) -> Observation:
         base = super().observe(state, policy)
