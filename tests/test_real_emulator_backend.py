@@ -5,7 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from sts2_ai.agents import RandomAgent
 from sts2_ai.emulator import InformationPolicy, JsonlPrototypeBackend
+from sts2_ai.evaluation import run_episode
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -45,3 +47,20 @@ def test_real_prototype_backend_round_trip() -> None:
         assert manifest["rulesetId"] == backend.ruleset_id
         assert manifest["aiSchemaId"] == backend.ai_schema_id
         assert "proto.silent.survivor" in manifest["cardIds"]
+
+
+@pytest.mark.skipif(not EMULATOR_PROJECT.is_file(), reason="emulator submodule is not initialized")
+def test_real_prototype_backend_runs_whole_episode() -> None:
+    with JsonlPrototypeBackend(EMULATOR_ROOT) as backend:
+        result = run_episode(
+            backend,
+            RandomAgent(seed=19),
+            seed="python-whole-run",
+            information_policy=InformationPolicy(backend.fair_policy_id),
+            max_decisions=5_000,
+        )
+
+        assert result.steps
+        assert result.steps[-1].terminal
+        assert result.terminal_outcome in {"victory", "defeat"}
+        assert result.initial_hash != result.final_hash
