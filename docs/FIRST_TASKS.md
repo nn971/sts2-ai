@@ -14,7 +14,7 @@
 - [x] Implement `PrototypeJsonlBackend`.
 - [x] Add batched step/expand/observe process operations before optimizing a native binding.
 - [x] Add real reset/observe/fork/step/hash process round-trip tests.
-- [x] Add deterministic search-guided multi-seed whole-run evaluation; random-policy comparison remains.
+- [x] Add deterministic search-guided multi-seed whole-run evaluation and same-seed random/flat/UCB comparison.
 
 ## Research hygiene
 
@@ -26,7 +26,7 @@
 ## Only after emulator confidence grows
 
 - [x] Implement the first flat rollout search workload; serious combat search remains later.
-- [ ] Measure transposition/exact-state recurrence rate and state-store memory footprint.
-- [ ] Build scenario archive from difficult states.
+- [ ] Measure transposition/exact-state recurrence rate and state-store memory footprint. Decision-root recurrence metrics are implemented; memory measurement remains.
+- [x] Build a replay-first scenario archive from close/high-uncertainty searched decisions and verify exact replay hashes.
 - [ ] Implement room-level macro search.
 - [ ] Produce first search-derived policy/value targets.
