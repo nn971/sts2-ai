@@ -54,6 +54,9 @@ class MockLinearBackend:
             terminal=self.is_terminal(child),
         )
 
+    def expand(self, state: StateHandle) -> Sequence[Transition]:
+        return tuple(self.step(state, action) for action in self.legal_actions(state))
+
     def fork(self, state: StateHandle) -> StateHandle:
         return str(state)
 
