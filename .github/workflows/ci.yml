@@ -33,3 +33,11 @@ jobs:
           --nodes 64
           --depth 8
           --seed ci-search-smoke
+
+      - run: >-
+          python -m sts2_ai.cli prototype-evaluate
+          --runs 2
+          --nodes-per-decision 16
+          --depth 4
+          --batch-size 4
+          --seed-prefix ci-eval
