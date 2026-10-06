@@ -6,7 +6,11 @@ import time
 from pathlib import Path
 
 from sts2_ai.emulator import PrototypeJsonlBackend
-from sts2_ai.evaluation import PrototypeSearchRunEvaluator, collect_experiment_manifest
+from sts2_ai.evaluation import (
+    PrototypeRandomRunEvaluator,
+    PrototypeSearchRunEvaluator,
+    collect_experiment_manifest,
+)
 from sts2_ai.search import PrototypeFlatRolloutSearch, SearchBudget
 from sts2_ai.strategy_db import SQLiteStrategyStore
 
@@ -46,6 +50,20 @@ def main() -> None:
         "--experiment-id",
         default="prototype-search-smoke",
     )
+
+    compare = sub.add_parser(
+        "prototype-compare",
+        help="compare rollout search with a deterministic random baseline on identical seeds",
+    )
+    compare.add_argument("--repo-root", type=Path, default=Path.cwd())
+    compare.add_argument("--seed-prefix", default="comparison")
+    compare.add_argument("--runs", type=int, default=20)
+    compare.add_argument("--nodes-per-decision", type=int, default=128)
+    compare.add_argument("--depth", type=int, default=32)
+    compare.add_argument("--batch-size", type=int, default=16)
+    compare.add_argument("--search-seed", type=int, default=0)
+    compare.add_argument("--random-seed", type=int, default=0)
+    compare.add_argument("--max-decisions", type=int, default=5000)
 
     evaluate = sub.add_parser(
         "prototype-evaluate",
@@ -154,6 +172,61 @@ def main() -> None:
                 )
                 search_manifest.write_json(args.manifest_output)
                 print(f"Manifest: {args.manifest_output}")
+    elif args.command == "prototype-compare":
+        if args.runs <= 0:
+            parser.error("--runs must be positive")
+        if args.nodes_per_decision <= 0:
+            parser.error("--nodes-per-decision must be positive")
+        if args.depth <= 0:
+            parser.error("--depth must be positive")
+        if args.batch_size <= 0:
+            parser.error("--batch-size must be positive")
+        if args.max_decisions <= 0:
+            parser.error("--max-decisions must be positive")
+
+        seeds = tuple(f"{args.seed_prefix}-{index}" for index in range(args.runs))
+
+        with PrototypeJsonlBackend.from_repo(args.repo_root) as backend:
+            random_summary = PrototypeRandomRunEvaluator(
+                backend,
+                backend.fair_policy,
+                random_seed=args.random_seed,
+                max_decisions=args.max_decisions,
+            ).evaluate(seeds)
+
+            search_summary = PrototypeSearchRunEvaluator(
+                backend,
+                backend.fair_policy,
+                nodes_per_decision=args.nodes_per_decision,
+                rollout_depth=args.depth,
+                rollout_batch_size=args.batch_size,
+                search_seed=args.search_seed,
+                max_decisions=args.max_decisions,
+            ).evaluate(seeds)
+
+            delta = search_summary.victory_rate - random_summary.victory_rate
+            print(f"Emulator revision: {backend.emulator_revision}")
+            print(f"Runs: {len(seeds)}")
+            print(
+                f"Random: victory_rate={random_summary.victory_rate:.3f} "
+                f"decisions={random_summary.total_decisions} "
+                f"elapsed={random_summary.elapsed_seconds:.3f}s"
+            )
+            print(
+                f"Search: victory_rate={search_summary.victory_rate:.3f} "
+                f"decisions={search_summary.total_decisions} "
+                f"search_decisions={search_summary.total_search_decisions} "
+                f"expanded_nodes={search_summary.total_expanded_nodes} "
+                f"elapsed={search_summary.elapsed_seconds:.3f}s"
+            )
+            print(f"Victory-rate delta (search-random): {delta:+.3f}")
+            print(
+                "Exact decision-state recurrence: "
+                f"{search_summary.repeated_search_states}/"
+                f"{search_summary.unique_search_states + search_summary.repeated_search_states} "
+                f"({search_summary.exact_state_recurrence_rate:.3f})"
+            )
+            print(f"Search nodes/sec: {search_summary.nodes_per_second:.1f}")
     elif args.command == "prototype-evaluate":
         if args.runs <= 0:
             parser.error("--runs must be positive")
