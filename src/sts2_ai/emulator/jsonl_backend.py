@@ -5,7 +5,7 @@ import subprocess
 import threading
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Protocol, TextIO, cast
+from typing import IO, Protocol, cast
 
 from sts2_ai.emulator.protocol import (
     EmulatorBackend,
@@ -52,8 +52,8 @@ class SubprocessJsonlClient:
             self._process.kill()
             raise RuntimeError("Failed to open emulator JSONL stdin/stdout")
 
-        self._stdin: TextIO = self._process.stdin
-        self._stdout: TextIO = self._process.stdout
+        self._stdin: IO[str] = self._process.stdin
+        self._stdout: IO[str] = self._process.stdout
         self._next_request_id = 1
         self._lock = threading.Lock()
         self._closed = False
