@@ -136,8 +136,7 @@ class PrototypeFlatRolloutSearch:
         remaining_nodes: int,
         deadline: float | None,
     ) -> tuple[float, int]:
-        state = self._backend.fork(root)
-        transition = self._backend.step(state, root_action)
+        transition = self._backend.step(root, root_action)
         state = transition.child
         used = 1
 
@@ -149,17 +148,16 @@ class PrototypeFlatRolloutSearch:
             if deadline is not None and time.monotonic() >= deadline:
                 break
 
-            actions = tuple(
+            expansions = tuple(
                 sorted(
-                    self._backend.legal_actions(state),
-                    key=lambda action: action.action_id,
+                    self._backend.expand(state),
+                    key=lambda item: item.action.action_id,
                 )
             )
-            if not actions:
+            if not expansions:
                 break
 
-            action = self._rng.choice(actions)
-            transition = self._backend.step(state, action)
+            transition = self._rng.choice(expansions)
             state = transition.child
             used += 1
 
