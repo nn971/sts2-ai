@@ -10,12 +10,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: false
+          submodules: recursive
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
       - run: python -m pip install -U pip
       - run: python -m pip install -e '.[dev]'
+      - run: dotnet build emulator/src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj -c Release
       - run: python -m ruff check src tests
       - run: python -m mypy src/sts2_ai
       - run: python -m pytest
