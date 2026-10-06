@@ -1,6 +1,6 @@
 import json
 
-from sts2_ai.emulator import InformationPolicy
+from sts2_ai.emulator import InformationPolicy, Observation
 from sts2_ai.search import PrototypeFlatRolloutSearch, SearchBudget
 from sts2_ai.testing import MockLinearBackend
 
@@ -8,8 +8,8 @@ from sts2_ai.testing import MockLinearBackend
 def test_flat_rollout_search_prefers_larger_progress() -> None:
     backend = MockLinearBackend(terminal_at=20)
 
-    def value(observation: object) -> float:
-        payload = json.loads(observation.payload_json)  # type: ignore[attr-defined]
+    def value(observation: Observation) -> float:
+        payload = json.loads(observation.payload_json)
         return float(payload["value"])
 
     search = PrototypeFlatRolloutSearch(
@@ -32,8 +32,8 @@ def test_flat_rollout_search_prefers_larger_progress() -> None:
 def test_flat_rollout_search_is_deterministic_under_node_budget() -> None:
     policy = InformationPolicy("fair-test")
 
-    def value(observation: object) -> float:
-        payload = json.loads(observation.payload_json)  # type: ignore[attr-defined]
+    def value(observation: Observation) -> float:
+        payload = json.loads(observation.payload_json)
         return float(payload["value"])
 
     first = PrototypeFlatRolloutSearch(
