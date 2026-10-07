@@ -5,6 +5,7 @@ from sts2_ai.search import ActionEvaluation, SearchResult
 from sts2_ai.strategy_db import (
     SQLiteStrategyStore,
     StrategicEvidence,
+    diagnose_budget_disagreements,
     record_search_result,
 )
 
@@ -36,7 +37,7 @@ def test_roundtrip_search_root_and_action_statistics(tmp_path: Path) -> None:
     result = SearchResult(
         root_state_hash="state-search",
         root_observation_hash="obs-search",
-        root_observation_json='{"phase":"reward"}',
+        root_observation_json='{"phase":5,"act":1,"floor":2,"hp":42,"max_hp":70}',
         evaluations=(
             ActionEvaluation(actions[0], value=0.7, visits=20, uncertainty=0.1),
             ActionEvaluation(actions[1], value=0.2, visits=12, uncertainty=0.2),
@@ -62,13 +63,7 @@ def test_roundtrip_search_root_and_action_statistics(tmp_path: Path) -> None:
             "state-search",
             "prototype-fair-v0",
         )
-        observation = store.observation(
-            "obs-search",
-            "prototype-fair-v0",
-        )
 
-    assert observation is not None
-    assert observation.payload_json == '{"phase":"reward"}'
     assert len(records) == 1
     root, stored_actions = records[0]
     assert root.observation_hash == "obs-search"
@@ -80,37 +75,142 @@ def test_roundtrip_search_root_and_action_statistics(tmp_path: Path) -> None:
     assert [item.visits for item in stored_actions] == [20, 12]
 
 
+def test_budget_disagreement_diagnostic_separates_value_flip_from_visit_choice(
+    tmp_path: Path,
+) -> None:
+    first = LegalAction("play_card:a", "play_card")
+    second = LegalAction("end_turn:b", "end_turn")
+    observation = (
+        '{"phase":3,"act":1,"floor":6,"hp":31,"max_hp":70,'
+        '"combat":{"turn":4}}'
+    )
+    low = SearchResult(
+        root_state_hash="shared-state",
+        root_observation_hash="shared-observation",
+        root_observation_json=observation,
+        evaluations=(
+            ActionEvaluation(first, value=0.30, visits=5, uncertainty=0.1),
+            ActionEvaluation(second, value=0.25, visits=3, uncertainty=0.1),
+        ),
+        expanded_nodes=4,
+        transitions=10,
+        transposition_hits=0,
+        search_version="search-v1",
+    )
+    high = SearchResult(
+        root_state_hash="shared-state",
+        root_observation_hash="shared-observation",
+        root_observation_json=observation,
+        evaluations=(
+            ActionEvaluation(first, value=0.20, visits=12, uncertainty=0.05),
+            ActionEvaluation(second, value=0.40, visits=20, uncertainty=0.05),
+        ),
+        expanded_nodes=8,
+        transitions=30,
+        transposition_hits=1,
+        search_version="search-v1",
+    )
 
-def test_budget_disagreement_query(tmp_path: Path) -> None:
-    action_a = LegalAction("take:a", "take_reward_card")
-    action_b = LegalAction("skip:b", "skip_reward_card")
-
-    with SQLiteStrategyStore(tmp_path / "disagreements.sqlite") as store:
-        for budget, chosen in ((8, action_a), (32, action_b)):
-            result = SearchResult(
-                root_state_hash="same-state",
-                root_observation_hash="same-observation",
-                root_observation_json='{"phase":"reward","act":1,"floor":2}',
-                evaluations=(
-                    ActionEvaluation(action_a, value=0.4, visits=budget // 2),
-                    ActionEvaluation(action_b, value=0.3, visits=budget // 2),
-                ),
-                expanded_nodes=budget,
-                transitions=budget * 4,
-                transposition_hits=0,
-                search_version="search-v1",
-            )
-            record_search_result(
-                store,
-                result,
-                chosen,
-                information_policy="prototype-fair-v0",
-                search_regime="oracle-exact",
-                search_budget=budget,
-                emulator_revision="emu-1",
-                game_build="build-1",
-            )
-
-        assert store.disagreement_state_hashes("prototype-fair-v0") == (
-            "same-state",
+    with SQLiteStrategyStore(tmp_path / "strategy.sqlite") as store:
+        record_search_result(
+            store,
+            low,
+            first,
+            information_policy="prototype-fair-v0",
+            search_regime="oracle-exact",
+            search_budget=8,
+            emulator_revision="emu-1",
+            game_build="build-1",
         )
+        record_search_result(
+            store,
+            high,
+            second,
+            information_policy="prototype-fair-v0",
+            search_regime="oracle-exact",
+            search_budget=32,
+            emulator_revision="emu-1",
+            game_build="build-1",
+        )
+
+        report = diagnose_budget_disagreements(
+            store,
+            "prototype-fair-v0",
+        )
+
+    assert report.total_roots == 1
+    root = report.roots[0]
+    assert root.phase == "Combat"
+    assert root.classification == "value-ranking-flip"
+    assert root.value_ranking_flip
+    assert not root.has_visit_selection_mismatch
+    assert root.low_budget_pair_delta == 0.05
+    assert root.high_budget_pair_delta == -0.20
+    assert report.by_phase[0].value_ranking_flips == 1
+
+
+def test_budget_disagreement_diagnostic_detects_visit_selection_regret(
+    tmp_path: Path,
+) -> None:
+    first = LegalAction("choose_map_node:a", "choose_map_node")
+    second = LegalAction("choose_map_node:b", "choose_map_node")
+    observation = '{"phase":2,"act":1,"floor":3,"hp":60,"max_hp":70}'
+    low = SearchResult(
+        root_state_hash="shared-state",
+        root_observation_hash="shared-observation",
+        root_observation_json=observation,
+        evaluations=(
+            ActionEvaluation(first, value=0.40, visits=7, uncertainty=0.1),
+            ActionEvaluation(second, value=0.35, visits=1, uncertainty=0.1),
+        ),
+        expanded_nodes=4,
+        transitions=10,
+        transposition_hits=0,
+        search_version="search-v1",
+    )
+    high = SearchResult(
+        root_state_hash="shared-state",
+        root_observation_hash="shared-observation",
+        root_observation_json=observation,
+        evaluations=(
+            ActionEvaluation(first, value=0.41, visits=14, uncertainty=0.05),
+            ActionEvaluation(second, value=0.39, visits=18, uncertainty=0.05),
+        ),
+        expanded_nodes=8,
+        transitions=30,
+        transposition_hits=1,
+        search_version="search-v1",
+    )
+
+    with SQLiteStrategyStore(tmp_path / "strategy.sqlite") as store:
+        record_search_result(
+            store,
+            low,
+            first,
+            information_policy="prototype-fair-v0",
+            search_regime="oracle-exact",
+            search_budget=8,
+            emulator_revision="emu-1",
+            game_build="build-1",
+        )
+        record_search_result(
+            store,
+            high,
+            second,
+            information_policy="prototype-fair-v0",
+            search_regime="oracle-exact",
+            search_budget=32,
+            emulator_revision="emu-1",
+            game_build="build-1",
+        )
+        report = diagnose_budget_disagreements(
+            store,
+            "prototype-fair-v0",
+        )
+
+    root = report.roots[0]
+    assert root.phase == "MapChoice"
+    assert root.classification == "visit-selection"
+    assert not root.value_ranking_flip
+    assert root.has_visit_selection_mismatch
+    assert root.decisions[-1].selection_regret == 0.02
