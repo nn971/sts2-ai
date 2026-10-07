@@ -48,7 +48,8 @@ def test_oracle_mcts_never_prefers_unvisited_zero_placeholder() -> None:
         search_version="test-search",
         rollout_count=8,
         terminal_rollouts=3,
-        cutoff_rollouts=5,
+        boundary_rollouts=2,
+        cutoff_rollouts=3,
         rollout_steps=40,
     )
 
@@ -63,7 +64,8 @@ def test_oracle_mcts_never_prefers_unvisited_zero_placeholder() -> None:
     metadata = json.loads(decision.metadata_json)
     assert metadata["rollout_count"] == 8
     assert metadata["terminal_rollouts"] == 3
-    assert metadata["cutoff_rollouts"] == 5
+    assert metadata["boundary_rollouts"] == 2
+    assert metadata["cutoff_rollouts"] == 3
     assert metadata["rollout_steps"] == 40
 
 
