@@ -165,7 +165,9 @@ class SQLiteStrategyStore:
         expected_ids = set(root.legal_action_ids)
         action_ids = {action.action_id for action in actions}
         if action_ids != expected_ids:
-            raise ValueError("Search action evidence must cover every legal root action exactly once")
+            raise ValueError(
+                "Search action evidence must cover every legal root action exactly once"
+            )
         if root.chosen_action_id not in expected_ids:
             raise ValueError("Chosen action must be one of the legal root actions")
 

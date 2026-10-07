@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import statistics
+from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
 
@@ -13,7 +14,13 @@ from sts2_ai.agents import (
     OracleMctsAgent,
     RandomAgent,
 )
-from sts2_ai.emulator import FAIR_POLICY_ID, InformationPolicy, JsonlEmulatorBackend
+from sts2_ai.emulator import (
+    FAIR_POLICY_ID,
+    BridgeOperationStats,
+    InformationPolicy,
+    JsonlEmulatorBackend,
+    LegalAction,
+)
 from sts2_ai.evaluation import collect_experiment_manifest, play_run
 from sts2_ai.search import SearchResult, UctMcts
 from sts2_ai.strategy_db import SQLiteStrategyStore, record_search_result
@@ -84,7 +91,7 @@ def _evaluate(args: argparse.Namespace) -> None:
 
     policy = InformationPolicy(FAIR_POLICY_ID)
     summaries = []
-    bridge_profile = {}
+    bridge_profile: Mapping[str, BridgeOperationStats] = {}
     strategy_store = (
         SQLiteStrategyStore(args.strategy_db)
         if args.agent == "mcts" and args.budget > 0
@@ -113,14 +120,10 @@ def _evaluate(args: argparse.Namespace) -> None:
 
                     def sink(
                         result: SearchResult,
-                        chosen_action: object,
+                        chosen_action: LegalAction,
                     ) -> None:
                         if strategy_store is None:
                             return
-                        from sts2_ai.emulator import LegalAction
-
-                        if not isinstance(chosen_action, LegalAction):
-                            raise TypeError("Search result sink requires a LegalAction")
                         record_search_result(
                             strategy_store,
                             result,
@@ -197,18 +200,14 @@ def _evaluate(args: argparse.Namespace) -> None:
         )
 
 
-def _print_bridge_profile(profile: dict[str, object]) -> None:
-    from sts2_ai.emulator import BridgeOperationStats
-
+def _print_bridge_profile(profile: Mapping[str, BridgeOperationStats]) -> None:
     print()
     print("| Bridge op | Calls | Total time | Mean time |")
     print("| --- | ---: | ---: | ---: |")
-    for operation, raw_stats in profile.items():
-        if not isinstance(raw_stats, BridgeOperationStats):
-            continue
+    for operation, stats in profile.items():
         print(
-            f"| {operation} | {raw_stats.calls} | "
-            f"{raw_stats.total_seconds:.3f}s | {1000.0 * raw_stats.mean_seconds:.3f}ms |"
+            f"| {operation} | {stats.calls} | "
+            f"{stats.total_seconds:.3f}s | {1000.0 * stats.mean_seconds:.3f}ms |"
         )
 
 
