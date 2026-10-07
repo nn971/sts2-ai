@@ -27,10 +27,12 @@ class BudgetDecisionDiagnostic:
     budget: int
     chosen_action_id: str
     chosen_action_kind: str
+    chosen_action_summary: str
     chosen_value: float
     chosen_visits: int
     best_mean_action_id: str
     best_mean_action_kind: str
+    best_mean_action_summary: str
     best_mean_value: float
     best_mean_visits: int
     selection_regret: float
@@ -215,11 +217,13 @@ def _decision_diagnostic(
     return BudgetDecisionDiagnostic(
         budget=root.search_budget,
         chosen_action_id=chosen.action_id,
-        chosen_action_kind=_action_kind(chosen.action_id),
+        chosen_action_kind=chosen.action_kind or _action_kind(chosen.action_id),
+        chosen_action_summary=_action_summary(chosen),
         chosen_value=chosen.value,
         chosen_visits=chosen.visits,
         best_mean_action_id=best.action_id,
-        best_mean_action_kind=_action_kind(best.action_id),
+        best_mean_action_kind=best.action_kind or _action_kind(best.action_id),
+        best_mean_action_summary=_action_summary(best),
         best_mean_value=best.value,
         best_mean_visits=best.visits,
         selection_regret=max(0.0, best.value - chosen.value),
@@ -307,3 +311,41 @@ def _optional_int(value: object) -> int | None:
 def _action_kind(action_id: str) -> str:
     kind, separator, _ = action_id.partition(":")
     return kind if separator else action_id
+
+
+def _action_summary(action: SearchActionEvidence) -> str:
+    kind = action.action_kind or _action_kind(action.action_id)
+    try:
+        raw = json.loads(action.action_payload_json)
+    except json.JSONDecodeError:
+        return kind
+    if not isinstance(raw, dict) or not raw:
+        return kind
+
+    interesting_keys = (
+        "NodeId",
+        "CardInstanceId",
+        "TargetEnemyId",
+        "Index",
+        "OfferId",
+        "Slot",
+        "CardInstanceIds",
+        "node_id",
+        "card_instance_id",
+        "target_enemy_id",
+        "index",
+        "offer_id",
+        "slot",
+        "card_instance_ids",
+    )
+    parts = [
+        f"{key}={raw[key]}"
+        for key in interesting_keys
+        if key in raw
+    ]
+    if not parts:
+        parts = [
+            f"{key}={raw[key]}"
+            for key in sorted(raw)[:3]
+        ]
+    return f"{kind}({', '.join(parts)})"
