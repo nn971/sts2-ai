@@ -1,0 +1,44 @@
+name: virtual-loss-sweep-5seed
+
+on:
+  push:
+    branches:
+      - benchmark/virtual-loss-sweep-5seed
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -U pip
+      - run: python -m pip install -e '.[dev]'
+      - name: Virtual loss minus 0.25
+        run: |
+          sts2-ai benchmark \
+            --budgets 8 32 \
+            --seeds 5 \
+            --seed-prefix benchmark \
+            --rollout-depth 8 \
+            --rollout-batch-size 8 \
+            --virtual-loss -0.25 \
+            --strategy-db /tmp/virtual-loss-neg025.sqlite
+      - name: Virtual loss minus 0.5
+        run: |
+          sts2-ai benchmark \
+            --budgets 8 32 \
+            --seeds 5 \
+            --seed-prefix benchmark \
+            --rollout-depth 8 \
+            --rollout-batch-size 8 \
+            --virtual-loss -0.5 \
+            --strategy-db /tmp/virtual-loss-neg05.sqlite
