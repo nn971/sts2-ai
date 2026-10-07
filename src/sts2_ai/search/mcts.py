@@ -78,6 +78,15 @@ class _RolloutState:
     observation: Observation
     legal_actions: tuple[LegalAction, ...]
     value: float | None = None
+    ended_terminal: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class _RolloutBatchResult:
+    values: tuple[float, ...]
+    transitions: int
+    terminal_rollouts: int
+    cutoff_rollouts: int
 
 
 class UctMcts:
@@ -135,6 +144,10 @@ class UctMcts:
 
         transitions = 0
         transposition_hits = 0
+        rollout_count = 0
+        terminal_rollouts = 0
+        cutoff_rollouts = 0
+        rollout_steps = 0
         created_handles: set[StateHandle] = set()
 
         root = self._make_node(state)
@@ -199,8 +212,13 @@ class UctMcts:
                 ]
                 rollout_values: tuple[float, ...] = ()
                 if rollout_entries:
-                    rollout_values, used = self._rollout_batch(tuple(rollout_entries))
-                    transitions += used
+                    batch_result = self._rollout_batch(tuple(rollout_entries))
+                    rollout_values = batch_result.values
+                    transitions += batch_result.transitions
+                    rollout_steps += batch_result.transitions
+                    rollout_count += len(batch_result.values)
+                    terminal_rollouts += batch_result.terminal_rollouts
+                    cutoff_rollouts += batch_result.cutoff_rollouts
 
                 value_iter = iter(rollout_values)
                 for simulation, reservation in pending:
@@ -233,6 +251,10 @@ class UctMcts:
             transitions=transitions,
             transposition_hits=transposition_hits,
             search_version=self.search_version,
+            rollout_count=rollout_count,
+            terminal_rollouts=terminal_rollouts,
+            cutoff_rollouts=cutoff_rollouts,
+            rollout_steps=rollout_steps,
         )
 
     def _select_simulation(
@@ -434,13 +456,14 @@ class UctMcts:
             ),
         )
 
-    def _rollout_batch(self, starts: tuple[_Node, ...]) -> tuple[tuple[float, ...], int]:
+    def _rollout_batch(self, starts: tuple[_Node, ...]) -> _RolloutBatchResult:
         rollouts = [
             _RolloutState(
                 handle=start.handle,
                 observation=start.observation,
                 legal_actions=start.legal_actions,
                 value=self._value_fn(start.observation) if start.terminal else None,
+                ended_terminal=start.terminal,
             )
             for start in starts
         ]
@@ -492,14 +515,21 @@ class UctMcts:
                     )
                     if frame.transition.terminal:
                         rollout.value = self._value_fn(frame.observation)
+                        rollout.ended_terminal = True
 
             for rollout in rollouts:
                 if rollout.value is None:
                     rollout.value = self._value_fn(rollout.observation)
 
-            return (
-                tuple(cast(float, rollout.value) for rollout in rollouts),
-                transitions_used,
+            terminal_count = sum(
+                rollout.ended_terminal
+                for rollout in rollouts
+            )
+            return _RolloutBatchResult(
+                values=tuple(cast(float, rollout.value) for rollout in rollouts),
+                transitions=transitions_used,
+                terminal_rollouts=terminal_count,
+                cutoff_rollouts=len(rollouts) - terminal_count,
             )
         finally:
             if temporary:
