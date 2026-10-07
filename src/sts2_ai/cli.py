@@ -36,6 +36,7 @@ from sts2_ai.strategy_db import (
     diagnose_budget_disagreements,
     record_search_result,
 )
+from sts2_ai.training import build_training_examples, write_training_jsonl
 
 
 def main() -> None:
@@ -170,6 +171,22 @@ def main() -> None:
     )
     report.add_argument("--json-output", type=Path)
 
+    training_export = sub.add_parser(
+        "export-training",
+        help="distill persisted search evidence into policy/value JSONL targets",
+    )
+    training_export.add_argument("database", type=Path)
+    training_export.add_argument("output", type=Path)
+    training_export.add_argument("--information-policy", default=FAIR_POLICY_ID)
+    training_export.add_argument("--search-regime", default="oracle-exact")
+    training_export.add_argument("--search-version")
+    training_export.add_argument("--min-budget", type=int, default=0)
+    training_export.add_argument(
+        "--all-budgets",
+        action="store_true",
+        help="emit every matching budget instead of the strongest root per exact state",
+    )
+
     args = parser.parse_args()
     if args.command == "manifest":
         result = collect_experiment_manifest(
@@ -196,6 +213,10 @@ def main() -> None:
 
     if args.command == "strategy-report":
         _strategy_report(args)
+        return
+
+    if args.command == "export-training":
+        _export_training(args)
 
 
 def _evaluate(args: argparse.Namespace) -> None:
@@ -664,6 +685,45 @@ def _strategy_report(args: argparse.Namespace) -> None:
             json.dumps(asdict(report), indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
+
+
+def _export_training(args: argparse.Namespace) -> None:
+    if args.min_budget < 0:
+        raise SystemExit("--min-budget must be non-negative")
+
+    with SQLiteStrategyStore(args.database) as store:
+        versions = store.search_versions(
+            args.information_policy,
+            search_regime=args.search_regime,
+        )
+        selected_version = args.search_version
+        if selected_version is None:
+            if len(versions) > 1:
+                available = "\n".join(f"  {version}" for version in versions)
+                raise SystemExit(
+                    "The database contains multiple search configurations. "
+                    "Choose one with --search-version:\n"
+                    f"{available}"
+                )
+            selected_version = versions[0] if versions else None
+        elif selected_version not in versions:
+            raise SystemExit(
+                f"Search configuration {selected_version!r} is absent from the database."
+            )
+
+        examples = build_training_examples(
+            store,
+            args.information_policy,
+            search_regime=args.search_regime,
+            search_version=selected_version,
+            min_budget=args.min_budget,
+            highest_budget_only=not args.all_budgets,
+        )
+
+    count = write_training_jsonl(examples, args.output)
+    print(f"Wrote {count} training examples to {args.output}")
+    if selected_version is not None:
+        print(f"Search configuration: {selected_version}")
 
 
 def _short_action_id(action_id: str) -> str:
