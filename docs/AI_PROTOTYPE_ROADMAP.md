@@ -343,6 +343,45 @@ training
         +-----------------> repeat
 ```
 
+## Sprint execution status — 2026-10-07
+
+The first pass through the immediate sprint is now implemented on `main`.
+
+Completed:
+
+- [x] repin the emulator submodule to `prototype/full-run-silent`;
+- [x] real `JsonlEmulatorBackend` with schema/ruleset/revision handshake checks;
+- [x] deterministic real-emulator integration tests;
+- [x] whole-run random driver and metrics;
+- [x] deliberately small heuristic policy;
+- [x] transposition-aware oracle-exact UCT MCTS;
+- [x] `sts2-ai evaluate` command;
+- [x] persistent searched-root/action evidence in SQLite;
+- [x] first profile of an actual MCTS workload.
+
+The full budget-strength comparison remains the next experiment. A first CI workload showed
+that running the requested 32/128/512/2048 matrix through scalar JSONL calls would currently
+be wasteful:
+
+| Workload | Result |
+| --- | ---: |
+| Random, 1 full run | 1.044 s, terminal progress 3 |
+| Heuristic, 1 full run | 1.030 s, terminal progress 6 |
+| MCTS-4, first 8 decisions | 8.985 s |
+| MCTS-4 transitions / real decision | 425.8 |
+| MCTS-4 agent compute | 8.834 s |
+
+For that MCTS-4 profile, the bridge handled 3339 scalar `step`, 3383
+`legal_actions`, and 3415 `observe` requests. Their measured bridge time was about
+8.29 s in total, and all profiled bridge operations except the one-time reset accounted
+for about 8.36 s of 8.83 s agent-compute time. The experiment therefore points first at
+request granularity and repeated frame extraction, rather than Python UCT bookkeeping.
+
+The next implementation step is to batch rollout work using the already exposed batch
+operations (and only then consider a fused frame/step API if batching is insufficient).
+After that, run the common-seed random/heuristic/MCTS-32/128/512/2048 matrix and measure
+the computation-versus-strength curve.
+
 ## Immediate implementation sprint
 
 Execute this sequence next:
