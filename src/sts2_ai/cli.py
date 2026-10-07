@@ -132,6 +132,10 @@ def main() -> None:
     report.add_argument("--limit", type=int, default=20)
     report.add_argument("--information-policy", default=FAIR_POLICY_ID)
     report.add_argument("--search-regime", default="oracle-exact")
+    report.add_argument(
+        "--search-version",
+        help="exact persisted search configuration to report",
+    )
     report.add_argument("--summary-only", action="store_true")
     report.add_argument("--json-output", type=Path)
 
@@ -425,15 +429,40 @@ def _strategy_report(args: argparse.Namespace) -> None:
         raise SystemExit("--limit must be positive")
 
     with SQLiteStrategyStore(args.database) as store:
+        versions = store.search_versions(
+            args.information_policy,
+            search_regime=args.search_regime,
+        )
+        selected_version = args.search_version
+        if selected_version is None:
+            if len(versions) > 1:
+                available = "\n".join(f"  {version}" for version in versions)
+                raise SystemExit(
+                    "The database contains multiple search configurations. "
+                    "Choose one with --search-version:\n"
+                    f"{available}"
+                )
+            selected_version = versions[0] if versions else None
+        elif selected_version not in versions:
+            raise SystemExit(
+                f"Search configuration {selected_version!r} is absent from the database."
+            )
+
         selection_health = store.root_selection_visit_counts(
             args.information_policy,
             search_regime=args.search_regime,
+            search_version=selected_version,
         )
         report = diagnose_budget_disagreements(
             store,
             args.information_policy,
             search_regime=args.search_regime,
+            search_version=selected_version,
         )
+
+    if selected_version is not None:
+        print(f"Search configuration: {selected_version}")
+        print()
 
     if selection_health:
         print("| Budget | Searched roots | Chosen with zero visits | Fraction |")
