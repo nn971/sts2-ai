@@ -31,14 +31,20 @@ def test_mcts_runs_budget_and_hits_transpositions() -> None:
     assert result.transitions > 0
     assert result.expanded_nodes > 0
     assert result.transposition_hits > 0
-    assert result.search_version.startswith("oracle-exact-light-rollout-uct-v8-configured")
+    assert result.search_version.startswith("oracle-exact-light-rollout-uct-v9-horizon-mode")
     assert "|depth=8|" in result.search_version
     assert "|batch=8|" in result.search_version
+    assert "|mode=fixed|" in result.search_version
     assert "|vl=mean|" in result.search_version
     assert "|rollout=heuristic-v2-payload-aware|" in result.search_version
     assert result.search_version.endswith("|value=_mock_value")
     assert result.rollout_count > 0
-    assert result.terminal_rollouts + result.cutoff_rollouts == result.rollout_count
+    assert (
+        result.terminal_rollouts
+        + result.boundary_rollouts
+        + result.cutoff_rollouts
+        == result.rollout_count
+    )
     assert result.rollout_steps > 0
     assert {item.action.action_id for item in result.evaluations} == {"inc-1", "inc-2"}
 
@@ -255,3 +261,84 @@ def test_zero_depth_rollouts_are_recorded_as_cutoffs() -> None:
     assert result.terminal_rollouts == 0
     assert result.cutoff_rollouts == result.rollout_count
     assert result.rollout_steps == 0
+
+
+class _CombatExitBackend(MockLinearBackend):
+    def observe(
+        self,
+        state: str,
+        policy: InformationPolicy,
+    ) -> Observation:
+        value = int(state)
+        in_combat = value < 4
+        payload = json.dumps(
+            {
+                "value": value,
+                "phase": 3 if in_combat else 5,
+                "combat": {"turn": value + 1} if in_combat else None,
+            },
+            sort_keys=True,
+        )
+        return Observation(
+            policy_id=policy.policy_id,
+            payload_json=payload,
+            observation_hash=f"{policy.policy_id}:{state}:{in_combat}",
+        )
+
+
+def test_combat_exit_rollout_stops_at_post_combat_boundary() -> None:
+    import sts2_ai.search.mcts as mcts
+
+    backend = _CombatExitBackend(terminal_at=20)
+    search = UctMcts(
+        backend,
+        policy=InformationPolicy("fair-test"),
+        rollout_policy=HeuristicAgent(),
+        value_fn=_mock_value,
+        rollout_depth=12,
+        rollout_batch_size=4,
+        rollout_mode="combat-exit",
+        seed=13,
+    )
+    start = mcts._Node(
+        handle="1",
+        exact_hash=backend.exact_hash("1"),
+        observation=backend.observe("1", InformationPolicy("fair-test")),
+        legal_actions=tuple(backend.legal_actions("1")),
+        terminal=False,
+    )
+
+    batch = search._rollout_batch((start,))
+
+    assert batch.terminal_rollouts == 0
+    assert batch.boundary_rollouts == 1
+    assert batch.cutoff_rollouts == 0
+    assert batch.transitions < 12
+    assert "|mode=combat-exit|" in search.search_version
+
+
+def test_fixed_rollout_does_not_treat_combat_exit_as_boundary() -> None:
+    import sts2_ai.search.mcts as mcts
+
+    backend = _CombatExitBackend(terminal_at=20)
+    search = UctMcts(
+        backend,
+        policy=InformationPolicy("fair-test"),
+        rollout_policy=HeuristicAgent(),
+        value_fn=_mock_value,
+        rollout_depth=4,
+        rollout_batch_size=1,
+        rollout_mode="fixed",
+        seed=17,
+    )
+    start = mcts._Node(
+        handle="1",
+        exact_hash=backend.exact_hash("1"),
+        observation=backend.observe("1", InformationPolicy("fair-test")),
+        legal_actions=tuple(backend.legal_actions("1")),
+        terminal=False,
+    )
+
+    batch = search._rollout_batch((start,))
+
+    assert batch.boundary_rollouts == 0
