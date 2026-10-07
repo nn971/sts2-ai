@@ -487,6 +487,11 @@ def _strategy_report(args: argparse.Namespace) -> None:
             search_regime=args.search_regime,
             search_version=selected_version,
         )
+        rollout_horizon = store.rollout_horizon_counts(
+            args.information_policy,
+            search_regime=args.search_regime,
+            search_version=selected_version,
+        )
         report = diagnose_budget_disagreements(
             store,
             args.information_policy,
@@ -505,6 +510,21 @@ def _strategy_report(args: argparse.Namespace) -> None:
             fraction = unvisited / roots if roots else 0.0
             print(
                 f"| {budget} | {roots} | {unvisited} | {100.0 * fraction:.1f}% |"
+            )
+        print()
+
+    if rollout_horizon and any(row[1] > 0 for row in rollout_horizon):
+        print(
+            "| Budget | Rollouts | Terminal | Cutoff | Terminal % | "
+            "Avg rollout steps |"
+        )
+        print("| ---: | ---: | ---: | ---: | ---: | ---: |")
+        for budget, rollouts, terminals, cutoffs, steps in rollout_horizon:
+            terminal_fraction = terminals / rollouts if rollouts else 0.0
+            average_steps = steps / rollouts if rollouts else 0.0
+            print(
+                f"| {budget} | {rollouts} | {terminals} | {cutoffs} | "
+                f"{100.0 * terminal_fraction:.1f}% | {average_steps:.2f} |"
             )
         print()
 
