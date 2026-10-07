@@ -399,20 +399,36 @@ remaining enemy HP to interpolate progress through the current combat, gave:
 | MCTS-32 | 5.084 | 11.080 s |
 | MCTS-128 | 5.109 | 42.139 s |
 
-This single seed is a diagnostic rather than a strength estimate. It shows that extra
-search budget is not yet producing a clean monotone improvement: MCTS-8 and MCTS-128
-finished farther through the boss combat than the heuristic baseline, while MCTS-32 did
-not. The next question is therefore search quality and variance, rather than more bridge
-micro-optimization.
+The single-seed result was followed by a five-seed common-seed diagnostic at the same
+rollout depth. The larger sample gives the first real signal that search is helping:
+
+| Agent | Runs | Win % | Avg terminal progress | Avg frontier progress | Avg defeat enemy HP | Time/run |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Random | 5 | 0.0 | 4.00 | 3.537 | 114.8 | 0.399 s |
+| Heuristic | 5 | 0.0 | 5.00 | 4.326 | 115.6 | 0.494 s |
+| MCTS-8 | 5 | 0.0 | 6.00 | 5.126 | 171.6 | 8.934 s |
+| MCTS-32 | 5 | 0.0 | 5.40 | 4.584 | 165.8 | 14.196 s |
+| MCTS-128 | 5 | 20.0 | 8.40 | 7.718 | 159.2 | 63.308 s |
+
+The sample is still small, but the qualitative result is useful: MCTS-128 is substantially
+stronger than the rollout heuristic and is the first baseline here to win a complete
+prototype run. The curve is also non-monotone at low budgets: MCTS-32 underperformed
+MCTS-8 on these five seeds. Therefore the next problem is search-quality diagnosis, not
+simply increasing the budget.
+
+The strategy database now stores the full root observation payload as well as exact state
+and per-action search statistics, and `sts2-ai strategy-report` lists exact roots where
+different budgets selected different actions. This gives a direct route to inspect why a
+larger search sometimes changes to a worse decision.
 
 Next:
 
-1. repeat the 8/32/128 comparison over several common seeds;
-2. inspect difficult roots from the persistent strategy database when larger budgets
-   choose worse actions;
-3. decide whether the next improvement belongs in the cutoff value, rollout policy,
-   root-action selection/backup rule, or a tactical-combat search layer;
-4. only then extend the ladder to 512 and 2048 simulations.
+1. use the disagreement report on a persisted multi-budget benchmark database;
+2. classify disagreements by phase (combat, map, reward, shop, rest);
+3. inspect whether bad changes come from cutoff evaluation, heuristic rollouts, UCT
+   allocation, or root-action selection;
+4. improve the dominant failure mode and repeat the common-seed ladder;
+5. extend to 512 simulations only after the 8/32/128 curve is better understood.
 
 ## Immediate implementation sprint
 
