@@ -6,9 +6,9 @@ from dataclasses import asdict
 from pathlib import Path
 
 from sts2_ai.strategy_db import (
-    SQLiteStrategyStore,
     SearchActionEvidence,
     SearchRootEvidence,
+    SQLiteStrategyStore,
 )
 
 from .targets import TrainingExample, build_training_example
