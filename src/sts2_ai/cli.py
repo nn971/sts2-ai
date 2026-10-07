@@ -6,7 +6,13 @@ import statistics
 from dataclasses import asdict
 from pathlib import Path
 
-from sts2_ai.agents import HeuristicAgent, OracleMctsAgent, RandomAgent
+from sts2_ai.agents import (
+    Agent,
+    ExactStateAgent,
+    HeuristicAgent,
+    OracleMctsAgent,
+    RandomAgent,
+)
 from sts2_ai.emulator import FAIR_POLICY_ID, InformationPolicy, JsonlEmulatorBackend
 from sts2_ai.evaluation import collect_experiment_manifest, play_run
 from sts2_ai.search import UctMcts
@@ -70,6 +76,7 @@ def _evaluate(args: argparse.Namespace) -> None:
         build=not args.no_build,
     ) as backend:
         for index in range(args.seeds):
+            agent: Agent | ExactStateAgent
             if args.agent == "random":
                 agent = RandomAgent(seed=args.agent_seed + index)
             elif args.agent == "heuristic":
