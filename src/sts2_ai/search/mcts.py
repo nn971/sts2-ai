@@ -66,6 +66,12 @@ class _PendingSimulation:
     immediate_value: float | None
 
 
+@dataclass(frozen=True, slots=True)
+class _Reservation:
+    node_values: tuple[float, ...]
+    edge_values: tuple[float, ...]
+
+
 @dataclass(slots=True)
 class _RolloutState:
     handle: StateHandle
@@ -87,14 +93,14 @@ class UctMcts:
         exploration: float = math.sqrt(2.0),
         rollout_depth: int = 128,
         rollout_batch_size: int = 8,
-        virtual_loss: float = -1.0,
+        virtual_loss: float | None = None,
         seed: int = 0,
     ) -> None:
         if rollout_depth < 0:
             raise ValueError("rollout_depth must be non-negative")
         if rollout_batch_size <= 0:
             raise ValueError("rollout_batch_size must be positive")
-        if not -1.0 <= virtual_loss <= 1.0:
+        if virtual_loss is not None and not -1.0 <= virtual_loss <= 1.0:
             raise ValueError("virtual_loss must lie in [-1, 1]")
         self._backend = backend
         self._policy = policy
@@ -174,21 +180,21 @@ class UctMcts:
                     break
 
                 target = min(self._rollout_batch_size, simulations - completed)
-                pending: list[_PendingSimulation] = []
+                pending: list[tuple[_PendingSimulation, _Reservation]] = []
 
                 for _ in range(target):
                     if deadline is not None and time.monotonic() >= deadline:
                         break
                     simulation = self._select_simulation(root, table, expand)
-                    self._reserve(simulation, self._virtual_loss)
-                    pending.append(simulation)
+                    reservation = self._reserve(simulation, self._virtual_loss)
+                    pending.append((simulation, reservation))
 
                 if not pending:
                     break
 
                 rollout_entries = [
                     simulation.leaf
-                    for simulation in pending
+                    for simulation, _ in pending
                     if simulation.leaf is not None
                 ]
                 rollout_values: tuple[float, ...] = ()
@@ -197,11 +203,11 @@ class UctMcts:
                     transitions += used
 
                 value_iter = iter(rollout_values)
-                for simulation in pending:
+                for simulation, reservation in pending:
                     value = simulation.immediate_value
                     if value is None:
                         value = next(value_iter)
-                    self._backup_reserved(simulation, value, self._virtual_loss)
+                    self._backup_reserved(simulation, value, reservation)
 
                 completed += len(pending)
         finally:
@@ -307,30 +313,72 @@ class UctMcts:
     @staticmethod
     def _reserve(
         simulation: _PendingSimulation,
-        virtual_loss: float,
-    ) -> None:
-        # Pending simulations participate in UCT immediately. The temporary
-        # pessimistic value keeps one batch from repeatedly selecting a branch
-        # before any rollout in that batch has returned.
-        for node in simulation.path_nodes:
+        virtual_loss: float | None,
+    ) -> _Reservation:
+        # Mean-preserving reservations are the default: the temporary visit gets
+        # the current estimate of that node/edge, so Q is unchanged while the UCT
+        # exploration bonus falls. A fixed virtual_loss can still be supplied for
+        # experiments that want explicit optimism or pessimism.
+        node_values = tuple(
+            (
+                virtual_loss
+                if virtual_loss is not None
+                else _mean_or_zero(node.value_sum, node.visits)
+            )
+            for node in simulation.path_nodes
+        )
+        edge_values = tuple(
+            (
+                virtual_loss
+                if virtual_loss is not None
+                else (
+                    _mean_or_zero(edge.value_sum, edge.visits)
+                    if edge.visits > 0
+                    else node_values[index]
+                )
+            )
+            for index, edge in enumerate(simulation.path_edges)
+        )
+
+        for node, temporary_value in zip(
+            simulation.path_nodes,
+            node_values,
+            strict=True,
+        ):
             node.visits += 1
-            node.value_sum += virtual_loss
-        for edge in simulation.path_edges:
+            node.value_sum += temporary_value
+        for edge, temporary_value in zip(
+            simulation.path_edges,
+            edge_values,
+            strict=True,
+        ):
             edge.visits += 1
-            edge.value_sum += virtual_loss
+            edge.value_sum += temporary_value
+
+        return _Reservation(
+            node_values=node_values,
+            edge_values=edge_values,
+        )
 
     @staticmethod
     def _backup_reserved(
         simulation: _PendingSimulation,
         value: float,
-        virtual_loss: float,
+        reservation: _Reservation,
     ) -> None:
-        # Replace the temporary virtual loss by the actual rollout value.
-        correction = value - virtual_loss
-        for node in simulation.path_nodes:
-            node.value_sum += correction
-        for edge in simulation.path_edges:
-            edge.value_sum += correction
+        # Replace each temporary reservation value by the actual rollout value.
+        for node, temporary_value in zip(
+            simulation.path_nodes,
+            reservation.node_values,
+            strict=True,
+        ):
+            node.value_sum += value - temporary_value
+        for edge, temporary_value in zip(
+            simulation.path_edges,
+            reservation.edge_values,
+            strict=True,
+        ):
+            edge.value_sum += value - temporary_value
 
     def _zero_budget_result(self, state: StateHandle) -> SearchResult:
         node = self._make_node(state)
@@ -481,7 +529,7 @@ def _configured_search_version(
     exploration: float,
     rollout_depth: int,
     rollout_batch_size: int,
-    virtual_loss: float,
+    virtual_loss: float | None,
 ) -> str:
     rollout_id = getattr(
         rollout_policy,
@@ -502,11 +550,19 @@ def _configured_search_version(
         f"{_SEARCH_ALGORITHM_VERSION}"
         f"|depth={rollout_depth}"
         f"|batch={rollout_batch_size}"
-        f"|vl={virtual_loss:.6g}"
+        f"|vl={_virtual_loss_id(virtual_loss)}"
         f"|c={exploration:.6g}"
         f"|rollout={rollout_id}"
         f"|value={value_id}"
     )
+
+
+def _virtual_loss_id(virtual_loss: float | None) -> str:
+    return "mean" if virtual_loss is None else f"{virtual_loss:.6g}"
+
+
+def _mean_or_zero(value_sum: float, visits: int) -> float:
+    return value_sum / visits if visits > 0 else 0.0
 
 
 def sts2_value(observation: Observation) -> float:

@@ -34,7 +34,7 @@ def test_mcts_runs_budget_and_hits_transpositions() -> None:
     assert result.search_version.startswith("oracle-exact-light-rollout-uct-v8-configured")
     assert "|depth=8|" in result.search_version
     assert "|batch=8|" in result.search_version
-    assert "|vl=-1|" in result.search_version
+    assert "|vl=mean|" in result.search_version
     assert "|rollout=heuristic-v2-payload-aware|" in result.search_version
     assert result.search_version.endswith("|value=_mock_value")
     assert {item.action.action_id for item in result.evaluations} == {"inc-1", "inc-2"}
@@ -82,13 +82,13 @@ def test_virtual_loss_reservation_is_replaced_by_rollout_value() -> None:
         immediate_value=None,
     )
 
-    mcts.UctMcts._reserve(pending, -1.0)
+    reservation = mcts.UctMcts._reserve(pending, -1.0)
     assert node.visits == 4
     assert edge.visits == 3
     assert node.value_sum == pytest.approx(-2.5)
     assert edge.value_sum == pytest.approx(-2.2)
 
-    mcts.UctMcts._backup_reserved(pending, -0.25, -1.0)
+    mcts.UctMcts._backup_reserved(pending, -0.25, reservation)
     assert node.visits == 4
     assert edge.visits == 3
     assert node.value_sum == pytest.approx(-1.75)
@@ -190,3 +190,45 @@ def test_search_version_changes_with_search_configuration() -> None:
 
     assert base.search_version != different_depth.search_version
     assert base.search_version != zero_virtual_loss.search_version
+
+
+def test_mean_preserving_reservation_keeps_existing_q_estimate() -> None:
+    import sts2_ai.search.mcts as mcts
+
+    action = LegalAction("a", "increment", '{"amount":1}')
+    edge = mcts._Edge(
+        action=action,
+        child_hash="child",
+        visits=4,
+        value_sum=-1.2,
+    )
+    node = mcts._Node(
+        handle="0",
+        exact_hash="root",
+        observation=Observation(
+            policy_id="fair-test",
+            payload_json='{"value":0}',
+            observation_hash="obs",
+        ),
+        legal_actions=(action,),
+        terminal=False,
+        visits=10,
+        value_sum=-3.5,
+    )
+    pending = mcts._PendingSimulation(
+        path_nodes=(node,),
+        path_edges=(edge,),
+        leaf=node,
+        immediate_value=None,
+    )
+
+    node_mean = node.value_sum / node.visits
+    edge_mean = edge.value_sum / edge.visits
+    reservation = mcts.UctMcts._reserve(pending, None)
+
+    assert node.value_sum / node.visits == pytest.approx(node_mean)
+    assert edge.value_sum / edge.visits == pytest.approx(edge_mean)
+
+    mcts.UctMcts._backup_reserved(pending, -0.1, reservation)
+    assert node.value_sum == pytest.approx((-3.5) + (-0.1))
+    assert edge.value_sum == pytest.approx((-1.2) + (-0.1))
