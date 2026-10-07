@@ -348,3 +348,75 @@ def test_diagnostic_best_mean_ignores_unvisited_placeholder(tmp_path: Path) -> N
     low_decision = report.roots[0].decisions[0]
     assert low_decision.best_mean_action_id == visited.action_id
     assert low_decision.selection_regret == 0.0
+
+
+def test_semantically_equivalent_card_instances_are_collapsed(tmp_path: Path) -> None:
+    strike_a = LegalAction(
+        "select_cards:a",
+        "select_cards",
+        payload_json='{"CardInstanceIds":[3]}',
+    )
+    strike_b = LegalAction(
+        "select_cards:b",
+        "select_cards",
+        payload_json='{"CardInstanceIds":[5]}',
+    )
+    observation = (
+        '{"phase":3,"act":1,"floor":1,"hp":70,"max_hp":70,'
+        '"combat":{"hand":['
+        '{"instance_id":3,"card_id":"proto.silent.strike"},'
+        '{"instance_id":5,"card_id":"proto.silent.strike"}]}}'
+    )
+    low = SearchResult(
+        root_state_hash="equivalent-state",
+        root_observation_hash="equivalent-observation",
+        root_observation_json=observation,
+        evaluations=(
+            ActionEvaluation(strike_a, value=-0.3, visits=4, uncertainty=0.1),
+            ActionEvaluation(strike_b, value=-0.31, visits=4, uncertainty=0.1),
+        ),
+        expanded_nodes=2,
+        transitions=8,
+        transposition_hits=0,
+        search_version="search-v1",
+    )
+    high = SearchResult(
+        root_state_hash="equivalent-state",
+        root_observation_hash="equivalent-observation",
+        root_observation_json=observation,
+        evaluations=(
+            ActionEvaluation(strike_a, value=-0.29, visits=10, uncertainty=0.1),
+            ActionEvaluation(strike_b, value=-0.28, visits=12, uncertainty=0.1),
+        ),
+        expanded_nodes=4,
+        transitions=24,
+        transposition_hits=0,
+        search_version="search-v1",
+    )
+
+    with SQLiteStrategyStore(tmp_path / "strategy.sqlite") as store:
+        record_search_result(
+            store,
+            low,
+            strike_a,
+            information_policy="prototype-fair-v0",
+            search_regime="oracle-exact",
+            search_budget=8,
+            emulator_revision="emu-1",
+            game_build="build-1",
+        )
+        record_search_result(
+            store,
+            high,
+            strike_b,
+            information_policy="prototype-fair-v0",
+            search_regime="oracle-exact",
+            search_budget=32,
+            emulator_revision="emu-1",
+            game_build="build-1",
+        )
+        report = diagnose_budget_disagreements(store, "prototype-fair-v0")
+
+    assert report.roots[0].classification == "semantic-equivalent"
+    assert report.roots[0].semantically_equivalent
+    assert report.by_phase[0].semantic_equivalent == 1
