@@ -351,16 +351,40 @@ class SQLiteStrategyStore:
                 ],
             )
 
+    def search_versions(
+        self,
+        information_policy: str,
+        *,
+        search_regime: str = "oracle-exact",
+    ) -> tuple[str, ...]:
+        rows = self._connection.execute(
+            """
+            SELECT DISTINCT search_version
+            FROM search_root_evidence
+            WHERE information_policy = ? AND search_regime = ?
+            ORDER BY search_version ASC
+            """,
+            (information_policy, search_regime),
+        ).fetchall()
+        return tuple(str(row[0]) for row in rows)
+
     def root_selection_visit_counts(
         self,
         information_policy: str,
         *,
         search_regime: str = "oracle-exact",
+        search_version: str | None = None,
     ) -> tuple[tuple[int, int, int], ...]:
         """Per-budget counts of searched roots and chosen actions with zero visits."""
 
+        version_clause = ""
+        parameters: tuple[str, ...] = (information_policy, search_regime)
+        if search_version is not None:
+            version_clause = " AND r.search_version = ?"
+            parameters += (search_version,)
+
         rows = self._connection.execute(
-            """
+            f"""
             SELECT r.search_budget,
                    COUNT(*) AS roots,
                    SUM(CASE WHEN a.visits = 0 THEN 1 ELSE 0 END) AS unvisited
@@ -375,10 +399,11 @@ class SQLiteStrategyStore:
              AND a.game_build = r.game_build
              AND a.action_id = r.chosen_action_id
             WHERE r.information_policy = ? AND r.search_regime = ?
+            {version_clause}
             GROUP BY r.search_budget
             ORDER BY r.search_budget ASC
             """,
-            (information_policy, search_regime),
+            parameters,
         ).fetchall()
         return tuple(
             (int(budget), int(roots), int(unvisited or 0))
