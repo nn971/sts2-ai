@@ -94,6 +94,8 @@ class UctMcts:
         rollout_depth: int = 128,
         rollout_batch_size: int = 8,
         virtual_loss: float | None = None,
+        finish_combat_rollouts: bool = False,
+        combat_extension_depth: int = 64,
         seed: int = 0,
     ) -> None:
         if rollout_depth < 0:
@@ -102,6 +104,8 @@ class UctMcts:
             raise ValueError("rollout_batch_size must be positive")
         if virtual_loss is not None and not -1.0 <= virtual_loss <= 1.0:
             raise ValueError("virtual_loss must lie in [-1, 1]")
+        if combat_extension_depth < 0:
+            raise ValueError("combat_extension_depth must be non-negative")
         self._backend = backend
         self._policy = policy
         self._rollout_policy = rollout_policy
@@ -110,6 +114,8 @@ class UctMcts:
         self._rollout_depth = rollout_depth
         self._rollout_batch_size = rollout_batch_size
         self._virtual_loss = virtual_loss
+        self._finish_combat_rollouts = finish_combat_rollouts
+        self._combat_extension_depth = combat_extension_depth
         self.search_version = _configured_search_version(
             rollout_policy=rollout_policy,
             value_fn=value_fn,
@@ -117,6 +123,8 @@ class UctMcts:
             rollout_depth=rollout_depth,
             rollout_batch_size=rollout_batch_size,
             virtual_loss=virtual_loss,
+            finish_combat_rollouts=finish_combat_rollouts,
+            combat_extension_depth=combat_extension_depth,
         )
         self._rng = random.Random(seed)
 
@@ -448,15 +456,30 @@ class UctMcts:
         transitions_used = 0
 
         try:
-            for _ in range(self._rollout_depth):
-                active_indices = [
-                    index
-                    for index, rollout in enumerate(rollouts)
-                    if rollout.value is None and rollout.legal_actions
-                ]
+            maximum_steps = self._rollout_depth + (
+                self._combat_extension_depth
+                if self._finish_combat_rollouts
+                else 0
+            )
+            for step in range(maximum_steps):
+                active_indices = []
                 for index, rollout in enumerate(rollouts):
-                    if rollout.value is None and not rollout.legal_actions:
-                        rollouts[index].value = self._value_fn(rollout.observation)
+                    if rollout.value is not None:
+                        continue
+                    if not rollout.legal_actions:
+                        rollout.value = self._value_fn(rollout.observation)
+                        continue
+
+                    within_base_horizon = step < self._rollout_depth
+                    extending_combat = (
+                        self._finish_combat_rollouts
+                        and step >= self._rollout_depth
+                        and _is_combat_observation(rollout.observation)
+                    )
+                    if within_base_horizon or extending_combat:
+                        active_indices.append(index)
+                    else:
+                        rollout.value = self._value_fn(rollout.observation)
 
                 if not active_indices:
                     break
@@ -530,6 +553,8 @@ def _configured_search_version(
     rollout_depth: int,
     rollout_batch_size: int,
     virtual_loss: float | None,
+    finish_combat_rollouts: bool,
+    combat_extension_depth: int,
 ) -> str:
     rollout_id = getattr(
         rollout_policy,
@@ -551,10 +576,23 @@ def _configured_search_version(
         f"|depth={rollout_depth}"
         f"|batch={rollout_batch_size}"
         f"|vl={_virtual_loss_id(virtual_loss)}"
+        f"|finish-combat={int(finish_combat_rollouts)}"
+        f"|combat-ext={combat_extension_depth}"
         f"|c={exploration:.6g}"
         f"|rollout={rollout_id}"
         f"|value={value_id}"
     )
+
+
+def _is_combat_observation(observation: Observation) -> bool:
+    try:
+        raw = json.loads(observation.payload_json)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(raw, dict):
+        return False
+    phase = raw.get("phase")
+    return phase == 3 or phase == "Combat"
 
 
 def _virtual_loss_id(virtual_loss: float | None) -> str:
