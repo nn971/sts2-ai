@@ -43,6 +43,12 @@ def main() -> None:
     evaluate.add_argument("--agent", choices=("random", "heuristic", "mcts"), required=True)
     evaluate.add_argument("--budget", type=int, default=32, help="MCTS simulations per decision")
     evaluate.add_argument(
+        "--rollout-depth",
+        type=int,
+        default=64,
+        help="maximum heuristic rollout decisions after each selected MCTS leaf",
+    )
+    evaluate.add_argument(
         "--rollout-batch-size",
         type=int,
         default=8,
@@ -94,6 +100,8 @@ def _evaluate(args: argparse.Namespace) -> None:
         raise SystemExit("--seeds must be positive")
     if args.budget < 0:
         raise SystemExit("--budget must be non-negative")
+    if args.rollout_depth < 0:
+        raise SystemExit("--rollout-depth must be non-negative")
     if args.rollout_batch_size <= 0:
         raise SystemExit("--rollout-batch-size must be positive")
 
@@ -123,6 +131,7 @@ def _evaluate(args: argparse.Namespace) -> None:
                         backend,
                         policy=policy,
                         rollout_policy=HeuristicAgent(),
+                        rollout_depth=args.rollout_depth,
                         rollout_batch_size=args.rollout_batch_size,
                         seed=args.agent_seed + index,
                     )
@@ -197,6 +206,7 @@ def _evaluate(args: argparse.Namespace) -> None:
         payload = {
             "agent": label,
             "budget": args.budget if args.agent == "mcts" else None,
+            "rollout_depth": args.rollout_depth if args.agent == "mcts" else None,
             "rollout_batch_size": (
                 args.rollout_batch_size if args.agent == "mcts" else None
             ),

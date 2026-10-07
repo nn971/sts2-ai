@@ -31,7 +31,9 @@ jobs:
         run: |
           sts2-ai evaluate \
             --agent mcts \
-            --budget 4 \
+            --budget 8 \
+            --rollout-depth 32 \
+            --rollout-batch-size 8 \
             --seeds 1 \
             --max-decisions 8 \
             --no-build \

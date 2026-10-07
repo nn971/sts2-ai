@@ -36,6 +36,13 @@ class OracleMctsAgent:
         if not legal_actions:
             raise ValueError("Cannot choose from an empty legal-action set")
 
+        if len(legal_actions) == 1:
+            return Decision(
+                action=legal_actions[0],
+                policy_name="forced-action",
+                metadata_json='{"search_seconds":0.0,"search_transitions":0}',
+            )
+
         if self._simulations == 0:
             action = min(legal_actions, key=lambda item: item.action_id)
             return Decision(
