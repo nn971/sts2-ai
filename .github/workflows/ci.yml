@@ -39,3 +39,13 @@ jobs:
             --no-build \
             --profile \
             --strategy-db /tmp/sts2-ai-strategy.sqlite
+
+      - name: One-seed frontier budget ladder
+        run: |
+          sts2-ai benchmark \
+            --budgets 8 32 128 \
+            --seeds 1 \
+            --rollout-depth 8 \
+            --rollout-batch-size 8 \
+            --no-build \
+            --strategy-db /tmp/sts2-ai-frontier.sqlite
