@@ -143,6 +143,17 @@ def main() -> None:
         help="exact persisted search configuration to report",
     )
     report.add_argument("--summary-only", action="store_true")
+    report.add_argument(
+        "--sort-by",
+        choices=("phase", "pair-shift", "regret"),
+        default="phase",
+        help="ordering for detailed disagreement rows",
+    )
+    report.add_argument(
+        "--meaningful-only",
+        action="store_true",
+        help="hide disagreements that collapse to the same semantic action",
+    )
     report.add_argument("--json-output", type=Path)
 
     args = parser.parse_args()
@@ -525,16 +536,46 @@ def _strategy_report(args: argparse.Namespace) -> None:
         )
 
     if not args.summary_only:
+        detail_roots = [
+            root
+            for root in report.roots
+            if not args.meaningful_only or root.meaningful
+        ]
+        if args.sort_by == "pair-shift":
+            detail_roots.sort(
+                key=lambda root: (
+                    root.pair_delta_shift,
+                    root.max_selection_regret,
+                    root.state_hash,
+                ),
+                reverse=True,
+            )
+        elif args.sort_by == "regret":
+            detail_roots.sort(
+                key=lambda root: (
+                    root.max_selection_regret,
+                    root.pair_delta_shift,
+                    root.state_hash,
+                ),
+                reverse=True,
+            )
+
         print()
+        if args.meaningful_only:
+            print(
+                f"Displaying {min(args.limit, len(detail_roots))} of "
+                f"{len(detail_roots)} semantically meaningful disagreements."
+            )
+            print()
         print(
-            "| State | Phase | Act/Floor | HP | Class | Budget | Chosen action | "
-            "Chosen mean | Best-mean action | Best mean | Regret | Visits |"
+            "| State | Phase | Act/Floor | HP | Class | Pair shift | Budget | "
+            "Chosen action | Chosen mean | Best-mean action | Best mean | Regret | Visits |"
         )
         print(
-            "| --- | --- | --- | ---: | --- | ---: | --- | ---: | --- | "
+            "| --- | --- | --- | ---: | --- | ---: | ---: | --- | ---: | --- | "
             "---: | ---: | ---: |"
         )
-        for root in report.roots[: args.limit]:
+        for root in detail_roots[: args.limit]:
             location = f"{root.act}/{root.floor}"
             hp = (
                 f"{root.hp}/{root.max_hp}"
@@ -544,7 +585,8 @@ def _strategy_report(args: argparse.Namespace) -> None:
             for decision in root.decisions:
                 print(
                     f"| {root.state_hash[:10]} | {root.phase} | {location} | {hp} | "
-                    f"{root.classification} | {decision.budget} | "
+                    f"{root.classification} | {root.pair_delta_shift:.4f} | "
+                    f"{decision.budget} | "
                     f"{decision.chosen_action_summary} | "
                     f"{decision.chosen_value:.4f} | "
                     f"{decision.best_mean_action_summary} | "
