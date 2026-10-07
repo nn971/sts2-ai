@@ -69,6 +69,7 @@ def test_roundtrip_search_root_and_action_statistics(tmp_path: Path) -> None:
             "state-search",
             "prototype-fair-v0",
         )
+        horizon = store.rollout_horizon_counts("prototype-fair-v0")
 
     assert len(records) == 1
     root, stored_actions = records[0]
@@ -81,6 +82,7 @@ def test_roundtrip_search_root_and_action_statistics(tmp_path: Path) -> None:
     assert root.terminal_rollouts == 12
     assert root.cutoff_rollouts == 20
     assert root.rollout_steps == 180
+    assert horizon == ((32, 32, 12, 20, 180),)
     assert [item.action_id for item in stored_actions] == ["a", "b"]
     assert [item.action_kind for item in stored_actions] == [
         "take_reward_card",
