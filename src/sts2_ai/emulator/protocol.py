@@ -39,6 +39,15 @@ class Transition:
     exact_hash: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class StepFrame:
+    """A transition bundled with the resulting player-facing frame."""
+
+    transition: Transition
+    observation: Observation
+    legal_actions: tuple[LegalAction, ...]
+
+
 class EmulatorBackend(Protocol):
     """Research-facing contract expected from sts2-emulator bindings."""
 
@@ -58,6 +67,12 @@ class EmulatorBackend(Protocol):
         self,
         items: Sequence[tuple[StateHandle, LegalAction]],
     ) -> tuple[Transition, ...]: ...
+
+    def batch_step_frame(
+        self,
+        items: Sequence[tuple[StateHandle, LegalAction]],
+        policy: InformationPolicy,
+    ) -> tuple[StepFrame, ...]: ...
 
     def fork(self, state: StateHandle) -> StateHandle: ...
 

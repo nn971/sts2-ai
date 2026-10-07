@@ -9,6 +9,7 @@ from sts2_ai.emulator import (
     LegalAction,
     Observation,
     StateHandle,
+    StepFrame,
     Transition,
 )
 
@@ -60,6 +61,25 @@ class MockLinearBackend:
         items: Sequence[tuple[StateHandle, LegalAction]],
     ) -> tuple[Transition, ...]:
         return tuple(self.step(state, action) for state, action in items)
+
+    def batch_step_frame(
+        self,
+        items: Sequence[tuple[StateHandle, LegalAction]],
+        policy: InformationPolicy,
+    ) -> tuple[StepFrame, ...]:
+        frames = []
+        for state, action in items:
+            transition = self.step(state, action)
+            observation = self.observe(transition.child, policy)
+            legal_actions = tuple(self.legal_actions(transition.child))
+            frames.append(
+                StepFrame(
+                    transition=transition,
+                    observation=observation,
+                    legal_actions=legal_actions,
+                )
+            )
+        return tuple(frames)
 
     def fork(self, state: StateHandle) -> StateHandle:
         return str(state)

@@ -13,6 +13,7 @@ from .protocol import (
     LegalAction,
     Observation,
     StateHandle,
+    StepFrame,
     Transition,
 )
 
@@ -28,6 +29,7 @@ __all__ = [
     "Observation",
     "RULESET_ID",
     "StateHandle",
+    "StepFrame",
     "Transition",
     "WIRE_SCHEMA_ID",
 ]

@@ -74,7 +74,7 @@ class _RolloutState:
 class UctMcts:
     """Transposition-aware oracle-exact UCT with batched heuristic rollouts."""
 
-    search_version = "oracle-exact-batched-uct-v2"
+    search_version = "oracle-exact-fused-batched-uct-v3"
 
     def __init__(
         self,
@@ -394,31 +394,28 @@ class UctMcts:
                     )
                     requests.append((rollout.handle, decision.action))
 
-                transitions = self._backend.batch_step(requests)
-                transitions_used += len(transitions)
-                child_handles = tuple(transition.child for transition in transitions)
-                temporary.extend(child_handles)
-                observations = self._backend.batch_observe(
-                    child_handles,
+                frames = self._backend.batch_step_frame(
+                    requests,
                     self._policy,
                 )
+                transitions_used += len(frames)
+                temporary.extend(frame.transition.child for frame in frames)
 
-                for index, transition, observation in zip(
+                for index, frame in zip(
                     active_indices,
-                    transitions,
-                    observations,
+                    frames,
                     strict=True,
                 ):
                     rollout = rollouts[index]
-                    rollout.handle = transition.child
-                    rollout.observation = observation
-                    if transition.terminal:
-                        rollout.legal_actions = ()
-                        rollout.value = self._value_fn(observation)
-                    else:
-                        rollout.legal_actions = tuple(
-                            self._backend.legal_actions(transition.child)
-                        )
+                    rollout.handle = frame.transition.child
+                    rollout.observation = frame.observation
+                    rollout.legal_actions = (
+                        ()
+                        if frame.transition.terminal
+                        else frame.legal_actions
+                    )
+                    if frame.transition.terminal:
+                        rollout.value = self._value_fn(frame.observation)
 
             for rollout in rollouts:
                 if rollout.value is None:

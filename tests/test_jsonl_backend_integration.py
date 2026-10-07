@@ -74,6 +74,20 @@ def test_fork_step_expand_batch_expand_and_release(backend: JsonlEmulatorBackend
     assert len(batched_observations) == 2
     assert all(item.observation_hash for item in batched_observations)
 
+    fused = backend.batch_step_frame(
+        [
+            (root, backend.legal_actions(root)[0]),
+            (other, backend.legal_actions(other)[0]),
+        ],
+        InformationPolicy(FAIR_POLICY_ID),
+    )
+    assert len(fused) == 2
+    assert all(item.observation.observation_hash for item in fused)
+    assert all(
+        item.transition.terminal or item.legal_actions
+        for item in fused
+    )
+
     batches = backend.batch_expand([root, other])
     assert len(batches) == 2
     assert all(item.parent == root for item in batches[0])
@@ -85,6 +99,7 @@ def test_fork_step_expand_batch_expand_and_release(backend: JsonlEmulatorBackend
         stepped.child,
         other,
         *(item.child for item in batched_steps),
+        *(item.transition.child for item in fused),
         *(item.child for item in expansions),
         *(item.child for batch in batches for item in batch),
     ]

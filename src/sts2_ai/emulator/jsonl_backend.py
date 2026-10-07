@@ -13,6 +13,7 @@ from .protocol import (
     LegalAction,
     Observation,
     StateHandle,
+    StepFrame,
     Transition,
 )
 
@@ -257,6 +258,72 @@ class JsonlEmulatorBackend:
             if transition.action.action_id != expected_action.action_id:
                 raise JsonlBridgeError("batch_step action order does not match request")
         return transitions
+
+    def batch_step_frame(
+        self,
+        items: Sequence[tuple[StateHandle, LegalAction]],
+        policy: InformationPolicy,
+    ) -> tuple[StepFrame, ...]:
+        requested = list(items)
+        response = self._request(
+            "batch_step_frame",
+            policy_id=policy.policy_id,
+            items=[
+                {"state_handle": state, "action_id": action.action_id}
+                for state, action in requested
+            ],
+        )
+        raw_frames = response.get("frames")
+        if not isinstance(raw_frames, list) or len(raw_frames) != len(requested):
+            raise JsonlBridgeError("batch_step_frame response shape does not match request")
+
+        frames: list[StepFrame] = []
+        for (expected_parent, expected_action), raw in zip(
+            requested,
+            raw_frames,
+            strict=True,
+        ):
+            if not isinstance(raw, dict):
+                raise JsonlBridgeError("batch_step_frame item is not an object")
+
+            transition = self._parse_transition(raw)
+            if transition.parent != expected_parent:
+                raise JsonlBridgeError("batch_step_frame parent order does not match request")
+            if transition.action.action_id != expected_action.action_id:
+                raise JsonlBridgeError("batch_step_frame action order does not match request")
+
+            schema_id = self._require_string(raw, "schemaId")
+            if schema_id != OBSERVATION_SCHEMA_ID:
+                raise JsonlBridgeError(
+                    f"Unexpected observation schema {schema_id!r}; "
+                    f"expected {OBSERVATION_SCHEMA_ID!r}"
+                )
+            response_policy = self._require_string(raw, "policyId")
+            if response_policy != policy.policy_id:
+                raise JsonlBridgeError(
+                    "batch_step_frame information policy does not match request"
+                )
+
+            raw_actions = raw.get("legalActions")
+            if not isinstance(raw_actions, list):
+                raise JsonlBridgeError(
+                    "batch_step_frame item has no legalActions array"
+                )
+            observation = Observation(
+                policy_id=response_policy,
+                payload_json=self._require_string(raw, "payloadJson"),
+                observation_hash=self._require_string(raw, "observationHash"),
+            )
+            frames.append(
+                StepFrame(
+                    transition=transition,
+                    observation=observation,
+                    legal_actions=tuple(
+                        self._parse_action(action) for action in raw_actions
+                    ),
+                )
+            )
+        return tuple(frames)
 
     def fork(self, state: StateHandle) -> StateHandle:
         response = self._request("fork", state_handle=state)
