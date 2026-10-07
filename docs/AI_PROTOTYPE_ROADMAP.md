@@ -537,15 +537,44 @@ That experiment was rejected and `main` was restored to the previous progress-pl
 cutoff evaluator before adding virtual loss. The lesson is to change one search component
 at a time and demand an empirical gain before keeping extra evaluator features.
 
+### Horizon and disagreement instrumentation
+
+The search diagnostics now expose two measurements needed for the next comparison.
+
+First, `strategy-report` can filter semantically equivalent card-instance choices with
+`--meaningful-only` and rank the remaining roots by low-to-high-budget relative-value
+movement with `--sort-by pair-shift`. This turns the earlier qualitative disagreement
+inspection into a direct list of the roots whose action ordering moves the most as compute
+increases.
+
+Second, every searched root now records heuristic-rollout horizon telemetry:
+
+- number of heuristic rollouts;
+- rollouts that actually reached a terminal state;
+- rollouts evaluated at the depth/no-action cutoff;
+- total rollout steps.
+
+`strategy-report` aggregates these by budget and prints terminal fraction and mean
+rollout length. This is intended to distinguish the two leading hypotheses:
+
+- a low terminal fraction, especially at depth 16, points toward horizon/cutoff-value
+  quality as the dominant limitation;
+- a high terminal fraction with weak decisions points more strongly toward the rollout
+  policy itself.
+
+This instrumentation is persisted in SQLite with migration-safe default columns, so old
+evidence databases remain readable.
+
 Next:
 
 1. compare rollout depth 8 versus 16 using the mean-preserving reservation on the same
    five-seed 8/32/128 ladder;
-2. use semantic action payloads in disagreement reports to inspect the largest Combat,
-   MapChoice, and Reward flips;
-3. decide whether the dominant remaining error is cutoff evaluation or rollout policy;
-4. improve that component and repeat the common-seed ladder;
-5. extend to 512 simulations only after the 8/32/128 curve is better understood.
+2. compare the rollout terminal/cutoff fractions alongside run strength;
+3. inspect the largest semantically meaningful Combat, MapChoice, and Reward flips using
+   `strategy-report --meaningful-only --sort-by pair-shift`;
+4. decide whether the dominant remaining error is cutoff evaluation or rollout policy;
+5. improve that component and repeat the common-seed ladder;
+6. extend to 512 simulations only after the 8/32/128 curve is better understood.
 
 
 ## Immediate implementation sprint
