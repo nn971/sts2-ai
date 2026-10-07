@@ -202,8 +202,10 @@ def _decision_diagnostic(
     if not actions:
         raise RuntimeError(f"Stored root {root.state_hash} has no action evidence")
 
+    visited = [action for action in actions if action.visits > 0]
+    best_candidates = visited or list(actions)
     best = max(
-        actions,
+        best_candidates,
         key=lambda action: (
             action.value,
             action.visits,
