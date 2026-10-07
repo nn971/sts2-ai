@@ -1,4 +1,10 @@
-from sts2_ai.evaluation import BenchmarkRow, markdown_table, summarize_runs
+from sts2_ai.evaluation import (
+    BenchmarkRow,
+    compare_paired_runs,
+    markdown_table,
+    paired_markdown_table,
+    summarize_runs,
+)
 from sts2_ai.evaluation.run import RunSummary
 
 
@@ -49,3 +55,79 @@ def test_summarize_runs_aggregates_common_metrics() -> None:
     table = markdown_table([row])
     assert "MCTS-32" in table
     assert "50.0" in table
+
+
+def test_compare_paired_runs_uses_common_seed_deltas() -> None:
+    baseline = [
+        RunSummary(
+            seed="a",
+            outcome="defeat",
+            terminal_act=1,
+            terminal_floor=3,
+            decisions=10,
+            emulator_transitions=10,
+            wall_seconds=1.0,
+            agent_compute_seconds=0.1,
+            frontier_progress=2.5,
+            frontier_enemy_hp=20,
+            hp_trajectory=(70, 30),
+        ),
+        RunSummary(
+            seed="b",
+            outcome="defeat",
+            terminal_act=1,
+            terminal_floor=4,
+            decisions=10,
+            emulator_transitions=10,
+            wall_seconds=1.0,
+            agent_compute_seconds=0.1,
+            frontier_progress=3.0,
+            frontier_enemy_hp=10,
+            hp_trajectory=(70, 20),
+        ),
+    ]
+    challenger = [
+        RunSummary(
+            seed="a",
+            outcome="defeat",
+            terminal_act=1,
+            terminal_floor=4,
+            decisions=11,
+            emulator_transitions=20,
+            wall_seconds=2.0,
+            agent_compute_seconds=1.0,
+            frontier_progress=3.5,
+            frontier_enemy_hp=15,
+            hp_trajectory=(70, 35),
+        ),
+        RunSummary(
+            seed="b",
+            outcome="defeat",
+            terminal_act=1,
+            terminal_floor=4,
+            decisions=11,
+            emulator_transitions=20,
+            wall_seconds=2.0,
+            agent_compute_seconds=1.0,
+            frontier_progress=2.5,
+            frontier_enemy_hp=12,
+            hp_trajectory=(70, 18),
+        ),
+    ]
+
+    comparison = compare_paired_runs(
+        "heuristic",
+        baseline,
+        "MCTS-32",
+        challenger,
+    )
+
+    assert comparison.runs == 2
+    assert comparison.mean_frontier_delta == 0.25
+    assert comparison.mean_terminal_delta == 0.5
+    assert comparison.challenger_ahead == 1
+    assert comparison.tied == 0
+    assert comparison.baseline_ahead == 1
+    table = paired_markdown_table([comparison])
+    assert "MCTS-32" in table
+    assert "+0.250" in table
