@@ -12,6 +12,7 @@ class BenchmarkRow:
     runs: int
     win_rate: float
     average_terminal_progress: float
+    average_frontier_progress: float
     average_decisions: float
     transitions_per_decision: float
     average_wall_seconds: float
@@ -31,6 +32,9 @@ def summarize_runs(label: str, summaries: list[RunSummary]) -> BenchmarkRow:
         average_terminal_progress=statistics.fmean(
             summary.terminal_progress for summary in summaries
         ),
+        average_frontier_progress=statistics.fmean(
+            summary.frontier_progress for summary in summaries
+        ),
         average_decisions=statistics.fmean(summary.decisions for summary in summaries),
         transitions_per_decision=(
             total_transitions / total_decisions if total_decisions else 0.0
@@ -46,13 +50,14 @@ def summarize_runs(label: str, summaries: list[RunSummary]) -> BenchmarkRow:
 
 def markdown_table(rows: list[BenchmarkRow]) -> str:
     lines = [
-        "| Agent | Runs | Win % | Avg terminal progress | "
+        "| Agent | Runs | Win % | Avg terminal progress | Avg frontier progress | "
         "Emulator transitions/decision | Time/run |",
-        "| --- | ---: | ---: | ---: | ---: | ---: |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     lines.extend(
         f"| {row.label} | {row.runs} | {100.0 * row.win_rate:.1f} | "
         f"{row.average_terminal_progress:.2f} | "
+        f"{row.average_frontier_progress:.3f} | "
         f"{row.transitions_per_decision:.1f} | {row.average_wall_seconds:.3f}s |"
         for row in rows
     )

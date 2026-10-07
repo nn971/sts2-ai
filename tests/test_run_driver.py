@@ -16,4 +16,5 @@ def test_full_run_driver_reaches_terminal() -> None:
     assert summary.decisions > 0
     assert summary.emulator_transitions == summary.decisions
     assert summary.agent_compute_seconds >= 0.0
+    assert summary.frontier_progress >= 0.0
     assert summary.outcome == "unknown"

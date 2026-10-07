@@ -19,6 +19,8 @@ def _run(
         emulator_transitions=transitions,
         wall_seconds=wall,
         agent_compute_seconds=wall / 2,
+        frontier_progress=float(floor),
+        frontier_enemy_hp=None,
         hp_trajectory=(70, 60),
     )
 
@@ -37,6 +39,7 @@ def test_summarize_runs_aggregates_common_metrics() -> None:
         runs=2,
         win_rate=0.5,
         average_terminal_progress=5.0,
+        average_frontier_progress=5.0,
         average_decisions=15.0,
         transitions_per_decision=400 / 30,
         average_wall_seconds=3.0,

@@ -19,6 +19,8 @@ class RunSummary:
     emulator_transitions: int
     wall_seconds: float
     agent_compute_seconds: float
+    frontier_progress: float
+    frontier_enemy_hp: int | None
     hp_trajectory: tuple[int, ...]
 
     @property
@@ -29,7 +31,7 @@ class RunSummary:
     def terminal_progress(self) -> float:
         if self.terminal_act is None:
             return float(self.terminal_floor or 0)
-        return float(((self.terminal_act - 1) * 20) + (self.terminal_floor or 0))
+        return float(((self.terminal_act - 1) * 6) + (self.terminal_floor or 0))
 
     @property
     def transitions_per_decision(self) -> float:
@@ -56,6 +58,7 @@ def play_run(
     emulator_transitions = 0
     agent_compute_seconds = 0.0
     final_state: dict[str, Any] = {}
+    preterminal_state: dict[str, Any] | None = None
 
     try:
         while True:
@@ -72,6 +75,7 @@ def play_run(
             if max_decisions is not None and decisions >= max_decisions:
                 break
 
+            preterminal_state = current
             legal_actions = tuple(backend.legal_actions(state))
             choose_started = time.perf_counter()
             if isinstance(agent, ExactStateAgent):
@@ -96,6 +100,11 @@ def play_run(
         )
         act = final_state.get("act")
         floor = final_state.get("floor")
+        frontier_state = (
+            preterminal_state
+            if outcome == "defeat" and preterminal_state is not None
+            else final_state
+        )
         return RunSummary(
             seed=seed,
             outcome=outcome,
@@ -105,6 +114,8 @@ def play_run(
             emulator_transitions=emulator_transitions,
             wall_seconds=time.perf_counter() - started,
             agent_compute_seconds=agent_compute_seconds,
+            frontier_progress=_continuous_progress(frontier_state),
+            frontier_enemy_hp=_remaining_enemy_hp(frontier_state),
             hp_trajectory=tuple(hp_trajectory),
         )
     finally:
@@ -120,3 +131,48 @@ def _search_transitions(metadata_json: str) -> int:
         return 0
     value = raw.get("search_transitions")
     return value if isinstance(value, int) and value >= 0 else 0
+
+
+def _continuous_progress(state: dict[str, Any]) -> float:
+    """Prototype run progress with a continuous within-combat component."""
+
+    act = _number(state.get("act"), 1.0)
+    floor = _number(state.get("floor"), 0.0)
+    act = max(1.0, min(3.0, act))
+    floor = max(0.0, min(6.0, floor))
+
+    enemy_hp = _remaining_enemy_hp(state)
+    if enemy_hp is not None and floor > 0.0:
+        import math
+
+        completion = math.exp(-enemy_hp / 80.0)
+        effective_floor = max(0.0, floor - 1.0 + completion)
+    else:
+        effective_floor = floor
+    return ((act - 1.0) * 6.0) + effective_floor
+
+
+def _remaining_enemy_hp(state: dict[str, Any]) -> int | None:
+    combat = state.get("combat")
+    if not isinstance(combat, dict):
+        return None
+    enemies = combat.get("enemies")
+    if not isinstance(enemies, list):
+        return None
+
+    total = 0
+    found = False
+    for raw_enemy in enemies:
+        if not isinstance(raw_enemy, dict):
+            continue
+        hp = raw_enemy.get("hp")
+        if isinstance(hp, int):
+            total += max(0, hp)
+            found = True
+    return total if found else None
+
+
+def _number(value: object, default: float) -> float:
+    if isinstance(value, int | float):
+        return float(value)
+    return default
