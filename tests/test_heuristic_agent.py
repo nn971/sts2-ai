@@ -30,3 +30,65 @@ def test_heuristic_upgrades_when_healthy() -> None:
         LegalAction("upgrade", "rest_upgrade"),
     )
     assert agent.choose(observation, actions).action.kind == "rest_upgrade"
+
+
+def test_heuristic_reads_pascal_case_map_payload() -> None:
+    agent = HeuristicAgent()
+    observation = _observation(
+        {
+            "hp": 20,
+            "max_hp": 70,
+            "map": [
+                {"node_id": "fight", "room_type": 0},
+                {"node_id": "rest", "room_type": 4},
+            ],
+        }
+    )
+    actions = (
+        LegalAction(
+            "choose_map_node:fight",
+            "choose_map_node",
+            payload_json='{"NodeId":"fight"}',
+        ),
+        LegalAction(
+            "choose_map_node:rest",
+            "choose_map_node",
+            payload_json='{"NodeId":"rest"}',
+        ),
+    )
+
+    assert agent.choose(observation, actions).action.action_id == "choose_map_node:rest"
+
+
+def test_heuristic_reads_pascal_case_combat_payload() -> None:
+    agent = HeuristicAgent()
+    observation = _observation(
+        {
+            "hp": 60,
+            "max_hp": 70,
+            "combat": {
+                "energy": 3,
+                "hand": [
+                    {"instance_id": 10, "card_id": "Strike"},
+                    {"instance_id": 11, "card_id": "Defend"},
+                ],
+                "enemies": [
+                    {"instance_id": 2, "enemy_id": "test_enemy", "hp": 6},
+                ],
+            },
+        }
+    )
+    actions = (
+        LegalAction(
+            "play_card:strike",
+            "play_card",
+            payload_json='{"CardInstanceId":10,"TargetEnemyId":2}',
+        ),
+        LegalAction(
+            "play_card:defend",
+            "play_card",
+            payload_json='{"CardInstanceId":11,"TargetEnemyId":null}',
+        ),
+    )
+
+    assert agent.choose(observation, actions).action.action_id == "play_card:strike"
