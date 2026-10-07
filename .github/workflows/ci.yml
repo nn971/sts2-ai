@@ -39,3 +39,29 @@ jobs:
             --no-build \
             --profile \
             --strategy-db /tmp/sts2-ai-strategy.sqlite
+
+      - name: Persisted five-seed root-selection-fix ladder
+        shell: bash
+        run: |
+          mkdir -p results
+          sts2-ai benchmark \
+            --budgets 8 32 128 \
+            --seeds 5 \
+            --rollout-depth 8 \
+            --rollout-batch-size 8 \
+            --no-build \
+            --strategy-db results/strategy.sqlite \
+            --json-output results/benchmark.json | tee results/benchmark.md
+          sts2-ai strategy-report results/strategy.sqlite --limit 100 \
+            --json-output results/strategy-report.json \
+            | tee results/strategy-report.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: root-selection-fix-five-seed-${{ github.run_id }}
+          path: |
+            results/benchmark.json
+            results/benchmark.md
+            results/strategy.sqlite
+            results/strategy-report.md
+            results/strategy-report.json
+          if-no-files-found: error
