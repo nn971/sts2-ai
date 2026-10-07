@@ -153,6 +153,8 @@ def test_budget_disagreement_diagnostic_separates_value_flip_from_visit_choice(
     assert not root.has_visit_selection_mismatch
     assert root.low_budget_pair_delta == pytest.approx(0.05)
     assert root.high_budget_pair_delta == pytest.approx(-0.20)
+    assert root.pair_delta_shift == pytest.approx(0.25)
+    assert root.meaningful
     assert report.by_phase[0].value_ranking_flips == 1
 
 
@@ -419,6 +421,7 @@ def test_semantically_equivalent_card_instances_are_collapsed(tmp_path: Path) ->
 
     assert report.roots[0].classification == "semantic-equivalent"
     assert report.roots[0].semantically_equivalent
+    assert not report.roots[0].meaningful
     assert report.by_phase[0].semantic_equivalent == 1
 
 
