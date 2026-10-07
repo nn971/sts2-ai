@@ -382,7 +382,7 @@ def _semantic_action_signature(
         raw = json.loads(action.action_payload_json)
     except json.JSONDecodeError:
         return action.action_id
-    if not isinstance(raw, dict):
+    if not isinstance(raw, dict) or not raw:
         return action.action_id
 
     card_by_instance = _card_ids_by_instance(observation)
@@ -430,7 +430,7 @@ def _semantic_action_signature(
                 if isinstance(option, str):
                     return f"{kind}:{option}"
 
-    return _action_summary(action)
+    return action.action_id
 
 
 def _card_ids_by_instance(observation: dict[str, object]) -> dict[int, str]:
