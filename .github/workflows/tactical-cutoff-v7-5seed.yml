@@ -1,0 +1,39 @@
+name: tactical-cutoff-v7-5seed
+
+on:
+  push:
+    branches:
+      - benchmark/tactical-cutoff-v7-5seed
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -U pip
+      - run: python -m pip install -e '.[dev]'
+      - name: Five-seed tactical-cutoff ladder
+        run: |
+          sts2-ai benchmark \
+            --budgets 8 32 128 \
+            --seeds 5 \
+            --seed-prefix benchmark \
+            --rollout-depth 8 \
+            --rollout-batch-size 8 \
+            --strategy-db /tmp/tactical-cutoff-v7.sqlite \
+            --json-output /tmp/tactical-cutoff-v7.json
+      - name: Disagreement report
+        run: |
+          sts2-ai strategy-report \
+            /tmp/tactical-cutoff-v7.sqlite \
+            --limit 50
