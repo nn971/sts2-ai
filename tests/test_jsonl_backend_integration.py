@@ -59,6 +59,21 @@ def test_fork_step_expand_batch_expand_and_release(backend: JsonlEmulatorBackend
     assert all(item.exact_hash == backend.exact_hash(item.child) for item in expansions)
 
     other = backend.reset("python-jsonl-batch")
+    other_actions = backend.legal_actions(other)
+    batched_steps = backend.batch_step(
+        [
+            (root, backend.legal_actions(root)[0]),
+            (other, other_actions[0]),
+        ]
+    )
+    assert len(batched_steps) == 2
+    batched_observations = backend.batch_observe(
+        [item.child for item in batched_steps],
+        InformationPolicy(FAIR_POLICY_ID),
+    )
+    assert len(batched_observations) == 2
+    assert all(item.observation_hash for item in batched_observations)
+
     batches = backend.batch_expand([root, other])
     assert len(batches) == 2
     assert all(item.parent == root for item in batches[0])
@@ -69,6 +84,7 @@ def test_fork_step_expand_batch_expand_and_release(backend: JsonlEmulatorBackend
         fork,
         stepped.child,
         other,
+        *(item.child for item in batched_steps),
         *(item.child for item in expansions),
         *(item.child for batch in batches for item in batch),
     ]

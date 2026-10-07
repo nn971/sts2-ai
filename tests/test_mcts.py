@@ -18,6 +18,7 @@ def test_mcts_runs_budget_and_hits_transpositions() -> None:
         rollout_policy=HeuristicAgent(),
         value_fn=_mock_value,
         rollout_depth=8,
+        rollout_batch_size=8,
         seed=3,
     )
 
@@ -28,4 +29,22 @@ def test_mcts_runs_budget_and_hits_transpositions() -> None:
     assert result.transitions > 0
     assert result.expanded_nodes > 0
     assert result.transposition_hits > 0
+    assert result.search_version == "oracle-exact-batched-uct-v2"
     assert {item.action.action_id for item in result.evaluations} == {"inc-1", "inc-2"}
+
+
+def test_mcts_batch_size_one_still_consumes_exact_budget() -> None:
+    backend = MockLinearBackend(terminal_at=8)
+    search = UctMcts(
+        backend,
+        policy=InformationPolicy("fair-test"),
+        rollout_policy=HeuristicAgent(),
+        value_fn=_mock_value,
+        rollout_depth=4,
+        rollout_batch_size=1,
+        seed=7,
+    )
+
+    result = search.search("0", SearchBudget(max_simulations=17))
+
+    assert sum(item.visits for item in result.evaluations) == 17

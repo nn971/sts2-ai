@@ -55,10 +55,26 @@ class _Node:
     edges: dict[str, _Edge] = field(default_factory=dict)
 
 
-class UctMcts:
-    """Transposition-aware oracle-exact UCT over emulator states."""
+@dataclass(slots=True)
+class _PendingSimulation:
+    path_nodes: tuple[_Node, ...]
+    path_edges: tuple[_Edge, ...]
+    leaf: _Node | None
+    immediate_value: float | None
 
-    search_version = "oracle-exact-uct-v1"
+
+@dataclass(slots=True)
+class _RolloutState:
+    handle: StateHandle
+    observation: Observation
+    legal_actions: tuple[LegalAction, ...]
+    value: float | None = None
+
+
+class UctMcts:
+    """Transposition-aware oracle-exact UCT with batched heuristic rollouts."""
+
+    search_version = "oracle-exact-batched-uct-v2"
 
     def __init__(
         self,
@@ -69,16 +85,20 @@ class UctMcts:
         value_fn: ValueFunction | None = None,
         exploration: float = math.sqrt(2.0),
         rollout_depth: int = 128,
+        rollout_batch_size: int = 8,
         seed: int = 0,
     ) -> None:
         if rollout_depth < 0:
             raise ValueError("rollout_depth must be non-negative")
+        if rollout_batch_size <= 0:
+            raise ValueError("rollout_batch_size must be positive")
         self._backend = backend
         self._policy = policy
         self._rollout_policy = rollout_policy
         self._value_fn = value_fn or sts2_value
         self._exploration = exploration
         self._rollout_depth = rollout_depth
+        self._rollout_batch_size = rollout_batch_size
         self._rng = random.Random(seed)
 
     def search(self, state: StateHandle, budget: SearchBudget) -> SearchResult:
@@ -134,52 +154,45 @@ class UctMcts:
                 )
             node.expanded = True
 
+        completed = 0
         try:
-            for _ in range(simulations):
+            while completed < simulations:
                 if deadline is not None and time.monotonic() >= deadline:
                     break
 
-                node = root
-                path_nodes = [root]
-                path_edges: list[_Edge] = []
+                target = min(self._rollout_batch_size, simulations - completed)
+                pending: list[_PendingSimulation] = []
 
-                while True:
-                    if node.terminal:
-                        value = self._value_fn(node.observation)
+                for _ in range(target):
+                    if deadline is not None and time.monotonic() >= deadline:
                         break
+                    simulation = self._select_simulation(root, table, expand)
+                    self._reserve(simulation)
+                    pending.append(simulation)
 
-                    if not node.expanded:
-                        expand(node)
-                        if not node.edges:
-                            value = self._value_fn(node.observation)
-                            break
-                        edge = self._choose_unvisited_or_uct(node)
-                        path_edges.append(edge)
-                        node = table[edge.child_hash]
-                        path_nodes.append(node)
-                        value, used = self._rollout(node)
-                        transitions += used
-                        break
+                if not pending:
+                    break
 
-                    if not node.edges:
-                        value = self._value_fn(node.observation)
-                        break
+                rollout_entries = [
+                    simulation.leaf
+                    for simulation in pending
+                    if simulation.leaf is not None
+                ]
+                rollout_values: tuple[float, ...] = ()
+                if rollout_entries:
+                    rollout_values, used = self._rollout_batch(
+                        tuple(cast(_Node, leaf) for leaf in rollout_entries)
+                    )
+                    transitions += used
 
-                    edge = self._choose_unvisited_or_uct(node)
-                    path_edges.append(edge)
-                    node = table[edge.child_hash]
-                    path_nodes.append(node)
-                    if edge.visits == 0:
-                        value, used = self._rollout(node)
-                        transitions += used
-                        break
+                value_iter = iter(rollout_values)
+                for simulation in pending:
+                    value = simulation.immediate_value
+                    if value is None:
+                        value = next(value_iter)
+                    self._backup_reserved(simulation, value)
 
-                for visited_node in path_nodes:
-                    visited_node.visits += 1
-                    visited_node.value_sum += value
-                for visited_edge in path_edges:
-                    visited_edge.visits += 1
-                    visited_edge.value_sum += value
+                completed += len(pending)
         finally:
             if created_handles:
                 self._backend.release_many(tuple(created_handles))
@@ -203,6 +216,96 @@ class UctMcts:
             transposition_hits=transposition_hits,
             search_version=self.search_version,
         )
+
+    def _select_simulation(
+        self,
+        root: _Node,
+        table: dict[str, _Node],
+        expand: Callable[[_Node], None],
+    ) -> _PendingSimulation:
+        node = root
+        path_nodes = [root]
+        path_edges: list[_Edge] = []
+
+        while True:
+            if node.terminal:
+                return _PendingSimulation(
+                    path_nodes=tuple(path_nodes),
+                    path_edges=tuple(path_edges),
+                    leaf=None,
+                    immediate_value=self._value_fn(node.observation),
+                )
+
+            if not node.expanded:
+                expand(node)
+                if not node.edges:
+                    return _PendingSimulation(
+                        path_nodes=tuple(path_nodes),
+                        path_edges=tuple(path_edges),
+                        leaf=None,
+                        immediate_value=self._value_fn(node.observation),
+                    )
+                edge = self._choose_unvisited_or_uct(node)
+                path_edges.append(edge)
+                node = table[edge.child_hash]
+                path_nodes.append(node)
+                if node.terminal:
+                    return _PendingSimulation(
+                        path_nodes=tuple(path_nodes),
+                        path_edges=tuple(path_edges),
+                        leaf=None,
+                        immediate_value=self._value_fn(node.observation),
+                    )
+                return _PendingSimulation(
+                    path_nodes=tuple(path_nodes),
+                    path_edges=tuple(path_edges),
+                    leaf=node,
+                    immediate_value=None,
+                )
+
+            if not node.edges:
+                return _PendingSimulation(
+                    path_nodes=tuple(path_nodes),
+                    path_edges=tuple(path_edges),
+                    leaf=None,
+                    immediate_value=self._value_fn(node.observation),
+                )
+
+            edge = self._choose_unvisited_or_uct(node)
+            was_unvisited = edge.visits == 0
+            path_edges.append(edge)
+            node = table[edge.child_hash]
+            path_nodes.append(node)
+
+            if node.terminal:
+                return _PendingSimulation(
+                    path_nodes=tuple(path_nodes),
+                    path_edges=tuple(path_edges),
+                    leaf=None,
+                    immediate_value=self._value_fn(node.observation),
+                )
+            if was_unvisited:
+                return _PendingSimulation(
+                    path_nodes=tuple(path_nodes),
+                    path_edges=tuple(path_edges),
+                    leaf=node,
+                    immediate_value=None,
+                )
+
+    @staticmethod
+    def _reserve(simulation: _PendingSimulation) -> None:
+        # Zero-value virtual visits diversify the other selections in this batch.
+        for node in simulation.path_nodes:
+            node.visits += 1
+        for edge in simulation.path_edges:
+            edge.visits += 1
+
+    @staticmethod
+    def _backup_reserved(simulation: _PendingSimulation, value: float) -> None:
+        for node in simulation.path_nodes:
+            node.value_sum += value
+        for edge in simulation.path_edges:
+            edge.value_sum += value
 
     def _zero_budget_result(self, state: StateHandle) -> SearchResult:
         node = self._make_node(state)
@@ -257,29 +360,76 @@ class UctMcts:
             ),
         )
 
-    def _rollout(self, start: _Node) -> tuple[float, int]:
-        if start.terminal:
-            return self._value_fn(start.observation), 0
-
-        state = start.handle
-        observation = start.observation
-        legal_actions = start.legal_actions
+    def _rollout_batch(self, starts: tuple[_Node, ...]) -> tuple[tuple[float, ...], int]:
+        rollouts = [
+            _RolloutState(
+                handle=start.handle,
+                observation=start.observation,
+                legal_actions=start.legal_actions,
+                value=self._value_fn(start.observation) if start.terminal else None,
+            )
+            for start in starts
+        ]
         temporary: list[StateHandle] = []
-        transitions = 0
+        transitions_used = 0
+
         try:
             for _ in range(self._rollout_depth):
-                if not legal_actions:
-                    return self._value_fn(observation), transitions
-                decision = self._rollout_policy.choose(observation, legal_actions)
-                transition = self._backend.step(state, decision.action)
-                transitions += 1
-                temporary.append(transition.child)
-                state = transition.child
-                observation = self._backend.observe(state, self._policy)
-                if transition.terminal:
-                    return self._value_fn(observation), transitions
-                legal_actions = tuple(self._backend.legal_actions(state))
-            return self._value_fn(observation), transitions
+                active_indices = [
+                    index
+                    for index, rollout in enumerate(rollouts)
+                    if rollout.value is None and rollout.legal_actions
+                ]
+                for index, rollout in enumerate(rollouts):
+                    if rollout.value is None and not rollout.legal_actions:
+                        rollouts[index].value = self._value_fn(rollout.observation)
+
+                if not active_indices:
+                    break
+
+                requests: list[tuple[StateHandle, LegalAction]] = []
+                for index in active_indices:
+                    rollout = rollouts[index]
+                    decision = self._rollout_policy.choose(
+                        rollout.observation,
+                        rollout.legal_actions,
+                    )
+                    requests.append((rollout.handle, decision.action))
+
+                transitions = self._backend.batch_step(requests)
+                transitions_used += len(transitions)
+                child_handles = tuple(transition.child for transition in transitions)
+                temporary.extend(child_handles)
+                observations = self._backend.batch_observe(
+                    child_handles,
+                    self._policy,
+                )
+
+                for index, transition, observation in zip(
+                    active_indices,
+                    transitions,
+                    observations,
+                    strict=True,
+                ):
+                    rollout = rollouts[index]
+                    rollout.handle = transition.child
+                    rollout.observation = observation
+                    if transition.terminal:
+                        rollout.legal_actions = ()
+                        rollout.value = self._value_fn(observation)
+                    else:
+                        rollout.legal_actions = tuple(
+                            self._backend.legal_actions(transition.child)
+                        )
+
+            for rollout in rollouts:
+                if rollout.value is None:
+                    rollout.value = self._value_fn(rollout.observation)
+
+            return (
+                tuple(cast(float, rollout.value) for rollout in rollouts),
+                transitions_used,
+            )
         finally:
             if temporary:
                 self._backend.release_many(temporary)
