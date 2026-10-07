@@ -16,6 +16,8 @@ class HeuristicAgent:
     to be a useful rollout baseline, not a hand-authored expert.
     """
 
+    policy_id = "heuristic-v2-payload-aware"
+
     def choose(
         self,
         observation: Observation,
@@ -31,7 +33,7 @@ class HeuristicAgent:
             for action in legal_actions
         ]
         _, _, action = max(scored)
-        return Decision(action=action, policy_name="heuristic-v2-payload-aware")
+        return Decision(action=action, policy_name=self.policy_id)
 
     def _score(self, state: dict[str, Any], action: LegalAction) -> float:
         kind = action.kind
