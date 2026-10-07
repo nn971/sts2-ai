@@ -1,0 +1,37 @@
+name: combat-exit-depth32-3seed
+
+on:
+  push:
+    branches:
+      - benchmark/combat-exit-depth32-3seed
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -U pip
+      - run: python -m pip install -e '.[dev]'
+      - name: Combat-exit depth-32 probe
+        run: |
+          sts2-ai benchmark \
+            --budgets 8 32 \
+            --seeds 3 \
+            --seed-prefix benchmark \
+            --rollout-depth 32 \
+            --rollout-batch-size 8 \
+            --rollout-mode combat-exit \
+            --strategy-db /tmp/combat-exit-depth32.sqlite
+          sts2-ai strategy-report \
+            /tmp/combat-exit-depth32.sqlite \
+            --summary-only
