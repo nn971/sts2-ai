@@ -434,6 +434,47 @@ class SQLiteStrategyStore:
             for budget, roots, unvisited in rows
         )
 
+    def rollout_horizon_counts(
+        self,
+        information_policy: str,
+        *,
+        search_regime: str = "oracle-exact",
+        search_version: str | None = None,
+    ) -> tuple[tuple[int, int, int, int, int], ...]:
+        """Aggregate rollout termination telemetry by search budget."""
+
+        version_clause = ""
+        parameters: tuple[str, ...] = (information_policy, search_regime)
+        if search_version is not None:
+            version_clause = " AND search_version = ?"
+            parameters += (search_version,)
+
+        rows = self._connection.execute(
+            f"""
+            SELECT search_budget,
+                   SUM(rollout_count),
+                   SUM(terminal_rollouts),
+                   SUM(cutoff_rollouts),
+                   SUM(rollout_steps)
+            FROM search_root_evidence
+            WHERE information_policy = ? AND search_regime = ?
+            {version_clause}
+            GROUP BY search_budget
+            ORDER BY search_budget ASC
+            """,
+            parameters,
+        ).fetchall()
+        return tuple(
+            (
+                int(budget),
+                int(rollouts or 0),
+                int(terminals or 0),
+                int(cutoffs or 0),
+                int(steps or 0),
+            )
+            for budget, rollouts, terminals, cutoffs, steps in rows
+        )
+
     def disagreement_state_hashes(
         self,
         information_policy: str,
