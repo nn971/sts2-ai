@@ -3,13 +3,21 @@ from .export import (
     load_training_jsonl,
     write_training_jsonl,
 )
+from .linear import (
+    TrainingMetrics,
+    evaluate_hashed_linear,
+    train_hashed_linear,
+)
 from .targets import PolicyTarget, TrainingExample, build_training_example
 
 __all__ = [
     "PolicyTarget",
     "TrainingExample",
+    "TrainingMetrics",
     "build_training_example",
     "build_training_examples",
+    "evaluate_hashed_linear",
     "load_training_jsonl",
+    "train_hashed_linear",
     "write_training_jsonl",
 ]
