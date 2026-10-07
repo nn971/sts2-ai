@@ -574,11 +574,13 @@ Second, every searched root now records heuristic-rollout horizon telemetry:
 
 - number of heuristic rollouts;
 - rollouts that actually reached a terminal state;
+- rollouts stopped at a natural combat boundary;
 - rollouts evaluated at the depth/no-action cutoff;
 - total rollout steps.
 
-`strategy-report` aggregates these by budget and prints terminal fraction and mean
-rollout length. This is intended to distinguish the two leading hypotheses:
+`strategy-report` aggregates these by budget and prints resolved fraction
+(terminal + combat boundary) and mean rollout length. This is intended to distinguish
+the two leading hypotheses:
 
 - a low terminal fraction, especially at depth 16, points toward horizon/cutoff-value
   quality as the dominant limitation;
@@ -614,19 +616,50 @@ whole prototype run ended, so the number should be interpreted mainly as a horiz
 diagnostic rather than as proof that the cutoff function itself is wrong.
 
 On the same three seeds, frontier progress moved from 5.111 / 5.094 at depth 8 to
-5.230 / 5.235 at depth 16 for MCTS-8 / 32. Together with the five-seed MCTS-32 gain,
-this is enough evidence to test a still longer horizon before adding more hand-engineered
-cutoff features. A depth-32 3-seed probe is the next compact experiment.
+5.230 / 5.235 at depth 16 for MCTS-8 / 32.
+
+A depth-32 probe then showed diminishing returns rather than a monotone depth benefit.
+On the same three seeds, depth-32 frontier progress was 5.072 for MCTS-8 and 5.164 for
+MCTS-32, versus 5.230 and 5.235 at depth 16. About 21--22% of depth-32 rollouts reached
+a run terminal and the average rollout consumed roughly 28--29 decisions out of the
+32-decision cap. The longer continuation therefore spends substantially more compute while
+still leaving most samples cutoff-valued, and it did not improve this small common-seed
+comparison.
+
+### Combat-exit rollout mode
+
+The next experiment changes the horizon shape rather than merely increasing its length.
+
+`UctMcts` now supports `rollout_mode="combat-exit"`, exposed as
+`--rollout-mode combat-exit`. A heuristic rollout that **starts in Combat** is advanced
+until it leaves Combat, reaches a run terminal, or hits the configured safety cap.
+Rollouts that start outside Combat retain the ordinary fixed-depth behavior. This keeps
+the experiment narrow: the tactical continuation is encouraged to reach a natural
+post-combat boundary, while route/reward/shop leaves retain the existing search semantics.
+
+Search evidence fingerprints the rollout mode, and horizon telemetry now distinguishes
+three outcomes:
+
+- run terminal;
+- combat-boundary exit;
+- safety/depth cutoff.
+
+This is the first concrete hierarchical-search primitive in the parent project. Its
+purpose is to test whether evaluating a completed fight is a better tactical search target
+than evaluating an arbitrary mid-combat decision count.
 
 Next:
 
-1. compare the rollout terminal/cutoff fractions for depth 8 versus 16 alongside the
-   completed strength comparison;
-2. inspect the largest semantically meaningful Combat, MapChoice, and Reward flips using
+1. compare fixed depth-32 against combat-exit depth-32 on the same three seeds at budgets
+   8 and 32;
+2. inspect the combat-boundary rate and average rollout length to see how much of the
+   extra horizon is actually needed to finish fights;
+3. inspect the largest semantically meaningful Combat disagreements with
    `strategy-report --meaningful-only --sort-by pair-shift`;
-3. decide whether the dominant remaining error is cutoff evaluation or rollout policy;
-4. improve that component and repeat the common-seed ladder;
-5. extend to 512 simulations only after the 8/32/128 curve is better understood.
+4. if combat-exit improves the curve, promote a combat-specific horizon/safety-cap policy
+   and test it on the five-seed 8/32/128 ladder;
+5. otherwise, turn next to the rollout policy rather than adding more generic depth;
+6. extend to 512 simulations only after the 8/32/128 curve is better understood.
 
 
 ## Immediate implementation sprint
