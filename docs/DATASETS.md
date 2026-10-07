@@ -40,6 +40,29 @@ Compact examples distilled from search evidence, for example:
 
 or other supervised/RL targets.
 
+### Current training export
+
+The parent repo can now distill persisted search evidence directly:
+
+```fish
+sts2-ai export-training results/strategy.sqlite results/train.jsonl \
+    --search-version '<exact search configuration>' \
+    --min-budget 128
+```
+
+By default the exporter keeps the strongest matching search budget for each exact state
+and provenance tuple. `--all-budgets` retains every matching budget for diagnostic
+datasets.
+
+Each JSONL record contains the player-facing observation payload, normalized root visit
+distribution, per-action kind/payload/search value/visits, a root value target, and search
+provenance. The value target is the best visited root-action mean. Exact state hashes are
+retained only as source provenance; they are not part of the player-facing model input.
+
+This first export deliberately preserves the search regime label. Current targets are
+usually `oracle-exact`, so future fair-model experiments can distinguish oracle-derived
+supervision from genuinely fair search evidence.
+
 ## 4. Scenario archive
 
 Strategically important states deliberately retained for repeated study:
