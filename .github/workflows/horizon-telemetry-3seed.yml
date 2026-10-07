@@ -1,0 +1,48 @@
+name: horizon-telemetry-3seed
+
+on:
+  push:
+    branches:
+      - benchmark/horizon-telemetry-3seed
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -U pip
+      - run: python -m pip install -e '.[dev]'
+      - name: Depth 8 horizon telemetry
+        run: |
+          sts2-ai benchmark \
+            --budgets 8 32 \
+            --seeds 3 \
+            --seed-prefix benchmark \
+            --rollout-depth 8 \
+            --rollout-batch-size 8 \
+            --strategy-db /tmp/horizon-depth8.sqlite
+          sts2-ai strategy-report \
+            /tmp/horizon-depth8.sqlite \
+            --summary-only
+      - name: Depth 16 horizon telemetry
+        run: |
+          sts2-ai benchmark \
+            --budgets 8 32 \
+            --seeds 3 \
+            --seed-prefix benchmark \
+            --rollout-depth 16 \
+            --rollout-batch-size 8 \
+            --strategy-db /tmp/horizon-depth16.sqlite
+          sts2-ai strategy-report \
+            /tmp/horizon-depth16.sqlite \
+            --summary-only
