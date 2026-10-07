@@ -54,6 +54,11 @@ jobs:
             --no-build \
             --strategy-db results/strategy.sqlite \
             --json-output results/benchmark.json | tee results/benchmark.md
+      - name: Report multi-budget action disagreements
+        shell: bash
+        run: |
+          sts2-ai strategy-report results/strategy.sqlite --limit 50 \
+            | tee results/strategy-report.md
       - uses: actions/upload-artifact@v4
         with:
           name: search-benchmark-${{ github.run_id }}
@@ -61,4 +66,5 @@ jobs:
             results/benchmark.json
             results/benchmark.md
             results/strategy.sqlite
+            results/strategy-report.md
           if-no-files-found: error
