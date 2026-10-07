@@ -669,14 +669,28 @@ likely the rollout policy itself: a completed combat reached by a weak tactical 
 still be a poor value sample. Combat-exit remains useful infrastructure for later
 hierarchical search.
 
+A small follow-up tried exactly one survival-aware heuristic change: defensive cards
+received extra priority as HP fell, with the bonus reduced by existing block. On the same
+three depth-16 seeds, heuristic frontier progress changed from 3.308 to 3.296,
+MCTS-8 from 5.230 to 5.248, and MCTS-32 from 5.235 to 5.211. These changes are too small
+and inconsistent to justify another hand-tuned rule, so the experiment was rejected and
+the v2 payload-aware heuristic was restored.
+
+At this point the immediate search-first objective has been met: the five-seed depth-16
+ladder produced a clear compute signal through MCTS-128, while the subsequent experiments
+identified several search-engine defects, a useful rollout-depth range, and the limits of
+the deliberately small hand-written rollout policy. Further manual heuristic tuning is
+unlikely to be the best use of effort.
+
 Next:
 
-1. improve the deliberately small combat rollout heuristic without adding a large
-   hand-authored expert system;
-2. repeat the three-seed fixed-depth-16 8/32 probe before changing search mechanics again;
-3. if the rollout-policy change helps, run the five-seed 8/32/128 ladder;
-4. keep combat-exit available as a later tactical macro-transition experiment;
-5. extend to 512 simulations only after the 8/32/128 curve is better understood.
+1. turn the persistent search evidence into explicit supervised
+   `(observation, pi_search, V_search)` training examples;
+2. add a reproducible JSONL export with provenance and action semantics;
+3. build the first tiny policy/value model baseline against those targets;
+4. feed model predictions back into search only after the offline target pipeline is
+   validated;
+5. keep combat-exit and the current oracle-exact search as architecture/debugging tools.
 
 
 ## Immediate implementation sprint
