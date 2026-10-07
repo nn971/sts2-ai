@@ -31,6 +31,10 @@ class SearchResult:
     transitions: int
     transposition_hits: int
     search_version: str
+    rollout_count: int = 0
+    terminal_rollouts: int = 0
+    cutoff_rollouts: int = 0
+    rollout_steps: int = 0
 
 
 class SearchAlgorithm(Protocol):
