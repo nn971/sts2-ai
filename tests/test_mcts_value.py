@@ -59,3 +59,63 @@ def test_terminal_outcomes_override_cutoff_features() -> None:
 
     assert sts2_value(victory) == 1.0
     assert sts2_value(defeat) == -1.0
+
+
+def test_cutoff_value_rewards_temporary_block_inside_combat() -> None:
+    unblocked = _observation(
+        {
+            "act": 1,
+            "floor": 2,
+            "hp": 40,
+            "max_hp": 70,
+            "combat": {
+                "player_block": 0,
+                "enemies": [{"hp": 50}],
+            },
+        }
+    )
+    blocked = _observation(
+        {
+            "act": 1,
+            "floor": 2,
+            "hp": 40,
+            "max_hp": 70,
+            "combat": {
+                "player_block": 14,
+                "enemies": [{"hp": 50}],
+            },
+        }
+    )
+
+    assert sts2_value(blocked) > sts2_value(unblocked)
+
+
+def test_cutoff_value_rewards_persistent_resources() -> None:
+    poor = _observation(
+        {
+            "act": 1,
+            "floor": 3,
+            "hp": 50,
+            "max_hp": 70,
+            "gold": 0,
+            "relics": [{"relic_id": "starter"}],
+            "potions": [],
+        }
+    )
+    rich = _observation(
+        {
+            "act": 1,
+            "floor": 3,
+            "hp": 50,
+            "max_hp": 70,
+            "gold": 200,
+            "relics": [
+                {"relic_id": "starter"},
+                {"relic_id": "extra-a"},
+                {"relic_id": "extra-b"},
+            ],
+            "potions": [{"slot": 0, "potion_id": "potion"}],
+        }
+    )
+
+    assert sts2_value(rich) > sts2_value(poor)
