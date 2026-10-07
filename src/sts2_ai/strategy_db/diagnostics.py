@@ -67,6 +67,18 @@ class DisagreementDiagnostic:
     def max_selection_regret(self) -> float:
         return max((item.selection_regret for item in self.decisions), default=0.0)
 
+    @property
+    def pair_delta_shift(self) -> float:
+        """How much the low-vs-high chosen-action value gap moved across budgets."""
+        if self.low_budget_pair_delta is None or self.high_budget_pair_delta is None:
+            return 0.0
+        return abs(self.high_budget_pair_delta - self.low_budget_pair_delta)
+
+    @property
+    def meaningful(self) -> bool:
+        """Whether the disagreement survives semantic-equivalence collapsing."""
+        return not self.semantically_equivalent
+
 
 @dataclass(frozen=True, slots=True)
 class PhaseDisagreementSummary:
