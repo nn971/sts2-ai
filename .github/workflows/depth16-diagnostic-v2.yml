@@ -1,0 +1,40 @@
+name: depth16-diagnostic-v2
+
+on:
+  push:
+    branches:
+      - benchmark/depth16-diagnostic-v2
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -U pip
+      - run: python -m pip install -e '.[dev]'
+      - name: Common-seed depth-16 ladder
+        run: |
+          sts2-ai benchmark \
+            --budgets 8 32 128 \
+            --seeds 5 \
+            --seed-prefix benchmark \
+            --rollout-depth 16 \
+            --rollout-batch-size 8 \
+            --no-build \
+            --strategy-db /tmp/depth16-strategy.sqlite \
+            --json-output /tmp/depth16-results.json
+      - name: Disagreement report
+        run: |
+          sts2-ai strategy-report \
+            /tmp/depth16-strategy.sqlite \
+            --limit 50
