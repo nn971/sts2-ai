@@ -28,11 +28,13 @@ class BudgetDecisionDiagnostic:
     chosen_action_id: str
     chosen_action_kind: str
     chosen_action_summary: str
+    chosen_semantic_signature: str
     chosen_value: float
     chosen_visits: int
     best_mean_action_id: str
     best_mean_action_kind: str
     best_mean_action_summary: str
+    best_mean_semantic_signature: str
     best_mean_value: float
     best_mean_visits: int
     selection_regret: float
@@ -52,6 +54,7 @@ class DisagreementDiagnostic:
     hp: int | None
     max_hp: int | None
     classification: str
+    semantically_equivalent: bool
     value_ranking_flip: bool
     has_visit_selection_mismatch: bool
     low_budget_action: str
@@ -70,6 +73,7 @@ class PhaseDisagreementSummary:
     phase: str
     roots: int
     unvisited_selection: int
+    semantic_equivalent: int
     value_ranking_flips: int
     visit_selection: int
     mixed: int
@@ -114,7 +118,7 @@ def diagnose_budget_disagreements(
         payload = _payload(observation.payload_json if observation is not None else "{}")
 
         decisions = tuple(
-            _decision_diagnostic(root, actions)
+            _decision_diagnostic(root, actions, payload)
             for root, actions in sorted(records, key=lambda item: item[0].search_budget)
         )
         low = decisions[0]
@@ -141,6 +145,9 @@ def diagnose_budget_disagreements(
             decision.chosen_visits == 0
             for decision in decisions
         )
+        semantic_equivalent = len(
+            {decision.chosen_semantic_signature for decision in decisions}
+        ) == 1
         selection_mismatch = any(
             decision.selection_regret > 1e-12
             for decision in decisions
@@ -148,6 +155,8 @@ def diagnose_budget_disagreements(
 
         if unvisited_selection:
             classification = "unvisited-selection"
+        elif semantic_equivalent:
+            classification = "semantic-equivalent"
         elif value_flip and selection_mismatch:
             classification = "mixed"
         elif value_flip:
@@ -167,6 +176,7 @@ def diagnose_budget_disagreements(
                 hp=_optional_int(payload.get("hp")),
                 max_hp=_optional_int(payload.get("max_hp")),
                 classification=classification,
+                semantically_equivalent=semantic_equivalent,
                 value_ranking_flip=value_flip,
                 has_visit_selection_mismatch=selection_mismatch,
                 low_budget_action=low.chosen_action_id,
@@ -194,6 +204,7 @@ def diagnose_budget_disagreements(
 def _decision_diagnostic(
     root: SearchRootEvidence,
     actions: tuple[SearchActionEvidence, ...],
+    observation_payload: dict[str, object],
 ) -> BudgetDecisionDiagnostic:
     by_id = _actions_by_id(actions)
     chosen = by_id.get(root.chosen_action_id)
@@ -219,11 +230,19 @@ def _decision_diagnostic(
         chosen_action_id=chosen.action_id,
         chosen_action_kind=chosen.action_kind or _action_kind(chosen.action_id),
         chosen_action_summary=_action_summary(chosen),
+        chosen_semantic_signature=_semantic_action_signature(
+            chosen,
+            observation_payload,
+        ),
         chosen_value=chosen.value,
         chosen_visits=chosen.visits,
         best_mean_action_id=best.action_id,
         best_mean_action_kind=best.action_kind or _action_kind(best.action_id),
         best_mean_action_summary=_action_summary(best),
+        best_mean_semantic_signature=_semantic_action_signature(
+            best,
+            observation_payload,
+        ),
         best_mean_value=best.value,
         best_mean_visits=best.visits,
         selection_regret=max(0.0, best.value - chosen.value),
@@ -243,6 +262,10 @@ def _phase_summaries(
                 roots=len(phase_roots),
                 unvisited_selection=sum(
                     root.classification == "unvisited-selection"
+                    for root in phase_roots
+                ),
+                semantic_equivalent=sum(
+                    root.classification == "semantic-equivalent"
                     for root in phase_roots
                 ),
                 value_ranking_flips=sum(
@@ -349,3 +372,102 @@ def _action_summary(action: SearchActionEvidence) -> str:
             for key in sorted(raw)[:3]
         ]
     return f"{kind}({', '.join(parts)})"
+
+def _semantic_action_signature(
+    action: SearchActionEvidence,
+    observation: dict[str, object],
+) -> str:
+    kind = action.action_kind or _action_kind(action.action_id)
+    try:
+        raw = json.loads(action.action_payload_json)
+    except json.JSONDecodeError:
+        return action.action_id
+    if not isinstance(raw, dict):
+        return action.action_id
+
+    card_by_instance = _card_ids_by_instance(observation)
+    enemy_by_instance = _enemy_ids_by_instance(observation)
+
+    card_instance = raw.get("CardInstanceId", raw.get("card_instance_id"))
+    target_enemy = raw.get("TargetEnemyId", raw.get("target_enemy_id"))
+    card_ids = raw.get("CardInstanceIds", raw.get("card_instance_ids"))
+    node_id = raw.get("NodeId", raw.get("node_id"))
+    index = raw.get("Index", raw.get("index"))
+
+    if kind in {"play_card", "rest_upgrade", "remove_card"} and isinstance(
+        card_instance,
+        int,
+    ):
+        card = card_by_instance.get(card_instance, f"instance:{card_instance}")
+        if kind == "play_card":
+            if isinstance(target_enemy, int):
+                target = enemy_by_instance.get(
+                    target_enemy,
+                    f"enemy-instance:{target_enemy}",
+                )
+                return f"{kind}:{card}->{target}"
+            return f"{kind}:{card}"
+        return f"{kind}:{card}"
+
+    if kind == "select_cards" and isinstance(card_ids, list):
+        cards = [
+            card_by_instance.get(item, f"instance:{item}")
+            for item in card_ids
+            if isinstance(item, int)
+        ]
+        return f"{kind}:{\',\'.join(sorted(cards))}"
+
+    if kind == "choose_map_node" and isinstance(node_id, str):
+        return f"{kind}:{node_id}"
+
+    if kind == "take_reward_card" and isinstance(index, int):
+        reward = observation.get("reward")
+        if isinstance(reward, dict):
+            options = reward.get("card_options")
+            if isinstance(options, list) and 0 <= index < len(options):
+                option = options[index]
+                if isinstance(option, str):
+                    return f"{kind}:{option}"
+
+    return _action_summary(action)
+
+
+def _card_ids_by_instance(observation: dict[str, object]) -> dict[int, str]:
+    result: dict[int, str] = {}
+
+    def consume(value: object) -> None:
+        if not isinstance(value, list):
+            return
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            instance_id = item.get("instance_id")
+            card_id = item.get("card_id")
+            if isinstance(instance_id, int) and isinstance(card_id, str):
+                result[instance_id] = card_id
+
+    consume(observation.get("deck"))
+    combat = observation.get("combat")
+    if isinstance(combat, dict):
+        consume(combat.get("hand"))
+        consume(combat.get("discard_pile"))
+        consume(combat.get("exhaust_pile"))
+    return result
+
+
+def _enemy_ids_by_instance(observation: dict[str, object]) -> dict[int, str]:
+    result: dict[int, str] = {}
+    combat = observation.get("combat")
+    if not isinstance(combat, dict):
+        return result
+    enemies = combat.get("enemies")
+    if not isinstance(enemies, list):
+        return result
+    for enemy in enemies:
+        if not isinstance(enemy, dict):
+            continue
+        instance_id = enemy.get("instance_id")
+        enemy_id = enemy.get("enemy_id")
+        if isinstance(instance_id, int) and isinstance(enemy_id, str):
+            result[instance_id] = enemy_id
+    return result
