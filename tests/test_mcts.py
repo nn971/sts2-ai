@@ -1,7 +1,9 @@
 import json
 
+import pytest
+
 from sts2_ai.agents import HeuristicAgent
-from sts2_ai.emulator import InformationPolicy, Observation
+from sts2_ai.emulator import InformationPolicy, LegalAction, Observation
 from sts2_ai.search import SearchBudget, UctMcts
 from sts2_ai.testing import MockLinearBackend
 
@@ -29,7 +31,7 @@ def test_mcts_runs_budget_and_hits_transpositions() -> None:
     assert result.transitions > 0
     assert result.expanded_nodes > 0
     assert result.transposition_hits > 0
-    assert result.search_version == "oracle-exact-light-rollout-uct-v6-payload-aware-rollout"
+    assert result.search_version == "oracle-exact-light-rollout-uct-v7-virtual-loss"
     assert {item.action.action_id for item in result.evaluations} == {"inc-1", "inc-2"}
 
 
@@ -48,3 +50,52 @@ def test_mcts_batch_size_one_still_consumes_exact_budget() -> None:
     result = search.search("0", SearchBudget(max_simulations=17))
 
     assert sum(item.visits for item in result.evaluations) == 17
+
+
+def test_virtual_loss_reservation_is_replaced_by_rollout_value() -> None:
+    import sts2_ai.search.mcts as mcts
+
+    action = LegalAction("inc-1", "increment", '{"amount":1}')
+    edge = mcts._Edge(action=action, child_hash="child", visits=2, value_sum=-1.2)
+    node = mcts._Node(
+        handle="0",
+        exact_hash="root",
+        observation=Observation(
+            policy_id="fair-test",
+            payload_json='{"value":0}',
+            observation_hash="obs",
+        ),
+        legal_actions=(action,),
+        terminal=False,
+        visits=3,
+        value_sum=-1.5,
+    )
+    pending = mcts._PendingSimulation(
+        path_nodes=(node,),
+        path_edges=(edge,),
+        leaf=node,
+        immediate_value=None,
+    )
+
+    mcts.UctMcts._reserve(pending, -1.0)
+    assert node.visits == 4
+    assert edge.visits == 3
+    assert node.value_sum == -2.5
+    assert edge.value_sum == -2.2
+
+    mcts.UctMcts._backup_reserved(pending, -0.25, -1.0)
+    assert node.visits == 4
+    assert edge.visits == 3
+    assert node.value_sum == -1.75
+    assert edge.value_sum == -1.45
+
+
+def test_virtual_loss_must_be_bounded() -> None:
+    backend = MockLinearBackend(terminal_at=8)
+    with pytest.raises(ValueError, match="virtual_loss"):
+        UctMcts(
+            backend,
+            policy=InformationPolicy("fair-test"),
+            rollout_policy=HeuristicAgent(),
+            virtual_loss=-1.5,
+        )
