@@ -1,0 +1,46 @@
+name: virtual-loss-5seed
+
+on:
+  push:
+    branches:
+      - benchmark/virtual-loss-5seed
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -U pip
+      - run: python -m pip install -e '.[dev]'
+      - name: Zero reservation baseline
+        run: |
+          sts2-ai benchmark \
+            --budgets 8 32 \
+            --seeds 5 \
+            --seed-prefix benchmark \
+            --rollout-depth 8 \
+            --rollout-batch-size 8 \
+            --virtual-loss 0 \
+            --strategy-db /tmp/virtual-loss-0.sqlite \
+            --json-output /tmp/virtual-loss-0.json
+      - name: Pessimistic virtual loss
+        run: |
+          sts2-ai benchmark \
+            --budgets 8 32 \
+            --seeds 5 \
+            --seed-prefix benchmark \
+            --rollout-depth 8 \
+            --rollout-batch-size 8 \
+            --virtual-loss -1 \
+            --strategy-db /tmp/virtual-loss-neg1.sqlite \
+            --json-output /tmp/virtual-loss-neg1.json
