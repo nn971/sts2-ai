@@ -25,17 +25,16 @@ jobs:
       - run: python -m pytest
       - name: Whole-run baseline smoke
         run: |
-          sts2-ai evaluate --agent random --seeds 1 --no-build
-          sts2-ai evaluate --agent heuristic --seeds 1 --no-build
-      - name: Small oracle MCTS workload profile
+          sts2-ai evaluate --agent random --seeds 3 --no-build
+          sts2-ai evaluate --agent heuristic --seeds 3 --no-build
+      - name: Tactical-value MCTS benchmark
         run: |
           sts2-ai evaluate \
             --agent mcts \
             --budget 8 \
-            --rollout-depth 32 \
+            --rollout-depth 16 \
             --rollout-batch-size 8 \
-            --seeds 1 \
-            --max-decisions 8 \
+            --seeds 3 \
             --no-build \
             --profile \
             --strategy-db /tmp/sts2-ai-strategy.sqlite
