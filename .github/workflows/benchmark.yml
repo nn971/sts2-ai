@@ -1,0 +1,64 @@
+name: search-benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      budgets:
+        description: "Space-separated MCTS simulation budgets"
+        required: true
+        default: "8 32 128"
+        type: string
+      seeds:
+        description: "Number of common game seeds"
+        required: true
+        default: "5"
+        type: string
+      rollout_depth:
+        description: "Heuristic rollout depth"
+        required: true
+        default: "8"
+        type: string
+      rollout_batch_size:
+        description: "Parallel rollout batch size"
+        required: true
+        default: "8"
+        type: string
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -U pip
+      - run: python -m pip install -e '.[dev]'
+      - run: dotnet build emulator/src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj --configuration Release
+      - name: Run common-seed budget ladder
+        shell: bash
+        run: |
+          mkdir -p results
+          sts2-ai benchmark \
+            --budgets ${{ inputs.budgets }} \
+            --seeds ${{ inputs.seeds }} \
+            --rollout-depth ${{ inputs.rollout_depth }} \
+            --rollout-batch-size ${{ inputs.rollout_batch_size }} \
+            --no-build \
+            --strategy-db results/strategy.sqlite \
+            --json-output results/benchmark.json | tee results/benchmark.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: search-benchmark-${{ github.run_id }}
+          path: |
+            results/benchmark.json
+            results/benchmark.md
+            results/strategy.sqlite
+          if-no-files-found: error
