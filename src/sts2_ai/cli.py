@@ -28,7 +28,11 @@ from sts2_ai.evaluation import (
     summarize_runs,
 )
 from sts2_ai.search import SearchResult, UctMcts
-from sts2_ai.strategy_db import SQLiteStrategyStore, record_search_result
+from sts2_ai.strategy_db import (
+    SQLiteStrategyStore,
+    diagnose_budget_disagreements,
+    record_search_result,
+)
 
 
 def main() -> None:
@@ -121,6 +125,8 @@ def main() -> None:
     report.add_argument("--limit", type=int, default=20)
     report.add_argument("--information-policy", default=FAIR_POLICY_ID)
     report.add_argument("--search-regime", default="oracle-exact")
+    report.add_argument("--summary-only", action="store_true")
+    report.add_argument("--json-output", type=Path)
 
     args = parser.parse_args()
     if args.command == "manifest":
@@ -404,65 +410,87 @@ def _strategy_report(args: argparse.Namespace) -> None:
         raise SystemExit("--limit must be positive")
 
     with SQLiteStrategyStore(args.database) as store:
-        state_hashes = store.disagreement_state_hashes(
+        report = diagnose_budget_disagreements(
+            store,
             args.information_policy,
             search_regime=args.search_regime,
         )
-        if not state_hashes:
-            print("No multi-budget action disagreements found.")
-            return
 
+    if report.total_roots == 0:
+        print("No multi-budget action disagreements found.")
+        if args.json_output is not None:
+            args.json_output.parent.mkdir(parents=True, exist_ok=True)
+            args.json_output.write_text(
+                json.dumps(asdict(report), indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+        return
+
+    print(f"Multi-budget disagreement roots: {report.total_roots}")
+    print()
+    print(
+        "| Phase | Roots | Value-ranking flip | Visit-selection | Mixed | "
+        "Other | Mean max selection regret |"
+    )
+    print("| --- | ---: | ---: | ---: | ---: | ---: | ---: |")
+    for summary in report.by_phase:
         print(
-            "| State | Phase | Act/Floor | HP | Budget | Chosen action | "
-            "Estimated value | Visits |"
+            f"| {summary.phase} | {summary.roots} | "
+            f"{summary.value_ranking_flips} | {summary.visit_selection} | "
+            f"{summary.mixed} | {summary.other} | "
+            f"{summary.mean_max_selection_regret:.4f} |"
         )
-        print("| --- | --- | --- | ---: | ---: | --- | ---: | ---: |")
 
-        shown = 0
-        for state_hash in state_hashes:
-            if shown >= args.limit:
-                break
-            records = store.search_for_state(
-                state_hash,
-                args.information_policy,
-                search_regime=args.search_regime,
+    if not args.summary_only:
+        print()
+        print(
+            "| State | Phase | Act/Floor | HP | Class | Budget | Chosen action | "
+            "Chosen mean | Best-mean action | Best mean | Regret | Visits |"
+        )
+        print(
+            "| --- | --- | --- | ---: | --- | ---: | --- | ---: | --- | "
+            "---: | ---: | ---: |"
+        )
+        for root in report.roots[: args.limit]:
+            location = f"{root.act}/{root.floor}"
+            hp = (
+                f"{root.hp}/{root.max_hp}"
+                if root.hp is not None and root.max_hp is not None
+                else "?"
             )
-            if not records:
-                continue
-
-            observation = store.observation(
-                records[0][0].observation_hash,
-                args.information_policy,
-            )
-            payload: dict[str, object] = {}
-            if observation is not None:
-                raw = json.loads(observation.payload_json)
-                if isinstance(raw, dict):
-                    payload = raw
-
-            phase = str(payload.get("phase", "?"))
-            act = payload.get("act")
-            floor = payload.get("floor")
-            hp = payload.get("hp")
-            location = f"{act}/{floor}"
-
-            for root, actions in records:
-                chosen = next(
-                    (
-                        action
-                        for action in actions
-                        if action.action_id == root.chosen_action_id
-                    ),
-                    None,
-                )
-                value = chosen.value if chosen is not None else float("nan")
-                visits = chosen.visits if chosen is not None else 0
-                display_action = _short_action_id(root.chosen_action_id)
+            for decision in root.decisions:
                 print(
-                    f"| {state_hash[:10]} | {phase} | {location} | {hp} | "
-                    f"{root.search_budget} | {display_action} | {value:.4f} | {visits} |"
+                    f"| {root.state_hash[:10]} | {root.phase} | {location} | {hp} | "
+                    f"{root.classification} | {decision.budget} | "
+                    f"{_short_action_id(decision.chosen_action_id)} | "
+                    f"{decision.chosen_value:.4f} | "
+                    f"{_short_action_id(decision.best_mean_action_id)} | "
+                    f"{decision.best_mean_value:.4f} | "
+                    f"{decision.selection_regret:.4f} | "
+                    f"{decision.chosen_visits} |"
                 )
-            shown += 1
+            low_delta = (
+                "?"
+                if root.low_budget_pair_delta is None
+                else f"{root.low_budget_pair_delta:+.4f}"
+            )
+            high_delta = (
+                "?"
+                if root.high_budget_pair_delta is None
+                else f"{root.high_budget_pair_delta:+.4f}"
+            )
+            print(
+                f"<!-- pair-delta low={low_delta} high={high_delta}; "
+                f"low={_short_action_id(root.low_budget_action)}; "
+                f"high={_short_action_id(root.high_budget_action)} -->"
+            )
+
+    if args.json_output is not None:
+        args.json_output.parent.mkdir(parents=True, exist_ok=True)
+        args.json_output.write_text(
+            json.dumps(asdict(report), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
 
 
 def _short_action_id(action_id: str) -> str:
