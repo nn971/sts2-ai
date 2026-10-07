@@ -93,6 +93,7 @@ class OracleMctsAgent:
             "transposition_hits": result.transposition_hits,
             "rollout_count": result.rollout_count,
             "terminal_rollouts": result.terminal_rollouts,
+            "boundary_rollouts": result.boundary_rollouts,
             "cutoff_rollouts": result.cutoff_rollouts,
             "rollout_steps": result.rollout_steps,
             "root_exact_hash": result.root_state_hash,
