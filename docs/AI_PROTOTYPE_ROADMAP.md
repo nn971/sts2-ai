@@ -509,6 +509,13 @@ the actual rollout value, so final visit/value statistics remain ordinary UCT st
 Unit tests cover the accounting identity and the intended within-batch diversification
 effect.
 
+Search evidence now fingerprints the full search configuration in `search_version`:
+rollout depth, rollout batch size, virtual loss, UCT exploration constant, rollout-policy
+identifier, and cutoff-value identifier. This prevents experiments that reuse the same
+SQLite database from silently overwriting evidence produced with a different search
+configuration. `strategy-report` also scopes diagnostics to one such configuration and
+asks for `--search-version` when a database contains several.
+
 An attempted cutoff-evaluator change that added direct credit for block, gold, relics,
 and potions was also tested on the five-seed depth-8 ladder. It made the curve worse:
 MCTS-8 / 32 / 128 frontier progress was approximately 4.61 / 5.14 / 4.70, with no wins.
