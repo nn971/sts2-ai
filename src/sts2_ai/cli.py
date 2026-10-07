@@ -410,11 +410,25 @@ def _strategy_report(args: argparse.Namespace) -> None:
         raise SystemExit("--limit must be positive")
 
     with SQLiteStrategyStore(args.database) as store:
+        selection_health = store.root_selection_visit_counts(
+            args.information_policy,
+            search_regime=args.search_regime,
+        )
         report = diagnose_budget_disagreements(
             store,
             args.information_policy,
             search_regime=args.search_regime,
         )
+
+    if selection_health:
+        print("| Budget | Searched roots | Chosen with zero visits | Fraction |")
+        print("| ---: | ---: | ---: | ---: |")
+        for budget, roots, unvisited in selection_health:
+            fraction = unvisited / roots if roots else 0.0
+            print(
+                f"| {budget} | {roots} | {unvisited} | {100.0 * fraction:.1f}% |"
+            )
+        print()
 
     if report.total_roots == 0:
         print("No multi-budget action disagreements found.")
