@@ -92,3 +92,89 @@ def test_heuristic_reads_pascal_case_combat_payload() -> None:
     )
 
     assert agent.choose(observation, actions).action.action_id == "play_card:strike"
+
+
+def test_route_aware_map_heuristic_breaks_same_room_type_tie() -> None:
+    agent = HeuristicAgent()
+    observation = _observation(
+        {
+            "hp": 65,
+            "max_hp": 70,
+            "map": [
+                {
+                    "node_id": "left",
+                    "room_type": 0,
+                    "next_node_ids": ["left-elite"],
+                },
+                {
+                    "node_id": "right",
+                    "room_type": 0,
+                    "next_node_ids": ["right-event"],
+                },
+                {
+                    "node_id": "left-elite",
+                    "room_type": 1,
+                    "next_node_ids": ["left-rest"],
+                },
+                {
+                    "node_id": "right-event",
+                    "room_type": 2,
+                    "next_node_ids": ["right-combat"],
+                },
+                {"node_id": "left-rest", "room_type": 4, "next_node_ids": []},
+                {"node_id": "right-combat", "room_type": 0, "next_node_ids": []},
+            ],
+        }
+    )
+    actions = (
+        LegalAction(
+            "choose_map_node:left",
+            "choose_map_node",
+            payload_json='{"NodeId":"left"}',
+        ),
+        LegalAction(
+            "choose_map_node:right",
+            "choose_map_node",
+            payload_json='{"NodeId":"right"}',
+        ),
+    )
+
+    assert agent.choose(observation, actions).action.action_id == "choose_map_node:left"
+
+
+def test_route_aware_map_heuristic_prefers_safer_future_when_low_hp() -> None:
+    agent = HeuristicAgent()
+    observation = _observation(
+        {
+            "hp": 20,
+            "max_hp": 70,
+            "map": [
+                {
+                    "node_id": "left",
+                    "room_type": 0,
+                    "next_node_ids": ["left-elite"],
+                },
+                {
+                    "node_id": "right",
+                    "room_type": 0,
+                    "next_node_ids": ["right-rest"],
+                },
+                {"node_id": "left-elite", "room_type": 1, "next_node_ids": []},
+                {"node_id": "right-rest", "room_type": 4, "next_node_ids": []},
+            ],
+        }
+    )
+    actions = (
+        LegalAction(
+            "choose_map_node:left",
+            "choose_map_node",
+            payload_json='{"NodeId":"left"}',
+        ),
+        LegalAction(
+            "choose_map_node:right",
+            "choose_map_node",
+            payload_json='{"NodeId":"right"}',
+        ),
+    )
+
+    assert agent.choose(observation, actions).action.action_id == "choose_map_node:right"
