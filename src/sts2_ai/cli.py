@@ -429,15 +429,15 @@ def _strategy_report(args: argparse.Namespace) -> None:
     print(f"Multi-budget disagreement roots: {report.total_roots}")
     print()
     print(
-        "| Phase | Roots | Value-ranking flip | Visit-selection | Mixed | "
-        "Other | Mean max selection regret |"
+        "| Phase | Roots | Unvisited selection | Value-ranking flip | "
+        "Visit-selection | Mixed | Other | Mean max selection regret |"
     )
-    print("| --- | ---: | ---: | ---: | ---: | ---: | ---: |")
+    print("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
     for summary in report.by_phase:
         print(
             f"| {summary.phase} | {summary.roots} | "
-            f"{summary.value_ranking_flips} | {summary.visit_selection} | "
-            f"{summary.mixed} | {summary.other} | "
+            f"{summary.unvisited_selection} | {summary.value_ranking_flips} | "
+            f"{summary.visit_selection} | {summary.mixed} | {summary.other} | "
             f"{summary.mean_max_selection_regret:.4f} |"
         )
 
