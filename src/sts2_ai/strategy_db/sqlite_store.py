@@ -54,6 +54,10 @@ CREATE TABLE IF NOT EXISTS search_root_evidence (
     expanded_nodes INTEGER NOT NULL,
     transitions INTEGER NOT NULL,
     transposition_hits INTEGER NOT NULL,
+    rollout_count INTEGER NOT NULL DEFAULT 0,
+    terminal_rollouts INTEGER NOT NULL DEFAULT 0,
+    cutoff_rollouts INTEGER NOT NULL DEFAULT 0,
+    rollout_steps INTEGER NOT NULL DEFAULT 0,
     search_version TEXT NOT NULL,
     model_id TEXT,
     emulator_revision TEXT NOT NULL,
@@ -120,6 +124,17 @@ class SQLiteStrategyStore:
             "action_payload_json",
             "TEXT NOT NULL DEFAULT '{}'",
         )
+        for column in (
+            "rollout_count",
+            "terminal_rollouts",
+            "cutoff_rollouts",
+            "rollout_steps",
+        ):
+            self._ensure_column(
+                "search_root_evidence",
+                column,
+                "INTEGER NOT NULL DEFAULT 0",
+            )
         self._connection.commit()
 
     def _ensure_column(
@@ -280,9 +295,10 @@ class SQLiteStrategyStore:
                 INSERT INTO search_root_evidence (
                     state_hash, observation_hash, information_policy, search_regime,
                     legal_action_ids_json, chosen_action_id, search_budget,
-                    expanded_nodes, transitions, transposition_hits, search_version,
-                    model_id, emulator_revision, game_build
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    expanded_nodes, transitions, transposition_hits,
+                    rollout_count, terminal_rollouts, cutoff_rollouts, rollout_steps,
+                    search_version, model_id, emulator_revision, game_build
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (
                     state_hash, information_policy, search_regime, search_budget,
                     search_version, emulator_revision, game_build
@@ -293,6 +309,10 @@ class SQLiteStrategyStore:
                     expanded_nodes = excluded.expanded_nodes,
                     transitions = excluded.transitions,
                     transposition_hits = excluded.transposition_hits,
+                    rollout_count = excluded.rollout_count,
+                    terminal_rollouts = excluded.terminal_rollouts,
+                    cutoff_rollouts = excluded.cutoff_rollouts,
+                    rollout_steps = excluded.rollout_steps,
                     model_id = excluded.model_id
                 """,
                 (
@@ -306,6 +326,10 @@ class SQLiteStrategyStore:
                     root.expanded_nodes,
                     root.transitions,
                     root.transposition_hits,
+                    root.rollout_count,
+                    root.terminal_rollouts,
+                    root.cutoff_rollouts,
+                    root.rollout_steps,
                     root.search_version,
                     root.model_id,
                     root.emulator_revision,
@@ -462,8 +486,9 @@ class SQLiteStrategyStore:
             f"""
             SELECT state_hash, observation_hash, information_policy, search_regime,
                    legal_action_ids_json, chosen_action_id, search_budget,
-                   expanded_nodes, transitions, transposition_hits, search_version,
-                   model_id, emulator_revision, game_build
+                   expanded_nodes, transitions, transposition_hits,
+                   rollout_count, terminal_rollouts, cutoff_rollouts, rollout_steps,
+                   search_version, model_id, emulator_revision, game_build
             FROM search_root_evidence
             WHERE state_hash = ? AND information_policy = ? AND search_regime = ?
             {version_clause}
@@ -490,10 +515,14 @@ class SQLiteStrategyStore:
                 expanded_nodes=row[7],
                 transitions=row[8],
                 transposition_hits=row[9],
-                search_version=row[10],
-                model_id=row[11],
-                emulator_revision=row[12],
-                game_build=row[13],
+                rollout_count=row[10],
+                terminal_rollouts=row[11],
+                cutoff_rollouts=row[12],
+                rollout_steps=row[13],
+                search_version=row[14],
+                model_id=row[15],
+                emulator_revision=row[16],
+                game_build=row[17],
             )
             action_rows = self._connection.execute(
                 """
