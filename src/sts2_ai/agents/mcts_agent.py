@@ -69,9 +69,12 @@ class OracleMctsAgent:
         if not candidates:
             raise RuntimeError("MCTS returned no legal root action")
 
+        # Oracle-exact rollouts are deterministic at a fixed leaf, so mean value
+        # carries the decision signal directly. Visit count remains a tie-breaker
+        # rather than overriding a better-valued root action.
         best = max(
             candidates,
-            key=lambda item: (item.visits, item.value, item.action.action_id),
+            key=lambda item: (item.value, item.visits, item.action.action_id),
         )
         selected = legal_by_id[best.action.action_id]
         if self._result_sink is not None:
