@@ -36,7 +36,12 @@ from sts2_ai.strategy_db import (
     diagnose_budget_disagreements,
     record_search_result,
 )
-from sts2_ai.training import build_training_examples, write_training_jsonl
+from sts2_ai.training import (
+    build_training_examples,
+    load_training_jsonl,
+    train_hashed_linear,
+    write_training_jsonl,
+)
 
 
 def main() -> None:
@@ -187,6 +192,18 @@ def main() -> None:
         help="emit every matching budget instead of the strongest root per exact state",
     )
 
+    train_linear = sub.add_parser(
+        "train-linear",
+        help="train the dependency-free hashed linear policy/value baseline",
+    )
+    train_linear.add_argument("dataset", type=Path)
+    train_linear.add_argument("output", type=Path)
+    train_linear.add_argument("--dimension", type=int, default=4096)
+    train_linear.add_argument("--epochs", type=int, default=8)
+    train_linear.add_argument("--learning-rate", type=float, default=0.03)
+    train_linear.add_argument("--l2", type=float, default=1e-6)
+    train_linear.add_argument("--seed", type=int, default=0)
+
     args = parser.parse_args()
     if args.command == "manifest":
         result = collect_experiment_manifest(
@@ -217,6 +234,10 @@ def main() -> None:
 
     if args.command == "export-training":
         _export_training(args)
+        return
+
+    if args.command == "train-linear":
+        _train_linear(args)
 
 
 def _evaluate(args: argparse.Namespace) -> None:
@@ -724,6 +745,29 @@ def _export_training(args: argparse.Namespace) -> None:
     print(f"Wrote {count} training examples to {args.output}")
     if selected_version is not None:
         print(f"Search configuration: {selected_version}")
+
+
+def _train_linear(args: argparse.Namespace) -> None:
+    examples = load_training_jsonl(args.dataset)
+    if not examples:
+        raise SystemExit("Training dataset is empty")
+
+    model, metrics = train_hashed_linear(
+        examples,
+        dimension=args.dimension,
+        epochs=args.epochs,
+        learning_rate=args.learning_rate,
+        l2=args.l2,
+        seed=args.seed,
+    )
+    model.save(args.output)
+
+    print(f"Wrote model to {args.output}")
+    print(f"Model id: {model.model_id}")
+    print(f"Training examples: {metrics.examples}")
+    print(f"Training policy cross-entropy: {metrics.policy_cross_entropy:.6f}")
+    print(f"Training policy top-1 accuracy: {100.0 * metrics.policy_top1_accuracy:.1f}%")
+    print(f"Training value RMSE: {metrics.value_rmse:.6f}")
 
 
 def _short_action_id(action_id: str) -> str:
