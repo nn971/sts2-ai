@@ -588,6 +588,16 @@ rollout length. This is intended to distinguish the two leading hypotheses:
 This instrumentation is persisted in SQLite with migration-safe default columns, so old
 evidence databases remain readable.
 
+The completed five-seed depth-16 disagreement report also gives a useful scale for the
+remaining instability. After ignoring semantically equivalent card instances, the largest
+low-to-high-budget relative-value movements were about **0.114** for one early Combat
+root, **0.056** for one Shop root, and **0.028** for another early Combat root. The
+MapChoice flips were much smaller, all below about **0.009** in that run. This suggests
+that the most consequential current search instability is tactical/combat-side rather
+than the tiny near-ties between the two initial route choices. The report command now
+supports `--meaningful-only --sort-by pair-shift` and prints semantic action signatures
+to make these cases easier to inspect in future runs.
+
 A three-seed diagnostic with the new telemetry gives the first direct horizon measurement:
 
 | Depth | Budget | Heuristic rollouts | Terminal | Cutoff | Terminal % | Avg steps |
