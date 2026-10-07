@@ -48,6 +48,10 @@ def test_roundtrip_search_root_and_action_statistics(tmp_path: Path) -> None:
         transitions=200,
         transposition_hits=4,
         search_version="oracle-exact-uct-v1",
+        rollout_count=32,
+        terminal_rollouts=12,
+        cutoff_rollouts=20,
+        rollout_steps=180,
     )
 
     with SQLiteStrategyStore(tmp_path / "nested" / "strategy.sqlite") as store:
@@ -73,6 +77,10 @@ def test_roundtrip_search_root_and_action_statistics(tmp_path: Path) -> None:
     assert root.chosen_action_id == "a"
     assert root.search_budget == 32
     assert root.transitions == 200
+    assert root.rollout_count == 32
+    assert root.terminal_rollouts == 12
+    assert root.cutoff_rollouts == 20
+    assert root.rollout_steps == 180
     assert [item.action_id for item in stored_actions] == ["a", "b"]
     assert [item.action_kind for item in stored_actions] == [
         "take_reward_card",
