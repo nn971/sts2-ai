@@ -477,10 +477,19 @@ victory. This is useful evidence: the old policy's accidental tie-breaking was s
 lucky, while the current legible heuristic is systematically too crude.
 
 The remaining multi-budget disagreements are concentrated in early Combat and initial
-MapChoice roots, with one Reward disagreement. Map-choice action-value gaps are often zero
-or only around 1e-3 at rollout depth 8, while several combat rankings flip by similarly
-small amounts. This points to cutoff horizon/evaluation quality as the next likely
-bottleneck. A common-seed depth-16 ladder is running before changing the evaluator again.
+MapChoice roots, with one Reward disagreement. Persisted action payloads show that two of
+the five reported Combat disagreements are actually **semantically equivalent** choices
+between different instances of the same card (for example, discarding one Strike versus
+another Strike, or playing one Defend instance versus another). Diagnostics now collapse
+these instance-identity differences rather than treating them as strategic disagreements.
+
+The meaningful depth-8 disagreements are therefore five initial MapChoice roots, three
+early Combat roots, and one Reward root. The map choices select different first-floor
+combat nodes whose route consequences only appear downstream; their action-value gaps are
+often zero or around 1e-3. The meaningful combat flips are likewise mostly small. This
+strengthens the case that cutoff horizon/evaluation quality is the next likely bottleneck,
+rather than UCT bookkeeping. A common-seed depth-16 ladder is running before changing the
+evaluator again.
 
 Next:
 
