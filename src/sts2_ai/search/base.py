@@ -8,6 +8,7 @@ from sts2_ai.emulator import LegalAction, StateHandle
 
 @dataclass(frozen=True, slots=True)
 class SearchBudget:
+    max_simulations: int | None = None
     max_nodes: int | None = None
     max_seconds: float | None = None
 
@@ -23,8 +24,11 @@ class ActionEvaluation:
 @dataclass(frozen=True, slots=True)
 class SearchResult:
     root_state_hash: str
+    root_observation_hash: str
     evaluations: tuple[ActionEvaluation, ...]
     expanded_nodes: int
+    transitions: int
+    transposition_hits: int
     search_version: str
 
 

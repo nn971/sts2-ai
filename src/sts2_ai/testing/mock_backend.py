@@ -31,6 +31,10 @@ class MockLinearBackend:
     def emulator_revision(self) -> str:
         return "mock"
 
+    def reset(self, seed: str, ascension: int = 0) -> StateHandle:
+        del seed, ascension
+        return "0"
+
     def legal_actions(self, state: StateHandle) -> Sequence[LegalAction]:
         if self.is_terminal(state):
             return ()
@@ -48,10 +52,23 @@ class MockLinearBackend:
             action=action,
             child=child,
             terminal=self.is_terminal(child),
+            exact_hash=self.exact_hash(child),
         )
 
     def fork(self, state: StateHandle) -> StateHandle:
         return str(state)
+
+    def expand(self, state: StateHandle) -> Sequence[Transition]:
+        return tuple(self.step(state, action) for action in self.legal_actions(state))
+
+    def batch_expand(
+        self,
+        states: Sequence[StateHandle],
+    ) -> tuple[tuple[Transition, ...], ...]:
+        return tuple(tuple(self.expand(state)) for state in states)
+
+    def release_many(self, states: Sequence[StateHandle]) -> int:
+        return len(set(states))
 
     def exact_hash(self, state: StateHandle) -> str:
         return hashlib.sha256(state.encode()).hexdigest()
@@ -67,3 +84,6 @@ class MockLinearBackend:
 
     def is_terminal(self, state: StateHandle) -> bool:
         return int(state) >= self._terminal_at
+
+    def close(self) -> None:
+        return None

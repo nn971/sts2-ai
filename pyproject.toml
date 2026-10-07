@@ -13,6 +13,9 @@ authors = [
 ]
 dependencies = []
 
+[project.scripts]
+sts2-ai = "sts2_ai.cli:main"
+
 [project.optional-dependencies]
 dev = [
   "pytest>=8",
