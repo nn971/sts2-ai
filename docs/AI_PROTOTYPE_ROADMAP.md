@@ -537,6 +537,29 @@ That experiment was rejected and `main` was restored to the previous progress-pl
 cutoff evaluator before adding virtual loss. The lesson is to change one search component
 at a time and demand an empirical gain before keeping extra evaluator features.
 
+### Mean-preserving depth-16 comparison
+
+The pending five-seed depth-16 run completed successfully using the same benchmark seeds
+and the mean-preserving batched-UCT reservation. The directly comparable depth-8 and
+depth-16 results are:
+
+| Agent | Depth 8 frontier | Depth 16 frontier | Change |
+| --- | ---: | ---: | ---: |
+| MCTS-8 | 5.162 | 4.665 | -0.497 |
+| MCTS-32 | 4.574 | 5.206 | +0.632 |
+
+The depth-16 run also measured MCTS-128 at frontier progress **6.469** and terminal
+progress **7.20**, substantially ahead of the heuristic baseline at 4.061 / 4.60.
+On paired seeds, depth-16 MCTS-8 / 32 / 128 improved frontier progress over the heuristic
+by +0.604 / +1.145 / +2.408 respectively; each was better on four seeds and tied on one.
+
+This is a useful interaction rather than a simple "deeper is always better" result.
+At budget 32, doubling the rollout horizon materially improves run strength. At budget 8,
+the same change hurts. The most plausible current interpretation is that a longer heuristic
+continuation contains useful strategic signal, but very small UCT budgets sample it too
+sparsely to exploit it reliably. The new terminal-versus-cutoff telemetry is intended to
+separate this from cutoff-value error in the next compact diagnostic.
+
 ### Horizon and disagreement instrumentation
 
 The search diagnostics now expose two measurements needed for the next comparison.
@@ -567,14 +590,13 @@ evidence databases remain readable.
 
 Next:
 
-1. compare rollout depth 8 versus 16 using the mean-preserving reservation on the same
-   five-seed 8/32/128 ladder;
-2. compare the rollout terminal/cutoff fractions alongside run strength;
-3. inspect the largest semantically meaningful Combat, MapChoice, and Reward flips using
+1. compare the rollout terminal/cutoff fractions for depth 8 versus 16 alongside the
+   completed strength comparison;
+2. inspect the largest semantically meaningful Combat, MapChoice, and Reward flips using
    `strategy-report --meaningful-only --sort-by pair-shift`;
-4. decide whether the dominant remaining error is cutoff evaluation or rollout policy;
-5. improve that component and repeat the common-seed ladder;
-6. extend to 512 simulations only after the 8/32/128 curve is better understood.
+3. decide whether the dominant remaining error is cutoff evaluation or rollout policy;
+4. improve that component and repeat the common-seed ladder;
+5. extend to 512 simulations only after the 8/32/128 curve is better understood.
 
 
 ## Immediate implementation sprint
