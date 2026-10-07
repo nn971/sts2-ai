@@ -588,6 +588,26 @@ rollout length. This is intended to distinguish the two leading hypotheses:
 This instrumentation is persisted in SQLite with migration-safe default columns, so old
 evidence databases remain readable.
 
+A three-seed diagnostic with the new telemetry gives the first direct horizon measurement:
+
+| Depth | Budget | Heuristic rollouts | Terminal | Cutoff | Terminal % | Avg steps |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 8 | 8 | 1669 | 238 | 1431 | 14.3% | 7.57 |
+| 8 | 32 | 6395 | 957 | 5438 | 15.0% | 7.59 |
+| 16 | 8 | 1948 | 401 | 1547 | 20.6% | 14.63 |
+| 16 | 32 | 9488 | 1593 | 7895 | 16.8% | 14.74 |
+
+The average rollout length sits very near the configured cap, and roughly 79–85% of the
+depth-16 heuristic rollouts still finish at the cutoff rather than a run terminal. This
+confirms that the cutoff evaluator remains heavily exercised. "Terminal" here means the
+whole prototype run ended, so the number should be interpreted mainly as a horizon
+diagnostic rather than as proof that the cutoff function itself is wrong.
+
+On the same three seeds, frontier progress moved from 5.111 / 5.094 at depth 8 to
+5.230 / 5.235 at depth 16 for MCTS-8 / 32. Together with the five-seed MCTS-32 gain,
+this is enough evidence to test a still longer horizon before adding more hand-engineered
+cutoff features. A depth-32 3-seed probe is the next compact experiment.
+
 Next:
 
 1. compare the rollout terminal/cutoff fractions for depth 8 versus 16 alongside the
