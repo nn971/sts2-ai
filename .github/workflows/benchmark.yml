@@ -58,6 +58,7 @@ jobs:
         shell: bash
         run: |
           sts2-ai strategy-report results/strategy.sqlite --limit 50 \
+            --json-output results/strategy-report.json \
             | tee results/strategy-report.md
       - uses: actions/upload-artifact@v4
         with:
@@ -67,4 +68,5 @@ jobs:
             results/benchmark.md
             results/strategy.sqlite
             results/strategy-report.md
+            results/strategy-report.json
           if-no-files-found: error
