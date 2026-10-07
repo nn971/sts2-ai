@@ -67,6 +67,7 @@ class DisagreementDiagnostic:
 class PhaseDisagreementSummary:
     phase: str
     roots: int
+    unvisited_selection: int
     value_ranking_flips: int
     visit_selection: int
     mixed: int
@@ -134,12 +135,18 @@ def diagnose_budget_disagreements(
             and high_delta is not None
             and low_delta * high_delta < 0.0
         )
+        unvisited_selection = any(
+            decision.chosen_visits == 0
+            for decision in decisions
+        )
         selection_mismatch = any(
             decision.selection_regret > 1e-12
             for decision in decisions
         )
 
-        if value_flip and selection_mismatch:
+        if unvisited_selection:
+            classification = "unvisited-selection"
+        elif value_flip and selection_mismatch:
             classification = "mixed"
         elif value_flip:
             classification = "value-ranking-flip"
@@ -228,6 +235,10 @@ def _phase_summaries(
             PhaseDisagreementSummary(
                 phase=phase,
                 roots=len(phase_roots),
+                unvisited_selection=sum(
+                    root.classification == "unvisited-selection"
+                    for root in phase_roots
+                ),
                 value_ranking_flips=sum(
                     root.classification == "value-ranking-flip"
                     for root in phase_roots
