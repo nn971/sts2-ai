@@ -524,8 +524,8 @@ Unit tests cover the accounting identity, mean preservation, and within-batch se
 effect.
 
 Search evidence now fingerprints the full search configuration in `search_version`:
-rollout depth, rollout batch size, virtual loss, UCT exploration constant, rollout-policy
-identifier, and cutoff-value identifier. This prevents experiments that reuse the same
+rollout depth, rollout batch size, rollout mode, virtual loss, UCT exploration constant,
+rollout-policy identifier, and cutoff-value identifier. This prevents experiments that reuse the same
 SQLite database from silently overwriting evidence produced with a different search
 configuration. `strategy-report` also scopes diagnostics to one such configuration and
 asks for `--search-version` when a database contains several.
@@ -648,18 +648,35 @@ This is the first concrete hierarchical-search primitive in the parent project. 
 purpose is to test whether evaluating a completed fight is a better tactical search target
 than evaluating an arbitrary mid-combat decision count.
 
+The three-seed depth-32 probe is now complete:
+
+| Mode | Budget | Frontier | Time/run | Resolved % | Avg rollout steps |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| fixed | 8 | 5.072 | 13.562 s | 21.0% | 28.25 |
+| combat-exit | 8 | 4.692 | 12.474 s | 70.4% | 16.09 |
+| fixed | 32 | 5.164 | 66.348 s | 22.0% | 28.85 |
+| combat-exit | 32 | 5.111 | 33.023 s | 82.8% | 14.37 |
+
+Combat-exit therefore works well as a **computational boundary primitive**: at budget 32
+it roughly halves rollout/search time and converts most rollouts from arbitrary cutoffs to
+a run terminal or post-combat boundary. On these seeds it did not improve strength, and
+at budget 8 it was clearly worse. Depth-16 fixed rollouts also remained stronger on this
+small comparison (5.230 / 5.235 frontier at budgets 8 / 32).
+
+This rejects the simple hypothesis that "finish the current fight and evaluate there" is
+already a stronger rollout target with the current heuristic. The next bottleneck is more
+likely the rollout policy itself: a completed combat reached by a weak tactical policy can
+still be a poor value sample. Combat-exit remains useful infrastructure for later
+hierarchical search.
+
 Next:
 
-1. compare fixed depth-32 against combat-exit depth-32 on the same three seeds at budgets
-   8 and 32;
-2. inspect the combat-boundary rate and average rollout length to see how much of the
-   extra horizon is actually needed to finish fights;
-3. inspect the largest semantically meaningful Combat disagreements with
-   `strategy-report --meaningful-only --sort-by pair-shift`;
-4. if combat-exit improves the curve, promote a combat-specific horizon/safety-cap policy
-   and test it on the five-seed 8/32/128 ladder;
-5. otherwise, turn next to the rollout policy rather than adding more generic depth;
-6. extend to 512 simulations only after the 8/32/128 curve is better understood.
+1. improve the deliberately small combat rollout heuristic without adding a large
+   hand-authored expert system;
+2. repeat the three-seed fixed-depth-16 8/32 probe before changing search mechanics again;
+3. if the rollout-policy change helps, run the five-seed 8/32/128 ladder;
+4. keep combat-exit available as a later tactical macro-transition experiment;
+5. extend to 512 simulations only after the 8/32/128 curve is better understood.
 
 
 ## Immediate implementation sprint
