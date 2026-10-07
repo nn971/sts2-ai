@@ -415,22 +415,30 @@ class SQLiteStrategyStore:
         information_policy: str,
         *,
         search_regime: str = "oracle-exact",
+        search_version: str | None = None,
     ) -> tuple[str, ...]:
         """Exact roots searched at multiple budgets that chose different actions."""
 
+        version_clause = ""
+        parameters: tuple[str, ...] = (information_policy, search_regime)
+        if search_version is not None:
+            version_clause = " AND search_version = ?"
+            parameters += (search_version,)
+
         rows = self._connection.execute(
-            """
+            f"""
             SELECT state_hash
             FROM search_root_evidence
             WHERE information_policy = ? AND search_regime = ?
+            {version_clause}
             GROUP BY state_hash
             HAVING COUNT(DISTINCT search_budget) > 1
                AND COUNT(DISTINCT chosen_action_id) > 1
             ORDER BY state_hash ASC
             """,
-            (information_policy, search_regime),
+            parameters,
         ).fetchall()
-        return tuple(row[0] for row in rows)
+        return tuple(str(row[0]) for row in rows)
 
     def search_for_state(
         self,
@@ -438,18 +446,30 @@ class SQLiteStrategyStore:
         information_policy: str,
         *,
         search_regime: str = "oracle-exact",
+        search_version: str | None = None,
     ) -> tuple[tuple[SearchRootEvidence, tuple[SearchActionEvidence, ...]], ...]:
+        version_clause = ""
+        parameters: tuple[str, ...] = (
+            state_hash,
+            information_policy,
+            search_regime,
+        )
+        if search_version is not None:
+            version_clause = " AND search_version = ?"
+            parameters += (search_version,)
+
         roots = self._connection.execute(
-            """
+            f"""
             SELECT state_hash, observation_hash, information_policy, search_regime,
                    legal_action_ids_json, chosen_action_id, search_budget,
                    expanded_nodes, transitions, transposition_hits, search_version,
                    model_id, emulator_revision, game_build
             FROM search_root_evidence
             WHERE state_hash = ? AND information_policy = ? AND search_regime = ?
+            {version_clause}
             ORDER BY search_budget ASC, search_version ASC
             """,
-            (state_hash, information_policy, search_regime),
+            parameters,
         ).fetchall()
 
         results = []
