@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from sts2_ai.agents import OracleMctsAgent
 from sts2_ai.emulator import LegalAction, Observation
 from sts2_ai.search import ActionEvaluation, SearchResult
@@ -44,6 +46,10 @@ def test_oracle_mcts_never_prefers_unvisited_zero_placeholder() -> None:
         transitions=8,
         transposition_hits=0,
         search_version="test-search",
+        rollout_count=8,
+        terminal_rollouts=3,
+        cutoff_rollouts=5,
+        rollout_steps=40,
     )
 
     agent = OracleMctsAgent(_FakeSearch(result), simulations=8)  # type: ignore[arg-type]
@@ -54,6 +60,11 @@ def test_oracle_mcts_never_prefers_unvisited_zero_placeholder() -> None:
     )
 
     assert decision.action == searched
+    metadata = json.loads(decision.metadata_json)
+    assert metadata["rollout_count"] == 8
+    assert metadata["terminal_rollouts"] == 3
+    assert metadata["cutoff_rollouts"] == 5
+    assert metadata["rollout_steps"] == 40
 
 
 def test_oracle_mcts_uses_best_mean_among_visited_actions() -> None:
