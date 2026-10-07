@@ -31,7 +31,7 @@ class HeuristicAgent:
             for action in legal_actions
         ]
         _, _, action = max(scored)
-        return Decision(action=action, policy_name="heuristic-v1")
+        return Decision(action=action, policy_name="heuristic-v2-payload-aware")
 
     def _score(self, state: dict[str, Any], action: LegalAction) -> float:
         kind = action.kind
