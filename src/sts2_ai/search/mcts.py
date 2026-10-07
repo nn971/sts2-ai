@@ -74,7 +74,7 @@ class _RolloutState:
 class UctMcts:
     """Transposition-aware oracle-exact UCT with batched heuristic rollouts."""
 
-    search_version = "oracle-exact-light-rollout-uct-v6-payload-aware-rollout"
+    search_version = "oracle-exact-light-rollout-uct-v7-virtual-loss"
 
     def __init__(
         self,
@@ -86,12 +86,15 @@ class UctMcts:
         exploration: float = math.sqrt(2.0),
         rollout_depth: int = 128,
         rollout_batch_size: int = 8,
+        virtual_loss: float = -1.0,
         seed: int = 0,
     ) -> None:
         if rollout_depth < 0:
             raise ValueError("rollout_depth must be non-negative")
         if rollout_batch_size <= 0:
             raise ValueError("rollout_batch_size must be positive")
+        if not -1.0 <= virtual_loss <= 1.0:
+            raise ValueError("virtual_loss must lie in [-1, 1]")
         self._backend = backend
         self._policy = policy
         self._rollout_policy = rollout_policy
@@ -99,6 +102,7 @@ class UctMcts:
         self._exploration = exploration
         self._rollout_depth = rollout_depth
         self._rollout_batch_size = rollout_batch_size
+        self._virtual_loss = virtual_loss
         self._rng = random.Random(seed)
 
     def search(self, state: StateHandle, budget: SearchBudget) -> SearchResult:
@@ -167,7 +171,7 @@ class UctMcts:
                     if deadline is not None and time.monotonic() >= deadline:
                         break
                     simulation = self._select_simulation(root, table, expand)
-                    self._reserve(simulation)
+                    self._reserve(simulation, self._virtual_loss)
                     pending.append(simulation)
 
                 if not pending:
@@ -188,7 +192,7 @@ class UctMcts:
                     value = simulation.immediate_value
                     if value is None:
                         value = next(value_iter)
-                    self._backup_reserved(simulation, value)
+                    self._backup_reserved(simulation, value, self._virtual_loss)
 
                 completed += len(pending)
         finally:
@@ -292,19 +296,32 @@ class UctMcts:
                 )
 
     @staticmethod
-    def _reserve(simulation: _PendingSimulation) -> None:
-        # Zero-value virtual visits diversify the other selections in this batch.
+    def _reserve(
+        simulation: _PendingSimulation,
+        virtual_loss: float,
+    ) -> None:
+        # Pending simulations participate in UCT immediately. The temporary
+        # pessimistic value keeps one batch from repeatedly selecting a branch
+        # before any rollout in that batch has returned.
         for node in simulation.path_nodes:
             node.visits += 1
+            node.value_sum += virtual_loss
         for edge in simulation.path_edges:
             edge.visits += 1
+            edge.value_sum += virtual_loss
 
     @staticmethod
-    def _backup_reserved(simulation: _PendingSimulation, value: float) -> None:
+    def _backup_reserved(
+        simulation: _PendingSimulation,
+        value: float,
+        virtual_loss: float,
+    ) -> None:
+        # Replace the temporary virtual loss by the actual rollout value.
+        correction = value - virtual_loss
         for node in simulation.path_nodes:
-            node.value_sum += value
+            node.value_sum += correction
         for edge in simulation.path_edges:
-            edge.value_sum += value
+            edge.value_sum += correction
 
     def _zero_budget_result(self, state: StateHandle) -> SearchResult:
         node = self._make_node(state)
