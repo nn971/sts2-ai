@@ -20,6 +20,9 @@ from .base import ActionEvaluation, SearchBudget, SearchResult
 
 ValueFunction = Callable[[Observation], float]
 
+_SEARCH_ALGORITHM_VERSION = "oracle-exact-light-rollout-uct-v8-configured"
+_CUTOFF_VALUE_VERSION = "sts2-value-v2-progress-hp"
+
 
 class _RolloutDecision(Protocol):
     @property
@@ -74,8 +77,6 @@ class _RolloutState:
 class UctMcts:
     """Transposition-aware oracle-exact UCT with batched heuristic rollouts."""
 
-    search_version = "oracle-exact-light-rollout-uct-v7-virtual-loss"
-
     def __init__(
         self,
         backend: EmulatorBackend,
@@ -103,6 +104,14 @@ class UctMcts:
         self._rollout_depth = rollout_depth
         self._rollout_batch_size = rollout_batch_size
         self._virtual_loss = virtual_loss
+        self.search_version = _configured_search_version(
+            rollout_policy=rollout_policy,
+            value_fn=value_fn,
+            exploration=exploration,
+            rollout_depth=rollout_depth,
+            rollout_batch_size=rollout_batch_size,
+            virtual_loss=virtual_loss,
+        )
         self._rng = random.Random(seed)
 
     def search(self, state: StateHandle, budget: SearchBudget) -> SearchResult:
@@ -463,6 +472,41 @@ class UctMcts:
             visits=edge.visits,
             uncertainty=uncertainty,
         )
+
+
+def _configured_search_version(
+    *,
+    rollout_policy: RolloutPolicy,
+    value_fn: ValueFunction | None,
+    exploration: float,
+    rollout_depth: int,
+    rollout_batch_size: int,
+    virtual_loss: float,
+) -> str:
+    rollout_id = getattr(
+        rollout_policy,
+        "policy_id",
+        f"{type(rollout_policy).__module__}.{type(rollout_policy).__qualname__}",
+    )
+    actual_value_fn = value_fn or sts2_value
+    value_id = (
+        _CUTOFF_VALUE_VERSION
+        if value_fn is None
+        else getattr(
+            actual_value_fn,
+            "value_id",
+            getattr(actual_value_fn, "__name__", type(actual_value_fn).__qualname__),
+        )
+    )
+    return (
+        f"{_SEARCH_ALGORITHM_VERSION}"
+        f"|depth={rollout_depth}"
+        f"|batch={rollout_batch_size}"
+        f"|vl={virtual_loss:.6g}"
+        f"|c={exploration:.6g}"
+        f"|rollout={rollout_id}"
+        f"|value={value_id}"
+    )
 
 
 def sts2_value(observation: Observation) -> float:
