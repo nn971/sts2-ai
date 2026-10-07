@@ -74,7 +74,7 @@ class _RolloutState:
 class UctMcts:
     """Transposition-aware oracle-exact UCT with batched heuristic rollouts."""
 
-    search_version = "oracle-exact-light-rollout-uct-v5-tactical-value"
+    search_version = "oracle-exact-light-rollout-uct-v6-payload-aware-rollout"
 
     def __init__(
         self,
