@@ -42,6 +42,12 @@ def main() -> None:
     evaluate = sub.add_parser("evaluate", help="run whole-run emulator baselines")
     evaluate.add_argument("--agent", choices=("random", "heuristic", "mcts"), required=True)
     evaluate.add_argument("--budget", type=int, default=32, help="MCTS simulations per decision")
+    evaluate.add_argument(
+        "--rollout-batch-size",
+        type=int,
+        default=8,
+        help="number of pending UCT simulations whose heuristic rollouts are advanced together",
+    )
     evaluate.add_argument("--seeds", type=int, default=10, help="number of deterministic run seeds")
     evaluate.add_argument("--seed-prefix", default="eval")
     evaluate.add_argument("--agent-seed", type=int, default=0)
@@ -88,6 +94,8 @@ def _evaluate(args: argparse.Namespace) -> None:
         raise SystemExit("--seeds must be positive")
     if args.budget < 0:
         raise SystemExit("--budget must be non-negative")
+    if args.rollout_batch_size <= 0:
+        raise SystemExit("--rollout-batch-size must be positive")
 
     policy = InformationPolicy(FAIR_POLICY_ID)
     summaries = []
@@ -115,6 +123,7 @@ def _evaluate(args: argparse.Namespace) -> None:
                         backend,
                         policy=policy,
                         rollout_policy=HeuristicAgent(),
+                        rollout_batch_size=args.rollout_batch_size,
                         seed=args.agent_seed + index,
                     )
 
@@ -188,6 +197,9 @@ def _evaluate(args: argparse.Namespace) -> None:
         payload = {
             "agent": label,
             "budget": args.budget if args.agent == "mcts" else None,
+            "rollout_batch_size": (
+                args.rollout_batch_size if args.agent == "mcts" else None
+            ),
             "runs": [asdict(summary) for summary in summaries],
             "bridge_profile": {
                 operation: asdict(stats)
