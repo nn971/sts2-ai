@@ -44,6 +44,10 @@ def record_search_result(
         model_id=model_id,
         emulator_revision=emulator_revision,
         game_build=game_build,
+        rollout_count=result.rollout_count,
+        terminal_rollouts=result.terminal_rollouts,
+        cutoff_rollouts=result.cutoff_rollouts,
+        rollout_steps=result.rollout_steps,
     )
     actions = tuple(
         SearchActionEvidence(
