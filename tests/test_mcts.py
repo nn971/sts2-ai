@@ -29,7 +29,7 @@ def test_mcts_runs_budget_and_hits_transpositions() -> None:
     assert result.transitions > 0
     assert result.expanded_nodes > 0
     assert result.transposition_hits > 0
-    assert result.search_version == "oracle-exact-light-rollout-uct-v7-tactical-cutoff"
+    assert result.search_version == "oracle-exact-light-rollout-uct-v6-payload-aware-rollout"
     assert {item.action.action_id for item in result.evaluations} == {"inc-1", "inc-2"}
 
 
