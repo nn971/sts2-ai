@@ -4,16 +4,34 @@ import json
 import math
 import random
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
-from sts2_ai.agents import HeuristicAgent
-from sts2_ai.emulator import EmulatorBackend, InformationPolicy, LegalAction, Observation, StateHandle
+from sts2_ai.emulator import (
+    EmulatorBackend,
+    InformationPolicy,
+    LegalAction,
+    Observation,
+    StateHandle,
+)
 
 from .base import ActionEvaluation, SearchBudget, SearchResult
 
 ValueFunction = Callable[[Observation], float]
+
+
+class _RolloutDecision(Protocol):
+    @property
+    def action(self) -> LegalAction: ...
+
+
+class RolloutPolicy(Protocol):
+    def choose(
+        self,
+        observation: Observation,
+        legal_actions: Sequence[LegalAction],
+    ) -> _RolloutDecision: ...
 
 
 @dataclass(slots=True)
@@ -47,7 +65,7 @@ class UctMcts:
         backend: EmulatorBackend,
         *,
         policy: InformationPolicy,
-        rollout_policy: HeuristicAgent | None = None,
+        rollout_policy: RolloutPolicy,
         value_fn: ValueFunction | None = None,
         exploration: float = math.sqrt(2.0),
         rollout_depth: int = 128,
@@ -57,7 +75,7 @@ class UctMcts:
             raise ValueError("rollout_depth must be non-negative")
         self._backend = backend
         self._policy = policy
-        self._rollout_policy = rollout_policy or HeuristicAgent()
+        self._rollout_policy = rollout_policy
         self._value_fn = value_fn or sts2_value
         self._exploration = exploration
         self._rollout_depth = rollout_depth
@@ -116,7 +134,6 @@ class UctMcts:
                 )
             node.expanded = True
 
-        completed_simulations = 0
         try:
             for _ in range(simulations):
                 if deadline is not None and time.monotonic() >= deadline:
@@ -163,7 +180,6 @@ class UctMcts:
                 for visited_edge in path_edges:
                     visited_edge.visits += 1
                     visited_edge.value_sum += value
-                completed_simulations += 1
         finally:
             if created_handles:
                 self._backend.release_many(tuple(created_handles))
@@ -228,7 +244,8 @@ class UctMcts:
     def _choose_unvisited_or_uct(self, node: _Node) -> _Edge:
         unvisited = [edge for edge in node.edges.values() if edge.visits == 0]
         if unvisited:
-            return self._rng.choice(sorted(unvisited, key=lambda edge: edge.action.action_id))
+            ordered = sorted(unvisited, key=lambda edge: edge.action.action_id)
+            return self._rng.choice(ordered)
 
         log_parent = math.log(max(1, node.visits))
         return max(
