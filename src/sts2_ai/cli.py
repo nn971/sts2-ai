@@ -75,6 +75,13 @@ def main() -> None:
             "omit for mean-preserving reservations"
         ),
     )
+    evaluate.add_argument(
+        "--finish-combat-rollouts",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="extend a cutoff rollout until its current combat ends",
+    )
+    evaluate.add_argument("--combat-extension-depth", type=int, default=64)
     evaluate.add_argument("--seeds", type=int, default=10, help="number of deterministic run seeds")
     evaluate.add_argument("--seed-prefix", default="eval")
     evaluate.add_argument("--agent-seed", type=int, default=0)
@@ -115,6 +122,12 @@ def main() -> None:
     benchmark.add_argument("--rollout-depth", type=int, default=8)
     benchmark.add_argument("--rollout-batch-size", type=int, default=8)
     benchmark.add_argument("--virtual-loss", type=float)
+    benchmark.add_argument(
+        "--finish-combat-rollouts",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+    )
+    benchmark.add_argument("--combat-extension-depth", type=int, default=64)
     benchmark.add_argument("--repo-root", type=Path, default=Path.cwd())
     benchmark.add_argument("--no-build", action="store_true")
     benchmark.add_argument(
@@ -184,6 +197,8 @@ def _evaluate(args: argparse.Namespace) -> None:
         raise SystemExit("--rollout-batch-size must be positive")
     if args.virtual_loss is not None and not -1.0 <= args.virtual_loss <= 1.0:
         raise SystemExit("--virtual-loss must lie in [-1, 1]")
+    if args.combat_extension_depth < 0:
+        raise SystemExit("--combat-extension-depth must be non-negative")
 
     policy = InformationPolicy(FAIR_POLICY_ID)
     summaries = []
@@ -214,6 +229,8 @@ def _evaluate(args: argparse.Namespace) -> None:
                         rollout_depth=args.rollout_depth,
                         rollout_batch_size=args.rollout_batch_size,
                         virtual_loss=args.virtual_loss,
+                        finish_combat_rollouts=args.finish_combat_rollouts,
+                        combat_extension_depth=args.combat_extension_depth,
                         seed=args.agent_seed + index,
                     )
 
@@ -292,6 +309,12 @@ def _evaluate(args: argparse.Namespace) -> None:
                 args.rollout_batch_size if args.agent == "mcts" else None
             ),
             "virtual_loss": args.virtual_loss if args.agent == "mcts" else None,
+            "finish_combat_rollouts": (
+                args.finish_combat_rollouts if args.agent == "mcts" else None
+            ),
+            "combat_extension_depth": (
+                args.combat_extension_depth if args.agent == "mcts" else None
+            ),
             "runs": [asdict(summary) for summary in summaries],
             "bridge_profile": {
                 operation: asdict(stats)
@@ -328,6 +351,8 @@ def _benchmark(args: argparse.Namespace) -> None:
         raise SystemExit("--rollout-batch-size must be positive")
     if args.virtual_loss is not None and not -1.0 <= args.virtual_loss <= 1.0:
         raise SystemExit("--virtual-loss must lie in [-1, 1]")
+    if args.combat_extension_depth < 0:
+        raise SystemExit("--combat-extension-depth must be non-negative")
 
     budgets = sorted(args.budgets)
     policy = InformationPolicy(FAIR_POLICY_ID)
@@ -437,6 +462,8 @@ def _benchmark(args: argparse.Namespace) -> None:
             "rollout_depth": args.rollout_depth,
             "rollout_batch_size": args.rollout_batch_size,
             "virtual_loss": args.virtual_loss,
+            "finish_combat_rollouts": args.finish_combat_rollouts,
+            "combat_extension_depth": args.combat_extension_depth,
             "rows": [asdict(row) for row in rows],
             "paired_vs_heuristic": [asdict(row) for row in paired],
             "runs": serialized_runs,
