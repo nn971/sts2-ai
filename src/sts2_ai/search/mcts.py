@@ -208,6 +208,7 @@ class UctMcts:
         return SearchResult(
             root_state_hash=root.exact_hash,
             root_observation_hash=root.observation.observation_hash,
+            root_observation_json=root.observation.payload_json,
             evaluations=evaluations,
             expanded_nodes=sum(1 for node in table.values() if node.expanded),
             transitions=transitions,
@@ -310,6 +311,7 @@ class UctMcts:
         return SearchResult(
             root_state_hash=node.exact_hash,
             root_observation_hash=node.observation.observation_hash,
+            root_observation_json=node.observation.payload_json,
             evaluations=tuple(
                 ActionEvaluation(action=action, value=0.0, visits=0)
                 for action in node.legal_actions

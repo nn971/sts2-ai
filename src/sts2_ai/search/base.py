@@ -25,6 +25,7 @@ class ActionEvaluation:
 class SearchResult:
     root_state_hash: str
     root_observation_hash: str
+    root_observation_json: str
     evaluations: tuple[ActionEvaluation, ...]
     expanded_nodes: int
     transitions: int

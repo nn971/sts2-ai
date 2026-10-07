@@ -3,7 +3,7 @@ from __future__ import annotations
 from sts2_ai.emulator import LegalAction
 from sts2_ai.search import SearchResult
 
-from .schema import SearchActionEvidence, SearchRootEvidence
+from .schema import SearchActionEvidence, SearchObservationEvidence, SearchRootEvidence
 from .sqlite_store import SQLiteStrategyStore
 
 
@@ -19,6 +19,14 @@ def record_search_result(
     game_build: str,
     model_id: str | None = None,
 ) -> None:
+    store.upsert_search_observation(
+        SearchObservationEvidence(
+            observation_hash=result.root_observation_hash,
+            information_policy=information_policy,
+            payload_json=result.root_observation_json,
+        )
+    )
+
     root = SearchRootEvidence(
         state_hash=result.root_state_hash,
         observation_hash=result.root_observation_hash,

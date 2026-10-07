@@ -36,6 +36,7 @@ def test_roundtrip_search_root_and_action_statistics(tmp_path: Path) -> None:
     result = SearchResult(
         root_state_hash="state-search",
         root_observation_hash="obs-search",
+        root_observation_json='{"phase":"reward"}',
         evaluations=(
             ActionEvaluation(actions[0], value=0.7, visits=20, uncertainty=0.1),
             ActionEvaluation(actions[1], value=0.2, visits=12, uncertainty=0.2),
@@ -61,7 +62,13 @@ def test_roundtrip_search_root_and_action_statistics(tmp_path: Path) -> None:
             "state-search",
             "prototype-fair-v0",
         )
+        observation = store.observation(
+            "obs-search",
+            "prototype-fair-v0",
+        )
 
+    assert observation is not None
+    assert observation.payload_json == '{"phase":"reward"}'
     assert len(records) == 1
     root, stored_actions = records[0]
     assert root.observation_hash == "obs-search"

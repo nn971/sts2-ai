@@ -5,7 +5,12 @@ import sqlite3
 from collections.abc import Sequence
 from pathlib import Path
 
-from .schema import SearchActionEvidence, SearchRootEvidence, StrategicEvidence
+from .schema import (
+    SearchActionEvidence,
+    SearchObservationEvidence,
+    SearchRootEvidence,
+    StrategicEvidence,
+)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS strategic_evidence (
@@ -30,6 +35,13 @@ CREATE TABLE IF NOT EXISTS strategic_evidence (
 );
 CREATE INDEX IF NOT EXISTS idx_evidence_state
 ON strategic_evidence(state_hash, information_policy);
+
+CREATE TABLE IF NOT EXISTS search_observation_evidence (
+    observation_hash TEXT NOT NULL,
+    information_policy TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    PRIMARY KEY (observation_hash, information_policy)
+);
 
 CREATE TABLE IF NOT EXISTS search_root_evidence (
     state_hash TEXT NOT NULL,
@@ -154,6 +166,43 @@ class SQLiteStrategyStore:
             (state_hash, information_policy),
         ).fetchall()
         return tuple(StrategicEvidence(*row) for row in rows)
+
+    def upsert_search_observation(
+        self,
+        observation: SearchObservationEvidence,
+    ) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO search_observation_evidence (
+                    observation_hash, information_policy, payload_json
+                ) VALUES (?, ?, ?)
+                ON CONFLICT (observation_hash, information_policy)
+                DO UPDATE SET payload_json = excluded.payload_json
+                """,
+                (
+                    observation.observation_hash,
+                    observation.information_policy,
+                    observation.payload_json,
+                ),
+            )
+
+    def observation(
+        self,
+        observation_hash: str,
+        information_policy: str,
+    ) -> SearchObservationEvidence | None:
+        row = self._connection.execute(
+            """
+            SELECT observation_hash, information_policy, payload_json
+            FROM search_observation_evidence
+            WHERE observation_hash = ? AND information_policy = ?
+            """,
+            (observation_hash, information_policy),
+        ).fetchone()
+        if row is None:
+            return None
+        return SearchObservationEvidence(*row)
 
     def upsert_search(
         self,

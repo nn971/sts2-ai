@@ -51,3 +51,10 @@ class SearchActionEvidence:
     model_id: str | None
     emulator_revision: str
     game_build: str
+
+
+@dataclass(frozen=True, slots=True)
+class SearchObservationEvidence:
+    observation_hash: str
+    information_policy: str
+    payload_json: str
