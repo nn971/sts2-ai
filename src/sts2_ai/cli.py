@@ -22,9 +22,9 @@ from sts2_ai.emulator import (
     LegalAction,
 )
 from sts2_ai.evaluation import (
+    RunSummary,
     collect_experiment_manifest,
     compare_paired_runs,
-    RunSummary,
     markdown_table,
     paired_markdown_table,
     play_run,
