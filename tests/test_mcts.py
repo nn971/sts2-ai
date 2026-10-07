@@ -187,9 +187,18 @@ def test_search_version_changes_with_search_configuration() -> None:
         rollout_batch_size=8,
         virtual_loss=0.0,
     )
+    finish_combat = UctMcts(
+        backend,
+        policy=policy,
+        rollout_policy=HeuristicAgent(),
+        rollout_depth=8,
+        rollout_batch_size=8,
+        finish_combat_rollouts=True,
+    )
 
     assert base.search_version != different_depth.search_version
     assert base.search_version != zero_virtual_loss.search_version
+    assert base.search_version != finish_combat.search_version
 
 
 def test_mean_preserving_reservation_keeps_existing_q_estimate() -> None:
@@ -232,3 +241,79 @@ def test_mean_preserving_reservation_keeps_existing_q_estimate() -> None:
     mcts.UctMcts._backup_reserved(pending, -0.1, reservation)
     assert node.value_sum == pytest.approx((-3.5) + (-0.1))
     assert edge.value_sum == pytest.approx((-1.2) + (-0.1))
+
+
+class _MockCombatBackend(MockLinearBackend):
+    def observe(
+        self,
+        state: str,
+        policy: InformationPolicy,
+    ) -> Observation:
+        value = int(state)
+        phase = 3 if value < 3 else 2
+        payload = json.dumps({"value": value, "phase": phase}, sort_keys=True)
+        return Observation(
+            policy_id=policy.policy_id,
+            payload_json=payload,
+            observation_hash=f"{policy.policy_id}:{state}:{phase}",
+        )
+
+
+def test_finish_combat_rollout_extends_only_while_combat_is_active() -> None:
+    import sts2_ai.search.mcts as mcts
+
+    backend = _MockCombatBackend(terminal_at=20)
+    policy = InformationPolicy("fair-test")
+    search = UctMcts(
+        backend,
+        policy=policy,
+        rollout_policy=HeuristicAgent(),
+        value_fn=_mock_value,
+        rollout_depth=1,
+        rollout_batch_size=1,
+        finish_combat_rollouts=True,
+        combat_extension_depth=4,
+        seed=0,
+    )
+    start = mcts._Node(
+        handle="0",
+        exact_hash=backend.exact_hash("0"),
+        observation=backend.observe("0", policy),
+        legal_actions=tuple(backend.legal_actions("0")),
+        terminal=False,
+    )
+
+    values, transitions = search._rollout_batch((start,))
+
+    assert transitions == 2
+    assert values == pytest.approx((0.4,))
+
+
+def test_fixed_rollout_still_stops_at_nominal_depth_inside_combat() -> None:
+    import sts2_ai.search.mcts as mcts
+
+    backend = _MockCombatBackend(terminal_at=20)
+    policy = InformationPolicy("fair-test")
+    search = UctMcts(
+        backend,
+        policy=policy,
+        rollout_policy=HeuristicAgent(),
+        value_fn=_mock_value,
+        rollout_depth=1,
+        rollout_batch_size=1,
+        finish_combat_rollouts=False,
+        combat_extension_depth=4,
+        seed=0,
+    )
+    start = mcts._Node(
+        handle="0",
+        exact_hash=backend.exact_hash("0"),
+        observation=backend.observe("0", policy),
+        legal_actions=tuple(backend.legal_actions("0")),
+        terminal=False,
+    )
+
+    values, transitions = search._rollout_batch((start,))
+
+    assert transitions == 1
+    assert values == pytest.approx((0.2,))
