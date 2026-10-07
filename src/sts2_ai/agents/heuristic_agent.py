@@ -164,23 +164,27 @@ class HeuristicAgent:
     @staticmethod
     def _map_score(room_type: object, hp_ratio: float) -> float:
         # PrototypeRoomType: Combat=0, Elite=1, Event=2, Shop=3, Rest=4, Boss=5.
+        if not isinstance(room_type, int):
+            return 0.0
         if hp_ratio < 0.45:
-            return {
+            low_hp_scores: dict[int, float] = {
                 4: 10.0,
                 3: 7.0,
                 2: 6.0,
                 0: 3.0,
                 1: 0.0,
                 5: -1.0,
-            }.get(room_type, 0.0)
-        return {
+            }
+            return low_hp_scores.get(room_type, 0.0)
+        healthy_scores: dict[int, float] = {
             1: 8.0,
             4: 7.0,
             2: 6.0,
             3: 5.0,
             0: 4.0,
             5: 3.0,
-        }.get(room_type, 0.0)
+        }
+        return healthy_scores.get(room_type, 0.0)
 
     @staticmethod
     def _payload(action: LegalAction) -> dict[str, Any]:
