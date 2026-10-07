@@ -55,6 +55,12 @@ class MockLinearBackend:
             exact_hash=self.exact_hash(child),
         )
 
+    def batch_step(
+        self,
+        items: Sequence[tuple[StateHandle, LegalAction]],
+    ) -> tuple[Transition, ...]:
+        return tuple(self.step(state, action) for state, action in items)
+
     def fork(self, state: StateHandle) -> StateHandle:
         return str(state)
 
@@ -81,6 +87,13 @@ class MockLinearBackend:
             payload_json=payload,
             observation_hash=digest,
         )
+
+    def batch_observe(
+        self,
+        states: Sequence[StateHandle],
+        policy: InformationPolicy,
+    ) -> tuple[Observation, ...]:
+        return tuple(self.observe(state, policy) for state in states)
 
     def is_terminal(self, state: StateHandle) -> bool:
         return int(state) >= self._terminal_at

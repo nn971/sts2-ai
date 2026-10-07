@@ -230,6 +230,34 @@ class JsonlEmulatorBackend:
             raise JsonlBridgeError("step response action does not match request")
         return transition
 
+    def batch_step(
+        self,
+        items: Sequence[tuple[StateHandle, LegalAction]],
+    ) -> tuple[Transition, ...]:
+        requested = list(items)
+        response = self._request(
+            "batch_step",
+            items=[
+                {"state_handle": state, "action_id": action.action_id}
+                for state, action in requested
+            ],
+        )
+        raw_transitions = response.get("transitions")
+        if not isinstance(raw_transitions, list) or len(raw_transitions) != len(requested):
+            raise JsonlBridgeError("batch_step response shape does not match request")
+
+        transitions = tuple(self._parse_transition(item) for item in raw_transitions)
+        for (expected_parent, expected_action), transition in zip(
+            requested,
+            transitions,
+            strict=True,
+        ):
+            if transition.parent != expected_parent:
+                raise JsonlBridgeError("batch_step parent order does not match request")
+            if transition.action.action_id != expected_action.action_id:
+                raise JsonlBridgeError("batch_step action order does not match request")
+        return transitions
+
     def fork(self, state: StateHandle) -> StateHandle:
         response = self._request("fork", state_handle=state)
         return self._require_string(response, "child")
@@ -300,6 +328,47 @@ class JsonlEmulatorBackend:
             payload_json=self._require_string(response, "payloadJson"),
             observation_hash=self._require_string(response, "observationHash"),
         )
+
+    def batch_observe(
+        self,
+        states: Sequence[StateHandle],
+        policy: InformationPolicy,
+    ) -> tuple[Observation, ...]:
+        requested = list(states)
+        response = self._request(
+            "batch_observe",
+            state_handles=requested,
+            policy_id=policy.policy_id,
+        )
+        raw_observations = response.get("observations")
+        if not isinstance(raw_observations, list) or len(raw_observations) != len(requested):
+            raise JsonlBridgeError("batch_observe response shape does not match request")
+
+        observations: list[Observation] = []
+        for expected_state, raw in zip(requested, raw_observations, strict=True):
+            if not isinstance(raw, dict):
+                raise JsonlBridgeError("batch_observe item is not an object")
+            if raw.get("stateHandle") != expected_state:
+                raise JsonlBridgeError("batch_observe state order does not match request")
+            schema_id = self._require_string(raw, "schemaId")
+            if schema_id != OBSERVATION_SCHEMA_ID:
+                raise JsonlBridgeError(
+                    f"Unexpected observation schema {schema_id!r}; "
+                    f"expected {OBSERVATION_SCHEMA_ID!r}"
+                )
+            response_policy = self._require_string(raw, "policyId")
+            if response_policy != policy.policy_id:
+                raise JsonlBridgeError(
+                    "batch_observe information policy does not match request"
+                )
+            observations.append(
+                Observation(
+                    policy_id=response_policy,
+                    payload_json=self._require_string(raw, "payloadJson"),
+                    observation_hash=self._require_string(raw, "observationHash"),
+                )
+            )
+        return tuple(observations)
 
     def is_terminal(self, state: StateHandle) -> bool:
         response = self._request("is_terminal", state_handle=state)
