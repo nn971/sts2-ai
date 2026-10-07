@@ -11,7 +11,7 @@ from sts2_ai.strategy_db import (
     SQLiteStrategyStore,
 )
 
-from .targets import TrainingExample, build_training_example
+from .targets import PolicyTarget, TrainingExample, build_training_example
 
 
 def build_training_examples(
@@ -92,3 +92,59 @@ def write_training_jsonl(
             )
             count += 1
     return count
+
+
+def load_training_jsonl(path: Path) -> tuple[TrainingExample, ...]:
+    """Load JSONL emitted by write_training_jsonl."""
+
+    examples: list[TrainingExample] = []
+    with path.open("r", encoding="utf-8") as stream:
+        for line_number, line in enumerate(stream, start=1):
+            if not line.strip():
+                continue
+            raw = json.loads(line)
+            if not isinstance(raw, dict):
+                raise ValueError(
+                    f"Training record on line {line_number} is not an object"
+                )
+            raw_targets = raw.get("policy_targets")
+            if not isinstance(raw_targets, list):
+                raise ValueError(
+                    f"Training record on line {line_number} has no policy_targets"
+                )
+            targets = []
+            for raw_target in raw_targets:
+                if not isinstance(raw_target, dict):
+                    raise ValueError(
+                        f"Policy target on line {line_number} is not an object"
+                    )
+                targets.append(
+                    PolicyTarget(
+                        action_id=str(raw_target["action_id"]),
+                        probability=float(raw_target["probability"]),
+                        action_kind=str(raw_target.get("action_kind", "")),
+                        action_payload_json=str(
+                            raw_target.get("action_payload_json", "{}")
+                        ),
+                        search_value=float(raw_target.get("search_value", 0.0)),
+                        visits=int(raw_target.get("visits", 0)),
+                    )
+                )
+
+            examples.append(
+                TrainingExample(
+                    observation_hash=str(raw["observation_hash"]),
+                    information_policy=str(raw["information_policy"]),
+                    policy_targets=tuple(targets),
+                    value_target=float(raw["value_target"]),
+                    source_search_id=str(raw["source_search_id"]),
+                    emulator_revision=str(raw["emulator_revision"]),
+                    observation_json=str(raw.get("observation_json", "{}")),
+                    source_state_hash=str(raw.get("source_state_hash", "")),
+                    search_regime=str(raw.get("search_regime", "oracle-exact")),
+                    search_budget=int(raw.get("search_budget", 0)),
+                    search_version=str(raw.get("search_version", "")),
+                    game_build=str(raw.get("game_build", "unknown")),
+                )
+            )
+    return tuple(examples)
