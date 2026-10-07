@@ -113,6 +113,15 @@ def main() -> None:
         default=True,
     )
 
+    report = sub.add_parser(
+        "strategy-report",
+        help="show exact roots where search budgets selected different actions",
+    )
+    report.add_argument("database", type=Path)
+    report.add_argument("--limit", type=int, default=20)
+    report.add_argument("--information-policy", default=FAIR_POLICY_ID)
+    report.add_argument("--search-regime", default="oracle-exact")
+
     args = parser.parse_args()
     if args.command == "manifest":
         result = collect_experiment_manifest(
@@ -135,6 +144,10 @@ def main() -> None:
 
     if args.command == "benchmark":
         _benchmark(args)
+        return
+
+    if args.command == "strategy-report":
+        _strategy_report(args)
 
 
 def _evaluate(args: argparse.Namespace) -> None:
@@ -384,6 +397,79 @@ def _benchmark(args: argparse.Namespace) -> None:
             json.dumps(payload, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
+
+
+def _strategy_report(args: argparse.Namespace) -> None:
+    if args.limit <= 0:
+        raise SystemExit("--limit must be positive")
+
+    with SQLiteStrategyStore(args.database) as store:
+        state_hashes = store.disagreement_state_hashes(
+            args.information_policy,
+            search_regime=args.search_regime,
+        )
+        if not state_hashes:
+            print("No multi-budget action disagreements found.")
+            return
+
+        print(
+            "| State | Phase | Act/Floor | HP | Budget | Chosen action | "
+            "Estimated value | Visits |"
+        )
+        print("| --- | --- | --- | ---: | ---: | --- | ---: | ---: |")
+
+        shown = 0
+        for state_hash in state_hashes:
+            if shown >= args.limit:
+                break
+            records = store.search_for_state(
+                state_hash,
+                args.information_policy,
+                search_regime=args.search_regime,
+            )
+            if not records:
+                continue
+
+            observation = store.observation(
+                records[0][0].observation_hash,
+                args.information_policy,
+            )
+            payload: dict[str, object] = {}
+            if observation is not None:
+                raw = json.loads(observation.payload_json)
+                if isinstance(raw, dict):
+                    payload = raw
+
+            phase = str(payload.get("phase", "?"))
+            act = payload.get("act")
+            floor = payload.get("floor")
+            hp = payload.get("hp")
+            location = f"{act}/{floor}"
+
+            for root, actions in records:
+                chosen = next(
+                    (
+                        action
+                        for action in actions
+                        if action.action_id == root.chosen_action_id
+                    ),
+                    None,
+                )
+                value = chosen.value if chosen is not None else float("nan")
+                visits = chosen.visits if chosen is not None else 0
+                display_action = _short_action_id(root.chosen_action_id)
+                print(
+                    f"| {state_hash[:10]} | {phase} | {location} | {hp} | "
+                    f"{root.search_budget} | {display_action} | {value:.4f} | {visits} |"
+                )
+            shown += 1
+
+
+def _short_action_id(action_id: str) -> str:
+    kind, separator, digest = action_id.partition(":")
+    if not separator:
+        return action_id
+    return f"{kind}:{digest[-8:]}"
 
 
 if __name__ == "__main__":

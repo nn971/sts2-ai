@@ -78,3 +78,39 @@ def test_roundtrip_search_root_and_action_statistics(tmp_path: Path) -> None:
     assert root.transitions == 200
     assert [item.action_id for item in stored_actions] == ["a", "b"]
     assert [item.visits for item in stored_actions] == [20, 12]
+
+
+
+def test_budget_disagreement_query(tmp_path: Path) -> None:
+    action_a = LegalAction("take:a", "take_reward_card")
+    action_b = LegalAction("skip:b", "skip_reward_card")
+
+    with SQLiteStrategyStore(tmp_path / "disagreements.sqlite") as store:
+        for budget, chosen in ((8, action_a), (32, action_b)):
+            result = SearchResult(
+                root_state_hash="same-state",
+                root_observation_hash="same-observation",
+                root_observation_json='{"phase":"reward","act":1,"floor":2}',
+                evaluations=(
+                    ActionEvaluation(action_a, value=0.4, visits=budget // 2),
+                    ActionEvaluation(action_b, value=0.3, visits=budget // 2),
+                ),
+                expanded_nodes=budget,
+                transitions=budget * 4,
+                transposition_hits=0,
+                search_version="search-v1",
+            )
+            record_search_result(
+                store,
+                result,
+                chosen,
+                information_policy="prototype-fair-v0",
+                search_regime="oracle-exact",
+                search_budget=budget,
+                emulator_revision="emu-1",
+                game_build="build-1",
+            )
+
+        assert store.disagreement_state_hashes("prototype-fair-v0") == (
+            "same-state",
+        )

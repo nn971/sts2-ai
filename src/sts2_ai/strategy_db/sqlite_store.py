@@ -320,6 +320,28 @@ class SQLiteStrategyStore:
                 ],
             )
 
+    def disagreement_state_hashes(
+        self,
+        information_policy: str,
+        *,
+        search_regime: str = "oracle-exact",
+    ) -> tuple[str, ...]:
+        """Exact roots searched at multiple budgets that chose different actions."""
+
+        rows = self._connection.execute(
+            """
+            SELECT state_hash
+            FROM search_root_evidence
+            WHERE information_policy = ? AND search_regime = ?
+            GROUP BY state_hash
+            HAVING COUNT(DISTINCT search_budget) > 1
+               AND COUNT(DISTINCT chosen_action_id) > 1
+            ORDER BY state_hash ASC
+            """,
+            (information_policy, search_regime),
+        ).fetchall()
+        return tuple(row[0] for row in rows)
+
     def search_for_state(
         self,
         state_hash: str,
