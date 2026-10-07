@@ -415,7 +415,8 @@ def _semantic_action_signature(
             for item in card_ids
             if isinstance(item, int)
         ]
-        return f"{kind}:{\',\'.join(sorted(cards))}"
+        joined_cards = ",".join(sorted(cards))
+        return f"{kind}:{joined_cards}"
 
     if kind == "choose_map_node" and isinstance(node_id, str):
         return f"{kind}:{node_id}"
