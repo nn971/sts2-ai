@@ -16,7 +16,7 @@ class HeuristicAgent:
     to be a useful rollout baseline, not a hand-authored expert.
     """
 
-    policy_id = "heuristic-v3-survival-aware"
+    policy_id = "heuristic-v2-payload-aware"
 
     def choose(
         self,
@@ -127,10 +127,6 @@ class HeuristicAgent:
                 break
 
         score = 4.0
-        hp = self._number(state.get("hp"), 1.0)
-        max_hp = max(1.0, self._number(state.get("max_hp"), 1.0))
-        hp_ratio = hp / max_hp
-        player_block = self._number(combat.get("player_block"), 0.0)
         attack_words = (
             "strike",
             "stab",
@@ -154,14 +150,7 @@ class HeuristicAgent:
         if any(word in card_id for word in attack_words):
             score += 2.0
         if any(word in card_id for word in defense_words):
-            # The rollout policy previously preferred attacks by a fixed margin,
-            # even when the player was already in a dangerous HP range. Keep the
-            # heuristic deliberately small, but let defense become attractive as
-            # survivability falls. Existing block reduces that urgency so a rollout
-            # can switch back to offense after covering some risk.
-            survival_pressure = max(0.0, 0.75 - hp_ratio)
-            block_relief = min(2.5, player_block / 6.0)
-            score += 1.5 + (8.0 * survival_pressure) - block_relief
+            score += 1.5
 
         target_id = payload.get("target_enemy_id")
         if target_id is not None:
