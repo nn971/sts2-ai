@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS search_root_evidence (
     transposition_hits INTEGER NOT NULL,
     rollout_count INTEGER NOT NULL DEFAULT 0,
     terminal_rollouts INTEGER NOT NULL DEFAULT 0,
+    boundary_rollouts INTEGER NOT NULL DEFAULT 0,
     cutoff_rollouts INTEGER NOT NULL DEFAULT 0,
     rollout_steps INTEGER NOT NULL DEFAULT 0,
     search_version TEXT NOT NULL,
@@ -127,6 +128,7 @@ class SQLiteStrategyStore:
         for column in (
             "rollout_count",
             "terminal_rollouts",
+            "boundary_rollouts",
             "cutoff_rollouts",
             "rollout_steps",
         ):
@@ -296,9 +298,10 @@ class SQLiteStrategyStore:
                     state_hash, observation_hash, information_policy, search_regime,
                     legal_action_ids_json, chosen_action_id, search_budget,
                     expanded_nodes, transitions, transposition_hits,
-                    rollout_count, terminal_rollouts, cutoff_rollouts, rollout_steps,
+                    rollout_count, terminal_rollouts, boundary_rollouts,
+                    cutoff_rollouts, rollout_steps,
                     search_version, model_id, emulator_revision, game_build
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (
                     state_hash, information_policy, search_regime, search_budget,
                     search_version, emulator_revision, game_build
@@ -311,6 +314,7 @@ class SQLiteStrategyStore:
                     transposition_hits = excluded.transposition_hits,
                     rollout_count = excluded.rollout_count,
                     terminal_rollouts = excluded.terminal_rollouts,
+                    boundary_rollouts = excluded.boundary_rollouts,
                     cutoff_rollouts = excluded.cutoff_rollouts,
                     rollout_steps = excluded.rollout_steps,
                     model_id = excluded.model_id
@@ -328,6 +332,7 @@ class SQLiteStrategyStore:
                     root.transposition_hits,
                     root.rollout_count,
                     root.terminal_rollouts,
+                    root.boundary_rollouts,
                     root.cutoff_rollouts,
                     root.rollout_steps,
                     root.search_version,
@@ -440,7 +445,7 @@ class SQLiteStrategyStore:
         *,
         search_regime: str = "oracle-exact",
         search_version: str | None = None,
-    ) -> tuple[tuple[int, int, int, int, int], ...]:
+    ) -> tuple[tuple[int, int, int, int, int, int], ...]:
         """Aggregate rollout termination telemetry by search budget."""
 
         version_clause = ""
@@ -454,6 +459,7 @@ class SQLiteStrategyStore:
             SELECT search_budget,
                    SUM(rollout_count),
                    SUM(terminal_rollouts),
+                   SUM(boundary_rollouts),
                    SUM(cutoff_rollouts),
                    SUM(rollout_steps)
             FROM search_root_evidence
@@ -469,10 +475,11 @@ class SQLiteStrategyStore:
                 int(budget),
                 int(rollouts or 0),
                 int(terminals or 0),
+                int(boundaries or 0),
                 int(cutoffs or 0),
                 int(steps or 0),
             )
-            for budget, rollouts, terminals, cutoffs, steps in rows
+            for budget, rollouts, terminals, boundaries, cutoffs, steps in rows
         )
 
     def disagreement_state_hashes(
@@ -528,7 +535,8 @@ class SQLiteStrategyStore:
             SELECT state_hash, observation_hash, information_policy, search_regime,
                    legal_action_ids_json, chosen_action_id, search_budget,
                    expanded_nodes, transitions, transposition_hits,
-                   rollout_count, terminal_rollouts, cutoff_rollouts, rollout_steps,
+                   rollout_count, terminal_rollouts, boundary_rollouts,
+                   cutoff_rollouts, rollout_steps,
                    search_version, model_id, emulator_revision, game_build
             FROM search_root_evidence
             WHERE state_hash = ? AND information_policy = ? AND search_regime = ?
@@ -558,12 +566,13 @@ class SQLiteStrategyStore:
                 transposition_hits=row[9],
                 rollout_count=row[10],
                 terminal_rollouts=row[11],
-                cutoff_rollouts=row[12],
-                rollout_steps=row[13],
-                search_version=row[14],
-                model_id=row[15],
-                emulator_revision=row[16],
-                game_build=row[17],
+                boundary_rollouts=row[12],
+                cutoff_rollouts=row[13],
+                rollout_steps=row[14],
+                search_version=row[15],
+                model_id=row[16],
+                emulator_revision=row[17],
+                game_build=row[18],
             )
             action_rows = self._connection.execute(
                 """
