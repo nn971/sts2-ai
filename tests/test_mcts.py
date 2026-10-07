@@ -99,3 +99,57 @@ def test_virtual_loss_must_be_bounded() -> None:
             rollout_policy=HeuristicAgent(),
             virtual_loss=-1.5,
         )
+
+
+def test_pessimistic_virtual_loss_discourages_reselecting_pending_edge() -> None:
+    import sts2_ai.search.mcts as mcts
+
+    backend = MockLinearBackend(terminal_at=8)
+    search = UctMcts(
+        backend,
+        policy=InformationPolicy("fair-test"),
+        rollout_policy=HeuristicAgent(),
+        virtual_loss=-1.0,
+        seed=0,
+    )
+    action_a = LegalAction("a", "increment", '{"amount":1}')
+    action_b = LegalAction("b", "increment", '{"amount":2}')
+    edge_a = mcts._Edge(
+        action=action_a,
+        child_hash="a-child",
+        visits=10,
+        value_sum=-4.0,
+    )
+    edge_b = mcts._Edge(
+        action=action_b,
+        child_hash="b-child",
+        visits=10,
+        value_sum=-4.1,
+    )
+    node = mcts._Node(
+        handle="0",
+        exact_hash="root",
+        observation=Observation(
+            policy_id="fair-test",
+            payload_json='{"value":0}',
+            observation_hash="obs",
+        ),
+        legal_actions=(action_a, action_b),
+        terminal=False,
+        visits=20,
+        value_sum=-8.1,
+        expanded=True,
+        edges={"a": edge_a, "b": edge_b},
+    )
+
+    assert search._choose_unvisited_or_uct(node) is edge_a
+
+    pending = mcts._PendingSimulation(
+        path_nodes=(node,),
+        path_edges=(edge_a,),
+        leaf=None,
+        immediate_value=-0.4,
+    )
+    search._reserve(pending, -1.0)
+
+    assert search._choose_unvisited_or_uct(node) is edge_b
