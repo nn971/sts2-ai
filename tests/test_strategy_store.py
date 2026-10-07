@@ -74,6 +74,11 @@ def test_roundtrip_search_root_and_action_statistics(tmp_path: Path) -> None:
     assert root.search_budget == 32
     assert root.transitions == 200
     assert [item.action_id for item in stored_actions] == ["a", "b"]
+    assert [item.action_kind for item in stored_actions] == [
+        "take_reward_card",
+        "skip_reward_card",
+    ]
+    assert [item.action_payload_json for item in stored_actions] == ["{}", "{}"]
     assert [item.visits for item in stored_actions] == [20, 12]
 
 
