@@ -30,7 +30,6 @@ jobs:
             --seed-prefix benchmark \
             --rollout-depth 16 \
             --rollout-batch-size 8 \
-            --no-build \
             --strategy-db /tmp/depth16-strategy.sqlite \
             --json-output /tmp/depth16-results.json
       - name: Disagreement report
