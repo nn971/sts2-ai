@@ -512,6 +512,66 @@ class SQLiteStrategyStore:
         ).fetchall()
         return tuple(str(row[0]) for row in rows)
 
+    def searched_state_hashes(
+        self,
+        information_policy: str,
+        *,
+        search_regime: str = "oracle-exact",
+        search_version: str | None = None,
+    ) -> tuple[str, ...]:
+        """All exact roots with persisted search evidence."""
+
+        version_clause = ""
+        parameters: tuple[str, ...] = (information_policy, search_regime)
+        if search_version is not None:
+            version_clause = " AND search_version = ?"
+            parameters += (search_version,)
+
+        rows = self._connection.execute(
+            f"""
+            SELECT DISTINCT state_hash
+            FROM search_root_evidence
+            WHERE information_policy = ? AND search_regime = ?
+            {version_clause}
+            ORDER BY state_hash ASC
+            """,
+            parameters,
+        ).fetchall()
+        return tuple(str(row[0]) for row in rows)
+
+    def search_records(
+        self,
+        information_policy: str,
+        *,
+        search_regime: str = "oracle-exact",
+        search_version: str | None = None,
+        min_budget: int = 0,
+    ) -> tuple[tuple[SearchRootEvidence, tuple[SearchActionEvidence, ...]], ...]:
+        """All persisted searched roots matching one training/export configuration."""
+
+        records = []
+        for state_hash in self.searched_state_hashes(
+            information_policy,
+            search_regime=search_regime,
+            search_version=search_version,
+        ):
+            for root, actions in self.search_for_state(
+                state_hash,
+                information_policy,
+                search_regime=search_regime,
+                search_version=search_version,
+            ):
+                if root.search_budget >= min_budget:
+                    records.append((root, actions))
+        records.sort(
+            key=lambda item: (
+                item[0].state_hash,
+                item[0].search_budget,
+                item[0].search_version,
+            )
+        )
+        return tuple(records)
+
     def search_for_state(
         self,
         state_hash: str,
