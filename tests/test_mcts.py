@@ -80,14 +80,14 @@ def test_virtual_loss_reservation_is_replaced_by_rollout_value() -> None:
     mcts.UctMcts._reserve(pending, -1.0)
     assert node.visits == 4
     assert edge.visits == 3
-    assert node.value_sum == -2.5
-    assert edge.value_sum == -2.2
+    assert node.value_sum == pytest.approx(-2.5)
+    assert edge.value_sum == pytest.approx(-2.2)
 
     mcts.UctMcts._backup_reserved(pending, -0.25, -1.0)
     assert node.visits == 4
     assert edge.visits == 3
-    assert node.value_sum == -1.75
-    assert edge.value_sum == -1.45
+    assert node.value_sum == pytest.approx(-1.75)
+    assert edge.value_sum == pytest.approx(-1.45)
 
 
 def test_virtual_loss_must_be_bounded() -> None:
