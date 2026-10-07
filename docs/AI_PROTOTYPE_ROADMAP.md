@@ -421,6 +421,35 @@ and per-action search statistics, and `sts2-ai strategy-report` lists exact root
 different budgets selected different actions. This gives a direct route to inspect why a
 larger search sometimes changes to a worse decision.
 
+### First search-quality diagnosis
+
+The persisted five-seed database exposed two concrete implementation defects before any
+search-theory change was needed.
+
+First, low-budget root selection could choose an **unvisited** action. Unvisited
+`ActionEvaluation` entries use the neutral placeholder value `0.0`; early-run searched
+values are commonly negative. The root agent compared those values directly, so at budget
+8 an unsearched action could look better than every searched action. In the five-seed
+database this happened on **42 of 422 MCTS-8 searched roots (10.0%)**: 30 combat roots,
+8 rest roots, and 4 shop roots. MCTS-32 and MCTS-128 had zero such selections in that
+dataset. Root selection now excludes zero-visit actions whenever at least one searched
+candidate exists, and the strategy report exposes per-budget zero-visit selection counts.
+
+Second, the heuristic rollout policy expected snake_case action payload keys such as
+`card_instance_id`, `target_enemy_id`, and `node_id`. The emulator wire payloads
+preserve the C# payload names `CardInstanceId`, `TargetEnemyId`, and `NodeId`.
+Consequently the intended card/target/map scoring was largely inactive even though the
+player-facing observation itself was correct. The heuristic now normalizes wire payload
+keys before scoring; regression tests use the real PascalCase payload shape.
+
+Because this changes the rollout semantics, the heuristic policy and MCTS search evidence
+versions were advanced. Search-action evidence also now persists action kind and payload
+JSON so future disagreement reports can describe decisions rather than only hashed action
+IDs.
+
+Validation ladders for the root-selection fix alone and for the payload-aware heuristic are
+running on the same five benchmark seeds.
+
 Next:
 
 1. use the disagreement report on a persisted multi-budget benchmark database;
