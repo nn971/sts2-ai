@@ -67,6 +67,15 @@ def main() -> None:
         help="number of pending UCT simulations whose heuristic rollouts are advanced together",
     )
     evaluate.add_argument(
+        "--rollout-mode",
+        choices=("fixed", "combat-exit"),
+        default="fixed",
+        help=(
+            "fixed uses the decision cap uniformly; combat-exit stops rollouts "
+            "that start in combat as soon as they leave combat"
+        ),
+    )
+    evaluate.add_argument(
         "--virtual-loss",
         type=float,
         default=None,
@@ -114,6 +123,11 @@ def main() -> None:
     benchmark.add_argument("--max-decisions", type=int)
     benchmark.add_argument("--rollout-depth", type=int, default=8)
     benchmark.add_argument("--rollout-batch-size", type=int, default=8)
+    benchmark.add_argument(
+        "--rollout-mode",
+        choices=("fixed", "combat-exit"),
+        default="fixed",
+    )
     benchmark.add_argument("--virtual-loss", type=float)
     benchmark.add_argument("--repo-root", type=Path, default=Path.cwd())
     benchmark.add_argument("--no-build", action="store_true")
@@ -224,6 +238,7 @@ def _evaluate(args: argparse.Namespace) -> None:
                         rollout_policy=HeuristicAgent(),
                         rollout_depth=args.rollout_depth,
                         rollout_batch_size=args.rollout_batch_size,
+                        rollout_mode=args.rollout_mode,
                         virtual_loss=args.virtual_loss,
                         seed=args.agent_seed + index,
                     )
@@ -302,6 +317,7 @@ def _evaluate(args: argparse.Namespace) -> None:
             "rollout_batch_size": (
                 args.rollout_batch_size if args.agent == "mcts" else None
             ),
+            "rollout_mode": args.rollout_mode if args.agent == "mcts" else None,
             "virtual_loss": args.virtual_loss if args.agent == "mcts" else None,
             "runs": [asdict(summary) for summary in summaries],
             "bridge_profile": {
@@ -373,6 +389,7 @@ def _benchmark(args: argparse.Namespace) -> None:
                             rollout_policy=HeuristicAgent(),
                             rollout_depth=args.rollout_depth,
                             rollout_batch_size=args.rollout_batch_size,
+                            rollout_mode=args.rollout_mode,
                             virtual_loss=args.virtual_loss,
                             seed=args.agent_seed + index,
                         )
@@ -447,6 +464,7 @@ def _benchmark(args: argparse.Namespace) -> None:
             "seed_prefix": args.seed_prefix,
             "rollout_depth": args.rollout_depth,
             "rollout_batch_size": args.rollout_batch_size,
+            "rollout_mode": args.rollout_mode,
             "virtual_loss": args.virtual_loss,
             "rows": [asdict(row) for row in rows],
             "paired_vs_heuristic": [asdict(row) for row in paired],
@@ -515,16 +533,26 @@ def _strategy_report(args: argparse.Namespace) -> None:
 
     if rollout_horizon and any(row[1] > 0 for row in rollout_horizon):
         print(
-            "| Budget | Rollouts | Terminal | Cutoff | Terminal % | "
-            "Avg rollout steps |"
+            "| Budget | Rollouts | Terminal | Combat exit | Cutoff | "
+            "Resolved % | Avg rollout steps |"
         )
-        print("| ---: | ---: | ---: | ---: | ---: | ---: |")
-        for budget, rollouts, terminals, cutoffs, steps in rollout_horizon:
-            terminal_fraction = terminals / rollouts if rollouts else 0.0
+        print("| ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
+        for (
+            budget,
+            rollouts,
+            terminals,
+            boundaries,
+            cutoffs,
+            steps,
+        ) in rollout_horizon:
+            resolved_fraction = (
+                (terminals + boundaries) / rollouts if rollouts else 0.0
+            )
             average_steps = steps / rollouts if rollouts else 0.0
             print(
-                f"| {budget} | {rollouts} | {terminals} | {cutoffs} | "
-                f"{100.0 * terminal_fraction:.1f}% | {average_steps:.2f} |"
+                f"| {budget} | {rollouts} | {terminals} | {boundaries} | "
+                f"{cutoffs} | {100.0 * resolved_fraction:.1f}% | "
+                f"{average_steps:.2f} |"
             )
         print()
 
