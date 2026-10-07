@@ -74,7 +74,7 @@ class _RolloutState:
 class UctMcts:
     """Transposition-aware oracle-exact UCT with batched heuristic rollouts."""
 
-    search_version = "oracle-exact-fused-batched-uct-v3"
+    search_version = "oracle-exact-fused-batched-uct-v4-tactical-value"
 
     def __init__(
         self,
@@ -447,7 +447,12 @@ class UctMcts:
 
 
 def sts2_value(observation: Observation) -> float:
-    """Simple terminal/cutoff value used before a learned value model exists."""
+    """Transparent cutoff value for the fixed three-act prototype ruleset.
+
+    A combat on floor f is treated as progress from floor f-1 toward floor f.
+    Remaining enemy HP supplies the within-combat progress signal that the first
+    evaluator lacked, while player HP remains the survival signal.
+    """
 
     raw = json.loads(observation.payload_json)
     state = cast(dict[str, Any], raw if isinstance(raw, dict) else {})
@@ -460,10 +465,44 @@ def sts2_value(observation: Observation) -> float:
     hp = _number(state.get("hp"), 0.0)
     max_hp = max(1.0, _number(state.get("max_hp"), 1.0))
     hp_fraction = max(0.0, min(1.0, hp / max_hp))
-    act = max(1.0, _number(state.get("act"), 1.0))
-    floor = max(0.0, _number(state.get("floor"), 0.0))
-    progress = max(0.0, min(1.0, (((act - 1.0) * 20.0) + floor) / 60.0))
-    return (2.0 * ((0.65 * progress) + (0.35 * hp_fraction))) - 1.0
+
+    # The current prototype ruleset has 3 acts x 6 floors. Keeping this explicit
+    # is preferable to the old 20-floor reporting convention, which compressed
+    # all of Act 1 into only one tenth of the value range.
+    floors_per_act = 6.0
+    total_acts = 3.0
+    act = max(1.0, min(total_acts, _number(state.get("act"), 1.0)))
+    floor = max(0.0, min(floors_per_act, _number(state.get("floor"), 0.0)))
+
+    combat = state.get("combat")
+    if isinstance(combat, dict) and floor > 0.0:
+        enemies = _dict_items(combat.get("enemies"))
+        remaining_enemy_hp = sum(
+            max(0.0, _number(enemy.get("hp"), 0.0))
+            for enemy in enemies
+        )
+        # Smoothly interpolates from roughly the previous completed floor at the
+        # beginning of a fight to the current floor as enemy HP approaches zero.
+        combat_completion = math.exp(-remaining_enemy_hp / 80.0)
+        effective_floor = max(0.0, floor - 1.0 + combat_completion)
+    else:
+        effective_floor = floor
+
+    progress = (
+        ((act - 1.0) * floors_per_act) + effective_floor
+    ) / (total_acts * floors_per_act)
+    utility = (0.70 * progress) + (0.30 * hp_fraction)
+    return max(-1.0, min(1.0, (2.0 * utility) - 1.0))
+
+
+def _dict_items(value: object) -> tuple[dict[str, Any], ...]:
+    if not isinstance(value, list):
+        return ()
+    return tuple(
+        cast(dict[str, Any], item)
+        for item in value
+        if isinstance(item, dict)
+    )
 
 
 def _number(value: object, default: float) -> float:
