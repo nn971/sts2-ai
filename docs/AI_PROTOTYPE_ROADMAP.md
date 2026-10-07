@@ -447,16 +447,48 @@ versions were advanced. Search-action evidence also now persists action kind and
 JSON so future disagreement reports can describe decisions rather than only hashed action
 IDs.
 
-Validation ladders for the root-selection fix alone and for the payload-aware heuristic are
-running on the same five benchmark seeds.
+Validation on the same five benchmark seeds separated the two effects clearly.
+
+The root-selection fix alone improved MCTS-8 substantially while leaving larger budgets
+essentially unchanged, exactly as the zero-visit diagnosis predicted:
+
+| Agent | Before fix frontier | Root-fix frontier |
+| --- | ---: | ---: |
+| MCTS-8 | 5.126 | 6.598 |
+| MCTS-32 | 4.584 | 4.584 |
+| MCTS-128 | 7.718 | 7.718 |
+
+MCTS-8 terminal progress rose from 6.00 to 7.40. The zero-visit root-selection defect is
+therefore a confirmed causal bug rather than just a reporting anomaly.
+
+The payload-aware rollout heuristic then changed the search distribution much more broadly.
+On five seeds at rollout depth 8:
+
+| Agent | Win % | Avg terminal progress | Avg frontier progress |
+| --- | ---: | ---: | ---: |
+| Heuristic v2 | 0.0 | 4.60 | 4.061 |
+| MCTS-8 | 0.0 | 6.00 | 5.162 |
+| MCTS-32 | 0.0 | 5.40 | 4.651 |
+| MCTS-128 | 0.0 | 6.00 | 5.120 |
+
+So making the rollout policy actually read card/map targets removed a bug but did not make
+the rollout policy stronger. In this small sample it erased the previous single MCTS-128
+victory. This is useful evidence: the old policy's accidental tie-breaking was sometimes
+lucky, while the current legible heuristic is systematically too crude.
+
+The remaining multi-budget disagreements are concentrated in early Combat and initial
+MapChoice roots, with one Reward disagreement. Map-choice action-value gaps are often zero
+or only around 1e-3 at rollout depth 8, while several combat rankings flip by similarly
+small amounts. This points to cutoff horizon/evaluation quality as the next likely
+bottleneck. A common-seed depth-16 ladder is running before changing the evaluator again.
 
 Next:
 
-1. use the disagreement report on a persisted multi-budget benchmark database;
-2. classify disagreements by phase (combat, map, reward, shop, rest);
-3. inspect whether bad changes come from cutoff evaluation, heuristic rollouts, UCT
-   allocation, or root-action selection;
-4. improve the dominant failure mode and repeat the common-seed ladder;
+1. compare rollout depth 8 versus 16 on the same five-seed 8/32/128 ladder;
+2. use semantic action payloads in disagreement reports to inspect the largest Combat,
+   MapChoice, and Reward flips;
+3. decide whether the dominant remaining error is cutoff evaluation or rollout policy;
+4. improve that component and repeat the common-seed ladder;
 5. extend to 512 simulations only after the 8/32/128 curve is better understood.
 
 ## Immediate implementation sprint
