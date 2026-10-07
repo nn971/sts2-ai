@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from sts2_ai.emulator import LegalAction
 from sts2_ai.search import ActionEvaluation, SearchResult
 from sts2_ai.strategy_db import (
@@ -144,8 +146,8 @@ def test_budget_disagreement_diagnostic_separates_value_flip_from_visit_choice(
     assert root.classification == "value-ranking-flip"
     assert root.value_ranking_flip
     assert not root.has_visit_selection_mismatch
-    assert root.low_budget_pair_delta == 0.05
-    assert root.high_budget_pair_delta == -0.20
+    assert root.low_budget_pair_delta == pytest.approx(0.05)
+    assert root.high_budget_pair_delta == pytest.approx(-0.20)
     assert report.by_phase[0].value_ranking_flips == 1
 
 
@@ -213,4 +215,67 @@ def test_budget_disagreement_diagnostic_detects_visit_selection_regret(
     assert root.classification == "visit-selection"
     assert not root.value_ranking_flip
     assert root.has_visit_selection_mismatch
-    assert root.decisions[-1].selection_regret == 0.02
+    assert root.decisions[-1].selection_regret == pytest.approx(0.02)
+
+
+def test_budget_disagreement_diagnostic_flags_unvisited_selection(
+    tmp_path: Path,
+) -> None:
+    visited = LegalAction("play_card:visited", "play_card")
+    unvisited = LegalAction("play_card:unvisited", "play_card")
+    observation = '{"phase":3,"act":1,"floor":1,"hp":70,"max_hp":70}'
+    low = SearchResult(
+        root_state_hash="shared-state",
+        root_observation_hash="shared-observation",
+        root_observation_json=observation,
+        evaluations=(
+            ActionEvaluation(visited, value=-0.4, visits=8, uncertainty=0.1),
+            ActionEvaluation(unvisited, value=0.0, visits=0, uncertainty=None),
+        ),
+        expanded_nodes=4,
+        transitions=10,
+        transposition_hits=0,
+        search_version="search-v1",
+    )
+    high = SearchResult(
+        root_state_hash="shared-state",
+        root_observation_hash="shared-observation",
+        root_observation_json=observation,
+        evaluations=(
+            ActionEvaluation(visited, value=-0.3, visits=10, uncertainty=0.1),
+            ActionEvaluation(unvisited, value=-0.2, visits=12, uncertainty=0.1),
+        ),
+        expanded_nodes=8,
+        transitions=30,
+        transposition_hits=0,
+        search_version="search-v1",
+    )
+
+    with SQLiteStrategyStore(tmp_path / "strategy.sqlite") as store:
+        record_search_result(
+            store,
+            low,
+            unvisited,
+            information_policy="prototype-fair-v0",
+            search_regime="oracle-exact",
+            search_budget=8,
+            emulator_revision="emu-1",
+            game_build="build-1",
+        )
+        record_search_result(
+            store,
+            high,
+            visited,
+            information_policy="prototype-fair-v0",
+            search_regime="oracle-exact",
+            search_budget=32,
+            emulator_revision="emu-1",
+            game_build="build-1",
+        )
+        report = diagnose_budget_disagreements(
+            store,
+            "prototype-fair-v0",
+        )
+
+    assert report.roots[0].classification == "unvisited-selection"
+    assert report.by_phase[0].unvisited_selection == 1
