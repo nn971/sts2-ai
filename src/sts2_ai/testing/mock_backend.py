@@ -81,6 +81,13 @@ class MockLinearBackend:
             )
         return tuple(frames)
 
+    def batch_rollout_step_frame(
+        self,
+        items: Sequence[tuple[StateHandle, LegalAction]],
+        policy: InformationPolicy,
+    ) -> tuple[StepFrame, ...]:
+        return self.batch_step_frame(items, policy)
+
     def fork(self, state: StateHandle) -> StateHandle:
         return str(state)
 

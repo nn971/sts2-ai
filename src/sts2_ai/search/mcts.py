@@ -74,7 +74,7 @@ class _RolloutState:
 class UctMcts:
     """Transposition-aware oracle-exact UCT with batched heuristic rollouts."""
 
-    search_version = "oracle-exact-fused-batched-uct-v4-tactical-value"
+    search_version = "oracle-exact-light-rollout-uct-v5-tactical-value"
 
     def __init__(
         self,
@@ -394,7 +394,7 @@ class UctMcts:
                     )
                     requests.append((rollout.handle, decision.action))
 
-                frames = self._backend.batch_step_frame(
+                frames = self._backend.batch_rollout_step_frame(
                     requests,
                     self._policy,
                 )

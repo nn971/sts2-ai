@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import time
@@ -318,6 +319,92 @@ class JsonlEmulatorBackend:
                 StepFrame(
                     transition=transition,
                     observation=observation,
+                    legal_actions=tuple(
+                        self._parse_action(action) for action in raw_actions
+                    ),
+                )
+            )
+        return tuple(frames)
+
+    def batch_rollout_step_frame(
+        self,
+        items: Sequence[tuple[StateHandle, LegalAction]],
+        policy: InformationPolicy,
+    ) -> tuple[StepFrame, ...]:
+        """Step rollout states without asking the emulator to hash next states.
+
+        The bridge emits canonical observation JSON once. Python hashes those exact
+        bytes locally so callers retain a normal Observation while the hot rollout
+        path avoids canonical state hashing and duplicate observation serialization.
+        """
+
+        requested = list(items)
+        response = self._request(
+            "batch_rollout_step_frame",
+            policy_id=policy.policy_id,
+            items=[
+                {"state_handle": state, "action_id": action.action_id}
+                for state, action in requested
+            ],
+        )
+        raw_frames = response.get("frames")
+        if not isinstance(raw_frames, list) or len(raw_frames) != len(requested):
+            raise JsonlBridgeError(
+                "batch_rollout_step_frame response shape does not match request"
+            )
+
+        frames: list[StepFrame] = []
+        for (expected_parent, expected_action), raw in zip(
+            requested,
+            raw_frames,
+            strict=True,
+        ):
+            if not isinstance(raw, dict):
+                raise JsonlBridgeError("batch_rollout_step_frame item is not an object")
+            if raw.get("parent") != expected_parent:
+                raise JsonlBridgeError(
+                    "batch_rollout_step_frame parent order does not match request"
+                )
+            child = self._require_string(raw, "child")
+            terminal = raw.get("terminal")
+            if not isinstance(terminal, bool):
+                raise JsonlBridgeError(
+                    "batch_rollout_step_frame terminal is not boolean"
+                )
+            schema_id = self._require_string(raw, "schemaId")
+            if schema_id != OBSERVATION_SCHEMA_ID:
+                raise JsonlBridgeError(
+                    f"Unexpected observation schema {schema_id!r}; "
+                    f"expected {OBSERVATION_SCHEMA_ID!r}"
+                )
+            response_policy = self._require_string(raw, "policyId")
+            if response_policy != policy.policy_id:
+                raise JsonlBridgeError(
+                    "batch_rollout_step_frame information policy does not match request"
+                )
+
+            payload_json = self._require_string(raw, "payloadJson")
+            observation_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+            raw_actions = raw.get("legalActions")
+            if not isinstance(raw_actions, list):
+                raise JsonlBridgeError(
+                    "batch_rollout_step_frame item has no legalActions array"
+                )
+
+            frames.append(
+                StepFrame(
+                    transition=Transition(
+                        parent=expected_parent,
+                        action=expected_action,
+                        child=child,
+                        terminal=terminal,
+                        exact_hash=None,
+                    ),
+                    observation=Observation(
+                        policy_id=response_policy,
+                        payload_json=payload_json,
+                        observation_hash=observation_hash,
+                    ),
                     legal_actions=tuple(
                         self._parse_action(action) for action in raw_actions
                     ),

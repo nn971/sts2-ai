@@ -88,6 +88,29 @@ def test_fork_step_expand_batch_expand_and_release(backend: JsonlEmulatorBackend
         for item in fused
     )
 
+    lightweight = backend.batch_rollout_step_frame(
+        [
+            (root, backend.legal_actions(root)[0]),
+            (other, backend.legal_actions(other)[0]),
+        ],
+        InformationPolicy(FAIR_POLICY_ID),
+    )
+    assert len(lightweight) == 2
+    assert all(item.transition.exact_hash is None for item in lightweight)
+    assert [item.observation.payload_json for item in lightweight] == [
+        item.observation.payload_json for item in fused
+    ]
+    assert [item.observation.observation_hash for item in lightweight] == [
+        item.observation.observation_hash for item in fused
+    ]
+    assert [
+        tuple(action.action_id for action in item.legal_actions)
+        for item in lightweight
+    ] == [
+        tuple(action.action_id for action in item.legal_actions)
+        for item in fused
+    ]
+
     batches = backend.batch_expand([root, other])
     assert len(batches) == 2
     assert all(item.parent == root for item in batches[0])
@@ -100,6 +123,7 @@ def test_fork_step_expand_batch_expand_and_release(backend: JsonlEmulatorBackend
         other,
         *(item.child for item in batched_steps),
         *(item.transition.child for item in fused),
+        *(item.transition.child for item in lightweight),
         *(item.child for item in expansions),
         *(item.child for batch in batches for item in batch),
     ]
