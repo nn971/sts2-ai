@@ -6,10 +6,10 @@ import pytest
 from sts2_ai.emulator import LegalAction
 from sts2_ai.search import ActionEvaluation, SearchResult
 from sts2_ai.strategy_db import (
-    SQLiteStrategyStore,
     SearchActionEvidence,
     SearchObservationEvidence,
     SearchRootEvidence,
+    SQLiteStrategyStore,
     record_search_result,
 )
 from sts2_ai.training import (
