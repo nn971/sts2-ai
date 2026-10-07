@@ -69,11 +69,17 @@ class OracleMctsAgent:
         if not candidates:
             raise RuntimeError("MCTS returned no legal root action")
 
+        # Unvisited root actions carry the neutral placeholder value 0.0 in
+        # SearchResult. Early-run values are often negative, so allowing zero-visit
+        # actions into this comparison can make the agent choose an action it never
+        # evaluated. Prefer searched actions whenever the budget reached at least one.
+        visited = [item for item in candidates if item.visits > 0]
+        root_candidates = visited or candidates
+
         # Oracle-exact rollouts are deterministic at a fixed leaf, so mean value
-        # carries the decision signal directly. Visit count remains a tie-breaker
-        # rather than overriding a better-valued root action.
+        # carries the decision signal directly. Visit count remains a tie-breaker.
         best = max(
-            candidates,
+            root_candidates,
             key=lambda item: (item.value, item.visits, item.action.action_id),
         )
         selected = legal_by_id[best.action.action_id]
