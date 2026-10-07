@@ -491,14 +491,40 @@ strengthens the case that cutoff horizon/evaluation quality is the next likely b
 rather than UCT bookkeeping. A common-seed depth-16 ladder is running before changing the
 evaluator again.
 
+### Batched-UCT reservation diagnosis
+
+A second search-quality issue was found in the batched UCT implementation itself.
+
+While a batch of rollouts was outstanding, the old code reserved each selected path by
+incrementing its visit count but adding **zero** temporary value. Early-run root values
+are usually negative (roughly -0.3 to -0.4 in the current diagnostics), so this is an
+optimistic reservation: a just-selected negative-valued edge can have its temporary mean
+pulled toward zero and become *more* attractive to the remaining selections in the same
+batch.
+
+The search now uses an explicit pessimistic virtual loss. The default is -1.0 on the
+current [-1, 1] value scale, and both `evaluate` and `benchmark` expose
+`--virtual-loss` for controlled comparisons. Backup replaces the temporary loss with
+the actual rollout value, so final visit/value statistics remain ordinary UCT statistics.
+Unit tests cover the accounting identity and the intended within-batch diversification
+effect.
+
+An attempted cutoff-evaluator change that added direct credit for block, gold, relics,
+and potions was also tested on the five-seed depth-8 ladder. It made the curve worse:
+MCTS-8 / 32 / 128 frontier progress was approximately 4.61 / 5.14 / 4.70, with no wins.
+That experiment was rejected and `main` was restored to the previous progress-plus-HP
+cutoff evaluator before adding virtual loss. The lesson is to change one search component
+at a time and demand an empirical gain before keeping extra evaluator features.
+
 Next:
 
-1. compare rollout depth 8 versus 16 on the same five-seed 8/32/128 ladder;
-2. use semantic action payloads in disagreement reports to inspect the largest Combat,
+1. compare the new virtual-loss UCT against `--virtual-loss 0` on the same five seeds;
+2. compare rollout depth 8 versus 16 only after reservation behavior is fixed;
+3. use semantic action payloads in disagreement reports to inspect the largest Combat,
    MapChoice, and Reward flips;
-3. decide whether the dominant remaining error is cutoff evaluation or rollout policy;
-4. improve that component and repeat the common-seed ladder;
+4. decide whether the dominant remaining error is cutoff evaluation or rollout policy;
 5. extend to 512 simulations only after the 8/32/128 curve is better understood.
+
 
 ## Immediate implementation sprint
 
