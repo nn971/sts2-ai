@@ -20,7 +20,8 @@ from .base import ActionEvaluation, SearchBudget, SearchResult
 
 ValueFunction = Callable[[Observation], float]
 
-_SEARCH_ALGORITHM_VERSION = "oracle-exact-light-rollout-uct-v8-configured"
+_SEARCH_ALGORITHM_VERSION = "oracle-exact-light-rollout-uct-v9-horizon-mode"
+_ROLLOUT_MODES = {"fixed", "combat-exit"}
 _CUTOFF_VALUE_VERSION = "sts2-value-v2-progress-hp"
 
 
@@ -78,7 +79,9 @@ class _RolloutState:
     observation: Observation
     legal_actions: tuple[LegalAction, ...]
     value: float | None = None
+    started_in_combat: bool = False
     ended_terminal: bool = False
+    ended_boundary: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +89,7 @@ class _RolloutBatchResult:
     values: tuple[float, ...]
     transitions: int
     terminal_rollouts: int
+    boundary_rollouts: int
     cutoff_rollouts: int
 
 
@@ -102,6 +106,7 @@ class UctMcts:
         exploration: float = math.sqrt(2.0),
         rollout_depth: int = 128,
         rollout_batch_size: int = 8,
+        rollout_mode: str = "fixed",
         virtual_loss: float | None = None,
         seed: int = 0,
     ) -> None:
@@ -109,6 +114,10 @@ class UctMcts:
             raise ValueError("rollout_depth must be non-negative")
         if rollout_batch_size <= 0:
             raise ValueError("rollout_batch_size must be positive")
+        if rollout_mode not in _ROLLOUT_MODES:
+            raise ValueError(
+                f"rollout_mode must be one of {sorted(_ROLLOUT_MODES)}"
+            )
         if virtual_loss is not None and not -1.0 <= virtual_loss <= 1.0:
             raise ValueError("virtual_loss must lie in [-1, 1]")
         self._backend = backend
@@ -118,6 +127,7 @@ class UctMcts:
         self._exploration = exploration
         self._rollout_depth = rollout_depth
         self._rollout_batch_size = rollout_batch_size
+        self._rollout_mode = rollout_mode
         self._virtual_loss = virtual_loss
         self.search_version = _configured_search_version(
             rollout_policy=rollout_policy,
@@ -125,6 +135,7 @@ class UctMcts:
             exploration=exploration,
             rollout_depth=rollout_depth,
             rollout_batch_size=rollout_batch_size,
+            rollout_mode=rollout_mode,
             virtual_loss=virtual_loss,
         )
         self._rng = random.Random(seed)
@@ -146,6 +157,7 @@ class UctMcts:
         transposition_hits = 0
         rollout_count = 0
         terminal_rollouts = 0
+        boundary_rollouts = 0
         cutoff_rollouts = 0
         rollout_steps = 0
         created_handles: set[StateHandle] = set()
@@ -218,6 +230,7 @@ class UctMcts:
                     rollout_steps += batch_result.transitions
                     rollout_count += len(batch_result.values)
                     terminal_rollouts += batch_result.terminal_rollouts
+                    boundary_rollouts += batch_result.boundary_rollouts
                     cutoff_rollouts += batch_result.cutoff_rollouts
 
                 value_iter = iter(rollout_values)
@@ -253,6 +266,7 @@ class UctMcts:
             search_version=self.search_version,
             rollout_count=rollout_count,
             terminal_rollouts=terminal_rollouts,
+            boundary_rollouts=boundary_rollouts,
             cutoff_rollouts=cutoff_rollouts,
             rollout_steps=rollout_steps,
         )
@@ -463,6 +477,10 @@ class UctMcts:
                 observation=start.observation,
                 legal_actions=start.legal_actions,
                 value=self._value_fn(start.observation) if start.terminal else None,
+                started_in_combat=(
+                    self._rollout_mode == "combat-exit"
+                    and _is_combat_observation(start.observation)
+                ),
                 ended_terminal=start.terminal,
             )
             for start in starts
@@ -516,6 +534,12 @@ class UctMcts:
                     if frame.transition.terminal:
                         rollout.value = self._value_fn(frame.observation)
                         rollout.ended_terminal = True
+                    elif (
+                        rollout.started_in_combat
+                        and not _is_combat_observation(frame.observation)
+                    ):
+                        rollout.value = self._value_fn(frame.observation)
+                        rollout.ended_boundary = True
 
             for rollout in rollouts:
                 if rollout.value is None:
@@ -525,11 +549,18 @@ class UctMcts:
                 rollout.ended_terminal
                 for rollout in rollouts
             )
+            boundary_count = sum(
+                rollout.ended_boundary
+                for rollout in rollouts
+            )
             return _RolloutBatchResult(
                 values=tuple(cast(float, rollout.value) for rollout in rollouts),
                 transitions=transitions_used,
                 terminal_rollouts=terminal_count,
-                cutoff_rollouts=len(rollouts) - terminal_count,
+                boundary_rollouts=boundary_count,
+                cutoff_rollouts=(
+                    len(rollouts) - terminal_count - boundary_count
+                ),
             )
         finally:
             if temporary:
@@ -559,6 +590,7 @@ def _configured_search_version(
     exploration: float,
     rollout_depth: int,
     rollout_batch_size: int,
+    rollout_mode: str,
     virtual_loss: float | None,
 ) -> str:
     rollout_id = getattr(
@@ -580,11 +612,26 @@ def _configured_search_version(
         f"{_SEARCH_ALGORITHM_VERSION}"
         f"|depth={rollout_depth}"
         f"|batch={rollout_batch_size}"
+        f"|mode={rollout_mode}"
         f"|vl={_virtual_loss_id(virtual_loss)}"
         f"|c={exploration:.6g}"
         f"|rollout={rollout_id}"
         f"|value={value_id}"
     )
+
+
+def _is_combat_observation(observation: Observation) -> bool:
+    try:
+        raw = json.loads(observation.payload_json)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(raw, dict):
+        return False
+    combat = raw.get("combat")
+    if isinstance(combat, dict):
+        return True
+    phase = raw.get("phase")
+    return phase == 3 or phase == "Combat"
 
 
 def _virtual_loss_id(virtual_loss: float | None) -> str:
