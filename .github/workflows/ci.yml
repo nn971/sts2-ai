@@ -27,15 +27,23 @@ jobs:
         run: |
           sts2-ai evaluate --agent random --seeds 1 --no-build
           sts2-ai evaluate --agent heuristic --seeds 1 --no-build
-      - name: Small oracle MCTS workload profile
+      - name: Oracle MCTS value-selection benchmark
         run: |
           sts2-ai evaluate \
             --agent mcts \
             --budget 8 \
-            --rollout-depth 32 \
+            --rollout-depth 16 \
             --rollout-batch-size 8 \
             --seeds 1 \
-            --max-decisions 8 \
             --no-build \
             --profile \
-            --strategy-db /tmp/sts2-ai-strategy.sqlite
+            --strategy-db /tmp/sts2-ai-strategy-8.sqlite
+          sts2-ai evaluate \
+            --agent mcts \
+            --budget 32 \
+            --rollout-depth 16 \
+            --rollout-batch-size 8 \
+            --seeds 1 \
+            --no-build \
+            --profile \
+            --strategy-db /tmp/sts2-ai-strategy-32.sqlite
