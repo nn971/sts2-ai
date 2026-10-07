@@ -5,7 +5,11 @@ from collections.abc import Iterable
 from dataclasses import asdict
 from pathlib import Path
 
-from sts2_ai.strategy_db import SQLiteStrategyStore
+from sts2_ai.strategy_db import (
+    SQLiteStrategyStore,
+    SearchActionEvidence,
+    SearchRootEvidence,
+)
 
 from .targets import TrainingExample, build_training_example
 
@@ -32,7 +36,7 @@ def build_training_examples(
     if highest_budget_only:
         strongest: dict[
             tuple[str, str, str, str],
-            tuple[object, object],
+            tuple[SearchRootEvidence, tuple[SearchActionEvidence, ...]],
         ] = {}
         for root, actions in records:
             key = (
@@ -42,12 +46,9 @@ def build_training_examples(
                 root.game_build,
             )
             previous = strongest.get(key)
-            if previous is None or root.search_budget > previous[0].search_budget:  # type: ignore[union-attr]
+            if previous is None or root.search_budget > previous[0].search_budget:
                 strongest[key] = (root, actions)
-        records = [
-            (root, actions)  # type: ignore[misc]
-            for root, actions in strongest.values()
-        ]
+        records = list(strongest.values())
 
     examples = []
     for root, actions in records:
