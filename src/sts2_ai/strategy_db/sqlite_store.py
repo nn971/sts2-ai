@@ -351,6 +351,40 @@ class SQLiteStrategyStore:
                 ],
             )
 
+    def root_selection_visit_counts(
+        self,
+        information_policy: str,
+        *,
+        search_regime: str = "oracle-exact",
+    ) -> tuple[tuple[int, int, int], ...]:
+        """Per-budget counts of searched roots and chosen actions with zero visits."""
+
+        rows = self._connection.execute(
+            """
+            SELECT r.search_budget,
+                   COUNT(*) AS roots,
+                   SUM(CASE WHEN a.visits = 0 THEN 1 ELSE 0 END) AS unvisited
+            FROM search_root_evidence AS r
+            JOIN search_action_evidence AS a
+              ON a.state_hash = r.state_hash
+             AND a.information_policy = r.information_policy
+             AND a.search_regime = r.search_regime
+             AND a.search_budget = r.search_budget
+             AND a.search_version = r.search_version
+             AND a.emulator_revision = r.emulator_revision
+             AND a.game_build = r.game_build
+             AND a.action_id = r.chosen_action_id
+            WHERE r.information_policy = ? AND r.search_regime = ?
+            GROUP BY r.search_budget
+            ORDER BY r.search_budget ASC
+            """,
+            (information_policy, search_regime),
+        ).fetchall()
+        return tuple(
+            (int(budget), int(roots), int(unvisited or 0))
+            for budget, roots, unvisited in rows
+        )
+
     def disagreement_state_hashes(
         self,
         information_policy: str,
