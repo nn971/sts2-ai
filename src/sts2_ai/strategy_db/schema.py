@@ -37,6 +37,7 @@ class SearchRootEvidence:
     game_build: str
     rollout_count: int = 0
     terminal_rollouts: int = 0
+    boundary_rollouts: int = 0
     cutoff_rollouts: int = 0
     rollout_steps: int = 0
 
