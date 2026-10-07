@@ -96,16 +96,19 @@ def diagnose_budget_disagreements(
     information_policy: str,
     *,
     search_regime: str = "oracle-exact",
+    search_version: str | None = None,
 ) -> DisagreementReport:
     roots: list[DisagreementDiagnostic] = []
     for state_hash in store.disagreement_state_hashes(
         information_policy,
         search_regime=search_regime,
+        search_version=search_version,
     ):
         records = store.search_for_state(
             state_hash,
             information_policy,
             search_regime=search_regime,
+            search_version=search_version,
         )
         if len(records) < 2:
             continue
