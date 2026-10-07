@@ -43,6 +43,8 @@ class SearchActionEvidence:
     information_policy: str
     search_regime: str
     action_id: str
+    action_kind: str
+    action_payload_json: str
     value: float
     visits: int
     uncertainty: float | None

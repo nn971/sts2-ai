@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS strategic_evidence (
     state_hash TEXT NOT NULL,
     information_policy TEXT NOT NULL,
     action_id TEXT NOT NULL,
+    action_kind TEXT NOT NULL DEFAULT '',
+    action_payload_json TEXT NOT NULL DEFAULT '{}',
     value REAL NOT NULL,
     visits INTEGER NOT NULL,
     uncertainty REAL,
@@ -108,7 +110,32 @@ class SQLiteStrategyStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._connection = sqlite3.connect(path)
         self._connection.executescript(_SCHEMA)
+        self._ensure_column(
+            "search_action_evidence",
+            "action_kind",
+            "TEXT NOT NULL DEFAULT ''",
+        )
+        self._ensure_column(
+            "search_action_evidence",
+            "action_payload_json",
+            "TEXT NOT NULL DEFAULT '{}'",
+        )
         self._connection.commit()
+
+    def _ensure_column(
+        self,
+        table: str,
+        column: str,
+        declaration: str,
+    ) -> None:
+        existing = {
+            str(row[1])
+            for row in self._connection.execute(f"PRAGMA table_info({table})")
+        }
+        if column not in existing:
+            self._connection.execute(
+                f"ALTER TABLE {table} ADD COLUMN {column} {declaration}"
+            )
 
     def close(self) -> None:
         self._connection.close()
@@ -289,13 +316,15 @@ class SQLiteStrategyStore:
                 """
                 INSERT INTO search_action_evidence (
                     state_hash, information_policy, search_regime, action_id,
-                    value, visits, uncertainty, search_budget, search_version,
-                    model_id, emulator_revision, game_build
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    action_kind, action_payload_json, value, visits, uncertainty,
+                    search_budget, search_version, model_id, emulator_revision, game_build
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (
                     state_hash, information_policy, search_regime, action_id,
                     search_budget, search_version, emulator_revision, game_build
                 ) DO UPDATE SET
+                    action_kind = excluded.action_kind,
+                    action_payload_json = excluded.action_payload_json,
                     value = excluded.value,
                     visits = excluded.visits,
                     uncertainty = excluded.uncertainty,
@@ -307,6 +336,8 @@ class SQLiteStrategyStore:
                         action.information_policy,
                         action.search_regime,
                         action.action_id,
+                        action.action_kind,
+                        action.action_payload_json,
                         action.value,
                         action.visits,
                         action.uncertainty,
@@ -388,8 +419,8 @@ class SQLiteStrategyStore:
             action_rows = self._connection.execute(
                 """
                 SELECT state_hash, information_policy, search_regime, action_id,
-                       value, visits, uncertainty, search_budget, search_version,
-                       model_id, emulator_revision, game_build
+                       action_kind, action_payload_json, value, visits, uncertainty,
+                       search_budget, search_version, model_id, emulator_revision, game_build
                 FROM search_action_evidence
                 WHERE state_hash = ?
                   AND information_policy = ?

@@ -51,6 +51,8 @@ def record_search_result(
             information_policy=information_policy,
             search_regime=search_regime,
             action_id=evaluation.action.action_id,
+            action_kind=evaluation.action.kind,
+            action_payload_json=evaluation.action.payload_json,
             value=evaluation.value,
             visits=evaluation.visits,
             uncertainty=evaluation.uncertainty,
