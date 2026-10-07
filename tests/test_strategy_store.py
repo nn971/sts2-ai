@@ -286,3 +286,65 @@ def test_budget_disagreement_diagnostic_flags_unvisited_selection(
     assert report.roots[0].classification == "unvisited-selection"
     assert report.by_phase[0].unvisited_selection == 1
     assert health == ((8, 1, 1), (32, 1, 0))
+
+
+def test_diagnostic_best_mean_ignores_unvisited_placeholder(tmp_path: Path) -> None:
+    visited = LegalAction("play_card:visited", "play_card")
+    unvisited = LegalAction("play_card:unvisited", "play_card")
+    other = LegalAction("play_card:other", "play_card")
+    observation = '{"phase":3,"act":1,"floor":1,"hp":70,"max_hp":70}'
+    low = SearchResult(
+        root_state_hash="shared-state-diagnostic",
+        root_observation_hash="shared-observation-diagnostic",
+        root_observation_json=observation,
+        evaluations=(
+            ActionEvaluation(visited, value=-0.40, visits=8, uncertainty=0.1),
+            ActionEvaluation(unvisited, value=0.0, visits=0, uncertainty=None),
+            ActionEvaluation(other, value=-0.45, visits=1, uncertainty=0.2),
+        ),
+        expanded_nodes=4,
+        transitions=10,
+        transposition_hits=0,
+        search_version="search-v1",
+    )
+    high = SearchResult(
+        root_state_hash="shared-state-diagnostic",
+        root_observation_hash="shared-observation-diagnostic",
+        root_observation_json=observation,
+        evaluations=(
+            ActionEvaluation(visited, value=-0.35, visits=10, uncertainty=0.1),
+            ActionEvaluation(unvisited, value=-0.30, visits=12, uncertainty=0.1),
+            ActionEvaluation(other, value=-0.50, visits=10, uncertainty=0.1),
+        ),
+        expanded_nodes=8,
+        transitions=30,
+        transposition_hits=0,
+        search_version="search-v1",
+    )
+
+    with SQLiteStrategyStore(tmp_path / "strategy.sqlite") as store:
+        record_search_result(
+            store,
+            low,
+            visited,
+            information_policy="prototype-fair-v0",
+            search_regime="oracle-exact",
+            search_budget=8,
+            emulator_revision="emu-1",
+            game_build="build-1",
+        )
+        record_search_result(
+            store,
+            high,
+            unvisited,
+            information_policy="prototype-fair-v0",
+            search_regime="oracle-exact",
+            search_budget=32,
+            emulator_revision="emu-1",
+            game_build="build-1",
+        )
+        report = diagnose_budget_disagreements(store, "prototype-fair-v0")
+
+    low_decision = report.roots[0].decisions[0]
+    assert low_decision.best_mean_action_id == visited.action_id
+    assert low_decision.selection_regret == 0.0
