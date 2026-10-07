@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Sequence
 from typing import Any, cast
 
@@ -189,7 +190,12 @@ class HeuristicAgent:
     @staticmethod
     def _payload(action: LegalAction) -> dict[str, Any]:
         raw = json.loads(action.payload_json)
-        return cast(dict[str, Any], raw if isinstance(raw, dict) else {})
+        if not isinstance(raw, dict):
+            return {}
+        return {
+            _snake_case(str(key)): value
+            for key, value in cast(dict[str, Any], raw).items()
+        }
 
     @staticmethod
     def _list_of_dicts(value: object) -> tuple[dict[str, Any], ...]:
@@ -202,3 +208,8 @@ class HeuristicAgent:
         if isinstance(value, int | float):
             return float(value)
         return default
+
+
+def _snake_case(name: str) -> str:
+    first = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", name)
+    return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", first).lower()
