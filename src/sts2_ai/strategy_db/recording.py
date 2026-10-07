@@ -46,6 +46,7 @@ def record_search_result(
         game_build=game_build,
         rollout_count=result.rollout_count,
         terminal_rollouts=result.terminal_rollouts,
+        boundary_rollouts=result.boundary_rollouts,
         cutoff_rollouts=result.cutoff_rollouts,
         rollout_steps=result.rollout_steps,
     )
