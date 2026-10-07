@@ -2,9 +2,9 @@
 
 ## Current phase
 
-**Phase 0 — establish the simulation foundation.**
+**Phase 1 — begin the search-first AI prototype.**
 
-The parent research scaffold exists, but strategic experiments are intentionally secondary until `sts2-emulator` satisfies its first milestone: trustworthy, practically fast whole-run simulation with native parity evidence.
+The emulator is now considered sufficient for the first experimental AI loop. Broad fidelity work is paused; the next task is to repin the emulator submodule, connect the real JSONL backend, and build random/heuristic/search baselines.
 
 ## Present capabilities
 
@@ -33,3 +33,12 @@ The parent research scaffold exists, but strategic experiments are intentionally
 4. Build a deterministic random-policy run generator for smoke testing.
 5. Establish experiment manifest generation and dataset provenance in actual runs.
 6. Wait for sufficient emulator parity before investing heavily in strategic learning.
+
+
+## Active roadmap
+
+See [docs/AI_PROTOTYPE_ROADMAP.md](docs/AI_PROTOTYPE_ROADMAP.md).
+
+That document is the self-contained handoff for a fresh development context. The next implementation
+step is to repin the emulator submodule to the current `prototype/full-run-silent` revision and
+implement the real Python JSONL backend.
