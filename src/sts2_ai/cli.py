@@ -63,6 +63,12 @@ def main() -> None:
         default=8,
         help="number of pending UCT simulations whose heuristic rollouts are advanced together",
     )
+    evaluate.add_argument(
+        "--virtual-loss",
+        type=float,
+        default=-1.0,
+        help="temporary value assigned to pending batched UCT paths",
+    )
     evaluate.add_argument("--seeds", type=int, default=10, help="number of deterministic run seeds")
     evaluate.add_argument("--seed-prefix", default="eval")
     evaluate.add_argument("--agent-seed", type=int, default=0)
@@ -102,6 +108,7 @@ def main() -> None:
     benchmark.add_argument("--max-decisions", type=int)
     benchmark.add_argument("--rollout-depth", type=int, default=8)
     benchmark.add_argument("--rollout-batch-size", type=int, default=8)
+    benchmark.add_argument("--virtual-loss", type=float, default=-1.0)
     benchmark.add_argument("--repo-root", type=Path, default=Path.cwd())
     benchmark.add_argument("--no-build", action="store_true")
     benchmark.add_argument(
@@ -165,6 +172,8 @@ def _evaluate(args: argparse.Namespace) -> None:
         raise SystemExit("--rollout-depth must be non-negative")
     if args.rollout_batch_size <= 0:
         raise SystemExit("--rollout-batch-size must be positive")
+    if not -1.0 <= args.virtual_loss <= 1.0:
+        raise SystemExit("--virtual-loss must lie in [-1, 1]")
 
     policy = InformationPolicy(FAIR_POLICY_ID)
     summaries = []
@@ -194,6 +203,7 @@ def _evaluate(args: argparse.Namespace) -> None:
                         rollout_policy=HeuristicAgent(),
                         rollout_depth=args.rollout_depth,
                         rollout_batch_size=args.rollout_batch_size,
+                        virtual_loss=args.virtual_loss,
                         seed=args.agent_seed + index,
                     )
 
@@ -271,6 +281,7 @@ def _evaluate(args: argparse.Namespace) -> None:
             "rollout_batch_size": (
                 args.rollout_batch_size if args.agent == "mcts" else None
             ),
+            "virtual_loss": args.virtual_loss if args.agent == "mcts" else None,
             "runs": [asdict(summary) for summary in summaries],
             "bridge_profile": {
                 operation: asdict(stats)
@@ -305,6 +316,8 @@ def _benchmark(args: argparse.Namespace) -> None:
         raise SystemExit("--rollout-depth must be non-negative")
     if args.rollout_batch_size <= 0:
         raise SystemExit("--rollout-batch-size must be positive")
+    if not -1.0 <= args.virtual_loss <= 1.0:
+        raise SystemExit("--virtual-loss must lie in [-1, 1]")
 
     budgets = sorted(args.budgets)
     policy = InformationPolicy(FAIR_POLICY_ID)
@@ -338,6 +351,7 @@ def _benchmark(args: argparse.Namespace) -> None:
                             rollout_policy=HeuristicAgent(),
                             rollout_depth=args.rollout_depth,
                             rollout_batch_size=args.rollout_batch_size,
+                            virtual_loss=args.virtual_loss,
                             seed=args.agent_seed + index,
                         )
 
@@ -396,6 +410,7 @@ def _benchmark(args: argparse.Namespace) -> None:
             "seed_prefix": args.seed_prefix,
             "rollout_depth": args.rollout_depth,
             "rollout_batch_size": args.rollout_batch_size,
+            "virtual_loss": args.virtual_loss,
             "rows": [asdict(row) for row in rows],
             "runs": serialized_runs,
         }
