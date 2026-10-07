@@ -74,7 +74,7 @@ class _RolloutState:
 class UctMcts:
     """Transposition-aware oracle-exact UCT with batched heuristic rollouts."""
 
-    search_version = "oracle-exact-light-rollout-uct-v7-tactical-cutoff"
+    search_version = "oracle-exact-light-rollout-uct-v6-payload-aware-rollout"
 
     def __init__(
         self,
@@ -449,7 +449,12 @@ class UctMcts:
 
 
 def sts2_value(observation: Observation) -> float:
-    """Small cutoff value with progress, survivability, and persistent resources."""
+    """Transparent cutoff value for the fixed three-act prototype ruleset.
+
+    A combat on floor f is treated as progress from floor f-1 toward floor f.
+    Remaining enemy HP supplies the within-combat progress signal that the first
+    evaluator lacked, while player HP remains the survival signal.
+    """
 
     raw = json.loads(observation.payload_json)
     state = cast(dict[str, Any], raw if isinstance(raw, dict) else {})
@@ -463,59 +468,34 @@ def sts2_value(observation: Observation) -> float:
     max_hp = max(1.0, _number(state.get("max_hp"), 1.0))
     hp_fraction = max(0.0, min(1.0, hp / max_hp))
 
+    # The current prototype ruleset has 3 acts x 6 floors. Keeping this explicit
+    # is preferable to the old 20-floor reporting convention, which compressed
+    # all of Act 1 into only one tenth of the value range.
     floors_per_act = 6.0
     total_acts = 3.0
     act = max(1.0, min(total_acts, _number(state.get("act"), 1.0)))
     floor = max(0.0, min(floors_per_act, _number(state.get("floor"), 0.0)))
 
     combat = state.get("combat")
-    block_credit = 0.0
     if isinstance(combat, dict) and floor > 0.0:
         enemies = _dict_items(combat.get("enemies"))
         remaining_enemy_hp = sum(
             max(0.0, _number(enemy.get("hp"), 0.0))
             for enemy in enemies
         )
+        # Smoothly interpolates from roughly the previous completed floor at the
+        # beginning of a fight to the current floor as enemy HP approaches zero.
         combat_completion = math.exp(-remaining_enemy_hp / 80.0)
         effective_floor = max(0.0, floor - 1.0 + combat_completion)
-
-        player_block = max(0.0, _number(combat.get("player_block"), 0.0))
-        block_fraction = min(player_block / max_hp, 0.50)
-        block_credit = 0.35 * block_fraction
     else:
         effective_floor = floor
 
     progress = (
         ((act - 1.0) * floors_per_act) + effective_floor
     ) / (total_acts * floors_per_act)
-    survival = min(1.25, hp_fraction + block_credit)
-    resources = _resource_value(state)
-
-    utility = (
-        (0.64 * progress)
-        + (0.30 * survival)
-        + (0.06 * resources)
-    )
+    utility = (0.70 * progress) + (0.30 * hp_fraction)
     return max(-1.0, min(1.0, (2.0 * utility) - 1.0))
 
-
-def _resource_value(state: dict[str, Any]) -> float:
-    gold = max(0.0, _number(state.get("gold"), 0.0))
-    gold_score = math.tanh(gold / 200.0)
-
-    relics = state.get("relics")
-    relic_count = len(relics) if isinstance(relics, list) else 0
-    relic_score = math.tanh(max(0, relic_count - 1) / 3.0)
-
-    potions = state.get("potions")
-    potion_count = len(potions) if isinstance(potions, list) else 0
-    potion_score = min(1.0, potion_count / 3.0)
-
-    return (
-        (0.45 * gold_score)
-        + (0.40 * relic_score)
-        + (0.15 * potion_score)
-    )
 
 def _dict_items(value: object) -> tuple[dict[str, Any], ...]:
     if not isinstance(value, list):
