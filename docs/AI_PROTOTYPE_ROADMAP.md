@@ -502,11 +502,25 @@ optimistic reservation: a just-selected negative-valued edge can have its tempor
 pulled toward zero and become *more* attractive to the remaining selections in the same
 batch.
 
-The search now uses an explicit pessimistic virtual loss. The default is -1.0 on the
-current [-1, 1] value scale, and both `evaluate` and `benchmark` expose
-`--virtual-loss` for controlled comparisons. Backup replaces the temporary loss with
-the actual rollout value, so final visit/value statistics remain ordinary UCT statistics.
-Unit tests cover the accounting identity and the intended within-batch diversification
+The first repair used an explicit fixed virtual loss, exposed as `--virtual-loss`.
+A five-seed common-seed comparison showed that strong pessimism was counterproductive:
+with rollout depth 8, fixed `-1` left MCTS-8 essentially unchanged but moved MCTS-32
+frontier progress from 4.651 (fixed `0`) down to 4.156. Milder values `-0.25` and
+`-0.5` were much closer to the zero-reservation baseline, with MCTS-32 frontier progress
+4.613 and 4.619 respectively.
+
+The default is therefore now a **mean-preserving reservation** rather than a fixed loss.
+A pending visit receives the edge's current mean value, so its Q estimate stays unchanged
+while its visit count increases and its UCT exploration bonus falls. For a newly visited
+edge, the parent estimate supplies the temporary value. Backup later replaces that exact
+temporary value by the real rollout value. Fixed `--virtual-loss` values remain available
+as experimental overrides.
+
+On the same five seeds, the mean-preserving default gave frontier progress 5.162 for
+MCTS-8 and 4.574 for MCTS-32, versus 5.162 and 4.651 for fixed zero. These differences
+are small at this sample size, so the main conclusion is structural rather than a claimed
+strength gain: batching no longer injects an arbitrary optimistic or pessimistic Q shift.
+Unit tests cover the accounting identity, mean preservation, and within-batch selection
 effect.
 
 Search evidence now fingerprints the full search configuration in `search_version`:
@@ -525,11 +539,12 @@ at a time and demand an empirical gain before keeping extra evaluator features.
 
 Next:
 
-1. compare the new virtual-loss UCT against `--virtual-loss 0` on the same five seeds;
-2. compare rollout depth 8 versus 16 only after reservation behavior is fixed;
-3. use semantic action payloads in disagreement reports to inspect the largest Combat,
+1. compare rollout depth 8 versus 16 using the mean-preserving reservation on the same
+   five-seed 8/32/128 ladder;
+2. use semantic action payloads in disagreement reports to inspect the largest Combat,
    MapChoice, and Reward flips;
-4. decide whether the dominant remaining error is cutoff evaluation or rollout policy;
+3. decide whether the dominant remaining error is cutoff evaluation or rollout policy;
+4. improve that component and repeat the common-seed ladder;
 5. extend to 512 simulations only after the 8/32/128 curve is better understood.
 
 
