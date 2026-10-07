@@ -180,9 +180,7 @@ class UctMcts:
                 ]
                 rollout_values: tuple[float, ...] = ()
                 if rollout_entries:
-                    rollout_values, used = self._rollout_batch(
-                        tuple(cast(_Node, leaf) for leaf in rollout_entries)
-                    )
+                    rollout_values, used = self._rollout_batch(tuple(rollout_entries))
                     transitions += used
 
                 value_iter = iter(rollout_values)
