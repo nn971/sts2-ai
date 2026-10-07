@@ -18,6 +18,7 @@ class RunSummary:
     decisions: int
     emulator_transitions: int
     wall_seconds: float
+    agent_compute_seconds: float
     hp_trajectory: tuple[int, ...]
 
     @property
@@ -53,6 +54,7 @@ def play_run(
     hp_trajectory: list[int] = []
     decisions = 0
     emulator_transitions = 0
+    agent_compute_seconds = 0.0
     final_state: dict[str, Any] = {}
 
     try:
@@ -71,10 +73,12 @@ def play_run(
                 break
 
             legal_actions = tuple(backend.legal_actions(state))
+            choose_started = time.perf_counter()
             if isinstance(agent, ExactStateAgent):
                 decision = agent.choose_state(state, observation, legal_actions)
             else:
                 decision = agent.choose(observation, legal_actions)
+            agent_compute_seconds += time.perf_counter() - choose_started
 
             transition = backend.step(state, decision.action)
             emulator_transitions += 1 + _search_transitions(decision.metadata_json)
@@ -100,6 +104,7 @@ def play_run(
             decisions=decisions,
             emulator_transitions=emulator_transitions,
             wall_seconds=time.perf_counter() - started,
+            agent_compute_seconds=agent_compute_seconds,
             hp_trajectory=tuple(hp_trajectory),
         )
     finally:

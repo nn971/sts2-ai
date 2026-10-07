@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import sqlite3
+from collections.abc import Sequence
 from pathlib import Path
 
-from .schema import StrategicEvidence
+from .schema import SearchActionEvidence, SearchRootEvidence, StrategicEvidence
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS strategic_evidence (
@@ -28,18 +30,70 @@ CREATE TABLE IF NOT EXISTS strategic_evidence (
 );
 CREATE INDEX IF NOT EXISTS idx_evidence_state
 ON strategic_evidence(state_hash, information_policy);
+
+CREATE TABLE IF NOT EXISTS search_root_evidence (
+    state_hash TEXT NOT NULL,
+    observation_hash TEXT NOT NULL,
+    information_policy TEXT NOT NULL,
+    search_regime TEXT NOT NULL,
+    legal_action_ids_json TEXT NOT NULL,
+    chosen_action_id TEXT NOT NULL,
+    search_budget INTEGER NOT NULL,
+    expanded_nodes INTEGER NOT NULL,
+    transitions INTEGER NOT NULL,
+    transposition_hits INTEGER NOT NULL,
+    search_version TEXT NOT NULL,
+    model_id TEXT,
+    emulator_revision TEXT NOT NULL,
+    game_build TEXT NOT NULL,
+    PRIMARY KEY (
+        state_hash,
+        information_policy,
+        search_regime,
+        search_budget,
+        search_version,
+        emulator_revision,
+        game_build
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_search_root_observation
+ON search_root_evidence(observation_hash, information_policy);
+
+CREATE TABLE IF NOT EXISTS search_action_evidence (
+    state_hash TEXT NOT NULL,
+    information_policy TEXT NOT NULL,
+    search_regime TEXT NOT NULL,
+    action_id TEXT NOT NULL,
+    value REAL NOT NULL,
+    visits INTEGER NOT NULL,
+    uncertainty REAL,
+    search_budget INTEGER NOT NULL,
+    search_version TEXT NOT NULL,
+    model_id TEXT,
+    emulator_revision TEXT NOT NULL,
+    game_build TEXT NOT NULL,
+    PRIMARY KEY (
+        state_hash,
+        information_policy,
+        search_regime,
+        action_id,
+        search_budget,
+        search_version,
+        emulator_revision,
+        game_build
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_search_action_state
+ON search_action_evidence(state_hash, information_policy, search_regime);
 """
 
 
 class SQLiteStrategyStore:
-    """Small development store for exact-state strategic evidence.
-
-    The schema is intentionally conservative. It makes provenance unavoidable while
-    leaving graph/storage design open for later measurements.
-    """
+    """SQLite development store for reusable exact-state search evidence."""
 
     def __init__(self, path: Path) -> None:
         self._path = path
+        path.parent.mkdir(parents=True, exist_ok=True)
         self._connection = sqlite3.connect(path)
         self._connection.executescript(_SCHEMA)
         self._connection.commit()
@@ -84,7 +138,11 @@ class SQLiteStrategyStore:
         )
         self._connection.commit()
 
-    def for_state(self, state_hash: str, information_policy: str) -> tuple[StrategicEvidence, ...]:
+    def for_state(
+        self,
+        state_hash: str,
+        information_policy: str,
+    ) -> tuple[StrategicEvidence, ...]:
         rows = self._connection.execute(
             """
             SELECT state_hash, information_policy, action_id, value, visits,
@@ -96,3 +154,189 @@ class SQLiteStrategyStore:
             (state_hash, information_policy),
         ).fetchall()
         return tuple(StrategicEvidence(*row) for row in rows)
+
+    def upsert_search(
+        self,
+        root: SearchRootEvidence,
+        actions: Sequence[SearchActionEvidence],
+    ) -> None:
+        """Atomically persist one searched root and all root-action statistics."""
+
+        expected_ids = set(root.legal_action_ids)
+        action_ids = {action.action_id for action in actions}
+        if action_ids != expected_ids:
+            raise ValueError("Search action evidence must cover every legal root action exactly once")
+        if root.chosen_action_id not in expected_ids:
+            raise ValueError("Chosen action must be one of the legal root actions")
+
+        key = (
+            root.state_hash,
+            root.information_policy,
+            root.search_regime,
+            root.search_budget,
+            root.search_version,
+            root.emulator_revision,
+            root.game_build,
+        )
+        for action in actions:
+            action_key = (
+                action.state_hash,
+                action.information_policy,
+                action.search_regime,
+                action.search_budget,
+                action.search_version,
+                action.emulator_revision,
+                action.game_build,
+            )
+            if action_key != key:
+                raise ValueError("Root and action search provenance must match")
+
+        legal_json = json.dumps(
+            root.legal_action_ids,
+            separators=(",", ":"),
+            sort_keys=False,
+        )
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO search_root_evidence (
+                    state_hash, observation_hash, information_policy, search_regime,
+                    legal_action_ids_json, chosen_action_id, search_budget,
+                    expanded_nodes, transitions, transposition_hits, search_version,
+                    model_id, emulator_revision, game_build
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (
+                    state_hash, information_policy, search_regime, search_budget,
+                    search_version, emulator_revision, game_build
+                ) DO UPDATE SET
+                    observation_hash = excluded.observation_hash,
+                    legal_action_ids_json = excluded.legal_action_ids_json,
+                    chosen_action_id = excluded.chosen_action_id,
+                    expanded_nodes = excluded.expanded_nodes,
+                    transitions = excluded.transitions,
+                    transposition_hits = excluded.transposition_hits,
+                    model_id = excluded.model_id
+                """,
+                (
+                    root.state_hash,
+                    root.observation_hash,
+                    root.information_policy,
+                    root.search_regime,
+                    legal_json,
+                    root.chosen_action_id,
+                    root.search_budget,
+                    root.expanded_nodes,
+                    root.transitions,
+                    root.transposition_hits,
+                    root.search_version,
+                    root.model_id,
+                    root.emulator_revision,
+                    root.game_build,
+                ),
+            )
+            self._connection.executemany(
+                """
+                INSERT INTO search_action_evidence (
+                    state_hash, information_policy, search_regime, action_id,
+                    value, visits, uncertainty, search_budget, search_version,
+                    model_id, emulator_revision, game_build
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (
+                    state_hash, information_policy, search_regime, action_id,
+                    search_budget, search_version, emulator_revision, game_build
+                ) DO UPDATE SET
+                    value = excluded.value,
+                    visits = excluded.visits,
+                    uncertainty = excluded.uncertainty,
+                    model_id = excluded.model_id
+                """,
+                [
+                    (
+                        action.state_hash,
+                        action.information_policy,
+                        action.search_regime,
+                        action.action_id,
+                        action.value,
+                        action.visits,
+                        action.uncertainty,
+                        action.search_budget,
+                        action.search_version,
+                        action.model_id,
+                        action.emulator_revision,
+                        action.game_build,
+                    )
+                    for action in actions
+                ],
+            )
+
+    def search_for_state(
+        self,
+        state_hash: str,
+        information_policy: str,
+        *,
+        search_regime: str = "oracle-exact",
+    ) -> tuple[tuple[SearchRootEvidence, tuple[SearchActionEvidence, ...]], ...]:
+        roots = self._connection.execute(
+            """
+            SELECT state_hash, observation_hash, information_policy, search_regime,
+                   legal_action_ids_json, chosen_action_id, search_budget,
+                   expanded_nodes, transitions, transposition_hits, search_version,
+                   model_id, emulator_revision, game_build
+            FROM search_root_evidence
+            WHERE state_hash = ? AND information_policy = ? AND search_regime = ?
+            ORDER BY search_budget ASC, search_version ASC
+            """,
+            (state_hash, information_policy, search_regime),
+        ).fetchall()
+
+        results = []
+        for row in roots:
+            legal_ids_raw = json.loads(row[4])
+            if not isinstance(legal_ids_raw, list) or not all(
+                isinstance(item, str) for item in legal_ids_raw
+            ):
+                raise RuntimeError("Stored legal action ids are malformed")
+            root = SearchRootEvidence(
+                state_hash=row[0],
+                observation_hash=row[1],
+                information_policy=row[2],
+                search_regime=row[3],
+                legal_action_ids=tuple(legal_ids_raw),
+                chosen_action_id=row[5],
+                search_budget=row[6],
+                expanded_nodes=row[7],
+                transitions=row[8],
+                transposition_hits=row[9],
+                search_version=row[10],
+                model_id=row[11],
+                emulator_revision=row[12],
+                game_build=row[13],
+            )
+            action_rows = self._connection.execute(
+                """
+                SELECT state_hash, information_policy, search_regime, action_id,
+                       value, visits, uncertainty, search_budget, search_version,
+                       model_id, emulator_revision, game_build
+                FROM search_action_evidence
+                WHERE state_hash = ?
+                  AND information_policy = ?
+                  AND search_regime = ?
+                  AND search_budget = ?
+                  AND search_version = ?
+                  AND emulator_revision = ?
+                  AND game_build = ?
+                ORDER BY action_id ASC
+                """,
+                (
+                    root.state_hash,
+                    root.information_policy,
+                    root.search_regime,
+                    root.search_budget,
+                    root.search_version,
+                    root.emulator_revision,
+                    root.game_build,
+                ),
+            ).fetchall()
+            actions = tuple(SearchActionEvidence(*action_row) for action_row in action_rows)
+            results.append((root, actions))
+        return tuple(results)
