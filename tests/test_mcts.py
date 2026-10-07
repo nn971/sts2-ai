@@ -31,7 +31,12 @@ def test_mcts_runs_budget_and_hits_transpositions() -> None:
     assert result.transitions > 0
     assert result.expanded_nodes > 0
     assert result.transposition_hits > 0
-    assert result.search_version == "oracle-exact-light-rollout-uct-v7-virtual-loss"
+    assert result.search_version.startswith("oracle-exact-light-rollout-uct-v8-configured")
+    assert "|depth=8|" in result.search_version
+    assert "|batch=8|" in result.search_version
+    assert "|vl=-1|" in result.search_version
+    assert "|rollout=heuristic-v2-payload-aware|" in result.search_version
+    assert result.search_version.endswith("|value=_mock_value")
     assert {item.action.action_id for item in result.evaluations} == {"inc-1", "inc-2"}
 
 
@@ -153,3 +158,35 @@ def test_pessimistic_virtual_loss_discourages_reselecting_pending_edge() -> None
     search._reserve(pending, -1.0)
 
     assert search._choose_unvisited_or_uct(node) is edge_b
+
+
+def test_search_version_changes_with_search_configuration() -> None:
+    backend = MockLinearBackend(terminal_at=8)
+    policy = InformationPolicy("fair-test")
+    base = UctMcts(
+        backend,
+        policy=policy,
+        rollout_policy=HeuristicAgent(),
+        rollout_depth=8,
+        rollout_batch_size=8,
+        virtual_loss=-1.0,
+    )
+    different_depth = UctMcts(
+        backend,
+        policy=policy,
+        rollout_policy=HeuristicAgent(),
+        rollout_depth=16,
+        rollout_batch_size=8,
+        virtual_loss=-1.0,
+    )
+    zero_virtual_loss = UctMcts(
+        backend,
+        policy=policy,
+        rollout_policy=HeuristicAgent(),
+        rollout_depth=8,
+        rollout_batch_size=8,
+        virtual_loss=0.0,
+    )
+
+    assert base.search_version != different_depth.search_version
+    assert base.search_version != zero_virtual_loss.search_version
