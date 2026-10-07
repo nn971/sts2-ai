@@ -33,7 +33,7 @@ jobs:
             --agent mcts \
             --budget 32 \
             --rollout-depth 16 \
-            --rollout-batch-size 8 \
+            --rollout-batch-size 32 \
             --seeds 3 \
             --no-build \
             --profile \
