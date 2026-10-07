@@ -24,6 +24,7 @@ from sts2_ai.emulator import (
 from sts2_ai.evaluation import (
     collect_experiment_manifest,
     compare_paired_runs,
+    RunSummary,
     markdown_table,
     paired_markdown_table,
     play_run,
@@ -328,7 +329,7 @@ def _benchmark(args: argparse.Namespace) -> None:
     budgets = sorted(args.budgets)
     policy = InformationPolicy(FAIR_POLICY_ID)
     rows = []
-    summaries_by_label = {}
+    summaries_by_label: dict[str, list[RunSummary]] = {}
     serialized_runs: dict[str, list[dict[str, object]]] = {}
 
     with SQLiteStrategyStore(args.strategy_db) as strategy_store:
