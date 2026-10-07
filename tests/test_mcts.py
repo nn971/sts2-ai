@@ -196,9 +196,19 @@ def test_search_version_changes_with_search_configuration() -> None:
         rollout_batch_size=8,
         virtual_loss=0.0,
     )
+    combat_exit = UctMcts(
+        backend,
+        policy=policy,
+        rollout_policy=HeuristicAgent(),
+        rollout_depth=8,
+        rollout_batch_size=8,
+        rollout_mode="combat-exit",
+        virtual_loss=-1.0,
+    )
 
     assert base.search_version != different_depth.search_version
     assert base.search_version != zero_virtual_loss.search_version
+    assert base.search_version != combat_exit.search_version
 
 
 def test_mean_preserving_reservation_keeps_existing_q_estimate() -> None:
