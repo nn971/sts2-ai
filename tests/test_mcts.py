@@ -37,6 +37,9 @@ def test_mcts_runs_budget_and_hits_transpositions() -> None:
     assert "|vl=mean|" in result.search_version
     assert "|rollout=heuristic-v2-payload-aware|" in result.search_version
     assert result.search_version.endswith("|value=_mock_value")
+    assert result.rollout_count > 0
+    assert result.terminal_rollouts + result.cutoff_rollouts == result.rollout_count
+    assert result.rollout_steps > 0
     assert {item.action.action_id for item in result.evaluations} == {"inc-1", "inc-2"}
 
 
@@ -232,3 +235,23 @@ def test_mean_preserving_reservation_keeps_existing_q_estimate() -> None:
     mcts.UctMcts._backup_reserved(pending, -0.1, reservation)
     assert node.value_sum == pytest.approx((-3.5) + (-0.1))
     assert edge.value_sum == pytest.approx((-1.2) + (-0.1))
+
+
+def test_zero_depth_rollouts_are_recorded_as_cutoffs() -> None:
+    backend = MockLinearBackend(terminal_at=20)
+    search = UctMcts(
+        backend,
+        policy=InformationPolicy("fair-test"),
+        rollout_policy=HeuristicAgent(),
+        value_fn=_mock_value,
+        rollout_depth=0,
+        rollout_batch_size=4,
+        seed=11,
+    )
+
+    result = search.search("0", SearchBudget(max_simulations=8))
+
+    assert result.rollout_count > 0
+    assert result.terminal_rollouts == 0
+    assert result.cutoff_rollouts == result.rollout_count
+    assert result.rollout_steps == 0
