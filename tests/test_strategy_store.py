@@ -420,3 +420,98 @@ def test_semantically_equivalent_card_instances_are_collapsed(tmp_path: Path) ->
     assert report.roots[0].classification == "semantic-equivalent"
     assert report.roots[0].semantically_equivalent
     assert report.by_phase[0].semantic_equivalent == 1
+
+
+def test_search_configuration_filters_keep_evidence_isolated(tmp_path: Path) -> None:
+    first = LegalAction("a", "choose_map_node")
+    second = LegalAction("b", "choose_map_node")
+    observation = '{"phase":2,"act":1,"floor":0,"hp":70,"max_hp":70}'
+
+    def result(
+        version: str,
+        first_value: float,
+        second_value: float,
+    ) -> SearchResult:
+        return SearchResult(
+            root_state_hash="shared-config-state",
+            root_observation_hash="shared-config-observation",
+            root_observation_json=observation,
+            evaluations=(
+                ActionEvaluation(first, value=first_value, visits=8, uncertainty=0.1),
+                ActionEvaluation(second, value=second_value, visits=8, uncertainty=0.1),
+            ),
+            expanded_nodes=4,
+            transitions=16,
+            transposition_hits=0,
+            search_version=version,
+        )
+
+    path = tmp_path / "strategy.sqlite"
+    with SQLiteStrategyStore(path) as store:
+        record_search_result(
+            store,
+            result("config-a", 0.4, 0.3),
+            first,
+            information_policy="prototype-fair-v0",
+            search_regime="oracle-exact",
+            search_budget=8,
+            emulator_revision="emu-1",
+            game_build="build-1",
+        )
+        record_search_result(
+            store,
+            result("config-a", 0.2, 0.5),
+            second,
+            information_policy="prototype-fair-v0",
+            search_regime="oracle-exact",
+            search_budget=32,
+            emulator_revision="emu-1",
+            game_build="build-1",
+        )
+        record_search_result(
+            store,
+            result("config-b", 0.6, 0.2),
+            first,
+            information_policy="prototype-fair-v0",
+            search_regime="oracle-exact",
+            search_budget=8,
+            emulator_revision="emu-1",
+            game_build="build-1",
+        )
+        record_search_result(
+            store,
+            result("config-b", 0.7, 0.1),
+            first,
+            information_policy="prototype-fair-v0",
+            search_regime="oracle-exact",
+            search_budget=32,
+            emulator_revision="emu-1",
+            game_build="build-1",
+        )
+
+        assert store.search_versions("prototype-fair-v0") == (
+            "config-a",
+            "config-b",
+        )
+        assert store.disagreement_state_hashes(
+            "prototype-fair-v0",
+            search_version="config-a",
+        ) == ("shared-config-state",)
+        assert store.disagreement_state_hashes(
+            "prototype-fair-v0",
+            search_version="config-b",
+        ) == ()
+
+        report_a = diagnose_budget_disagreements(
+            store,
+            "prototype-fair-v0",
+            search_version="config-a",
+        )
+        report_b = diagnose_budget_disagreements(
+            store,
+            "prototype-fair-v0",
+            search_version="config-b",
+        )
+
+    assert report_a.total_roots == 1
+    assert report_b.total_roots == 0
