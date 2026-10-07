@@ -21,7 +21,12 @@ from sts2_ai.emulator import (
     JsonlEmulatorBackend,
     LegalAction,
 )
-from sts2_ai.evaluation import collect_experiment_manifest, play_run
+from sts2_ai.evaluation import (
+    collect_experiment_manifest,
+    markdown_table,
+    play_run,
+    summarize_runs,
+)
 from sts2_ai.search import SearchResult, UctMcts
 from sts2_ai.strategy_db import SQLiteStrategyStore, record_search_result
 
@@ -75,6 +80,39 @@ def main() -> None:
         help="print JSONL bridge operation timing for the actual workload",
     )
 
+    benchmark = sub.add_parser(
+        "benchmark",
+        help="compare random, heuristic, and a common-seed MCTS budget ladder",
+    )
+    benchmark.add_argument(
+        "--budgets",
+        type=int,
+        nargs="+",
+        default=[32, 128, 512, 2048],
+        help="MCTS simulations per decision",
+    )
+    benchmark.add_argument("--seeds", type=int, default=3)
+    benchmark.add_argument("--seed-prefix", default="benchmark")
+    benchmark.add_argument("--agent-seed", type=int, default=0)
+    benchmark.add_argument("--ascension", type=int, default=0)
+    benchmark.add_argument("--max-decisions", type=int)
+    benchmark.add_argument("--rollout-depth", type=int, default=8)
+    benchmark.add_argument("--rollout-batch-size", type=int, default=8)
+    benchmark.add_argument("--repo-root", type=Path, default=Path.cwd())
+    benchmark.add_argument("--no-build", action="store_true")
+    benchmark.add_argument(
+        "--strategy-db",
+        type=Path,
+        default=Path("results/strategy.sqlite"),
+    )
+    benchmark.add_argument("--game-build", default="unknown")
+    benchmark.add_argument("--json-output", type=Path)
+    benchmark.add_argument(
+        "--include-random",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+
     args = parser.parse_args()
     if args.command == "manifest":
         result = collect_experiment_manifest(
@@ -93,6 +131,10 @@ def main() -> None:
 
     if args.command == "evaluate":
         _evaluate(args)
+        return
+
+    if args.command == "benchmark":
+        _benchmark(args)
 
 
 def _evaluate(args: argparse.Namespace) -> None:
@@ -230,6 +272,116 @@ def _print_bridge_profile(profile: Mapping[str, BridgeOperationStats]) -> None:
         print(
             f"| {operation} | {stats.calls} | "
             f"{stats.total_seconds:.3f}s | {1000.0 * stats.mean_seconds:.3f}ms |"
+        )
+
+
+def _benchmark(args: argparse.Namespace) -> None:
+    if args.seeds <= 0:
+        raise SystemExit("--seeds must be positive")
+    if any(budget <= 0 for budget in args.budgets):
+        raise SystemExit("--budgets entries must be positive")
+    if len(set(args.budgets)) != len(args.budgets):
+        raise SystemExit("--budgets entries must be unique")
+    if args.rollout_depth < 0:
+        raise SystemExit("--rollout-depth must be non-negative")
+    if args.rollout_batch_size <= 0:
+        raise SystemExit("--rollout-batch-size must be positive")
+
+    budgets = sorted(args.budgets)
+    policy = InformationPolicy(FAIR_POLICY_ID)
+    rows = []
+    serialized_runs: dict[str, list[dict[str, object]]] = {}
+
+    with SQLiteStrategyStore(args.strategy_db) as strategy_store:
+        with JsonlEmulatorBackend(
+            repo_root=args.repo_root,
+            build=not args.no_build,
+        ) as backend:
+            labels: list[tuple[str, int | None]] = []
+            if args.include_random:
+                labels.append(("random", None))
+            labels.append(("heuristic", 0))
+            labels.extend((f"MCTS-{budget}", budget) for budget in budgets)
+
+            for label, budget in labels:
+                summaries = []
+                for index in range(args.seeds):
+                    agent: Agent | ExactStateAgent
+                    if label == "random":
+                        agent = RandomAgent(seed=args.agent_seed + index)
+                    elif budget == 0:
+                        agent = HeuristicAgent()
+                    else:
+                        search = UctMcts(
+                            backend,
+                            policy=policy,
+                            rollout_policy=HeuristicAgent(),
+                            rollout_depth=args.rollout_depth,
+                            rollout_batch_size=args.rollout_batch_size,
+                            seed=args.agent_seed + index,
+                        )
+
+                        def sink(
+                            result: SearchResult,
+                            chosen_action: LegalAction,
+                            *,
+                            search_budget: int = budget,
+                        ) -> None:
+                            record_search_result(
+                                strategy_store,
+                                result,
+                                chosen_action,
+                                information_policy=policy.policy_id,
+                                search_regime="oracle-exact",
+                                search_budget=search_budget,
+                                emulator_revision=backend.emulator_revision,
+                                game_build=args.game_build,
+                            )
+
+                        agent = OracleMctsAgent(
+                            search,
+                            simulations=budget,
+                            result_sink=sink,
+                        )
+
+                    summaries.append(
+                        play_run(
+                            backend,
+                            agent,
+                            seed=f"{args.seed_prefix}-{index}",
+                            policy=policy,
+                            ascension=args.ascension,
+                            max_decisions=args.max_decisions,
+                        )
+                    )
+
+                rows.append(summarize_runs(label, summaries))
+                serialized_runs[label] = [
+                    asdict(summary) for summary in summaries
+                ]
+
+    print(markdown_table(rows))
+    print()
+    for row in rows:
+        print(
+            f"{row.label}: avg decisions/run={row.average_decisions:.1f}, "
+            f"agent compute/run={row.average_agent_compute_seconds:.3f}s"
+        )
+
+    if args.json_output is not None:
+        args.json_output.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "budgets": budgets,
+            "seeds": args.seeds,
+            "seed_prefix": args.seed_prefix,
+            "rollout_depth": args.rollout_depth,
+            "rollout_batch_size": args.rollout_batch_size,
+            "rows": [asdict(row) for row in rows],
+            "runs": serialized_runs,
+        }
+        args.json_output.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
         )
 
 
