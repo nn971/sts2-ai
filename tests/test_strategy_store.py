@@ -276,6 +276,8 @@ def test_budget_disagreement_diagnostic_flags_unvisited_selection(
             store,
             "prototype-fair-v0",
         )
+        health = store.root_selection_visit_counts("prototype-fair-v0")
 
     assert report.roots[0].classification == "unvisited-selection"
     assert report.by_phase[0].unvisited_selection == 1
+    assert health == ((8, 1, 1), (32, 1, 0))
