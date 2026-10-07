@@ -36,7 +36,7 @@ def test_mcts_runs_budget_and_hits_transpositions() -> None:
     assert "|batch=8|" in result.search_version
     assert "|mode=fixed|" in result.search_version
     assert "|vl=mean|" in result.search_version
-    assert "|rollout=heuristic-v2-payload-aware|" in result.search_version
+    assert "|rollout=heuristic-v3-survival-aware|" in result.search_version
     assert result.search_version.endswith("|value=_mock_value")
     assert result.rollout_count > 0
     assert (
