@@ -312,6 +312,7 @@ def _benchmark(args: argparse.Namespace) -> None:
                     elif budget == 0:
                         agent = HeuristicAgent()
                     else:
+                        assert budget is not None
                         search = UctMcts(
                             backend,
                             policy=policy,
