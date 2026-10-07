@@ -23,7 +23,9 @@ from sts2_ai.emulator import (
 )
 from sts2_ai.evaluation import (
     collect_experiment_manifest,
+    compare_paired_runs,
     markdown_table,
+    paired_markdown_table,
     play_run,
     summarize_runs,
 )
@@ -326,6 +328,7 @@ def _benchmark(args: argparse.Namespace) -> None:
     budgets = sorted(args.budgets)
     policy = InformationPolicy(FAIR_POLICY_ID)
     rows = []
+    summaries_by_label = {}
     serialized_runs: dict[str, list[dict[str, object]]] = {}
 
     with SQLiteStrategyStore(args.strategy_db) as strategy_store:
@@ -394,9 +397,20 @@ def _benchmark(args: argparse.Namespace) -> None:
                     )
 
                 rows.append(summarize_runs(label, summaries))
+                summaries_by_label[label] = summaries
                 serialized_runs[label] = [
                     asdict(summary) for summary in summaries
                 ]
+
+    paired = [
+        compare_paired_runs(
+            "heuristic",
+            summaries_by_label["heuristic"],
+            f"MCTS-{budget}",
+            summaries_by_label[f"MCTS-{budget}"],
+        )
+        for budget in budgets
+    ]
 
     print(markdown_table(rows))
     print()
@@ -405,6 +419,10 @@ def _benchmark(args: argparse.Namespace) -> None:
             f"{row.label}: avg decisions/run={row.average_decisions:.1f}, "
             f"agent compute/run={row.average_agent_compute_seconds:.3f}s"
         )
+
+    print()
+    print("Paired common-seed comparison against heuristic:")
+    print(paired_markdown_table(paired))
 
     if args.json_output is not None:
         args.json_output.parent.mkdir(parents=True, exist_ok=True)
@@ -416,6 +434,7 @@ def _benchmark(args: argparse.Namespace) -> None:
             "rollout_batch_size": args.rollout_batch_size,
             "virtual_loss": args.virtual_loss,
             "rows": [asdict(row) for row in rows],
+            "paired_vs_heuristic": [asdict(row) for row in paired],
             "runs": serialized_runs,
         }
         args.json_output.write_text(
