@@ -1,0 +1,48 @@
+name: mean-reservation-depth8-vs16
+
+on:
+  push:
+    branches:
+      - benchmark/mean-reservation-depth8-vs16
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -U pip
+      - run: python -m pip install -e '.[dev]'
+      - name: Depth 8
+        run: |
+          sts2-ai benchmark \
+            --budgets 8 32 128 \
+            --seeds 5 \
+            --seed-prefix benchmark \
+            --rollout-depth 8 \
+            --rollout-batch-size 8 \
+            --strategy-db /tmp/depth8.sqlite \
+            --json-output /tmp/depth8.json
+          echo "=== DEPTH 8 DISAGREEMENTS ==="
+          sts2-ai strategy-report /tmp/depth8.sqlite --limit 40
+      - name: Depth 16
+        run: |
+          sts2-ai benchmark \
+            --budgets 8 32 128 \
+            --seeds 5 \
+            --seed-prefix benchmark \
+            --rollout-depth 16 \
+            --rollout-batch-size 8 \
+            --strategy-db /tmp/depth16.sqlite \
+            --json-output /tmp/depth16.json
+          echo "=== DEPTH 16 DISAGREEMENTS ==="
+          sts2-ai strategy-report /tmp/depth16.sqlite --limit 40
