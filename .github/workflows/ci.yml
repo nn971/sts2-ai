@@ -23,3 +23,17 @@ jobs:
       - run: python -m ruff check src tests
       - run: python -m mypy src/sts2_ai
       - run: python -m pytest
+      - name: Whole-run baseline smoke
+        run: |
+          sts2-ai evaluate --agent random --seeds 1 --no-build
+          sts2-ai evaluate --agent heuristic --seeds 1 --no-build
+      - name: Small oracle MCTS workload profile
+        run: |
+          sts2-ai evaluate \
+            --agent mcts \
+            --budget 4 \
+            --seeds 1 \
+            --max-decisions 8 \
+            --no-build \
+            --profile \
+            --strategy-db /tmp/sts2-ai-strategy.sqlite

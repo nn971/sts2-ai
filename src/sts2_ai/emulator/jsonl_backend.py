@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -22,6 +24,16 @@ RULESET_ID = "prototype-silent-v0"
 
 class JsonlBridgeError(RuntimeError):
     """Raised when the emulator JSONL bridge rejects or violates a request."""
+
+
+@dataclass(frozen=True, slots=True)
+class BridgeOperationStats:
+    calls: int
+    total_seconds: float
+
+    @property
+    def mean_seconds(self) -> float:
+        return self.total_seconds / self.calls if self.calls else 0.0
 
 
 def _run_git(root: Path, *args: str) -> str:
@@ -91,6 +103,7 @@ class JsonlEmulatorBackend:
         self._dotnet = dotnet
         self._next_request_id = 1
         self._closed = False
+        self._operation_profile: dict[str, tuple[int, float]] = {}
 
         if build:
             try:
@@ -183,6 +196,15 @@ class JsonlEmulatorBackend:
     @property
     def capability_manifest(self) -> Mapping[str, Any]:
         return self._manifest
+
+    def operation_profile(self) -> Mapping[str, BridgeOperationStats]:
+        return {
+            operation: BridgeOperationStats(calls=calls, total_seconds=total_seconds)
+            for operation, (calls, total_seconds) in sorted(self._operation_profile.items())
+        }
+
+    def reset_operation_profile(self) -> None:
+        self._operation_profile.clear()
 
     def reset(self, seed: str, ascension: int = 0) -> StateHandle:
         response = self._request("reset", seed=seed, ascension=ascension)
@@ -310,6 +332,7 @@ class JsonlEmulatorBackend:
         if self._process.poll() is not None:
             raise JsonlBridgeError(self._dead_process_message())
 
+        started = time.perf_counter()
         request_id = str(self._next_request_id)
         self._next_request_id += 1
         request: dict[str, object] = {
@@ -348,6 +371,10 @@ class JsonlEmulatorBackend:
             error_type = response.get("errorType", "BridgeError")
             error = response.get("error", "unknown bridge failure")
             raise JsonlBridgeError(f"{error_type}: {error}")
+
+        elapsed = time.perf_counter() - started
+        calls, total_seconds = self._operation_profile.get(op, (0, 0.0))
+        self._operation_profile[op] = (calls + 1, total_seconds + elapsed)
         return response
 
     def _dead_process_message(self) -> str:

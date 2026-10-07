@@ -3,6 +3,7 @@ from .jsonl_backend import (
     OBSERVATION_SCHEMA_ID,
     RULESET_ID,
     WIRE_SCHEMA_ID,
+    BridgeOperationStats,
     JsonlBridgeError,
     JsonlEmulatorBackend,
 )
@@ -16,6 +17,7 @@ from .protocol import (
 )
 
 __all__ = [
+    "BridgeOperationStats",
     "EmulatorBackend",
     "FAIR_POLICY_ID",
     "InformationPolicy",

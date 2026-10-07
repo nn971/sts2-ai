@@ -15,7 +15,8 @@ from sts2_ai.agents import (
 )
 from sts2_ai.emulator import FAIR_POLICY_ID, InformationPolicy, JsonlEmulatorBackend
 from sts2_ai.evaluation import collect_experiment_manifest, play_run
-from sts2_ai.search import UctMcts
+from sts2_ai.search import SearchResult, UctMcts
+from sts2_ai.strategy_db import SQLiteStrategyStore, record_search_result
 
 
 def main() -> None:
@@ -42,6 +43,18 @@ def main() -> None:
     evaluate.add_argument("--repo-root", type=Path, default=Path.cwd())
     evaluate.add_argument("--no-build", action="store_true")
     evaluate.add_argument("--json-output", type=Path)
+    evaluate.add_argument(
+        "--strategy-db",
+        type=Path,
+        default=Path("results/strategy.sqlite"),
+        help="SQLite evidence store used by MCTS evaluations",
+    )
+    evaluate.add_argument("--game-build", default="unknown")
+    evaluate.add_argument(
+        "--profile",
+        action="store_true",
+        help="print JSONL bridge operation timing for the actual workload",
+    )
 
     args = parser.parse_args()
     if args.command == "manifest":
@@ -71,35 +84,74 @@ def _evaluate(args: argparse.Namespace) -> None:
 
     policy = InformationPolicy(FAIR_POLICY_ID)
     summaries = []
-    with JsonlEmulatorBackend(
-        repo_root=args.repo_root,
-        build=not args.no_build,
-    ) as backend:
-        for index in range(args.seeds):
-            agent: Agent | ExactStateAgent
-            if args.agent == "random":
-                agent = RandomAgent(seed=args.agent_seed + index)
-            elif args.agent == "heuristic":
-                agent = HeuristicAgent()
-            else:
-                search = UctMcts(
-                    backend,
-                    policy=policy,
-                    rollout_policy=HeuristicAgent(),
-                    seed=args.agent_seed + index,
-                )
-                agent = OracleMctsAgent(search, simulations=args.budget)
+    bridge_profile = {}
+    strategy_store = (
+        SQLiteStrategyStore(args.strategy_db)
+        if args.agent == "mcts" and args.budget > 0
+        else None
+    )
 
-            summaries.append(
-                play_run(
-                    backend,
-                    agent,
-                    seed=f"{args.seed_prefix}-{index}",
-                    policy=policy,
-                    ascension=args.ascension,
-                    max_decisions=args.max_decisions,
+    try:
+        with JsonlEmulatorBackend(
+            repo_root=args.repo_root,
+            build=not args.no_build,
+        ) as backend:
+            backend.reset_operation_profile()
+            for index in range(args.seeds):
+                agent: Agent | ExactStateAgent
+                if args.agent == "random":
+                    agent = RandomAgent(seed=args.agent_seed + index)
+                elif args.agent == "heuristic" or args.budget == 0:
+                    agent = HeuristicAgent()
+                else:
+                    search = UctMcts(
+                        backend,
+                        policy=policy,
+                        rollout_policy=HeuristicAgent(),
+                        seed=args.agent_seed + index,
+                    )
+
+                    def sink(
+                        result: SearchResult,
+                        chosen_action: object,
+                    ) -> None:
+                        if strategy_store is None:
+                            return
+                        from sts2_ai.emulator import LegalAction
+
+                        if not isinstance(chosen_action, LegalAction):
+                            raise TypeError("Search result sink requires a LegalAction")
+                        record_search_result(
+                            strategy_store,
+                            result,
+                            chosen_action,
+                            information_policy=policy.policy_id,
+                            search_regime="oracle-exact",
+                            search_budget=args.budget,
+                            emulator_revision=backend.emulator_revision,
+                            game_build=args.game_build,
+                        )
+
+                    agent = OracleMctsAgent(
+                        search,
+                        simulations=args.budget,
+                        result_sink=sink,
+                    )
+
+                summaries.append(
+                    play_run(
+                        backend,
+                        agent,
+                        seed=f"{args.seed_prefix}-{index}",
+                        policy=policy,
+                        ascension=args.ascension,
+                        max_decisions=args.max_decisions,
+                    )
                 )
-            )
+            bridge_profile = dict(backend.operation_profile())
+    finally:
+        if strategy_store is not None:
+            strategy_store.close()
 
     wins = sum(summary.won for summary in summaries)
     avg_progress = statistics.fmean(summary.terminal_progress for summary in summaries)
@@ -110,6 +162,7 @@ def _evaluate(args: argparse.Namespace) -> None:
         total_transitions / total_decisions if total_decisions else 0.0
     )
     avg_time = statistics.fmean(summary.wall_seconds for summary in summaries)
+    avg_agent_time = statistics.fmean(summary.agent_compute_seconds for summary in summaries)
     label = args.agent if args.agent != "mcts" else f"MCTS-{args.budget}"
 
     print(
@@ -122,6 +175,10 @@ def _evaluate(args: argparse.Namespace) -> None:
         f"{avg_progress:.2f} | {transitions_per_decision:.1f} | {avg_time:.3f}s |"
     )
     print(f"Average decisions/run: {avg_decisions:.1f}")
+    print(f"Average agent compute/run: {avg_agent_time:.3f}s")
+
+    if args.profile:
+        _print_bridge_profile(bridge_profile)
 
     if args.json_output is not None:
         args.json_output.parent.mkdir(parents=True, exist_ok=True)
@@ -129,10 +186,29 @@ def _evaluate(args: argparse.Namespace) -> None:
             "agent": label,
             "budget": args.budget if args.agent == "mcts" else None,
             "runs": [asdict(summary) for summary in summaries],
+            "bridge_profile": {
+                operation: asdict(stats)
+                for operation, stats in bridge_profile.items()
+            },
         }
         args.json_output.write_text(
             json.dumps(payload, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
+        )
+
+
+def _print_bridge_profile(profile: dict[str, object]) -> None:
+    from sts2_ai.emulator import BridgeOperationStats
+
+    print()
+    print("| Bridge op | Calls | Total time | Mean time |")
+    print("| --- | ---: | ---: | ---: |")
+    for operation, raw_stats in profile.items():
+        if not isinstance(raw_stats, BridgeOperationStats):
+            continue
+        print(
+            f"| {operation} | {raw_stats.calls} | "
+            f"{raw_stats.total_seconds:.3f}s | {1000.0 * raw_stats.mean_seconds:.3f}ms |"
         )
 
 
