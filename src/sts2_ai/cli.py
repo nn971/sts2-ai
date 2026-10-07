@@ -476,9 +476,9 @@ def _strategy_report(args: argparse.Namespace) -> None:
                 print(
                     f"| {root.state_hash[:10]} | {root.phase} | {location} | {hp} | "
                     f"{root.classification} | {decision.budget} | "
-                    f"{_short_action_id(decision.chosen_action_id)} | "
+                    f"{decision.chosen_action_summary} | "
                     f"{decision.chosen_value:.4f} | "
-                    f"{_short_action_id(decision.best_mean_action_id)} | "
+                    f"{decision.best_mean_action_summary} | "
                     f"{decision.best_mean_value:.4f} | "
                     f"{decision.selection_regret:.4f} | "
                     f"{decision.chosen_visits} |"
