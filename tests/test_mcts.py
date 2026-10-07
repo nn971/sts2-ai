@@ -104,6 +104,17 @@ def test_virtual_loss_reservation_is_replaced_by_rollout_value() -> None:
     assert edge.value_sum == pytest.approx(-1.45)
 
 
+def test_rollout_mode_must_be_known() -> None:
+    backend = MockLinearBackend(terminal_at=8)
+    with pytest.raises(ValueError, match="rollout_mode"):
+        UctMcts(
+            backend,
+            policy=InformationPolicy("fair-test"),
+            rollout_policy=HeuristicAgent(),
+            rollout_mode="unknown",
+        )
+
+
 def test_virtual_loss_must_be_bounded() -> None:
     backend = MockLinearBackend(terminal_at=8)
     with pytest.raises(ValueError, match="virtual_loss"):
