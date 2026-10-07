@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -55,7 +56,7 @@ class HashedLinearPolicyValueModel:
     def evaluate(
         self,
         observation: Observation,
-        legal_actions: list[LegalAction] | tuple[LegalAction, ...],
+        legal_actions: Sequence[LegalAction],
     ) -> PolicyValueEstimate:
         state = _state_dict(observation.payload_json)
         logits = tuple(
@@ -226,9 +227,10 @@ def _semantic_action_label(
     )
 
     if action_kind in {"play_card", "rest_upgrade", "remove_card"}:
-        card_id = card_by_instance.get(
-            card_instance,
-            "unknown-card",
+        card_id = (
+            card_by_instance.get(card_instance, "unknown-card")
+            if card_instance is not None
+            else "unknown-card"
         )
         if action_kind == "play_card" and target_enemy is not None:
             enemy_id = enemy_by_instance.get(target_enemy, "unknown-enemy")
@@ -290,8 +292,8 @@ def _int_field(
     return None
 
 
-def _card_ids_by_instance(state: dict[str, Any]) -> dict[int | None, str]:
-    result: dict[int | None, str] = {}
+def _card_ids_by_instance(state: dict[str, Any]) -> dict[int, str]:
+    result: dict[int, str] = {}
 
     def consume(value: object) -> None:
         for card in _dict_items(value):
