@@ -40,6 +40,7 @@ def test_summarize_runs_aggregates_common_metrics() -> None:
         win_rate=0.5,
         average_terminal_progress=5.0,
         average_frontier_progress=5.0,
+        average_defeat_enemy_hp=None,
         average_decisions=15.0,
         transitions_per_decision=400 / 30,
         average_wall_seconds=3.0,
