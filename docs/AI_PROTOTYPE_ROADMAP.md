@@ -345,7 +345,7 @@ training
 
 ## Sprint execution status — 2026-10-07
 
-The first pass through the immediate sprint is now implemented on `main`.
+The first pass through the immediate sprint is implemented on `main`.
 
 Completed:
 
@@ -355,32 +355,64 @@ Completed:
 - [x] whole-run random driver and metrics;
 - [x] deliberately small heuristic policy;
 - [x] transposition-aware oracle-exact UCT MCTS;
-- [x] `sts2-ai evaluate` command;
 - [x] persistent searched-root/action evidence in SQLite;
-- [x] first profile of an actual MCTS workload.
+- [x] common-seed budget-ladder benchmarking;
+- [x] profile-driven rollout batching and fused step/frame operations;
+- [x] lightweight rollout frames that avoid exact-state hashing on temporary rollout states;
+- [x] continuous frontier-progress metrics for runs that die on the same floor.
 
-The full budget-strength comparison remains the next experiment. A first CI workload showed
-that running the requested 32/128/512/2048 matrix through scalar JSONL calls would currently
-be wasteful:
+### Search performance after profiling
 
-| Workload | Result |
-| --- | ---: |
-| Random, 1 full run | 1.044 s, terminal progress 3 |
-| Heuristic, 1 full run | 1.030 s, terminal progress 6 |
-| MCTS-4, first 8 decisions | 8.985 s |
-| MCTS-4 transitions / real decision | 425.8 |
-| MCTS-4 agent compute | 8.834 s |
+The original scalar JSONL implementation made MCTS impractical. The first profile spent
+about 8.83 s of agent compute on only eight MCTS-4 decisions, overwhelmingly in repeated
+`step`, `observe`, and `legal_actions` bridge calls.
 
-For that MCTS-4 profile, the bridge handled 3339 scalar `step`, 3383
-`legal_actions`, and 3415 `observe` requests. Their measured bridge time was about
-8.29 s in total, and all profiled bridge operations except the one-time reset accounted
-for about 8.36 s of 8.83 s agent-compute time. The experiment therefore points first at
-request granularity and repeated frame extraction, rather than Python UCT bookkeeping.
+The hot rollout path now advances a batch of simulations with
+`batch_rollout_step_frame`. It returns the next observation and legal actions while
+skipping canonical exact-state hashing for temporary rollout states. On the same CI-sized
+eight-decision probe, MCTS-8 with rollout depth 32 now uses about 1.75 s of agent compute.
+The dominant bridge operation is about 1.15 s across 192 batched rollout calls. This is
+roughly a fivefold reduction in agent-compute time relative to the first scalar profile,
+despite the newer probe using twice the simulation budget.
 
-The next implementation step is to batch rollout work using the already exposed batch
-operations (and only then consider a fused frame/step API if batching is insufficient).
-After that, run the common-seed random/heuristic/MCTS-32/128/512/2048 matrix and measure
-the computation-versus-strength curve.
+This makes small and medium full-run MCTS experiments practical. Large flat-search budgets
+still scale roughly with simulations times rollout depth, so 512/2048 simulations should
+be justified by a strength curve before spending substantial compute on them.
+
+### First budget-ladder diagnostic
+
+The CLI now supports a common-seed comparison such as:
+
+```fish
+sts2-ai benchmark --budgets 8 32 128 --seeds 5 --rollout-depth 8
+```
+
+A one-seed full-run diagnostic at rollout depth 8 reached Act 1 floor 6 for every agent.
+The coarse floor metric therefore saturated. Continuous frontier progress, which uses
+remaining enemy HP to interpolate progress through the current combat, gave:
+
+| Agent | Frontier progress | Time/run |
+| --- | ---: | ---: |
+| Random | 5.043 | 0.797 s |
+| Heuristic | 5.087 | 0.711 s |
+| MCTS-8 | 5.109 | 5.252 s |
+| MCTS-32 | 5.084 | 11.080 s |
+| MCTS-128 | 5.109 | 42.139 s |
+
+This single seed is a diagnostic rather than a strength estimate. It shows that extra
+search budget is not yet producing a clean monotone improvement: MCTS-8 and MCTS-128
+finished farther through the boss combat than the heuristic baseline, while MCTS-32 did
+not. The next question is therefore search quality and variance, rather than more bridge
+micro-optimization.
+
+Next:
+
+1. repeat the 8/32/128 comparison over several common seeds;
+2. inspect difficult roots from the persistent strategy database when larger budgets
+   choose worse actions;
+3. decide whether the next improvement belongs in the cutoff value, rollout policy,
+   root-action selection/backup rule, or a tactical-combat search layer;
+4. only then extend the ladder to 512 and 2048 simulations.
 
 ## Immediate implementation sprint
 
@@ -451,4 +483,4 @@ real emulator binding
     -> learned policy/value guidance
 ```
 
-The next fresh development context should start from **Immediate implementation sprint, step 1**.
+The next fresh development context should start from the **multi-seed 8/32/128 budget ladder and search-quality diagnosis**.
