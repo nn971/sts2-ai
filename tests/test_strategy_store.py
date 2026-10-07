@@ -50,7 +50,8 @@ def test_roundtrip_search_root_and_action_statistics(tmp_path: Path) -> None:
         search_version="oracle-exact-uct-v1",
         rollout_count=32,
         terminal_rollouts=12,
-        cutoff_rollouts=20,
+        boundary_rollouts=5,
+        cutoff_rollouts=15,
         rollout_steps=180,
     )
 
@@ -80,9 +81,10 @@ def test_roundtrip_search_root_and_action_statistics(tmp_path: Path) -> None:
     assert root.transitions == 200
     assert root.rollout_count == 32
     assert root.terminal_rollouts == 12
-    assert root.cutoff_rollouts == 20
+    assert root.boundary_rollouts == 5
+    assert root.cutoff_rollouts == 15
     assert root.rollout_steps == 180
-    assert horizon == ((32, 32, 12, 20, 180),)
+    assert horizon == ((32, 32, 12, 5, 15, 180),)
     assert [item.action_id for item in stored_actions] == ["a", "b"]
     assert [item.action_kind for item in stored_actions] == [
         "take_reward_card",
