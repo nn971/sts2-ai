@@ -214,7 +214,20 @@ def _benchmark_rejection(
         sampler = CoupledFactorizedHistoryRejectionSampler(
             backend, runstart_sampler=source, max_candidates=proposal_budget
         )
-        for index in range(2, min(len(history), 2 + probes)):
+        # Probe early, middle and late public evidence, not just the
+        # opening combat. Deep histories can make fresh rejection costly
+        # or impossible within its declared finite budget.
+        possible = tuple(range(2, len(history)))
+        if probes == 1:
+            selected_indices = (possible[-1],)
+        elif probes > 1:
+            selected_indices = tuple(dict.fromkeys(
+                possible[i * (len(possible) - 1) // (probes - 1)]
+                for i in range(probes)
+            ))
+        else:
+            selected_indices = ()
+        for index in selected_indices:
             before = _operation_snapshot(backend)
             started_at = time.perf_counter()
             accepted = False
@@ -310,7 +323,7 @@ def _sizes(raw: str) -> tuple[int, ...]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cohorts", type=_sizes, default=(32, 128))
-    parser.add_argument("--post-map-decisions", type=int, default=24)
+    parser.add_argument("--post-map-decisions", type=int, default=48)
     parser.add_argument("--rejection-budget", type=int, default=16)
     parser.add_argument("--rejection-probes", type=int, default=3)
     parser.add_argument("--search-seed", type=int, default=711)
