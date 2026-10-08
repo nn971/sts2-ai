@@ -39,7 +39,9 @@ from sts2_ai.strategy_db import (
 from sts2_ai.training import (
     build_training_examples,
     load_training_jsonl,
+    split_training_examples,
     train_hashed_linear,
+    evaluate_hashed_linear,
     write_training_jsonl,
 )
 
@@ -204,6 +206,19 @@ def main() -> None:
     train_linear.add_argument("--l2", type=float, default=1e-6)
     train_linear.add_argument("--seed", type=int, default=0)
 
+    validate_linear = sub.add_parser(
+        "validate-linear",
+        help="train and evaluate on a deterministic exact-state grouped holdout",
+    )
+    validate_linear.add_argument("dataset", type=Path)
+    validate_linear.add_argument("output", type=Path)
+    validate_linear.add_argument("--validation-fraction", type=float, default=0.2)
+    validate_linear.add_argument("--dimension", type=int, default=4096)
+    validate_linear.add_argument("--epochs", type=int, default=8)
+    validate_linear.add_argument("--learning-rate", type=float, default=0.03)
+    validate_linear.add_argument("--l2", type=float, default=1e-6)
+    validate_linear.add_argument("--seed", type=int, default=0)
+
     args = parser.parse_args()
     if args.command == "manifest":
         result = collect_experiment_manifest(
@@ -238,6 +253,34 @@ def main() -> None:
 
     if args.command == "train-linear":
         _train_linear(args)
+        return
+
+    if args.command == "validate-linear":
+        examples = load_training_jsonl(args.dataset)
+        train, validation = split_training_examples(
+            examples,
+            validation_fraction=args.validation_fraction,
+            seed=args.seed,
+        )
+        model, training_metrics = train_hashed_linear(
+            train,
+            dimension=args.dimension,
+            epochs=args.epochs,
+            learning_rate=args.learning_rate,
+            l2=args.l2,
+            seed=args.seed,
+        )
+        model.save(args.output)
+        report = {
+            "train": asdict(training_metrics),
+            "validation": asdict(evaluate_hashed_linear(model, validation)),
+            "train_states": len({e.source_state_hash or e.observation_hash for e in train}),
+            "validation_states": len({e.source_state_hash or e.observation_hash for e in validation}),
+            "model_path": str(args.output),
+            "seed": args.seed,
+        }
+        print(json.dumps(report, sort_keys=True, indent=2))
+
 
 
 def _evaluate(args: argparse.Namespace) -> None:
