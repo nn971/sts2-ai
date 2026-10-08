@@ -70,7 +70,7 @@ def _entropy_normalized(probabilities: list[float]) -> float:
     return value / math.log(len(probabilities))
 
 
-def _conservative_semantic_group(
+def conservative_semantic_group(
     state: dict[str, Any], action: PolicyTarget
 ) -> str:
     """Merge identical visible card plays, but never distinct map branches.
@@ -122,7 +122,7 @@ def grade_teacher_root(
     literal = _normalized([max(0.0, p.probability) for p in example.policy_targets])
     groups: dict[str, list[int]] = defaultdict(list)
     for i, action in enumerate(example.policy_targets):
-        groups[_conservative_semantic_group(state, action)].append(i)
+        groups[conservative_semantic_group(state, action)].append(i)
 
     semantic_labels = sorted(groups)
     semantic_weights = [
