@@ -40,9 +40,8 @@ def test_known_top_cards_use_no_hidden_seed_and_are_deterministic_prefix() -> No
     top = belief.certify_known_top(("B", "A"))
     assert top.known_top == ("B", "A")
     assert top.unknown_size == 2
-    assert top.ordered_distribution(1) == pytest.approx(
-        (), abs=0  # overwritten below with typed comparison
-    ) if False else True
+    assert top.ordered_distribution(1)[0].cards == ("B",)
+    assert top.ordered_distribution(1)[0].probability == 1.0
     for seed in range(20):
         cards = top.sample_ordered(4, search_rng=random.Random(seed))
         assert cards[:2] == ("B", "A")
