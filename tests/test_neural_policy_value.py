@@ -6,7 +6,7 @@ import json
 import math
 import subprocess
 import sys
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import pytest
@@ -196,3 +196,34 @@ def test_neural_training_and_inference_export(tmp_path: Path) -> None:
     assert math.isfinite(conditional.evaluate(_observation(1), ()).value)
     with pytest.raises(ValueError, match="Censored"):
         train_neural(roots, continuations=(_cutoff(2, outcome="truncated"),))
+
+
+    # Run the *cutoff*-supervised command with distinct original run seeds.
+    labels = tmp_path / "independent-cutoffs.jsonl"
+    records = (
+        _cutoff(10), _cutoff(11, outcome="defeat"),
+        _cutoff(12, outcome="truncated"), _cutoff(13),
+    )
+    with labels.open("w", encoding="utf-8") as stream:
+        for rec in records:
+            stream.write(json.dumps({
+                "schema": "sts2-ai-cutoff-continuation-v1",
+                **asdict(rec),
+            }) + "\n")
+    cutoff_weights = tmp_path / "cli-cutoff.json"
+    cutoff_cli = subprocess.run(
+        [
+            sys.executable, "-m", "sts2_ai.cli", "train-neural",
+            str(dataset), str(cutoff_weights),
+            "--cutoff-continuations", str(labels),
+            "--dimension", "32", "--hidden", "8", "--epochs", "2",
+        ],
+        check=True, capture_output=True, text=True,
+    )
+    cutoff_report = json.loads(cutoff_cli.stdout)
+    assert cutoff_report["value_target_kind"] == "heuristic-continuation-terminal"
+    assert cutoff_report["cutoff_validation"]["records"] >= 1
+    assert set(cutoff_report["cutoff_training_seeds"]).isdisjoint(
+        cutoff_report["cutoff_validation_seeds"]
+    )
+    assert NeuralPolicyValueModel.load(cutoff_weights).hidden == 8
