@@ -27,6 +27,8 @@ _PARAMETER_NAMES = (
 
 def export_checkpoint(checkpoint: Path, output: Path) -> dict[str, Any]:
     """Validate and export a portable model; leave checkpoint untouched."""
+    if checkpoint.resolve() == output.resolve():
+        raise ValueError("Refusing to overwrite the source checkpoint")
     torch = importlib.import_module("torch")
     # weights_only blocks arbitrary pickle code execution; always read locally
     # trusted checkpoints, since file contents are still untrusted data.
@@ -43,6 +45,11 @@ def export_checkpoint(checkpoint: Path, output: Path) -> dict[str, Any]:
         raise ValueError("Checkpoint must contain completed training rounds")
     if not isinstance(metrics, list) or len(metrics) != completed_rounds:
         raise ValueError("Incomplete or malformed checkpoint round history")
+    if any(
+        not isinstance(entry, dict) or entry.get("round_index") != index
+        for index, entry in enumerate(metrics)
+    ):
+        raise ValueError("Noncontiguous checkpoint round history")
     if tuple(sorted(params)) != tuple(sorted(_PARAMETER_NAMES)):
         raise ValueError("Unexpected neural parameter keys")
     if not all(isinstance(params[name], torch.Tensor) for name in _PARAMETER_NAMES):
