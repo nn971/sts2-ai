@@ -6,7 +6,7 @@ import math
 from pathlib import Path
 
 from sts2_ai.emulator import Observation
-from sts2_ai.models import PolicyValueModel, load_model
+from sts2_ai.models import NeuralPolicyValueModel, PolicyValueModel, load_model
 
 from .mcts import sts2_value
 
@@ -34,6 +34,8 @@ class LearnedCutoffValue:
             raise ValueError("model_sha256 must be a SHA-256 hexadecimal digest")
         if not math.isfinite(learned_weight) or not 0.0 <= learned_weight <= 1.0:
             raise ValueError("learned_weight must lie in [0, 1]")
+        if isinstance(model, NeuralPolicyValueModel) and not model.value_head_trained:
+            raise ValueError("Cannot use an untrained policy-only value head as cutoff")
         self._model = model
         self.learned_weight = learned_weight
         self.value_id = (
