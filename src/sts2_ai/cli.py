@@ -446,17 +446,17 @@ def main() -> None:
 
     if args.command == "distill-q-teacher":
         examples = load_training_jsonl(args.dataset)
-        config = QTeacherConfig(
+        q_config = QTeacherConfig(
             min_budget=args.min_budget,
             min_semantic_visits=args.min_semantic_visits,
             min_value_gap=args.min_value_gap,
             uncertainty_scale=args.uncertainty_scale,
             temperature=args.temperature,
         )
-        selected, report = distill_q_targets(examples, config)
+        selected, q_report = distill_q_targets(examples, q_config)
         write_training_jsonl(selected, args.output)
-        report["output"] = str(args.output)
-        rendered = json.dumps(report, sort_keys=True, indent=2)
+        q_report["output"] = str(args.output)
+        rendered = json.dumps(q_report, sort_keys=True, indent=2)
         print(rendered)
         if args.json_output is not None:
             args.json_output.parent.mkdir(parents=True, exist_ok=True)
