@@ -1,8 +1,12 @@
 import json
+import math
 from pathlib import Path
+
+import pytest
 
 from sts2_ai.emulator import LegalAction, Observation
 from sts2_ai.models import HashedLinearPolicyValueModel
+from sts2_ai.models.hashed_linear import policy_features, state_features
 from sts2_ai.training import (
     PolicyTarget,
     TrainingExample,
@@ -144,3 +148,32 @@ def test_heldout_reference_metrics_use_only_training_value_mean() -> None:
     assert abs(baseline.constant_value_rmse - (0.26**0.5)) < 1e-9
     assert 0.0 <= baseline.heuristic_top1_accuracy <= 1.0
     assert 0.0 <= baseline.uniform_top1_accuracy <= 1.0
+
+
+def test_large_observation_feature_vectors_are_unit_normalized() -> None:
+    state = {
+        "phase": 2,
+        "hp": 60,
+        "max_hp": 70,
+        "map": [
+            {"node_id": f"node-{i}", "room_type": i % 6, "floor": i // 3}
+            for i in range(100)
+        ],
+    }
+    value_vector = state_features(state, dimension=256)
+    policy_vector = policy_features(
+        state, "choose_map_node", '{"NodeId":"node-1"}', dimension=256
+    )
+    assert math.isclose(sum(v * v for v in value_vector.values()), 1.0)
+    assert math.isclose(sum(v * v for v in policy_vector.values()), 1.0)
+
+
+def test_v2_model_rejects_unnormalized_v1_weights(tmp_path: Path) -> None:
+    model = HashedLinearPolicyValueModel.zeros(8)
+    path = tmp_path / "model.json"
+    model.save(path)
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["format"] = "hashed-linear-policy-value-v1"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="Unsupported"):
+        HashedLinearPolicyValueModel.load(path)
