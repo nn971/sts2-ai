@@ -62,7 +62,7 @@ def test_q_softmax_is_not_a_reweighted_uct_visit_distribution() -> None:
     (item,) = selected
     assert source.policy_target_mode == "uct-visits-v1"
     assert all(a.probability == pytest.approx(1.0 / 3.0) for a in source.policy_targets)
-    assert item.policy_target_mode.startswith("q-softmax-v1")
+    assert item.policy_target_mode.startswith("q-softmax-v2")
     probs = [a.probability for a in item.policy_targets]
     assert sum(probs) == pytest.approx(1.0)
     assert probs[0] == pytest.approx(probs[1])
@@ -106,7 +106,7 @@ def test_q_teacher_cli_json_roundtrip(tmp_path: Path) -> None:
     )
     assert json.loads(finished.stdout)["accepted"] == 1
     (loaded,) = load_training_jsonl(output)
-    assert loaded.policy_target_mode.startswith("q-softmax-v1")
+    assert loaded.policy_target_mode.startswith("q-softmax-v2")
     assert loaded.policy_targets[0].probability > loaded.policy_targets[2].probability
 
 
