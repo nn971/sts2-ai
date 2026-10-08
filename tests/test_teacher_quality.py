@@ -16,6 +16,7 @@ from sts2_ai.training.teacher_quality import (
     TeacherFilter,
     curate_teacher_examples,
     grade_teacher_root,
+    paired_teacher_quality_report,
     teacher_quality_report,
 )
 
@@ -198,3 +199,21 @@ def test_equal_room_type_does_not_make_paths_equivalent() -> None:
     assert quality.literal_normalized_entropy == pytest.approx(
         quality.semantic_normalized_entropy
     )
+
+
+
+def test_exact_root_teacher_pair_requires_matching_root_state() -> None:
+    before = _example(budget=12, probabilities=(0.25, 0.25, 0.50))
+    after = _example(budget=96)
+    report = paired_teacher_quality_report((before,), (after,))
+    assert report["matched_exact_roots"] == 1
+    assert report["mean_semantic_entropy_change_high_minus_low"] < 0.0
+    assert report["mean_top_margin_change_high_minus_low"] > 0.0
+    with pytest.raises(ValueError, match="no identical"):
+        paired_teacher_quality_report(
+            (before,), (replace(after, source_state_hash="other-exact"),)
+        )
+    with pytest.raises(ValueError, match="different fair observation"):
+        paired_teacher_quality_report(
+            (before,), (replace(after, observation_hash="changed"),)
+        )
