@@ -196,8 +196,8 @@ class JsonlEmulatorBackend:
             self._terminate()
             raise JsonlBridgeError("Unrecognized pristine-reward proposal capability")
 
-        # Optional, currently ABSENT in the pinned emulator. Never infer it
-        # from the existence of a C# factory or substitute ordinary reset.
+        # Explicit native Overgrowth bridge capability. Validate hello instead of
+        # inferring it from the existence of a C# factory or using ordinary reset.
         self._native_overgrowth_reset_schema = hello.get("nativeOvergrowthResetId")
         if self._native_overgrowth_reset_schema not in (
             None, "prototype-native-overgrowth-reset-v1"

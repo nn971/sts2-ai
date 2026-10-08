@@ -1,5 +1,18 @@
 # Project status
 
+## Native Overgrowth Wriggler blocker cleared in emulator (2026-10-09)
+
+The emulator regression for Dense Vegetation Wriggler AI (issue #6) is fixed
+at pinned revision `cc78c367a80f88ecef72cc72899892298f20ef90`.
+It assigns four native slot names and tests two actual enemy turns with all
+Wrigglers alive at A0 and A10. Emulator CI passed at that revision. The AI
+bridge remains player-visible and strictly revision-locked. After the paired
+AI CI validates the new gitlink, use a **fresh** native Overgrowth pilot
+checkpoint; never resume model/optimizer state across emulator revisions.
+See [native training instructions](docs/NATIVE_OVERGROWTH_TRAINING_GATE.md)
+and [failure replay protocol](docs/ROLLOUT_FAILURE_REPLAY.md).
+
+
 ## Native-structure Overgrowth: emulator interface available and pinned (2026-10-09)
 
 Pinned the independently verified `sts2-emulator` active-branch revision
