@@ -15,7 +15,6 @@ from sts2_ai.training.selfplay import (
 )
 
 
-
 def test_geometric_schedule_and_strict_validation() -> None:
     assert temperature_for_round(0, start=0.2, end=0.05, decay_rounds=10) == pytest.approx(0.2)
     assert temperature_for_round(5, start=0.2, end=0.05, decay_rounds=10) == pytest.approx(0.1)
