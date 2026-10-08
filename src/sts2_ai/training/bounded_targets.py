@@ -77,7 +77,9 @@ class OnlineBoundedMoments:
         self.mean += delta / self.count
         self.m2 += delta * (x - self.mean)
 
-    def estimate(self, *, min_variance_samples: int = DEFAULT_MIN_VARIANCE_SAMPLES) -> SampleEstimate:
+    def estimate(
+        self, *, min_variance_samples: int = DEFAULT_MIN_VARIANCE_SAMPLES
+    ) -> SampleEstimate:
         """Return unbiased sample variance, masked for undersampled labels.
 
         Bessel correction can place 4s² marginally above one. Explicitly record
