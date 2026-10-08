@@ -45,6 +45,15 @@ sts2-emulator  <---  sts2-ai
 
 ## Current status
 
+**Longer Overgrowth posterior benchmark:** a reproducible public-only synthetic
+Silent trace compares retained full-RNG particle cohorts against bounded,
+fresh whole-history joint rejection. Reports include survival by observed
+decision, simulator and bridge calls, rejection attempts, collapse, and wall
+time; CI archives the machine-readable profile. All probabilities remain
+under a declared *experimental independent-stream prior*, not native STS2.
+See [coupled belief benchmark](docs/COUPLED_BELIEF_BENCHMARK.md).
+
+
 **Incremental joint posterior pilot:** a persistent finite cohort of
 complete independently sampled hypothetical stream states is now filtered
 in-place across observed public decisions. It preserves cross-stream RNG
