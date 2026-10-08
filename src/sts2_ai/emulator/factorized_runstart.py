@@ -174,12 +174,12 @@ class FactorizedRunStartPosteriorSampler:
         tuple[PublicHistoryStep, PublicHistoryStep]
     ):
         transcript = tuple(history)
-        FairHistoryRejectionSampler._validate_history(transcript)
         if len(transcript) != 2:
             raise ValueError(
                 "Factorized sampler only supports RunStart -> MapChoice, "
                 "not longer coupled histories"
             )
+        FairHistoryRejectionSampler._validate_history(transcript)
         first, second = transcript
         if first.chosen_action is None or first.chosen_action.kind != "start_run":
             raise ValueError("StartRun action is required")
