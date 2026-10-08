@@ -43,6 +43,14 @@ class IncrementalCoupledPosteriorExhausted(FairContinuationUnavailable):
 class IncrementalCoupledBackend(FactorizedRunStartBackend, Protocol):
     def fork(self, state: StateHandle) -> StateHandle: ...
 
+    @property
+    def pristine_reward_proposal_schema(self) -> str | None: ...
+
+    def propose_pristine_reward(
+        self, state: StateHandle, action: LegalAction, *,
+        reward_initial_state: int
+    ) -> StateHandle: ...
+
 
 @dataclass(frozen=True, slots=True)
 class IncrementalCoupledStats:
@@ -212,6 +220,113 @@ class IncrementalCoupledParticlePosterior:
             self._observed_transitions += 1
         except BaseException:
             owned = remaining | children | set(accepted)
+            self._states = []
+            self._closed = True
+            if owned:
+                self._backend.release_many(tuple(owned))
+            raise
+
+    def advance_pristine_reward(
+        self,
+        action: LegalAction,
+        next_observation: Observation,
+        next_legal_actions: Sequence[LegalAction],
+        *,
+        search_rng: random.Random,
+        proposals_per_parent: int = 32,
+        max_total_proposals: int = 16384,
+    ) -> None:
+        """Condition on first reward by expanding each empirical parent equally.
+
+        Each pre-reward particle has equal empirical mass. For each parent,
+        independently draw K full-uniform reward initial states while keeping
+        *every other stream and cursor unchanged*. All accepted children
+        have equal weight. This estimates the parent's public reward evidence
+        probability and therefore automatically weights ancestor particles
+        correctly (rather than accepting one candidate per ancestor).
+
+        Exact for the generated N*K empirical joint proposal cohort;
+        NOT exact for the full independent-stream prior at finite K.
+        The pinned emulator enforces pristine reward cursor==0 and
+        experimental hypothetical provenance; unsupported states fail closed.
+        """
+        self._check_open()
+        history = self._history
+        if history is None:
+            raise RuntimeError("Initialize at MapChoice first")
+        if self._backend.pristine_reward_proposal_schema != (
+            "prototype-pristine-reward-branch-v1"
+        ):
+            raise RuntimeError("Pristine reward proposal capability unavailable")
+        if type(proposals_per_parent) is not int or proposals_per_parent <= 0:
+            raise ValueError("proposals_per_parent must be a positive integer")
+        if type(max_total_proposals) is not int or max_total_proposals <= 0:
+            raise ValueError("max_total_proposals must be positive")
+        if len(self._states) * proposals_per_parent > max_total_proposals:
+            raise ValueError("Requested reward cohort expansion exceeds max_total_proposals")
+        if action not in (history[-1].legal_actions or ()):
+            raise ValueError("Chosen action is not in the public legal menu")
+        if next_observation.policy_id != history[-1].observation.policy_id:
+            raise ValueError("Cannot change the public information policy")
+
+        import json
+
+        current_payload = json.loads(history[-1].observation.payload_json)
+        next_payload = json.loads(next_observation.payload_json)
+        if (
+            not isinstance(current_payload, dict)
+            or not isinstance(next_payload, dict)
+            or current_payload.get("phase") != 3
+            or next_payload.get("phase") != 5
+        ):
+            raise ValueError("Pristine reward proposals require Combat -> Reward")
+
+        next_frame = PublicHistoryStep(
+            next_observation, None, tuple(next_legal_actions)
+        )
+        prior_states, self._states = self._states, []
+        remaining = set(prior_states)
+        unhandled_children: set[StateHandle] = set()
+        accepted: list[StateHandle] = []
+        policy = InformationPolicy(next_observation.policy_id)
+        try:
+            for parent in prior_states:
+                for _ in range(proposals_per_parent):
+                    child = self._backend.propose_pristine_reward(
+                        parent, action, reward_initial_state=search_rng.getrandbits(64)
+                    )
+                    self._simulator_transitions += 1
+                    unhandled_children.add(child)
+                    if (
+                        self._backend.observe(child, policy) == next_observation
+                        and tuple(self._backend.legal_actions(child))
+                        == next_frame.legal_actions
+                    ):
+                        accepted.append(child)
+                        unhandled_children.remove(child)
+                    else:
+                        self._backend.release_many((child,))
+                        unhandled_children.remove(child)
+                self._backend.release_many((parent,))
+                remaining.remove(parent)
+
+            if not accepted:
+                raise IncrementalCoupledPosteriorExhausted(
+                    "Every independent pristine reward proposal was inconsistent "
+                    "with the observed reward; budget exhaustion does not imply "
+                    "zero true reward probability."
+                )
+            self._states = accepted
+            previous = history[-1]
+            self._history = history[:-1] + (
+                PublicHistoryStep(
+                    previous.observation, action, previous.legal_actions
+                ),
+                next_frame,
+            )
+            self._observed_transitions += 1
+        except BaseException:
+            owned = remaining | unhandled_children | set(accepted)
             self._states = []
             self._closed = True
             if owned:
