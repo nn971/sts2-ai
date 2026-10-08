@@ -31,7 +31,7 @@ from sts2_ai.evaluation import (
     play_run,
     summarize_runs,
 )
-from sts2_ai.search import SearchResult, UctMcts
+from sts2_ai.search import LearnedCutoffValue, SearchResult, UctMcts
 from sts2_ai.strategy_db import (
     SQLiteStrategyStore,
     diagnose_budget_disagreements,
@@ -102,6 +102,10 @@ def main() -> None:
     )
     evaluate.add_argument("--route-horizon", type=int, default=6)
     evaluate.add_argument("--route-discount", type=float, default=0.8)
+    evaluate.add_argument(
+        "--cutoff-model", type=Path,
+        help="optional normalized v2 model weights for nonterminal MCTS cutoffs",
+    )
     evaluate.add_argument("--seeds", type=int, default=10, help="number of deterministic run seeds")
     evaluate.add_argument("--seed-prefix", default="eval")
     evaluate.add_argument("--agent-seed", type=int, default=0)
@@ -152,6 +156,10 @@ def main() -> None:
     )
     benchmark.add_argument("--route-horizon", type=int, default=6)
     benchmark.add_argument("--route-discount", type=float, default=0.8)
+    benchmark.add_argument(
+        "--cutoff-model", type=Path,
+        help="optional normalized v2 model weights for nonterminal MCTS cutoffs",
+    )
     benchmark.add_argument(
         "--include-route", action=argparse.BooleanOptionalAction, default=True,
         help="include visible-route planner as an independent fair baseline",
@@ -333,6 +341,9 @@ def _evaluate(args: argparse.Namespace) -> None:
     if args.virtual_loss is not None and not -1.0 <= args.virtual_loss <= 1.0:
         raise SystemExit("--virtual-loss must lie in [-1, 1]")
 
+    if args.cutoff_model is not None and (args.agent != "mcts" or args.budget == 0):
+        raise SystemExit("--cutoff-model requires MCTS with a positive budget")
+    cutoff = LearnedCutoffValue.load(args.cutoff_model) if args.cutoff_model else None
     policy = InformationPolicy(FAIR_POLICY_ID)
     summaries = []
     bridge_profile: Mapping[str, BridgeOperationStats] = {}
@@ -361,6 +372,7 @@ def _evaluate(args: argparse.Namespace) -> None:
                         backend,
                         policy=policy,
                         rollout_policy=_rollout_agent(args),
+                        value_fn=cutoff,
                         rollout_depth=args.rollout_depth,
                         rollout_batch_size=args.rollout_batch_size,
                         rollout_mode=args.rollout_mode,
@@ -447,6 +459,7 @@ def _evaluate(args: argparse.Namespace) -> None:
             "route_horizon": args.route_horizon,
             "route_discount": args.route_discount,
             "virtual_loss": args.virtual_loss if args.agent == "mcts" else None,
+            "cutoff_value_id": cutoff.value_id if cutoff is not None else None,
             "runs": [asdict(summary) for summary in summaries],
             "bridge_profile": {
                 operation: asdict(stats)
@@ -486,6 +499,9 @@ def _benchmark(args: argparse.Namespace) -> None:
         raise SystemExit("--virtual-loss must lie in [-1, 1]")
 
     budgets = sorted(args.budgets)
+    if args.cutoff_model is not None and not budgets:
+        raise SystemExit("--cutoff-model requires at least one MCTS budget")
+    cutoff = LearnedCutoffValue.load(args.cutoff_model) if args.cutoff_model else None
     policy = InformationPolicy(FAIR_POLICY_ID)
     rows = []
     summaries_by_label: dict[str, list[RunSummary]] = {}
@@ -520,6 +536,7 @@ def _benchmark(args: argparse.Namespace) -> None:
                             backend,
                             policy=policy,
                             rollout_policy=_rollout_agent(args),
+                            value_fn=cutoff,
                             rollout_depth=args.rollout_depth,
                             rollout_batch_size=args.rollout_batch_size,
                             rollout_mode=args.rollout_mode,
@@ -613,6 +630,7 @@ def _benchmark(args: argparse.Namespace) -> None:
             "route_discount": args.route_discount,
             "include_route": args.include_route,
             "virtual_loss": args.virtual_loss,
+            "cutoff_value_id": cutoff.value_id if cutoff is not None else None,
             "rows": [asdict(row) for row in rows],
             "paired_vs_heuristic": [asdict(row) for row in paired],
             "runs": serialized_runs,
