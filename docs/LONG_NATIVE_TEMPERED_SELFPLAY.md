@@ -49,7 +49,7 @@ mkdir -p results
 set -gx OMP_NUM_THREADS 1
 set -gx MKL_NUM_THREADS 1
 
-python tools/train_selfplay.py \
+python -u tools/train_selfplay.py \
   --build \
   --environment native-overgrowth \
   --initialize-from-model results/native-round20-model.json \
@@ -64,8 +64,17 @@ python tools/train_selfplay.py \
   --checkpoint results/native-tempered-300.pt \
   --output results/native-tempered-300-model.json \
   --report results/native-tempered-300-report.json \
-  > results/native-tempered-300.log 2>&1
+  2>&1 | tee results/native-tempered-300.log
 ```
+
+The CLI prints **live, flush-immediate progress by default**: current round,
+temperature, completed/censored episodes, wins, running wins, normalized
+progress, loss, decisions, round/total elapsed time and estimated remaining
+time. It also prints evaluation progress every 16 held-out seeds and names
+the saved report. The fish command uses `tee` to keep those messages visible
+**and** save them to `results/native-tempered-300.log`. Avoid redirecting
+both streams only into a file; that hides live progress. The final full JSON
+report is written separately to the `--report` path.
 
 The experiment runs **300 cohorts × 32 episodes = 9,600 training runs**,
 approximately 40× the 240-episode pilot. Four isolated .NET workers are
