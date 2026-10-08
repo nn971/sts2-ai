@@ -45,6 +45,14 @@ sts2-emulator  <---  sts2-ai
 
 ## Current status
 
+**New optional research components (PR #13):** a provenance-checked, aggregate
+human card-reward prior (with missing-card/Skip fallback), and a mathematical
+stochastic PUCT kernel over full public-history keys. These are independently
+tested scaffolds, not a live fair-game agent. See
+[human statistics prior](docs/HUMAN_CARD_PRIORS.md) and
+[stochastic PUCT roadmap](docs/SELF_IMPROVING_STOCHASTIC_PUCT.md).
+
+
 **Next development direction (early implementation in PR #12):** fair stochastic neural-guided PUCT and iterative self-improvement, with compact normalized progress/HP mean-and-variance predictions. See the [implementation roadmap](docs/SELF_IMPROVING_STOCHASTIC_PUCT.md).
 
 This repository has **working experimental agents, but not a trained expert**.
