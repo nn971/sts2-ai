@@ -45,7 +45,7 @@ sts2-emulator  <---  sts2-ai
 
 ## Current status
 
-**Next development direction (planned, not implemented):** fair stochastic neural-guided PUCT and iterative self-improvement, with compact normalized progress/HP mean-and-variance predictions. See the [implementation roadmap](docs/SELF_IMPROVING_STOCHASTIC_PUCT.md).
+**Next development direction (early implementation in PR #12):** fair stochastic neural-guided PUCT and iterative self-improvement, with compact normalized progress/HP mean-and-variance predictions. See the [implementation roadmap](docs/SELF_IMPROVING_STOCHASTIC_PUCT.md).
 
 This repository has **working experimental agents, but not a trained expert**.
 The `emulator/` submodule is pinned to an implemented whole-run Silent prototype.
