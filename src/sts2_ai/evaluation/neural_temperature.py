@@ -163,7 +163,7 @@ def diagnose_neural_temperatures(
                 action_count += 1
                 last_action_kind = decision.action.kind
                 _action_kinds[decision.action.kind] += 1
-                __all_action_kinds[decision.action.kind] += 1
+                _all_action_kinds[decision.action.kind] += 1
                 combat = public.get("combat")
                 in_combat = isinstance(combat, dict)
                 if in_combat:
