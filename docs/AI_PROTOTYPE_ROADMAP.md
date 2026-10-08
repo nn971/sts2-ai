@@ -846,6 +846,18 @@ Implemented in `sts2-ai`:
 See [cutoff distribution diagnostics](CUTOFF_DISTRIBUTION_DIAGNOSTICS.md)
 for a reproducible capture and analysis workflow.
 
+The first real-emulator CI smoke exercised an eight-decision MCTS-8 search with
+rollout depth 32. It captured 48 cutoff callbacks, representing 31 unique
+(run-seed, policy, observation-hash) rows, and exported six searched roots.
+The six roots had mean normalized teacher-policy entropy **0.978** (every
+multi-action root near-uniform at the 0.95 threshold); the cutoff sample had
+**0%** fair-observation-hash overlap with searched roots, and the phase
+marginals had total variation distance **0.323**. The root sample was 83.3%
+combat while the captured cutoff sample was 54.8% combat. These are small,
+selection-biased *smoke diagnostics*, not population estimates. They confirm
+that the new telemetry observes genuinely different states and that this
+low-budget teacher often produces diffuse action targets.
+
 No new strength or calibration claim follows from instrumentation alone.
 The next experiment should gather a multi-seed cutoff-domain dataset, quantify
 the shift, then independently label selected cutoff states using continuation
