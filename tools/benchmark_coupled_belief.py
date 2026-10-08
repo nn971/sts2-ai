@@ -220,8 +220,18 @@ def _benchmark_rejection(
             accepted = False
             handles: tuple[str, ...] = ()
             try:
+                # The benchmark knows what action was chosen at this
+                # checkpoint in the *full* fixture trace, but a posterior
+                # query here must end at the currently observed frame.
+                # Do not include that future chosen action in the query.
+                at_checkpoint = history[index]
+                query = history[:index] + (
+                    PublicHistoryStep(
+                        at_checkpoint.observation, None, at_checkpoint.legal_actions
+                    ),
+                )
                 handles = sampler.sample_fair_continuations(
-                    history[:index + 1],
+                    query,
                     search_rng=random.Random(seed + index),
                     count=1,
                 )
