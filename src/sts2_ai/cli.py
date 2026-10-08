@@ -1345,10 +1345,24 @@ def _train_neural(args: argparse.Namespace) -> None:
         # data by either head, including across the two supervision datasets.
         excluded_train = {r.observation_hash for r in cutoff_holdout}
         excluded_holdout = {r.observation_hash for r in root_holdout}
+        excluded_train_exact = {r.source_exact_hash for r in cutoff_holdout}
+        excluded_holdout_exact = {r.source_state_hash for r in root_holdout}
+        excluded_train_seeds = {r.source_run_seed for r in cutoff_holdout}
+        excluded_holdout_seeds = {
+            seed for r in root_holdout for seed in r.source_run_seeds
+        }
         old_count = len(root_train) + len(cutoff_train)
-        root_train = tuple(r for r in root_train if r.observation_hash not in excluded_train)
+        root_train = tuple(
+            r for r in root_train
+            if r.observation_hash not in excluded_train
+            and r.source_state_hash not in excluded_train_exact
+            and not excluded_train_seeds.intersection(r.source_run_seeds)
+        )
         cutoff_train = tuple(
-            r for r in cutoff_train if r.observation_hash not in excluded_holdout
+            r for r in cutoff_train
+            if r.observation_hash not in excluded_holdout
+            and r.source_exact_hash not in excluded_holdout_exact
+            and r.source_run_seed not in excluded_holdout_seeds
         )
         dropped = old_count - len(root_train) - len(cutoff_train)
         cutoff_train = tuple(r for r in cutoff_train if r.terminal_value is not None)
@@ -1372,6 +1386,13 @@ def _train_neural(args: argparse.Namespace) -> None:
         "model_path": str(args.output),
         "model_id": model.model_id,
         "root_value_weight": args.root_value_weight,
+        "root_training_run_seeds": sorted({
+            seed for r in root_train for seed in r.source_run_seeds
+        }),
+        "root_validation_run_seeds": sorted({
+            seed for r in root_holdout for seed in r.source_run_seeds
+        }),
+        "root_run_provenance_examples": sum(bool(r.source_run_seeds) for r in roots),
         "policy_target_modes": sorted({r.policy_target_mode for r in roots}),
         "value_target_kind": (
             "heuristic-continuation-terminal" if args.cutoff_continuations is not None
@@ -1383,7 +1404,9 @@ def _train_neural(args: argparse.Namespace) -> None:
             )
         )),
         "root_validation": asdict(evaluate_neural(
-            model, root_holdout, compare_root_values=args.cutoff_continuations is None
+            model, root_holdout, compare_root_values=(
+                args.cutoff_continuations is None and args.root_value_weight > 0
+            )
         )),
         "discarded_cross_source_overlaps": dropped,
         "warning": (
