@@ -108,6 +108,7 @@ class UctMcts:
         rollout_batch_size: int = 8,
         rollout_mode: str = "fixed",
         virtual_loss: float | None = None,
+        cutoff_observer: Callable[[Observation], None] | None = None,
         seed: int = 0,
     ) -> None:
         if rollout_depth < 0:
@@ -129,6 +130,8 @@ class UctMcts:
         self._rollout_batch_size = rollout_batch_size
         self._rollout_mode = rollout_mode
         self._virtual_loss = virtual_loss
+        # Passive diagnostic hook; it never participates in action selection.
+        self._cutoff_observer = cutoff_observer
         self.search_version = _configured_search_version(
             rollout_policy=rollout_policy,
             value_fn=value_fn,
@@ -497,6 +500,8 @@ class UctMcts:
                 ]
                 for index, rollout in enumerate(rollouts):
                     if rollout.value is None and not rollout.legal_actions:
+                        if self._cutoff_observer is not None:
+                            self._cutoff_observer(rollout.observation)
                         rollouts[index].value = self._value_fn(rollout.observation)
 
                 if not active_indices:
@@ -543,6 +548,8 @@ class UctMcts:
 
             for rollout in rollouts:
                 if rollout.value is None:
+                    if self._cutoff_observer is not None:
+                        self._cutoff_observer(rollout.observation)
                     rollout.value = self._value_fn(rollout.observation)
 
             terminal_count = sum(
