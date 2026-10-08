@@ -1,5 +1,25 @@
 # Project status
 
+## Adaptive on-policy self-play and four-way evaluation (2026-10-08)
+
+The first teacher-free learner now uses true one-update-per-on-policy-
+cohort REINFORCE gradients instead of sequentially updating the
+weights after each replayed sample. A leave-one-episode-out baseline
+reduces early gradient noise, and zero-win rounds retain the
+victory-gated auxiliary learning signal. A successful run always
+scores 1, above any shaped defeat; the shaping coefficient reaches
+zero only after `win_anneal_threshold` completed victories.
+
+Evaluation now includes untrained neural, trained neural, random and
+the existing observation-only heuristic across paired held-out seeds,
+with completed-only Wilson win intervals and explicit censored cases.
+A test verifies the actual policy favors a toy winning map action;
+other tests verify no hidden-state access, strict censorship,
+curriculum and paired metrics. Scaling experiments remain separate
+from the smoke, and no native calibration is asserted.
+See [first neural self-play](docs/FIRST_NEURAL_SELFPLAY.md).
+
+
 ## First teacher-free neural on-policy self-play (2026-10-08)
 
 Added `src/sts2_ai/training/selfplay.py` and

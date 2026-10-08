@@ -13,9 +13,13 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-from sts2_ai.agents import NeuralGreedyAgent, RandomAgent
+from sts2_ai.agents import HeuristicAgent, NeuralGreedyAgent, RandomAgent
 from sts2_ai.emulator import FAIR_POLICY_ID, InformationPolicy, JsonlEmulatorBackend
-from sts2_ai.evaluation import play_run
+from sts2_ai.evaluation import RunSummary, play_run
+from sts2_ai.evaluation.selfplay_metrics import (
+    compare_completed_pairs,
+    summarize_completed_runs,
+)
 from sts2_ai.training.selfplay import SELFPLAY_VERSION, train_selfplay
 
 
@@ -28,6 +32,10 @@ def main() -> None:
     parser.add_argument("--hidden", type=int, default=16)
     parser.add_argument("--learning-rate", type=float, default=0.003)
     parser.add_argument("--auxiliary-weight", type=float, default=0.4)
+    parser.add_argument(
+        "--win-anneal-threshold", type=int, default=16,
+        help="Completed training victories required to anneal auxiliary return to zero",
+    )
     parser.add_argument("--seed", type=int, default=19)
     parser.add_argument("--evaluate-seeds", type=int, default=3)
     parser.add_argument("--build", action="store_true")
@@ -44,17 +52,24 @@ def main() -> None:
             dimension=args.dimension, hidden=args.hidden,
             learning_rate=args.learning_rate,
             auxiliary_weight=args.auxiliary_weight,
+            win_anneal_threshold=args.win_anneal_threshold,
             seed=args.seed,
         )
         trained.model.save(args.output)
         contenders = {
             "random": RandomAgent(seed=args.seed + 999),
+            "heuristic": HeuristicAgent(),
+            "initial_neural_greedy": NeuralGreedyAgent(
+                trained.initial_model, content_hash=trained.initial_model.model_id
+            ),
             "neural_greedy": NeuralGreedyAgent(
                 trained.model, content_hash=trained.model.model_id
             ),
         }
+        raw_runs: dict[str, list[RunSummary]] = {}
         evaluations: dict[str, list[dict[str, object]]] = {}
         for name, agent in contenders.items():
+            raw_runs[name] = []
             evaluations[name] = []
             for index in range(args.evaluate_seeds):
                 episode = play_run(
@@ -62,6 +77,7 @@ def main() -> None:
                     policy=InformationPolicy(FAIR_POLICY_ID),
                     max_decisions=args.max_decisions,
                 )
+                raw_runs[name].append(episode)
                 evaluations[name].append({
                     "seed": episode.seed,
                     "outcome": episode.outcome,
@@ -71,18 +87,34 @@ def main() -> None:
                     "floor": episode.terminal_floor,
                     "frontier_progress": episode.frontier_progress,
                 })
+        completed_summaries = {
+            name: summarize_completed_runs(runs)
+            for name, runs in raw_runs.items()
+        }
+        paired_diagnostics = {
+            f"neural_greedy_vs_{name}": compare_completed_pairs(
+                runs, raw_runs["neural_greedy"]
+            )
+            for name, runs in raw_runs.items()
+            if name != "neural_greedy"
+        }
         report = {
-            "schema": "sts2-onpolicy-neural-training-smoke-v1",
+            "schema": "sts2-onpolicy-neural-training-smoke-v2",
             "training_version": SELFPLAY_VERSION,
             "game_prior": "ordinary-prototype-emulator-reset",
             "policy_information": FAIR_POLICY_ID,
             "emulator_revision": backend.emulator_revision,
             "model_id": trained.model.model_id,
+            "initial_model_id": trained.initial_model.model_id,
+            "curriculum_win_anneal_threshold": args.win_anneal_threshold,
             "rounds": [asdict(row) for row in trained.rounds],
             "train_completed": sum(row.completed for row in trained.rounds),
             "train_censored": sum(row.censored for row in trained.rounds),
             "gradient_updates": sum(row.update_steps for row in trained.rounds),
+            "gradient_decision_samples": sum(row.decision_samples for row in trained.rounds),
             "heldout_evaluation": evaluations,
+            "heldout_completed_only": completed_summaries,
+            "paired_completed_only": paired_diagnostics,
         }
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(report, sort_keys=True, indent=2) + "\n")

@@ -21,7 +21,7 @@ from sts2_ai.models.hashed_linear import neural_action_features, state_dict, sta
 from sts2_ai.models.neural import NeuralPolicyValueModel
 from sts2_ai.training.neural import _dense, _export, _forward, _new_params
 
-SELFPLAY_VERSION = "public-onpolicy-reinforce-actor-critic-v1"
+SELFPLAY_VERSION = "public-onpolicy-reinforce-actor-critic-v2-adaptive-aux"
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,11 +56,15 @@ class TrainingRound:
     update_steps: int
     mean_loss: float | None
     auxiliary_coefficient: float
+    decision_samples: int
+    mean_return: float | None
+    mean_progress: float | None
 
 
 @dataclass(frozen=True, slots=True)
 class SelfPlayResult:
     model: NeuralPolicyValueModel
+    initial_model: NeuralPolicyValueModel
     rounds: tuple[TrainingRound, ...]
 
 
@@ -164,20 +168,38 @@ def collect_public_episode(
         backend.release_many((state,))
 
 
+def _normalized_progress(episode: Episode) -> float:
+    """Prototype's three-act, six-floor progress proxy, not native STS2."""
+    return min(
+        1.0,
+        max(0.0, ((max(1, episode.act or 1) - 1) * 6
+                   + max(0, episode.floor or 0)) / 18.0),
+    )
+
+
+def _curriculum_coefficient(
+    base_weight: float, completed_victories: int, win_anneal_threshold: int
+) -> float:
+    """Anneal only after observed victories, not after an arbitrary round count."""
+    if not 0.0 <= base_weight <= 1.0:
+        raise ValueError("Auxiliary weight must be in [0, 1]")
+    if type(completed_victories) is not int or completed_victories < 0:
+        raise ValueError("Completed victories must be nonnegative")
+    if type(win_anneal_threshold) is not int or win_anneal_threshold <= 0:
+        raise ValueError("win_anneal_threshold must be positive")
+    return base_weight * (1.0 - min(1.0, completed_victories / win_anneal_threshold))
+
+
 def _bounded_return(episode: Episode, aux_coefficient: float) -> float:
     if not episode.completed:
         raise ValueError("Truncated episodes cannot receive a Monte Carlo target")
     if not 0.0 <= aux_coefficient <= 1.0:
         raise ValueError("Auxiliary coefficient must be within [0,1]")
-    # Prototype currently has three acts, six floors per act. This
-    # normalization is not a native STS2 progress claim.
-    progress = min(
-        1.0,
-        max(0.0, ((max(1, episode.act or 1) - 1) * 6
-                   + max(0, episode.floor or 0)) / 18.0),
-    )
-    auxiliary = 0.7 * progress + 0.3 * episode.hp_ratio
-    return (1.0 - aux_coefficient) * float(episode.won) + aux_coefficient * auxiliary
+    auxiliary = 0.7 * _normalized_progress(episode) + 0.3 * episode.hp_ratio
+    # A genuine victory is always worth 1. Auxiliary signals only distinguish
+    # completed defeats until the curriculum has observed enough victories.
+    # This prevents an early low-HP victory from being worth less than a defeat.
+    return 1.0 if episode.won else aux_coefficient * auxiliary
 
 
 def _tensors(decision: PublicDecision, dimension: int, torch: Any) -> tuple[Any, Any]:
@@ -204,6 +226,7 @@ def train_selfplay(
     hidden: int = 16,
     learning_rate: float = 0.003,
     auxiliary_weight: float = 0.4,
+    win_anneal_threshold: int = 16,
     value_weight: float = 0.5,
     entropy_weight: float = 0.01,
     update_epochs: int = 1,
@@ -214,9 +237,12 @@ def train_selfplay(
     """Run genuine full-game episodes and optimize an on-policy neural actor.
 
     Every round samples from the *current* actor. No offline teacher data.
-    Each collected batch is optimized with an episodic REINFORCE objective
-    and a detached Monte Carlo value baseline. The auxiliary reward is
-    annealed to zero across rounds, never replacing the final win target.
+    Each complete on-policy cohort produces exactly one optimizer update,
+    without making earlier action samples off-policy partway through a round.
+    The return is victory first; defeat-only floor/HP auxiliaries are
+    annealed by observed victories, never merely by elapsed training rounds.
+    A leave-one-episode-out constant baseline reduces early gradient noise
+    when the learned value function is still uncalibrated.
     """
     if any(type(v) is not int or v <= 0 for v in (
         rounds, episodes_per_round, dimension, hidden, update_epochs, max_decisions
@@ -226,6 +252,10 @@ def train_selfplay(
         raise ValueError("Invalid learning rate or auxiliary coefficient")
     if not 0 <= value_weight <= 10 or not 0 <= entropy_weight <= 1:
         raise ValueError("Invalid value or entropy loss weight")
+    if update_epochs != 1:
+        raise ValueError("Strict on-policy v2 uses exactly one update epoch")
+    if type(win_anneal_threshold) is not int or win_anneal_threshold <= 0:
+        raise ValueError("win_anneal_threshold must be positive")
     try:
         torch: Any = importlib.import_module("torch")
     except ImportError as exc:
@@ -239,16 +269,26 @@ def train_selfplay(
     params = _new_params(dimension, hidden, torch)
     optimizer = torch.optim.AdamW(list(params.values()), lr=learning_rate)
     metrics: list[TrainingRound] = []
+    initial_model = _export(
+        params, dimension, hidden,
+        model_id=f"selfplay-initial-seed-{seed}", value_head_trained=False,
+    )
+    cumulative_victories = 0
 
     for round_index in range(rounds):
-        # The very last round has pure terminal-victory target.
-        alpha = auxiliary_weight * (1.0 - round_index / max(1, rounds - 1))
+        # Only observed completed victories can reduce the shaping coefficient.
+        # Zero victories = the early learning signal is not switched off.
+        alpha = _curriculum_coefficient(
+            auxiliary_weight, cumulative_victories, win_anneal_threshold
+        )
         model = _export(
             params, dimension, hidden,
             model_id=f"selfplay-actor-before-round-{round_index}",
-            value_head_trained=round_index > 0,
+            value_head_trained=round_index > 0 and any(
+                row.update_steps > 0 for row in metrics
+            ),
         )
-        batch: list[tuple[PublicDecision, float]] = []
+        completed_episodes: list[tuple[Episode, float]] = []
         completed = wins = censored = 0
         for episode_index in range(episodes_per_round):
             episode = collect_public_episode(
@@ -262,41 +302,72 @@ def train_selfplay(
                 continue
             completed += 1
             wins += int(episode.won)
-            target = _bounded_return(episode, alpha)
-            batch.extend((decision, target) for decision in episode.decisions)
+            completed_episodes.append((episode, _bounded_return(episode, alpha)))
 
-        total_loss = 0.0
-        steps = 0
-        if batch:
-            samples = [
-                (*_tensors(decision, dimension, torch), decision.chosen_index, value)
-                for decision, value in batch
-            ]
-            for _ in range(update_epochs):
-                # Train from the most recently collected on-policy batch.
-                # Repeated epochs introduce policy staleness; keep default one.
-                rng.shuffle(samples)
-                for obs, actions, index, outcome in samples:
-                    optimizer.zero_grad()
+        decisions_seen = sum(len(ep.decisions) for ep, _ in completed_episodes)
+        mean_loss: float | None = None
+        updates = 0
+        if completed_episodes and decisions_seen:
+            # No parameter update until the entire cohort has been scored with
+            # the same actor. Accumulate gradients per episode to bound memory
+            # by one trajectory, then perform ONE optimizer step.
+            optimizer.zero_grad()
+            total_return = sum(ret for _, ret in completed_episodes)
+            losses: list[float] = []
+            for episode, outcome in completed_episodes:
+                target_tensor = torch.tensor(outcome, dtype=torch.float32)
+                # Other episodes are statistically independent of this one's
+                # sampled actions, so leave-one-out is a valid baseline.
+                other_mean = (
+                    (total_return - outcome) / (len(completed_episodes) - 1)
+                    if len(completed_episodes) > 1 else 0.0
+                )
+                policy_terms = []
+                value_terms = []
+                entropy_terms = []
+                for decision in episode.decisions:
+                    obs, actions = _tensors(decision, dimension, torch)
                     estimate, logits = _forward(params, obs, actions, torch)
                     log_probs = torch.nn.functional.log_softmax(logits, dim=0)
-                    probs = log_probs.exp()
-                    target_tensor = torch.tensor(outcome, dtype=torch.float32)
-                    advantage = target_tensor - estimate.detach()
-                    entropy = -(probs * log_probs).sum()
-                    loss = (
-                        -log_probs[index] * advantage
-                        + value_weight * (estimate - target_tensor).square()
-                        - entropy_weight * entropy
+                    probabilities = log_probs.exp()
+                    # Both baselines are action-independent at this decision.
+                    # Keep the learned V detached from the policy gradient.
+                    baseline = (estimate.detach() + other_mean) / 2.0 if (
+                        len(completed_episodes) > 1
+                    ) else estimate.detach()
+                    policy_terms.append(
+                        -log_probs[decision.chosen_index] * (target_tensor - baseline)
                     )
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(list(params.values()), max_norm=5.0)
-                    optimizer.step()
-                    total_loss += float(loss.detach())
-                    steps += 1
+                    value_terms.append((estimate - target_tensor).square())
+                    entropy_terms.append(-(probabilities * log_probs).sum())
+
+                # The REINFORCE policy term is a SUM of log-prob gradients
+                # along the full episode; dividing by its length would bias
+                # the objective towards short runs. Value/entropy terms are
+                # per-decision averages to keep their scales stable.
+                policy_loss = torch.stack(policy_terms).sum()
+                value_loss = torch.stack(value_terms).mean()
+                entropy = torch.stack(entropy_terms).mean()
+                episode_loss = (
+                    policy_loss + value_weight * value_loss
+                    - entropy_weight * entropy
+                ) / len(completed_episodes)
+                episode_loss.backward()
+                losses.append(float(episode_loss.detach()))
+            torch.nn.utils.clip_grad_norm_(list(params.values()), max_norm=5.0)
+            optimizer.step()
+            mean_loss = sum(losses)
+            updates = 1
+
+        cumulative_victories += wins
         metrics.append(TrainingRound(
             round_index, episodes_per_round, completed, censored, wins,
-            steps, total_loss / steps if steps else None, alpha
+            updates, mean_loss, alpha,
+            decisions_seen,
+            (sum(ret for _, ret in completed_episodes) / len(completed_episodes)
+             if completed_episodes else None),
+            (sum(_normalized_progress(ep) for ep, _ in completed_episodes)
+             / len(completed_episodes) if completed_episodes else None),
         ))
 
     signature = hashlib.sha256(
@@ -307,7 +378,7 @@ def train_selfplay(
     ).hexdigest()[:12]
     final = _export(
         params, dimension, hidden,
-        model_id=f"selfplay-v1-{signature}",
+        model_id=f"selfplay-v2-{signature}",
         value_head_trained=any(item.update_steps > 0 for item in metrics),
     )
-    return SelfPlayResult(final, tuple(metrics))
+    return SelfPlayResult(final, initial_model, tuple(metrics))
