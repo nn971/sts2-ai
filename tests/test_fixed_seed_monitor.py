@@ -10,7 +10,7 @@ from test_neural_training_temperature import zero_model
 
 from sts2_ai.evaluation import RunSummary
 from sts2_ai.training.selfplay import TrainingRound, train_selfplay
-from tools.fixed_seed_monitor import FixedSeedMonitor
+from sts2_ai.evaluation.fixed_seed_monitor import FixedSeedMonitor
 
 
 def _round(number: int) -> TrainingRound:
@@ -24,7 +24,7 @@ def _round(number: int) -> TrainingRound:
 def test_fixed_seed_monitor_reuses_exact_seed_names(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    imported = __import__("tools.fixed_seed_monitor", fromlist=["play_run"])
+    imported = __import__("sts2_ai.evaluation.fixed_seed_monitor", fromlist=["play_run"])
     called: list[str] = []
 
     def fake_play_run(backend: object, agent: object, *, seed: str,
