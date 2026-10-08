@@ -80,3 +80,34 @@ than the original heuristic.
 The existing `oracle-exact` MCTS explores the full exact hidden
 emulator state and must **not** be described as fair; the route planner
 does not do this.
+
+
+## First eight-seed comparison
+
+CI run [37731781187](https://github.com/nn971/sts2-ai/actions/runs/37731781187)
+benchmarked eight matched seeds (`route-ci-0` through `route-ci-7`) on
+the pinned emulator with no MCTS and identical baseline mechanics:
+
+| Agent | Win rate | Avg terminal progress | Avg frontier progress | Avg time/run |
+| --- | ---: | ---: | ---: | ---: |
+| Heuristic | 0% | 5.25 | 4.561 | 0.599 s |
+| Route | 0% | 4.62 | 4.065 | 0.300 s |
+
+The paired frontier delta (route minus heuristic) was **-0.496**; route
+was better on one seed, tied one, and worse on six. This does **not**
+demonstrate route superiority. The time/run difference reflects different
+run lengths (about 86.9 vs 73.8 decisions), not necessarily a faster
+decision policy; agent compute per run was approximately 0.013 s for
+both. Results are a preliminary negative finding on just eight seeds.
+
+We therefore retain the original `heuristic` as the default agent and
+MCTS rollout policy, and keep `route` opt-in. The next defensible
+improvement is diagnosis of map-root decisions and better calibrated
+route outcomes, not arbitrary reward-weight tuning.
+
+Reproduce without an MCTS budget:
+
+```fish
+sts2-ai benchmark --budgets --seeds 8 --seed-prefix route-ci \
+  --no-include-random --json-output results/route-eight-seeds.json
+```
