@@ -45,6 +45,15 @@ sts2-emulator  <---  sts2-ai
 
 ## Current status
 
+**Incremental joint posterior pilot:** a persistent finite cohort of
+complete independently sampled hypothetical stream states is now filtered
+in-place across observed public decisions. It preserves cross-stream RNG
+correlations and avoids replaying the full run on every simulation.
+Sampling is exact for the **realized empirical cohort**, not the
+underlying full synthetic prior or native Slay the Spire 2. See
+[incremental coupled particle belief](docs/INCREMENTAL_COUPLED_PARTICLES.md).
+
+
 **Joint post-map history conditioning (synthetic independent-stream prior):**
 `CoupledFactorizedHistoryRejectionSampler` now draws complete hypothetical
 states from the exact factorized RunStart posterior and replays every

@@ -1,5 +1,24 @@
 # Project status
 
+## Incremental coupled joint-stream particles (2026-10-08)
+
+Added `IncrementalCoupledParticlePosterior`: sample a finite cohort
+of full hypothetical states once from the exact synthetic factorized
+RunStart posterior, then advance *all surviving particles* through every
+observed action and reject mismatched complete public frames and menus.
+No further run resets or full public-history replays are needed for
+sampling, and each surviving RNG bundle retains cross-stream effects.
+
+The posterior is exact only **for the realized finite empirical cohort**.
+It is not guaranteed to represent the complete independent-stream prior
+or native RNG, and collapse is explicit, not repaired by cloning hidden
+live state or duplicating survivors. Synthetic tests check coupled
+XOR outcomes, empirical PUCT statistics, cleanup, and absence of
+additional resets. Pinned emulator integration follows a native-shaped
+Silent Overgrowth combat through another decision. See
+[incremental coupled particles](docs/INCREMENTAL_COUPLED_PARTICLES.md).
+
+
 ## Coupled full-history posterior after map choice (2026-10-08)
 
 Added `CoupledFactorizedHistoryRejectionSampler` to extend the

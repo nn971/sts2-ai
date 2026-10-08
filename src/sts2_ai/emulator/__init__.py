@@ -22,6 +22,13 @@ from .factorized_runstart import (
     FactorizedRunStartStats,
     FactorizedRunStartUnavailable,
 )
+from .incremental_coupled_particles import (
+    INCREMENTAL_COUPLED_COHORT_PRIOR_ID,
+    IncrementalCoupledBackend,
+    IncrementalCoupledParticlePosterior,
+    IncrementalCoupledPosteriorExhausted,
+    IncrementalCoupledStats,
+)
 from .jsonl_backend import (
     FAIR_POLICY_ID,
     OBSERVATION_SCHEMA_ID,
@@ -76,6 +83,11 @@ __all__ = [
     "FiniteSeedPosteriorSampler",
     "FAIR_POLICY_ID",
     "InformationPolicy",
+    "INCREMENTAL_COUPLED_COHORT_PRIOR_ID",
+    "IncrementalCoupledBackend",
+    "IncrementalCoupledParticlePosterior",
+    "IncrementalCoupledPosteriorExhausted",
+    "IncrementalCoupledStats",
     "JsonlBridgeError",
     "JsonlEmulatorBackend",
     "LegalAction",
