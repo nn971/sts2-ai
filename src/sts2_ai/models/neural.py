@@ -28,6 +28,13 @@ NEURAL_FORMAT = "sts2-neural-policy-value-v2-semantic-action"
 LEGACY_NEURAL_FORMAT = "sts2-neural-policy-value-v1"
 
 
+def _trained_flag(raw: dict[str, Any]) -> bool:
+    value = raw.get("value_head_trained", True)
+    if type(value) is not bool:
+        raise ValueError("Neural value-head training flag must be boolean")
+    return value
+
+
 def _vector(value: object, length: int) -> list[float]:
     if not isinstance(value, list) or len(value) != length:
         raise ValueError("Neural vector has incorrect shape")
@@ -72,6 +79,7 @@ class NeuralPolicyValueModel:
     value_bias: float
     model_id: str
     format_id: str = NEURAL_FORMAT
+    value_head_trained: bool = True
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> NeuralPolicyValueModel:
@@ -103,6 +111,7 @@ class NeuralPolicyValueModel:
             value_bias=value_bias,
             model_id=model_id,
             format_id=str(raw["format"]),
+            value_head_trained=_trained_flag(raw),
         )
 
     @classmethod
@@ -126,6 +135,7 @@ class NeuralPolicyValueModel:
             "value_weight": self.value_weight,
             "value_bias": self.value_bias,
             "model_id": self.model_id,
+            "value_head_trained": self.value_head_trained,
         }
 
     def save(self, path: Path) -> None:
