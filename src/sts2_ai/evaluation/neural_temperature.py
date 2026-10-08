@@ -141,6 +141,12 @@ def diagnose_neural_temperatures(
                 observation: Observation,
                 legal: tuple[LegalAction, ...],
                 decision: Decision,
+                *,
+                _action_kinds: Counter[str] = action_kinds,
+                _all_action_kinds: Counter[str] = all_action_kinds,
+                _temperature: float | None = temperature,
+                _first_boss_actions: list[dict[str, Any]] = first_boss_actions,
+                _last_boss_actions: deque[dict[str, Any]] = last_boss_actions,
             ) -> None:
                 nonlocal action_count, sample_count, combat_sample_count
                 nonlocal entropy_sum, max_probability_sum, chosen_probability_sum
@@ -156,13 +162,13 @@ def diagnose_neural_temperatures(
                     last_hp = hp
                 action_count += 1
                 last_action_kind = decision.action.kind
-                action_kinds[decision.action.kind] += 1
-                all_action_kinds[decision.action.kind] += 1
+                _action_kinds[decision.action.kind] += 1
+                __all_action_kinds[decision.action.kind] += 1
                 combat = public.get("combat")
                 in_combat = isinstance(combat, dict)
                 if in_combat:
                     combat_sample_count += 1
-                if temperature is None:
+                if _temperature is None:
                     chosen_p = max_p = 1.0
                     entropy = 0.0
                 else:
@@ -201,9 +207,9 @@ def diagnose_neural_temperatures(
                             }
                         boss_last = snapshot
                         boss_decision_count += 1
-                        if len(first_boss_actions) < min(8, max_boss_actions):
-                            first_boss_actions.append(snapshot)
-                        last_boss_actions.append(snapshot)
+                        if len(_first_boss_actions) < min(8, max_boss_actions):
+                            _first_boss_actions.append(snapshot)
+                        _last_boss_actions.append(snapshot)
                 if in_combat:
                     assert isinstance(combat, dict)
                     last_combat = {
