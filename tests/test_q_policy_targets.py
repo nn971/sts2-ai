@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from sts2_ai.training.export import load_training_jsonl, write_training_jsonl
+from sts2_ai.training.neural import evaluate_neural, train_neural
 from sts2_ai.training.q_targets import QTeacherConfig, distill_q_targets
 from sts2_ai.training.targets import PolicyTarget, TrainingExample
 from sts2_ai.training.teacher_quality import grade_teacher_root
@@ -107,3 +108,19 @@ def test_q_teacher_cli_json_roundtrip(tmp_path: Path) -> None:
     (loaded,) = load_training_jsonl(output)
     assert loaded.policy_target_mode.startswith("q-softmax-v1")
     assert loaded.policy_targets[0].probability > loaded.policy_targets[2].probability
+
+
+
+def test_q_teacher_can_train_policy_without_root_value_supervision() -> None:
+    pytest.importorskip("torch")
+    (q_root,), report = distill_q_targets((_root(),))
+    assert report["accepted"] == 1
+    model = train_neural(
+        (q_root,), dimension=32, hidden=8, epochs=2, seed=11,
+        root_value_weight=0.0,
+    )
+    metrics = evaluate_neural(model, (q_root,), compare_root_values=False)
+    assert metrics.root_value_rmse is None
+    assert metrics.policy_cross_entropy > 0.0
+    with pytest.raises(ValueError, match="Root value"):
+        train_neural((q_root,), root_value_weight=-1.0)
