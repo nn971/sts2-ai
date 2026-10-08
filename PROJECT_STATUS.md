@@ -1,5 +1,22 @@
 # Project status
 
+## Local conditional combat-stream replay (2026-10-08)
+
+The emulator gitlink advances to `8eefaf5b67139bfcb7b6047a9fb7188c44126535`.
+The Python backend exposes the optional synthetic combat-stream conditioning
+operation added by emulator PR #3. Unlike post-combat card-order injection,
+it executes whole combat room entry using one independently rekeyed candidate
+stream and checks the complete visible observation and action menu. An accepted
+state keeps the resulting RNG cursor, so future calls remain consistent with
+that candidate's shuffle and enemy choices.
+
+This is a **local synthetic pre-entry stream model**. It does not correctly
+condition on previously revealed boss/encounter RNG or other hidden streams;
+do not treat it as the full native chance posterior or train fair value/variance
+labels from it. See
+[the versioned bridge contract](docs/LOCAL_COMBAT_STREAM_BRIDGE.md).
+
+
 ## Experimental full-combat draw-order realization (2026-10-08)
 
 The pinned emulator submodule is updated to
