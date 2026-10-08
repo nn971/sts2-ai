@@ -129,9 +129,9 @@ def main() -> None:
     benchmark.add_argument(
         "--budgets",
         type=int,
-        nargs="+",
+        nargs="*",
         default=[32, 128, 512, 2048],
-        help="MCTS simulations per decision",
+        help="MCTS simulations per decision (pass --budgets alone for no MCTS)",
     )
     benchmark.add_argument("--seeds", type=int, default=3)
     benchmark.add_argument("--seed-prefix", default="benchmark")
