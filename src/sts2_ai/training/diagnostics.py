@@ -163,7 +163,9 @@ def observation_shift_report(
         return {
             "count": len(observations),
             "phase_fraction": {key: phases[key] / len(observations) for key in sorted(phases)},
-            "combat_fraction": sum(isinstance(state.get("combat"), dict) for state in observations) / len(observations),
+            "combat_fraction": sum(
+                isinstance(state.get("combat"), dict) for state in observations
+            ) / len(observations),
             "mean_hp_fraction": fmean(hp_fractions) if hp_fractions else None,
             "mean_act": _mean_numeric(observations, "act"),
             "mean_floor": _mean_numeric(observations, "floor"),
