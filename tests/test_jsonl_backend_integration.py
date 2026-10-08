@@ -6,14 +6,15 @@ from pathlib import Path
 
 import pytest
 
-from sts2_ai.agents import HeuristicAgent, RoutePlanningAgent
+from sts2_ai.agents import HeuristicAgent, NeuralGreedyAgent, RoutePlanningAgent
 from sts2_ai.emulator import (
     FAIR_POLICY_ID,
     InformationPolicy,
     JsonlBridgeError,
     JsonlEmulatorBackend,
 )
-from sts2_ai.search import SearchBudget, UctMcts
+from sts2_ai.models import NeuralPolicyValueModel
+from sts2_ai.search import LearnedCutoffValue, SearchBudget, UctMcts
 from sts2_ai.training.continuations import CutoffContinuationCollector
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -248,3 +249,45 @@ def test_forked_mcts_cutoff_continuation_on_real_emulator(
         )
     finally:
         backend.release_many((root, started.child))
+
+
+
+def test_neural_policy_and_value_in_real_mcts(
+    backend: JsonlEmulatorBackend, tmp_path: Path,
+) -> None:
+    """Exercise both neural heads inside the pinned emulator's actual search."""
+    model = NeuralPolicyValueModel.from_dict({
+        "format": "sts2-neural-policy-value-v1",
+        "dimension": 16, "hidden": 4, "model_id": "bridge-neural-smoke",
+        "state_weight": [[0.1] * 16 for _ in range(4)],
+        "state_bias": [0.1] * 4,
+        "action_weight": [[0.1] * 16 for _ in range(4)],
+        "action_bias": [0.1] * 4,
+        "policy_weight": [0.1] * 4,
+        "policy_bias": 0.0,
+        "value_weight": [0.1] * 4,
+        "value_bias": 0.0,
+    })
+    path = tmp_path / "neural.json"
+    model.save(path)
+    policy = InformationPolicy(FAIR_POLICY_ID)
+    state = backend.reset("neural-real-bridge-smoke")
+    started = backend.step(state, backend.legal_actions(state)[0])
+    try:
+        search = UctMcts(
+            backend,
+            policy=policy,
+            rollout_policy=NeuralGreedyAgent.load(path),
+            value_fn=LearnedCutoffValue.load(path),
+            rollout_depth=2,
+            rollout_batch_size=2,
+            seed=17,
+        )
+        result = search.search(
+            started.child, SearchBudget(max_simulations=4)
+        )
+        assert result.evaluations
+        assert "neural-greedy-v1-sha256" in result.search_version
+        assert "learned-model-blend-v2" in result.search_version
+    finally:
+        backend.release_many((state, started.child))
