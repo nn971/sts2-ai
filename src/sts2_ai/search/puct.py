@@ -75,6 +75,17 @@ class FairChanceTransitionModel(Protocol):
     ) -> PublicSearchNode: ...
 
 
+@runtime_checkable
+class FairSimulationLifecycle(Protocol):
+    """One independently conditioned hidden continuation per tree simulation."""
+
+    def begin_simulation(
+        self, root: PublicSearchNode, search_rng: random.Random
+    ) -> None: ...
+
+    def end_simulation(self) -> None: ...
+
+
 @dataclass(slots=True)
 class _RunningOutcome:
     success: OnlineBoundedMoments = field(default_factory=OnlineBoundedMoments)
@@ -272,11 +283,20 @@ class StochasticPuct:
             raise ValueError("PUCT requires a nonterminal decision root")
         table = {root.information_key: self._make_node(root)}
         transitions = 0
+        lifecycle: FairSimulationLifecycle | None = (
+            self._model if isinstance(self._model, FairSimulationLifecycle) else None
+        )
         for _ in range(simulations):
-            outcome, selected, count = self._simulation(root, table)
-            transitions += count
-            for edge in selected:
-                edge.results.record(outcome)
+            try:
+                if lifecycle is not None:
+                    lifecycle.begin_simulation(root, self._rng)
+                outcome, selected, count = self._simulation(root, table)
+                transitions += count
+                for edge in selected:
+                    edge.results.record(outcome)
+            finally:
+                if lifecycle is not None:
+                    lifecycle.end_simulation()
 
         rows: list[PuctActionStatistics] = []
         for edge in table[root.information_key].edges:
