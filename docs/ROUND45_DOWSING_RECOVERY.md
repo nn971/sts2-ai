@@ -167,6 +167,16 @@ floor-16 reaches, Act-1 clears, full victories and censored episodes.
 Use `--monitor-every 0` to disable, or
 `--monitor-every 10 --monitor-seeds 64` explicitly.
 
+Every training-round record also measures `rollout_wall_seconds`
+(sequential emulator/Python actor inference across the worker cohort)
+and `optimization_wall_seconds` (single-threaded sequential PyTorch
+gradient construction and AdamW update). Live progress prints both.
+This is the first profiling check before investing in CUDA. The current
+128×32 network and individual-action CPU inference would require a
+different **batched, cross-worker inference design** to make GPU
+acceleration worthwhile. Do not assume that moving the existing
+per-decision operations to CUDA helps; watch these timings first.
+
 Crucially, fixed-seed greedy performance reflects the **changing
 policy** on exactly the same environments. Unlike noisy training
 cohort averages, it supports genuinely paired comparisons. It is an
