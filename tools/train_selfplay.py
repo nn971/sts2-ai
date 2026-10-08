@@ -113,7 +113,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=19)
     parser.add_argument(
         "--workers", type=int, default=1,
-        help="Isolated .NET rollout processes; start with 4 on an 8-core CPU",
+        help="Isolated .NET rollout processes; 15 is aggressive on 8-core/16-thread, 24GB hosts",
     )
     parser.add_argument(
         "--checkpoint", type=Path,
