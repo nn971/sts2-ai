@@ -114,7 +114,8 @@ def _forward(
 
 
 def _export(
-    params: dict[str, Any], dimension: int, hidden: int, *, model_id: str
+    params: dict[str, Any], dimension: int, hidden: int, *,
+    model_id: str, value_head_trained: bool,
 ) -> NeuralPolicyValueModel:
     weights: dict[str, Any] = {}
     for name, value in params.items():
@@ -124,6 +125,7 @@ def _export(
         "dimension": dimension,
         "hidden": hidden,
         "model_id": model_id,
+        "value_head_trained": value_head_trained,
         **weights,
     })
 
@@ -211,7 +213,9 @@ def train_neural(
         ).encode()
     ).hexdigest()[:12]
     return _export(
-        params, dimension, hidden, model_id=f"neural-v2-d{dimension}-h{hidden}-{signature}"
+        params, dimension, hidden,
+        model_id=f"neural-v2-d{dimension}-h{hidden}-{signature}",
+        value_head_trained=bool(continuation_data) or root_value_weight > 0,
     )
 
 
