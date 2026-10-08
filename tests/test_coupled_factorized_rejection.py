@@ -18,6 +18,11 @@ from sts2_ai.emulator.coupled_factorized_rejection import (
     COUPLED_FACTORIZED_PRIOR_ID,
     CoupledFactorizedHistoryRejectionSampler,
 )
+from sts2_ai.emulator.incremental_coupled_particles import (
+    INCREMENTAL_COUPLED_COHORT_PRIOR_ID,
+    IncrementalCoupledParticlePosterior,
+    IncrementalCoupledPosteriorExhausted,
+)
 from sts2_ai.emulator.factorized_runstart import (
     FACTORIZED_RUNSTART_SCHEMA_ID,
     FactorizedRunStartPosteriorSampler,
@@ -40,6 +45,7 @@ class CoupledToyBackend:
         self._states: dict[str, tuple[dict[str, int], int]] = {}
         self._next = 0
         self.reset_calls = 0
+        self.fork_calls = 0
         self.step_calls = 0
         self.fail_at_step: int | None = None
 
@@ -56,6 +62,11 @@ class CoupledToyBackend:
         assert len(initial_streams) == 6
         self.reset_calls += 1
         return self._store(dict(initial_streams), 0)
+
+    def fork(self, state: str) -> str:
+        self.fork_calls += 1
+        data, phase = self._states[state]
+        return self._store(data, phase)
 
     def observe(self, state: str, policy: InformationPolicy) -> Observation:
         data, phase = self._states[state]
@@ -262,4 +273,138 @@ def test_wrong_prefix_bad_requests_and_transition_errors_fail_closed() -> None:
         sampler.sample_fair_continuations(
             history, search_rng=random.Random(3), count=1
         )
+    assert backend.active == 0
+
+def _incremental_prefix(
+    history: tuple[PublicHistoryStep, ...],
+) -> tuple[PublicHistoryStep, ...]:
+    return (
+        history[0],
+        PublicHistoryStep(history[1].observation, None, history[1].legal_actions),
+    )
+
+
+def test_incremental_joint_particle_filter_and_empirical_sampling() -> None:
+    backend = CoupledToyBackend()
+    history, source, _ = setup(backend)
+    rng = random.Random(501)
+    with source, IncrementalCoupledParticlePosterior(
+        backend, runstart_sampler=source
+    ) as belief:
+        belief.initialize(
+            _incremental_prefix(history), search_rng=rng, cohort_size=600
+        )
+        assert require_fair_sampler(belief) is belief
+        assert belief.seed_prior_id == INCREMENTAL_COUPLED_COHORT_PRIOR_ID
+        assert belief.stats.initial_particles == 600
+        assert belief.stats.surviving_particles == 600
+        assert source.stats.inspected_run_starts == 7
+        resets = backend.reset_calls
+
+        belief.advance(CHOOSE, history[-1].observation, (FINISH,))
+        assert backend.reset_calls == resets  # Only existing particles advanced
+        assert belief.public_history == history
+        stats = belief.stats
+        assert stats.simulator_transitions == 600
+        assert stats.observed_transitions == 1
+        assert 200 < stats.surviving_particles < 400
+        assert stats.empirical_effective_sample_size == stats.surviving_particles
+        assert backend.active == stats.surviving_particles
+
+        sampled = belief.sample_fair_continuations(
+            history, search_rng=random.Random(502), count=1500
+        )
+        try:
+            assert backend.fork_calls == 1500
+            assert backend.reset_calls == resets
+            assert all(backend.observe(s, POLICY) == history[-1].observation for s in sampled)
+            assert all(
+                backend.latent(s)["event"] & 1
+                == (backend.latent(s)["combat"] >> 1) & 1
+                for s in sampled
+            )
+            frac = sum(backend.latent(s)["event"] & 1 for s in sampled) / len(sampled)
+            assert frac == pytest.approx(0.5, abs=0.1)
+        finally:
+            backend.release_many(sampled)
+        adapter = FairReplayPuctAdapter(
+            backend, sampler=belief, goal="prototype-full-victory-v1"
+        )
+        root = adapter.root(history, (FINISH,))
+        report = StochasticPuct(adapter, seed=52, max_depth=2).search(
+            root, simulations=350
+        )
+        assert report.actions[0].visits == 350
+        assert report.actions[0].success_mean == pytest.approx(frac, abs=0.12)
+        assert backend.reset_calls == resets
+        assert backend.active == stats.surviving_particles
+    assert backend.active == 0
+
+
+def test_incremental_cohort_collapse_cleans_every_owned_handle() -> None:
+    backend = CoupledToyBackend()
+    history, source, _ = setup(backend)
+    with source:
+        belief = IncrementalCoupledParticlePosterior(
+            backend, runstart_sampler=source
+        )
+        belief.initialize(
+            _incremental_prefix(history),
+            search_rng=random.Random(107), cohort_size=32
+        )
+        forged = Observation(
+            POLICY.policy_id, '{"phase":3,"coupled_reveal":900}', "forged"
+        )
+        with pytest.raises(IncrementalCoupledPosteriorExhausted):
+            belief.advance(CHOOSE, forged, (FINISH,))
+        assert backend.active == 0
+        assert belief.stats.surviving_particles == 0
+        with pytest.raises(RuntimeError, match="closed"):
+            belief.sample_fair_continuations(
+                history, search_rng=random.Random(4), count=1
+            )
+
+
+def test_incremental_mid_transition_failure_releases_accepted_particles() -> None:
+    backend = CoupledToyBackend()
+    history, source, _ = setup(backend)
+    with source:
+        belief = IncrementalCoupledParticlePosterior(
+            backend, runstart_sampler=source
+        )
+        belief.initialize(
+            _incremental_prefix(history),
+            search_rng=random.Random(23), cohort_size=40
+        )
+        backend.fail_at_step = backend.step_calls + 6
+        with pytest.raises(RuntimeError, match="injected transition failure"):
+            belief.advance(CHOOSE, history[-1].observation, (FINISH,))
+        assert backend.active == 0
+        belief.close()
+
+
+def test_incremental_history_provenance_and_validation_leave_cohort_intact() -> None:
+    backend = CoupledToyBackend()
+    history, source, _ = setup(backend)
+    with source, IncrementalCoupledParticlePosterior(
+        backend, runstart_sampler=source
+    ) as belief:
+        with pytest.raises(ValueError, match="MapChoice only"):
+            belief.initialize(history, search_rng=random.Random(1))
+        belief.initialize(
+            _incremental_prefix(history), search_rng=random.Random(1), cohort_size=24
+        )
+        before = backend.active
+        with pytest.raises(ValueError, match="public legal menu"):
+            belief.advance(FINISH, history[-1].observation, (FINISH,))
+        with pytest.raises(ValueError, match="history differs"):
+            belief.sample_fair_continuations(
+                history, search_rng=random.Random(3), count=1
+            )
+        with pytest.raises(ValueError, match="positive"):
+            belief.sample_fair_continuations(
+                _incremental_prefix(history), search_rng=random.Random(3), count=0
+            )
+        assert backend.active == before
+        assert belief.stats.observed_transitions == 0
     assert backend.active == 0
