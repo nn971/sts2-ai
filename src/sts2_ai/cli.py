@@ -54,16 +54,16 @@ from sts2_ai.training.continuations import (
     continuation_report,
     load_continuations,
 )
-from sts2_ai.training.neural import (
-    evaluate_neural,
-    split_continuations_by_seed,
-    train_neural,
-)
 from sts2_ai.training.diagnostics import (
     CutoffSampler,
     load_cutoff_samples,
     observation_shift_report,
     teacher_policy_report,
+)
+from sts2_ai.training.neural import (
+    evaluate_neural,
+    split_continuations_by_seed,
+    train_neural,
 )
 
 
