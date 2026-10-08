@@ -252,6 +252,7 @@ class StochasticPuct:
             if in_rollout:
                 action = self._weighted_rollout_action(current)
             else:
+                assert tree_node is not None
                 edge = self._choose(tree_node)
                 selected.append(edge)
                 action = edge.action
