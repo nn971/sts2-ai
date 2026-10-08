@@ -152,6 +152,13 @@ def policy_features(
     return _hash_features(tokens, dimension)
 
 
+def semantic_action_label(
+    state: dict[str, Any], action_kind: str, payload_json: str
+) -> str:
+    """Stable observed action semantics, without ephemeral instance identifiers."""
+    return _semantic_action_label(state, action_kind, payload_json)
+
+
 def neural_action_features(
     state: dict[str, Any],
     action_kind: str,
