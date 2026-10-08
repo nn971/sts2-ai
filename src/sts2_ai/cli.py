@@ -73,6 +73,7 @@ from sts2_ai.training.neural import (
 from sts2_ai.training.teacher_quality import (
     TeacherFilter,
     curate_teacher_examples,
+    paired_teacher_quality_report,
     teacher_quality_report,
 )
 
@@ -317,6 +318,14 @@ def main() -> None:
     compare.add_argument("contender", type=Path)
     compare.add_argument("--json-output", type=Path)
 
+    teacher_pair = sub.add_parser(
+        "compare-teachers",
+        help="measure budget effects on the same exact search roots",
+    )
+    teacher_pair.add_argument("low", type=Path)
+    teacher_pair.add_argument("high", type=Path)
+    teacher_pair.add_argument("--json-output", type=Path)
+
     curate = sub.add_parser(
         "curate-teacher",
         help="audit and optionally select roots with non-flat semantic MCTS evidence",
@@ -411,6 +420,17 @@ def main() -> None:
     if args.command == "compare-evaluations":
         paired_data = paired_evaluation_report(args.baseline, args.contender)
         rendered = json.dumps(paired_data, sort_keys=True, indent=2)
+        print(rendered)
+        if args.json_output is not None:
+            args.json_output.parent.mkdir(parents=True, exist_ok=True)
+            args.json_output.write_text(rendered + "\n", encoding="utf-8")
+        return
+
+    if args.command == "compare-teachers":
+        low = load_training_jsonl(args.low)
+        high = load_training_jsonl(args.high)
+        teacher_comparison = paired_teacher_quality_report(low, high)
+        rendered = json.dumps(teacher_comparison, sort_keys=True, indent=2)
         print(rendered)
         if args.json_output is not None:
             args.json_output.parent.mkdir(parents=True, exist_ok=True)
