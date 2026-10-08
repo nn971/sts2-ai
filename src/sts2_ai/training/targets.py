@@ -35,6 +35,7 @@ class TrainingExample:
     search_budget: int = 0
     search_version: str = ""
     game_build: str = "unknown"
+    policy_target_mode: str = "uct-visits-v1"
 
 
 def build_training_example(
