@@ -2,7 +2,7 @@
 
 ## Next implementation plan — fair stochastic self-improvement (2026-10-08)
 
-The active **planned** direction is [self-improving stochastic PUCT with bounded uniformized variance](docs/SELF_IMPROVING_STOCHASTIC_PUCT.md). It specifies a seed-blind, known-probability chance interface, small PUCT neural model, direct normalized progress/HP variance heads, annealed auxiliary losses, teacher-free iterative run generation, and compute-matched held-out evaluation. **These milestones are not yet implemented.** Existing exact-state MCTS remains an oracle-only research baseline.
+The active **planned** direction is [self-improving stochastic PUCT with bounded uniformized variance](docs/SELF_IMPROVING_STOCHASTIC_PUCT.md). It specifies a seed-blind, known-probability chance interface, small PUCT neural model, direct normalized progress/HP variance heads, annealed auxiliary losses, teacher-free iterative run generation, and compute-matched held-out evaluation. **The S0/S1 goal-label, bounded-moment and known-deck-law foundations are implemented in PR #12; fair hidden-state sampling, PUCT and self-play remain pending.** Existing exact-state MCTS remains an oracle-only research baseline.
 
 ## Current phase — search-first strategic AI experiments
 
