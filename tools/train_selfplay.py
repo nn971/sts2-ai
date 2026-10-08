@@ -37,6 +37,18 @@ def main() -> None:
         help="Completed training victories required to anneal auxiliary return to zero",
     )
     parser.add_argument("--seed", type=int, default=19)
+    parser.add_argument(
+        "--workers", type=int, default=1,
+        help="Isolated .NET rollout processes; start with 4 on an 8-core CPU",
+    )
+    parser.add_argument(
+        "--checkpoint", type=Path,
+        help="Atomic Torch checkpoint saved after each completed training round",
+    )
+    parser.add_argument(
+        "--resume", action="store_true",
+        help="Restore model/AdamW/round metrics from --checkpoint (same config)",
+    )
     parser.add_argument("--evaluate-seeds", type=int, default=3)
     parser.add_argument("--build", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
@@ -54,6 +66,9 @@ def main() -> None:
             auxiliary_weight=args.auxiliary_weight,
             win_anneal_threshold=args.win_anneal_threshold,
             seed=args.seed,
+            workers=args.workers,
+            checkpoint_path=args.checkpoint,
+            resume=args.resume,
         )
         trained.model.save(args.output)
         contenders = {
@@ -107,6 +122,9 @@ def main() -> None:
             "model_id": trained.model.model_id,
             "initial_model_id": trained.initial_model.model_id,
             "curriculum_win_anneal_threshold": args.win_anneal_threshold,
+            "rollout_workers": args.workers,
+            "checkpoint_path": str(args.checkpoint) if args.checkpoint is not None else None,
+            "resumed": args.resume,
             "rounds": [asdict(row) for row in trained.rounds],
             "train_completed": sum(row.completed for row in trained.rounds),
             "train_censored": sum(row.censored for row in trained.rounds),
