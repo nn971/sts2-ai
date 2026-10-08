@@ -819,6 +819,40 @@ signals before adding a larger model. Explicitly test a value model trained
 on actual rollout-cutoff states rather than continuing to tune mixtures
 on the same three seeds.
 
+### Cutoff-domain data collection and policy-target diagnostics (2026-10-08)
+
+The previous training experiments identified a target-domain mismatch: supervised
+examples describe searched roots, whereas learned cutoff models are evaluated
+on heuristic rollout end states. The next step is now instrumented rather than
+relying on additional arbitrary model mixtures.
+
+Implemented in `sts2-ai`:
+
+- `evaluate --cutoff-samples FILE` passively captures sampled nonterminal
+  MCTS rollout-cutoff observations; capture is optional and leaves UCT decisions
+  unchanged. Sampling is deterministic and deduplicated within run seed,
+  information policy and observation hash, with configurable cadence and cap.
+- `diagnose-training DATASET [--cutoff-samples FILE]` reports teacher-policy
+  entropy, effective action count and target concentration; with cutoffs it also
+  reports root-vs-cutoff phase total variation, combat frequency, HP, act and
+  floor summaries, and overlap of fair observation hashes.
+- Stored cutoff samples include capture settings and provenance (ruleset-level
+  emulator revision, rollout settings, budget, value function identity). These
+  samples are explicitly **unlabeled**: a cutoff model's own estimate must not
+  be recycled as ground truth.
+- Regression tests check passive MCTS capture, deterministic sample boundaries,
+  deduplication, schema and entropy/shift metrics.
+
+See [cutoff distribution diagnostics](CUTOFF_DISTRIBUTION_DIAGNOSTICS.md)
+for a reproducible capture and analysis workflow.
+
+No new strength or calibration claim follows from instrumentation alone.
+The next experiment should gather a multi-seed cutoff-domain dataset, quantify
+the shift, then independently label selected cutoff states using continuation
+returns with unambiguous rollout-policy/provenance identifiers. Only then
+compare a cutoff-trained model to the incumbent value function on held-out
+cutoff states and on independent full-run seeds.
+
 ## Immediate implementation sprint
 
 Execute this sequence next:
