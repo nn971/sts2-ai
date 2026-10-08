@@ -1,5 +1,22 @@
 # Project status
 
+## Optional card-statistics priors and fair-search kernel (2026-10-08)
+
+PR #13 introduces an authorized-snapshot-only aggregate card reward prior,
+with exact character/Act/ascension/game-build matching, sample-size shrinkage,
+neutral Skip/unknown-card behavior, and a reproducible source fingerprint.
+The source may eventually be Skada/sts2log.com, Untapped or another
+permission-compatible aggregate dataset; no real rankings have been imported.
+These *pick preferences* do not alter card-drop probabilities.
+
+A single-player, public-history-keyed stochastic PUCT kernel also handles
+sampled chance outcomes, binary success, and optional bounded progress/HP
+mean and variance statistics. Synthetic deterministic and Bernoulli toy games
+exercise it. Real emulator fair continuations remain blocked pending a
+validated history-conditioned adapter; the current UCT and default agents
+are unchanged.
+
+
 ## Next implementation plan — fair stochastic self-improvement (2026-10-08)
 
 The active **planned** direction is [self-improving stochastic PUCT with bounded uniformized variance](docs/SELF_IMPROVING_STOCHASTIC_PUCT.md). It specifies a seed-blind, known-probability chance interface, small PUCT neural model, direct normalized progress/HP variance heads, annealed auxiliary losses, teacher-free iterative run generation, and compute-matched held-out evaluation. **The S0/S1 goal-label, bounded-moment and known-deck-law foundations are implemented in PR #12; fair hidden-state sampling, PUCT and self-play remain pending.** Existing exact-state MCTS remains an oracle-only research baseline.
