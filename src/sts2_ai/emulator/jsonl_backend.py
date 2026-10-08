@@ -175,6 +175,13 @@ class JsonlEmulatorBackend:
                     f"expected {value!r}, found {hello.get(key)!r}"
                 )
 
+        self._hypothetical_draw_order_schema = hello.get("hypotheticalDrawOrderId")
+        if self._hypothetical_draw_order_schema not in (
+            None, "prototype-hypothetical-draw-order-v1"
+        ):
+            self._terminate()
+            raise JsonlBridgeError("Unrecognized hypothetical draw-order capability")
+
         manifest = self._request("manifest").get("manifest")
         if not isinstance(manifest, dict):
             self._terminate()
@@ -211,6 +218,59 @@ class JsonlEmulatorBackend:
     def reset(self, seed: str, ascension: int = 0) -> StateHandle:
         response = self._request("reset", seed=seed, ascension=ascension)
         return self._require_string(response, "stateHandle")
+
+    @property
+    def hypothetical_draw_order_schema(self) -> str | None:
+        """Experimental structural operation; NOT a fair chance sampler."""
+        value = self._hypothetical_draw_order_schema
+        return value if isinstance(value, str) else None
+
+    def reset_hypothetical(self, search_seed: int, ascension: int = 0) -> StateHandle:
+        """Use independently generated search-side randomness for a synthetic run."""
+        if self.hypothetical_draw_order_schema is None:
+            raise JsonlBridgeError("Hypothetical draw-order capability unavailable")
+        if type(search_seed) is not int or not 0 <= search_seed < 1 << 128:
+            raise ValueError("search_seed must be a nonnegative 128-bit integer")
+        response = self._request(
+            "reset_hypothetical",
+            search_seed=f"{search_seed:032x}",
+            ascension=ascension,
+        )
+        if response.get("hypothetical") is not True:
+            raise JsonlBridgeError("Emulator did not certify hypothetical handle")
+        return self._require_string(response, "stateHandle")
+
+    def hypothetical_draw_order(
+        self,
+        state: StateHandle,
+        ordered_cards: Sequence[tuple[str, int]],
+    ) -> StateHandle:
+        """Inject a public card-variant permutation, not an exact joint RNG law.
+
+        The server rejects live handles, acted-on combat, and invalid card
+        multisets. This does not implement FairContinuationSampler.
+        """
+        if self.hypothetical_draw_order_schema is None:
+            raise JsonlBridgeError("Hypothetical draw-order capability unavailable")
+        cards: list[dict[str, object]] = []
+        for card_id, upgrade_level in ordered_cards:
+            if (not isinstance(card_id, str) or not card_id
+                    or type(upgrade_level) is not int or upgrade_level < 0):
+                raise ValueError("Every ordered card requires ID and upgrade level")
+            cards.append({"card_id": card_id, "upgrade_level": upgrade_level})
+        original = self.observe(state, InformationPolicy(FAIR_POLICY_ID))
+        response = self._request(
+            "hypothetical_draw_order",
+            state_handle=state,
+            ordered_cards=cards,
+        )
+        if response.get("schemaId") != self.hypothetical_draw_order_schema:
+            raise JsonlBridgeError("Hypothetical draw-order schema mismatch")
+        child = self._require_string(response, "child")
+        if response.get("observationHash") != original.observation_hash:
+            self.release_many((child,))
+            raise JsonlBridgeError("Hypothetical draw injection changed public observation")
+        return child
 
     def legal_actions(self, state: StateHandle) -> tuple[LegalAction, ...]:
         response = self._request("legal_actions", state_handle=state)
