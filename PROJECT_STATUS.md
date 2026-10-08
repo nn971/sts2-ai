@@ -1,5 +1,24 @@
 # Project status
 
+## Coupled full-history posterior after map choice (2026-10-08)
+
+Added `CoupledFactorizedHistoryRejectionSampler` to extend the
+exact independent-stream `RunStart → MapChoice` posterior through
+observed combat and other player actions by **whole-state public-history
+rejection**. Unlike separately conditioning map, combat, reward and
+event streams after later observations, this method advances all
+original hypothetical stream states together; the joint posterior
+is correct under the declared synthetic independent-stream prior,
+subject to finite rejection exhaustion.
+
+Synthetic tests check XOR-coupled stream observations, correlated
+future outcomes, PUCT frequencies, exhaustion cleanup and foreign
+history rejection. The pinned emulator integration test covers
+`RunStart → MapChoice → Combat`. Long distinctive histories may
+make rejection impractical. No native RNG fidelity is claimed.
+See [coupled history rejection](docs/COUPLED_FACTORIZED_HISTORY_REJECTION.md).
+
+
 ## Exact start-of-run RNG stream factorization (2026-10-08)
 
 The pinned emulator advances to
