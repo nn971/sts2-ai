@@ -28,6 +28,7 @@ jobs:
       - name: Actual Silent whole-run neural training and heldout evaluation
         run: |
           python tools/train_selfplay.py \
+            --build \
             --rounds 2 --episodes 3 \
             --max-decisions 1024 --dimension 64 --hidden 8 \
             --evaluate-seeds 2 --seed 19 \
