@@ -67,9 +67,12 @@ class CutoffContinuationCollector:
         continuation_policy: ContinuationPolicy,
         every: int = 64,
         max_unique: int = 64,
+        max_per_seed: int | None = None,
         max_decisions: int = 512,
     ) -> None:
-        if min(every, max_unique, max_decisions) <= 0:
+        if min(every, max_unique, max_decisions) <= 0 or (
+            max_per_seed is not None and max_per_seed <= 0
+        ):
             raise ValueError("Sampling and continuation limits must be positive")
         self.backend = backend
         self.policy = policy
@@ -82,6 +85,7 @@ class CutoffContinuationCollector:
         )
         self.every = every
         self.max_unique = max_unique
+        self.max_per_seed = max_per_seed
         self.max_decisions = max_decisions
         self.seen = 0
         self.sampled = 0
@@ -101,6 +105,10 @@ class CutoffContinuationCollector:
             raise ValueError(f"Unknown cutoff reason {reason!r}")
         self.seen += 1
         if self.seen % self.every != 0 or len(self._records) >= self.max_unique:
+            return
+        if self.max_per_seed is not None and sum(
+            seed == run_seed for seed, _ in self._records
+        ) >= self.max_per_seed:
             return
         self.sampled += 1
         exact_hash = self.backend.exact_hash(handle)
