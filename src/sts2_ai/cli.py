@@ -70,6 +70,7 @@ from sts2_ai.training.neural import (
     split_continuations_by_seed,
     train_neural,
 )
+from sts2_ai.training.q_targets import QTeacherConfig, distill_q_targets
 from sts2_ai.training.teacher_quality import (
     TeacherFilter,
     curate_teacher_examples,
@@ -318,6 +319,19 @@ def main() -> None:
     compare.add_argument("contender", type=Path)
     compare.add_argument("--json-output", type=Path)
 
+    q_teacher = sub.add_parser(
+        "distill-q-teacher",
+        help="export evidence-gated softmax action-Q policy targets",
+    )
+    q_teacher.add_argument("dataset", type=Path)
+    q_teacher.add_argument("output", type=Path)
+    q_teacher.add_argument("--min-budget", type=int, default=64)
+    q_teacher.add_argument("--min-semantic-visits", type=int, default=2)
+    q_teacher.add_argument("--min-value-gap", type=float, default=0.05)
+    q_teacher.add_argument("--uncertainty-scale", type=float, default=0.25)
+    q_teacher.add_argument("--temperature", type=float, default=0.15)
+    q_teacher.add_argument("--json-output", type=Path)
+
     teacher_pair = sub.add_parser(
         "compare-teachers",
         help="measure budget effects on the same exact search roots",
@@ -355,6 +369,10 @@ def main() -> None:
     neural.add_argument("--dimension", type=int, default=256)
     neural.add_argument("--hidden", type=int, default=32)
     neural.add_argument("--epochs", type=int, default=12)
+    neural.add_argument(
+        "--root-value-weight", type=float, default=1.0,
+        help="weight of searched-root value loss; 0 trains policy only",
+    )
     neural.add_argument("--learning-rate", type=float, default=0.002)
     neural.add_argument("--validation-fraction", type=float, default=0.2)
     neural.add_argument("--seed", type=int, default=0)
@@ -420,6 +438,25 @@ def main() -> None:
     if args.command == "compare-evaluations":
         paired_data = paired_evaluation_report(args.baseline, args.contender)
         rendered = json.dumps(paired_data, sort_keys=True, indent=2)
+        print(rendered)
+        if args.json_output is not None:
+            args.json_output.parent.mkdir(parents=True, exist_ok=True)
+            args.json_output.write_text(rendered + "\n", encoding="utf-8")
+        return
+
+    if args.command == "distill-q-teacher":
+        examples = load_training_jsonl(args.dataset)
+        config = QTeacherConfig(
+            min_budget=args.min_budget,
+            min_semantic_visits=args.min_semantic_visits,
+            min_value_gap=args.min_value_gap,
+            uncertainty_scale=args.uncertainty_scale,
+            temperature=args.temperature,
+        )
+        selected, report = distill_q_targets(examples, config)
+        write_training_jsonl(selected, args.output)
+        report["output"] = str(args.output)
+        rendered = json.dumps(report, sort_keys=True, indent=2)
         print(rendered)
         if args.json_output is not None:
             args.json_output.parent.mkdir(parents=True, exist_ok=True)
@@ -1320,12 +1357,15 @@ def _train_neural(args: argparse.Namespace) -> None:
         hidden=args.hidden,
         epochs=args.epochs,
         learning_rate=args.learning_rate,
+        root_value_weight=args.root_value_weight,
         seed=args.seed,
     )
     model.save(args.output)
     report: dict[str, object] = {
         "model_path": str(args.output),
         "model_id": model.model_id,
+        "root_value_weight": args.root_value_weight,
+        "policy_target_modes": sorted({r.policy_target_mode for r in roots}),
         "value_target_kind": (
             "heuristic-continuation-terminal" if args.cutoff_continuations is not None
             else "searched-root-best-action"
