@@ -1,0 +1,63 @@
+name: matched-root-shadow-teacher
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/shadow-teacher-experiment.yml"
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project and pinned emulator
+        run: |
+          python -m pip install -e '.[dev]'
+          dotnet build emulator/src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj \
+            --configuration Release --nologo --verbosity quiet
+          mkdir -p results/shadow
+      - name: Evaluate low-budget agent and high-budget passive teacher on identical roots
+        run: |
+          sts2-ai evaluate \
+            --agent mcts --budget 12 --shadow-budget 96 \
+            --rollout-depth 24 --rollout-batch-size 8 \
+            --seeds 4 --max-decisions 40 --seed-prefix matched-teacher \
+            --no-build --strategy-db results/shadow/low.sqlite \
+            --shadow-strategy-db results/shadow/high.sqlite \
+            --json-output results/shadow/acting-run.json
+          sts2-ai export-training \
+            results/shadow/low.sqlite results/shadow/low-roots.jsonl
+          sts2-ai export-training \
+            results/shadow/high.sqlite results/shadow/high-roots.jsonl
+      - name: Compare exactly matched roots and curate without label sharpening
+        run: |
+          sts2-ai compare-teachers \
+            results/shadow/low-roots.jsonl results/shadow/high-roots.jsonl \
+            --json-output results/shadow/matched-comparison.json
+          sts2-ai diagnose-training results/shadow/low-roots.jsonl \
+            --json-output results/shadow/low-audit.json
+          sts2-ai diagnose-training results/shadow/high-roots.jsonl \
+            --json-output results/shadow/high-audit.json
+          sts2-ai curate-teacher results/shadow/high-roots.jsonl \
+            --min-budget 64 --min-visits-per-semantic-action 2 \
+            --min-semantic-top-margin 0.08 --min-semantic-value-gap 0.01 \
+            --output results/shadow/curated-roots.jsonl \
+            --json-output results/shadow/curation.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: matched-root-shadow-teacher-evidence
+          path: results/shadow/
+          if-no-files-found: warn
+          retention-days: 14
