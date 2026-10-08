@@ -152,6 +152,31 @@ def policy_features(
     return _hash_features(tokens, dimension)
 
 
+def neural_action_features(
+    state: dict[str, Any],
+    action_kind: str,
+    action_payload_json: str,
+    dimension: int,
+) -> dict[int, float]:
+    """Compact action-only semantic features for nonlinear state-conditioned policy.
+
+    The neural model already encodes full state context in its shared trunk.
+    Rehashing every map, deck and combat feature for each legal action caused
+    severe CPU costs in rollout-heavy search. Cross-state interactions instead
+    arise via ReLU(h_state + W_action * x_action), with stable card/target
+    semantics and no action instance IDs.
+    """
+    semantic = _semantic_action_label(state, action_kind, action_payload_json)
+    return _hash_features(
+        [
+            ("neural-action:bias", 1.0),
+            (f"neural-action:kind={action_kind}", 1.0),
+            (f"neural-action:semantic={semantic}", 1.0),
+        ],
+        dimension,
+    )
+
+
 def state_dict(payload_json: str) -> dict[str, Any]:
     return _state_dict(payload_json)
 
