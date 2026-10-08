@@ -45,6 +45,15 @@ sts2-emulator  <---  sts2-ai
 
 ## Current status
 
+**Local full-room combat RNG replay pilot:** the optional pinned
+`prototype-local-combat-stream-condition-v1` bridge conditions an independently
+sampled hypothetical *pre-entry* combat RNG stream on the player's entire
+visible combat-entry frame, preserving that stream's shuffle/enemy-decision/
+future-call cursor. It is explicitly **not** the native full-history posterior
+because earlier use of the combat stream is not conditioned.
+See [local combat-stream bridge](docs/LOCAL_COMBAT_STREAM_BRIDGE.md).
+
+
 **Certified combat draw law:** a new opt-in, strict public-inventory
 model for independently sampling/conditioning ordered draws from an
 exchangeable unknown multiset, including a known top-card prefix and
