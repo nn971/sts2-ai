@@ -1,5 +1,26 @@
 # Project status
 
+## First teacher-free neural on-policy self-play (2026-10-08)
+
+Added `src/sts2_ai/training/selfplay.py` and
+`tools/train_selfplay.py`, forming the first real gradient-updated
+neural policy–value loop driven by ordinary full-game Silent
+emulator episodes. All actor inputs are player-visible observations
+and legal menus. Training uses episodic REINFORCE with detached
+learned baseline, terminal victory and annealed bounded
+progress/HP auxiliary targets, AdamW, and entropy regularization.
+Censored trajectories are strictly excluded from terminal labels.
+
+A separate CPU-Torch CI job tests policy improvement on an
+analytically trivial one-decision game, measures actual parameter
+updates on pinned emulator full runs, evaluates random/learned
+policies on held-out seeds, and archives portable checkpoint/report.
+No full-history posterior or external teacher is needed.
+This is a **first functioning prototype, not evidence of native
+STS2 strategic mastery**. See
+[first neural self-play](docs/FIRST_NEURAL_SELFPLAY.md).
+
+
 ## Guarded first-reward joint conditional proposals (2026-10-08)
 
 Pinned emulator revision advances to
