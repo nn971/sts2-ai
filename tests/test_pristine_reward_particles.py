@@ -5,6 +5,7 @@ import json
 import random
 
 import pytest
+from test_coupled_factorized_rejection import CHOOSE, FINISH, START, CoupledToyBackend
 
 from sts2_ai.emulator.chance import PublicHistoryStep
 from sts2_ai.emulator.factorized_runstart import (
@@ -14,8 +15,7 @@ from sts2_ai.emulator.incremental_coupled_particles import (
     IncrementalCoupledParticlePosterior,
     IncrementalCoupledPosteriorExhausted,
 )
-from sts2_ai.emulator.protocol import InformationPolicy, LegalAction, Observation, Transition
-from test_coupled_factorized_rejection import CoupledToyBackend, START, CHOOSE, FINISH
+from sts2_ai.emulator.protocol import InformationPolicy, LegalAction, Observation
 
 POLICY = InformationPolicy("prototype-fair-v0")
 
