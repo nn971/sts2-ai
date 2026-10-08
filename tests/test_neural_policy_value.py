@@ -14,7 +14,11 @@ import pytest
 from sts2_ai.agents import NeuralGreedyAgent
 from sts2_ai.emulator import LegalAction, Observation
 from sts2_ai.models import NeuralPolicyValueModel, load_model
-from sts2_ai.models.hashed_linear import policy_features, state_dict, state_features
+from sts2_ai.models.hashed_linear import (
+    neural_action_features,
+    state_dict,
+    state_features,
+)
 from sts2_ai.search import LearnedCutoffValue
 from sts2_ai.training.continuations import ContinuationRecord
 from sts2_ai.training.export import write_training_jsonl
@@ -137,6 +141,7 @@ def test_neural_training_and_inference_export(tmp_path: Path) -> None:
     output = tmp_path / "trained.json"
     model.save(output)
     loaded = NeuralPolicyValueModel.load(output)
+    assert loaded.format_id == "sts2-neural-policy-value-v2-semantic-action"
     assert loaded.evaluate(_observation(1), ()).value == pytest.approx(
         model.evaluate(_observation(1), ()).value
     )
@@ -150,7 +155,7 @@ def test_neural_training_and_inference_export(tmp_path: Path) -> None:
     for index, val in state_features(state, loaded.dimension).items():
         vector[index] = val
     action_vector = torch.zeros(loaded.dimension)
-    for index, val in policy_features(
+    for index, val in neural_action_features(
         state, action.kind, action.payload_json, loaded.dimension
     ).items():
         action_vector[index] = val
