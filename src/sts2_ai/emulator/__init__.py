@@ -7,6 +7,12 @@ from .jsonl_backend import (
     JsonlBridgeError,
     JsonlEmulatorBackend,
 )
+from .particle_posterior import (
+    FINITE_COHORT_PRIOR_ID,
+    FiniteSeedPosteriorSampler,
+    ParticlePosteriorExhausted,
+    ParticlePosteriorStats,
+)
 from .protocol import (
     EmulatorBackend,
     InformationPolicy,
@@ -26,12 +32,16 @@ from .rejection import (
 __all__ = [
     "BridgeOperationStats",
     "EmulatorBackend",
+    "FINITE_COHORT_PRIOR_ID",
+    "FiniteSeedPosteriorSampler",
     "FAIR_POLICY_ID",
     "InformationPolicy",
     "JsonlBridgeError",
     "JsonlEmulatorBackend",
     "LegalAction",
     "OBSERVATION_SCHEMA_ID",
+    "ParticlePosteriorExhausted",
+    "ParticlePosteriorStats",
     "Observation",
     "RULESET_ID",
     "SEED_PRIOR_ID",
