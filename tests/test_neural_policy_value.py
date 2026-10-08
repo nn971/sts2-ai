@@ -141,7 +141,7 @@ def test_neural_training_and_inference_export(tmp_path: Path) -> None:
     )
     metrics = evaluate_neural(loaded, roots)
     assert metrics.roots == 4
-    assert math.isfinite(metrics.value_rmse or 0.0)
+    assert math.isfinite(metrics.root_value_rmse or 0.0)
     assert math.isfinite(metrics.policy_cross_entropy)
 
     dataset = tmp_path / "roots.jsonl"
