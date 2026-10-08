@@ -254,3 +254,74 @@ def curate_teacher_examples(
 ) -> tuple[TrainingExample, ...]:
     """Return unchanged selected examples; never fabricate sharpened labels."""
     return tuple(example for example in examples if grade_teacher_root(example, config).eligible)
+
+
+def paired_teacher_quality_report(
+    low: tuple[TrainingExample, ...],
+    high: tuple[TrainingExample, ...],
+    *,
+    config: TeacherFilter = _DEFAULT_FILTER,
+) -> dict[str, Any]:
+    """Compare supervision at exactly matched root states, not diverged runs."""
+
+    def index(rows: tuple[TrainingExample, ...]) -> dict[tuple[str, str, str], TrainingExample]:
+        result: dict[tuple[str, str, str], TrainingExample] = {}
+        for item in rows:
+            key = (
+                item.source_state_hash or item.observation_hash,
+                item.information_policy,
+                item.emulator_revision,
+            )
+            if key in result:
+                raise ValueError("Paired teacher input contains duplicate exact roots")
+            result[key] = item
+        return result
+
+    left, right = index(low), index(high)
+    matched = sorted(left.keys() & right.keys())
+    if not matched:
+        raise ValueError("Teacher datasets have no identical exact search roots")
+    before, after = [], []
+    for key in matched:
+        l, r = left[key], right[key]
+        if l.observation_hash != r.observation_hash:
+            raise ValueError("Same exact state yielded a different fair observation")
+        if {a.action_id for a in l.policy_targets} != {
+            a.action_id for a in r.policy_targets
+        }:
+            raise ValueError("Paired roots disagree on legal actions")
+        before.append(grade_teacher_root(l, config))
+        after.append(grade_teacher_root(r, config))
+    entropy_change = [
+        b.semantic_normalized_entropy - a.semantic_normalized_entropy
+        for a, b in zip(before, after, strict=True)
+        if a.semantic_actions >= 2 and b.semantic_actions >= 2
+    ]
+    top_margin_change = [
+        b.semantic_top_margin - a.semantic_top_margin
+        for a, b in zip(before, after, strict=True)
+        if a.semantic_actions >= 2 and b.semantic_actions >= 2
+    ]
+    return {
+        "matched_exact_roots": len(matched),
+        "unmatched_low_roots": len(left) - len(matched),
+        "unmatched_high_roots": len(right) - len(matched),
+        "mean_low_budget": fmean(q.budget for q in before),
+        "mean_high_budget": fmean(q.budget for q in after),
+        "mean_semantic_entropy_change_high_minus_low": (
+            fmean(entropy_change) if entropy_change else None
+        ),
+        "fraction_semantic_entropy_decreased": (
+            sum(delta < -1e-9 for delta in entropy_change) / len(entropy_change)
+            if entropy_change else None
+        ),
+        "mean_top_margin_change_high_minus_low": (
+            fmean(top_margin_change) if top_margin_change else None
+        ),
+        "eligible_low": sum(item.eligible for item in before),
+        "eligible_high": sum(item.eligible for item in after),
+        "warning": (
+            "Only exactly matched root states are compared; search remains oracle-exact. "
+            "Entropy changes measure target concentration, not decision correctness."
+        ),
+    }
