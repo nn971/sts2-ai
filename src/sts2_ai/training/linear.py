@@ -5,6 +5,8 @@ import random
 from dataclasses import dataclass
 from statistics import fmean
 
+from sts2_ai.agents import HeuristicAgent
+from sts2_ai.emulator import LegalAction, Observation
 from sts2_ai.models.hashed_linear import (
     HashedLinearPolicyValueModel,
     dot,
@@ -22,6 +24,70 @@ class TrainingMetrics:
     policy_cross_entropy: float
     policy_top1_accuracy: float
     value_rmse: float
+
+
+@dataclass(frozen=True, slots=True)
+class HeldoutBaselineMetrics:
+    """Offline references for interpreting policy/value distillation metrics."""
+
+    examples: int
+    uniform_policy_cross_entropy: float
+    uniform_top1_accuracy: float
+    heuristic_top1_accuracy: float
+    constant_value_rmse: float
+    constant_value_prediction: float
+
+
+def evaluate_heldout_baselines(
+    train: tuple[TrainingExample, ...],
+    validation: tuple[TrainingExample, ...],
+) -> HeldoutBaselineMetrics:
+    """Evaluate fair-action baselines without fitting on validation examples."""
+
+    if not train or not validation:
+        raise ValueError("Baseline evaluation requires nonempty train and validation")
+    constant_value = fmean(example.value_target for example in train)
+    heuristic = HeuristicAgent()
+    uniform_losses: list[float] = []
+    squared_errors: list[float] = []
+    uniform_correct = 0
+    heuristic_correct = 0
+
+    for example in validation:
+        if not example.policy_targets:
+            raise ValueError("Validation example has no policy targets")
+        targets = _normalized_targets(example)
+        correct_index = max(range(len(targets)), key=targets.__getitem__)
+        uniform_correct += correct_index == 0
+        uniform_losses.append(math.log(len(targets)))
+        squared_errors.append((constant_value - example.value_target) ** 2)
+
+        observation = Observation(
+            policy_id=example.information_policy,
+            payload_json=example.observation_json,
+            observation_hash=example.observation_hash,
+        )
+        actions = tuple(
+            LegalAction(
+                action_id=target.action_id,
+                kind=target.action_kind,
+                payload_json=target.action_payload_json,
+            )
+            for target in example.policy_targets
+        )
+        choice = heuristic.choose(observation, actions)
+        heuristic_correct += (
+            choice.action.action_id == example.policy_targets[correct_index].action_id
+        )
+
+    return HeldoutBaselineMetrics(
+        examples=len(validation),
+        uniform_policy_cross_entropy=fmean(uniform_losses),
+        uniform_top1_accuracy=uniform_correct / len(validation),
+        heuristic_top1_accuracy=heuristic_correct / len(validation),
+        constant_value_rmse=math.sqrt(fmean(squared_errors)),
+        constant_value_prediction=constant_value,
+    )
 
 
 def train_hashed_linear(

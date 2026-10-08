@@ -7,6 +7,7 @@ from sts2_ai.training import (
     PolicyTarget,
     TrainingExample,
     evaluate_hashed_linear,
+    evaluate_heldout_baselines,
     train_hashed_linear,
 )
 
@@ -125,3 +126,21 @@ def test_hashed_linear_model_roundtrips(tmp_path: Path) -> None:
     assert restored.model_id == "fixture"
     assert restored.policy_weights == model.policy_weights
     assert restored.value_weights == model.value_weights
+
+
+def test_heldout_reference_metrics_use_only_training_value_mean() -> None:
+    train = (
+        _example(hp=70, prefer_defend=False, value=0.5, source="train-a"),
+        _example(hp=15, prefer_defend=True, value=-0.5, source="train-b"),
+    )
+    validation = (
+        _example(hp=15, prefer_defend=True, value=-0.4, source="valid-a"),
+        _example(hp=70, prefer_defend=False, value=0.6, source="valid-b"),
+    )
+    baseline = evaluate_heldout_baselines(train, validation)
+    assert baseline.examples == 2
+    assert abs(baseline.uniform_policy_cross_entropy - 0.69314718056) < 1e-9
+    assert baseline.constant_value_prediction == 0.0
+    assert abs(baseline.constant_value_rmse - (0.26**0.5)) < 1e-9
+    assert 0.0 <= baseline.heuristic_top1_accuracy <= 1.0
+    assert 0.0 <= baseline.uniform_top1_accuracy <= 1.0

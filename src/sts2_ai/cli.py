@@ -40,6 +40,7 @@ from sts2_ai.strategy_db import (
 from sts2_ai.training import (
     build_training_examples,
     evaluate_hashed_linear,
+    evaluate_heldout_baselines,
     load_training_jsonl,
     split_training_examples,
     train_hashed_linear,
@@ -292,6 +293,7 @@ def main() -> None:
         validation_report = {
             "train": asdict(training_metrics),
             "validation": asdict(evaluate_hashed_linear(model, validation)),
+            "baselines": asdict(evaluate_heldout_baselines(train, validation)),
             "train_states": len({e.source_state_hash or e.observation_hash for e in train}),
             "validation_states": len(
                 {e.source_state_hash or e.observation_hash for e in validation}

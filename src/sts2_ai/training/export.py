@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Iterable
 from dataclasses import asdict
@@ -156,21 +157,42 @@ def split_training_examples(
     validation_fraction: float = 0.2,
     seed: int = 0,
 ) -> tuple[tuple[TrainingExample, ...], tuple[TrainingExample, ...]]:
-    """Deterministic exact-state grouped split, independent of input order.
+    """Split by connected exact-state and fair-observation groups.
 
-    All search budgets, versions and observation variants of one exact state
-    remain in one partition, preventing repeated-root validation leakage.
+    Repeated budgets of an exact state and distinct hidden states with identical
+    fair observations must all land in the same partition. Group assignment and
+    record order are deterministic, independently of input JSONL order.
     """
-    import hashlib
-
     if not 0.0 < validation_fraction < 1.0:
         raise ValueError("validation_fraction must lie strictly between 0 and 1")
+
+    parent: dict[str, str] = {}
+
+    def find(key: str) -> str:
+        parent.setdefault(key, key)
+        if parent[key] != key:
+            parent[key] = find(parent[key])
+        return parent[key]
+
+    def union(first: str, second: str) -> None:
+        left, right = find(first), find(second)
+        if left != right:
+            parent[max(left, right)] = min(left, right)
+
+    for example in examples:
+        if not example.observation_hash:
+            raise ValueError("Training examples require observation hashes")
+        state_key = "state:" + (example.source_state_hash or example.observation_hash)
+        observation_key = "observation:" + example.observation_hash
+        union(state_key, observation_key)
+
     groups: dict[str, list[TrainingExample]] = {}
     for example in examples:
-        key = example.source_state_hash or example.observation_hash
-        groups.setdefault(key, []).append(example)
+        state_key = "state:" + (example.source_state_hash or example.observation_hash)
+        groups.setdefault(find(state_key), []).append(example)
+
     if len(groups) < 2:
-        raise ValueError("At least two distinct states are required for validation")
+        raise ValueError("At least two distinct observation groups are required for validation")
 
     keys = sorted(
         groups,
@@ -181,27 +203,17 @@ def split_training_examples(
     )
     count = max(1, min(len(keys) - 1, round(len(keys) * validation_fraction)))
     validation_keys = set(keys[:count])
-    def sorted_group(key: str) -> list[TrainingExample]:
-        # Sort *inside* each exact-state group too. Otherwise reversing the
-        # source record order changes downstream model training order even
-        # though the partitions and group membership stay identical.
-        return sorted(
-            groups[key],
-            key=lambda example: json.dumps(
-                asdict(example), sort_keys=True, separators=(",", ":")
-            ),
+
+    def ordered(keys_to_include: set[str]) -> tuple[TrainingExample, ...]:
+        return tuple(
+            example
+            for key in sorted(keys_to_include)
+            for example in sorted(
+                groups[key],
+                key=lambda item: json.dumps(
+                    asdict(item), sort_keys=True, separators=(",", ":")
+                ),
+            )
         )
 
-    train = tuple(
-        example
-        for key in sorted(groups)
-        if key not in validation_keys
-        for example in sorted_group(key)
-    )
-    validation = tuple(
-        example
-        for key in sorted(groups)
-        if key in validation_keys
-        for example in sorted_group(key)
-    )
-    return train, validation
+    return ordered(set(groups) - validation_keys), ordered(validation_keys)
