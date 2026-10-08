@@ -45,6 +45,15 @@ sts2-emulator  <---  sts2-ai
 
 ## Current status
 
+**Certified combat draw law:** a new opt-in, strict public-inventory
+model for independently sampling/conditioning ordered draws from an
+exchangeable unknown multiset, including a known top-card prefix and
+empty-pile reshuffle. It has an opening-combat integration test against
+the pinned emulator. This is **not** a full native-game RNG replacement
+or a constructed emulator fair-continuation API. See
+[certified combat draws](docs/CERTIFIED_COMBAT_DRAWS.md).
+
+
 **Incremental fair-belief research:** a finite, independently search-seeded
 hypothetical cohort can now be conditioned across public actions and reused
 across stochastic PUCT simulations without restarting every candidate.
