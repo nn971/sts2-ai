@@ -2,11 +2,18 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, cast
 
-from sts2_ai.agents import Agent, ExactStateAgent
-from sts2_ai.emulator import EmulatorBackend, InformationPolicy
+from sts2_ai.agents import Agent, Decision, ExactStateAgent
+from sts2_ai.emulator import (
+    EmulatorBackend,
+    InformationPolicy,
+    LegalAction,
+    Observation,
+    StateHandle,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +55,10 @@ def play_run(
     policy: InformationPolicy,
     ascension: int = 0,
     max_decisions: int | None = None,
+    decision_observer: (
+        Callable[[StateHandle, Observation, tuple[LegalAction, ...], Decision], None]
+        | None
+    ) = None,
 ) -> RunSummary:
     """Drive one complete emulator run while keeping only the live state handle."""
 
@@ -83,6 +94,10 @@ def play_run(
             else:
                 decision = agent.choose(observation, legal_actions)
             agent_compute_seconds += time.perf_counter() - choose_started
+            # Optional passive research hook while the exact root handle is live.
+            # Its extra work is excluded from the agent compute/transition totals.
+            if decision_observer is not None:
+                decision_observer(state, observation, legal_actions, decision)
 
             transition = backend.step(state, decision.action)
             emulator_transitions += 1 + _search_transitions(decision.metadata_json)
