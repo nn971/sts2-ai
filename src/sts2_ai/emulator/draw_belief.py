@@ -11,7 +11,6 @@ unseen changes to draw-pile membership invalidate that certificate.
 from __future__ import annotations
 
 import json
-import math
 import random
 from collections import Counter
 from collections.abc import Mapping, Sequence
