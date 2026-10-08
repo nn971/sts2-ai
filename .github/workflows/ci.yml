@@ -59,3 +59,10 @@ jobs:
           sts2-ai compare-teachers \
             /tmp/sts2-ai-roots.jsonl /tmp/sts2-ai-shadow-roots.jsonl
           python -c 'import json; from pathlib import Path; files = [Path("/tmp/sts2-ai-roots.jsonl"), Path("/tmp/sts2-ai-shadow-roots.jsonl")]; rows = [[json.loads(line) for line in file.read_text().splitlines()] for file in files]; assert all(dataset and all(item["source_run_seeds"] == ["eval-0"] for item in dataset) for dataset in rows), "root run provenance is missing or wrong"'
+          sts2-ai distill-consensus-q-teacher \
+            /tmp/sts2-ai-roots.jsonl /tmp/sts2-ai-shadow-roots.jsonl \
+            /tmp/sts2-ai-consensus-roots.jsonl \
+            --min-budget 16 --min-semantic-visits 1 \
+            --min-value-gap 0 --min-low-value-gap 0 \
+            --json-output /tmp/sts2-ai-consensus-audit.json
+          python -c 'import json; from pathlib import Path; r = json.loads(Path("/tmp/sts2-ai-consensus-audit.json").read_text()); assert r["matched_exact_roots"] > 0; assert r["accepted"] <= r["matched_exact_roots"]'
