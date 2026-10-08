@@ -130,11 +130,23 @@ def main() -> None:
     args = parser.parse_args()
     if args.evaluate_seeds < 1:
         parser.error("--evaluate-seeds must be positive")
+    _progress(
+        f"[train] opening emulator | environment={args.environment} "
+        f"rounds={args.rounds} episodes/round={args.episodes} "
+        f"workers={args.workers} seed={args.seed} "
+        f"resume={args.resume} warm_start={args.initialize_from_model or 'none'}"
+    )
     with JsonlEmulatorBackend(build=args.build) as backend:
         # Refuse before Torch initialization, game generation or checkpoint
         # writes if the pinned bridge lacks the requested native mode.
         require_environment(backend, args.environment)
         started_at = time.perf_counter()
+        progress = _TrainingProgress(args.rounds, args.episodes)
+        _progress(
+            f"[train] emulator ready: revision={backend.emulator_revision} | "
+            f"temperature={args.temperature_start:g}->{args.temperature_end:g} "
+            f"over {args.temperature_decay_rounds} rounds"
+        )
         try:
             trained = train_selfplay(
                 backend,
@@ -154,6 +166,8 @@ def main() -> None:
                 checkpoint_path=args.checkpoint,
                 resume=args.resume,
                 environment=args.environment,
+                on_round_start=progress.start,
+                on_round_complete=progress.complete,
             )
         except PublicRolloutFailure as failure:
             # Broken emulator transitions are not valid censored episodes.
