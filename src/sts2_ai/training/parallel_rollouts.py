@@ -33,6 +33,7 @@ class EpisodeRequest:
     max_decisions: int
     policy_id: str
     environment: str
+    temperature: float = 1.0
 
 
 def episode_actor_seed(base_seed: int, run_seed: str) -> int:
@@ -71,6 +72,7 @@ def _worker_collect(request: EpisodeRequest) -> Episode:
         max_decisions=request.max_decisions,
         policy_id=request.policy_id,
         environment=request.environment,
+        temperature=request.temperature,
     )
 
 
@@ -98,6 +100,7 @@ def collect_parallel(
     max_decisions: int,
     policy_id: str,
     environment: str,
+    temperature: float = 1.0,
 ) -> tuple[Episode, ...]:
     if not run_seeds:
         return ()
@@ -107,7 +110,7 @@ def collect_parallel(
     requests = [
         EpisodeRequest(
             payload, seed, episode_actor_seed(base_seed, seed),
-            max_decisions, policy_id, environment,
+            max_decisions, policy_id, environment, temperature,
         )
         for seed in run_seeds
     ]

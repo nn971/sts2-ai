@@ -44,6 +44,15 @@ def main() -> None:
     parser.add_argument("--dimension", type=int, default=128)
     parser.add_argument("--hidden", type=int, default=16)
     parser.add_argument("--learning-rate", type=float, default=0.003)
+    parser.add_argument("--entropy-weight", type=float, default=0.01)
+    parser.add_argument("--temperature-start", type=float, default=1.0)
+    parser.add_argument("--temperature-end", type=float, default=1.0)
+    parser.add_argument("--temperature-decay-rounds", type=int, default=1)
+    parser.add_argument(
+        "--initialize-from-model", type=Path,
+        help="Initialize a NEW on-policy run from portable neural JSON; "
+             "the optimizer and all training metrics start fresh",
+    )
     parser.add_argument("--auxiliary-weight", type=float, default=0.4)
     parser.add_argument(
         "--win-anneal-threshold", type=int, default=16,
@@ -81,6 +90,11 @@ def main() -> None:
                 max_decisions=args.max_decisions,
                 dimension=args.dimension, hidden=args.hidden,
                 learning_rate=args.learning_rate,
+                entropy_weight=args.entropy_weight,
+                sampling_temperature_start=args.temperature_start,
+                sampling_temperature_end=args.temperature_end,
+                temperature_decay_rounds=args.temperature_decay_rounds,
+                initialize_from_model=args.initialize_from_model,
                 auxiliary_weight=args.auxiliary_weight,
                 win_anneal_threshold=args.win_anneal_threshold,
                 seed=args.seed,
@@ -175,6 +189,14 @@ def main() -> None:
             "model_id": trained.model.model_id,
             "initial_model_id": trained.initial_model.model_id,
             "curriculum_win_anneal_threshold": args.win_anneal_threshold,
+            "sampling_temperature_start": args.temperature_start,
+            "sampling_temperature_end": args.temperature_end,
+            "temperature_decay_rounds": args.temperature_decay_rounds,
+            "entropy_weight": args.entropy_weight,
+            "initialized_from_model": (
+                str(args.initialize_from_model)
+                if args.initialize_from_model is not None else None
+            ),
             "rollout_workers": args.workers,
             "checkpoint_path": str(args.checkpoint) if args.checkpoint is not None else None,
             "resumed": args.resume,

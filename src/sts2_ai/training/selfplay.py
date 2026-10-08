@@ -32,7 +32,7 @@ from sts2_ai.emulator.run_environment import (
     reset_training_run,
 )
 from sts2_ai.models.hashed_linear import neural_action_features, state_dict, state_features
-from sts2_ai.models.neural import NeuralPolicyValueModel
+from sts2_ai.models.neural import NEURAL_FORMAT, NeuralPolicyValueModel
 from sts2_ai.training.neural import _dense, _export, _forward, _new_params
 from sts2_ai.training.parallel_rollouts import (
     collect_parallel,
@@ -43,7 +43,7 @@ from sts2_ai.training.rollout_failure import SCHEMA as FAILURE_SCHEMA
 from sts2_ai.training.rollout_failure import PublicRolloutFailure
 from sts2_ai.training.selfplay_checkpoint import load_checkpoint, save_checkpoint
 
-SELFPLAY_VERSION = "public-onpolicy-reinforce-actor-critic-v3-parallel-resumable"
+SELFPLAY_VERSION = "public-onpolicy-reinforce-actor-critic-v4-temperature-warmstart"
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +82,7 @@ class TrainingRound:
     decision_samples: int
     mean_return: float | None
     mean_progress: float | None
+    sampling_temperature: float = 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,17 +101,36 @@ def _softmax(logits: Sequence[float]) -> tuple[float, ...]:
     return tuple(x / total for x in exp)
 
 
+def temperature_for_round(
+    round_index: int, *, start: float, end: float, decay_rounds: int
+) -> float:
+    """Geometric temperature schedule; each round freezes its sampling policy."""
+    if type(round_index) is not int or round_index < 0:
+        raise ValueError("Round index must be nonnegative")
+    if type(decay_rounds) is not int or decay_rounds <= 0:
+        raise ValueError("Temperature decay rounds must be positive")
+    if not all(math.isfinite(t) and t > 0 for t in (start, end)):
+        raise ValueError("Sampling temperatures must be positive and finite")
+    fraction = min(1.0, round_index / decay_rounds)
+    return math.exp((1.0 - fraction) * math.log(start) + fraction * math.log(end))
+
+
 def sample_public_action(
     model: NeuralPolicyValueModel,
     observation: Observation,
     actions: Sequence[LegalAction],
     *,
     rng: random.Random,
+    temperature: float = 1.0,
 ) -> int:
-    """On-policy categorical sampling over the *public* legal action list."""
+    """Sample from the public categorical policy softmax(logits / T)."""
+    if not math.isfinite(temperature) or temperature <= 0:
+        raise ValueError("Sampling temperature must be positive and finite")
     if not actions:
         raise ValueError("Cannot choose from an empty legal-action menu")
-    probabilities = _softmax(model.evaluate(observation, actions).action_logits)
+    probabilities = _softmax(tuple(
+        x / temperature for x in model.evaluate(observation, actions).action_logits
+    ))
     threshold = rng.random()
     total = 0.0
     for index, probability in enumerate(probabilities):
@@ -149,6 +169,7 @@ def collect_public_episode(
     max_decisions: int = 2048,
     policy_id: str = "prototype-fair-v0",
     environment: str = LEGACY,
+    temperature: float = 1.0,
 ) -> Episode:
     """Run the actual emulator; never give hidden handles to the actor.
 
@@ -158,6 +179,8 @@ def collect_public_episode(
     """
     if max_decisions <= 0:
         raise ValueError("max_decisions must be positive")
+    if not math.isfinite(temperature) or temperature <= 0:
+        raise ValueError("Sampling temperature must be positive and finite")
     policy = InformationPolicy(policy_id)
     state = reset_training_run(backend, seed, environment)
     history: list[PublicDecision] = []
@@ -181,7 +204,9 @@ def collect_public_episode(
                 )
 
             actions = tuple(backend.legal_actions(state))
-            index = sample_public_action(model, frame, actions, rng=actor_rng)
+            index = sample_public_action(
+                model, frame, actions, rng=actor_rng, temperature=temperature
+            )
             # Record *only* public inputs and the sampled legal index.
             history.append(PublicDecision(frame, actions, index))
             try:
@@ -279,6 +304,10 @@ def train_selfplay(
     win_anneal_threshold: int = 16,
     value_weight: float = 0.5,
     entropy_weight: float = 0.01,
+    sampling_temperature_start: float = 1.0,
+    sampling_temperature_end: float = 1.0,
+    temperature_decay_rounds: int = 1,
+    initialize_from_model: Path | None = None,
     update_epochs: int = 1,
     max_decisions: int = 2048,
     run_seed_prefix: str = "neural-train",
@@ -307,7 +336,11 @@ def train_selfplay(
     if not 0 <= value_weight <= 10 or not 0 <= entropy_weight <= 1:
         raise ValueError("Invalid value or entropy loss weight")
     if update_epochs != 1:
-        raise ValueError("Strict on-policy v2 uses exactly one update epoch")
+        raise ValueError("Strict on-policy learning uses exactly one update epoch")
+    temperature_for_round(
+        0, start=sampling_temperature_start,
+        end=sampling_temperature_end, decay_rounds=temperature_decay_rounds,
+    )
     if type(win_anneal_threshold) is not int or win_anneal_threshold <= 0:
         raise ValueError("win_anneal_threshold must be positive")
     if type(workers) is not int or workers <= 0:
@@ -335,6 +368,24 @@ def train_selfplay(
         params, dimension, hidden,
         model_id=f"selfplay-initial-seed-{seed}", value_head_trained=False,
     )
+    warm_start_sha256: str | None = None
+    if initialize_from_model is not None:
+        # A pretrained *public* policy supplies initial parameters; training
+        # still begins with a fresh optimizer and strictly on-policy rounds.
+        model_bytes = initialize_from_model.read_bytes()
+        warm_start_sha256 = hashlib.sha256(model_bytes).hexdigest()
+        warm = NeuralPolicyValueModel.from_dict(json.loads(model_bytes))
+        if warm.format_id != NEURAL_FORMAT:
+            raise ValueError("Warm start requires semantic-action neural format")
+        if (warm.dimension, warm.hidden) != (dimension, hidden):
+            raise ValueError("Warm start neural dimensions do not match trainer")
+        if not resume:
+            with torch.no_grad():
+                for name, tensor in params.items():
+                    tensor.copy_(torch.tensor(
+                        getattr(warm, name), dtype=tensor.dtype
+                    ))
+            initial_model = warm
     revision = getattr(backend, "emulator_revision", "test-backend")
     config: dict[str, Any] = {
         "training_version": SELFPLAY_VERSION,
@@ -347,6 +398,10 @@ def train_selfplay(
         "win_anneal_threshold": win_anneal_threshold,
         "value_weight": value_weight,
         "entropy_weight": entropy_weight,
+        "sampling_temperature_start": sampling_temperature_start,
+        "sampling_temperature_end": sampling_temperature_end,
+        "temperature_decay_rounds": temperature_decay_rounds,
+        "initialize_from_model_sha256": warm_start_sha256,
         "update_epochs": update_epochs,
         "max_decisions": max_decisions,
         "run_seed_prefix": run_seed_prefix,
@@ -374,10 +429,14 @@ def train_selfplay(
             alpha = _curriculum_coefficient(
                 auxiliary_weight, cumulative_victories, win_anneal_threshold
             )
+            sampling_temperature = temperature_for_round(
+                round_index, start=sampling_temperature_start,
+                end=sampling_temperature_end, decay_rounds=temperature_decay_rounds,
+            )
             model = _export(
                 params, dimension, hidden,
                 model_id=f"selfplay-actor-before-round-{round_index}",
-                value_head_trained=round_index > 0 and any(
+                value_head_trained=initial_model.value_head_trained or any(
                     row.update_steps > 0 for row in metrics
                 ),
             )
@@ -395,6 +454,7 @@ def train_selfplay(
                         actor_rng=random.Random(episode_actor_seed(seed, run_seed)),
                         max_decisions=max_decisions,
                         environment=environment,
+                        temperature=sampling_temperature,
                     )
                     for run_seed in run_seeds
                 )
@@ -404,6 +464,7 @@ def train_selfplay(
                     base_seed=seed, max_decisions=max_decisions,
                     policy_id="prototype-fair-v0",
                     environment=environment,
+                    temperature=sampling_temperature,
                 )
             for episode in cohort:
                 if not episode.completed:
@@ -437,7 +498,11 @@ def train_selfplay(
                     for decision in episode.decisions:
                         obs, actions = _tensors(decision, dimension, torch)
                         estimate, logits = _forward(params, obs, actions, torch)
-                        log_probs = torch.nn.functional.log_softmax(logits, dim=0)
+                        # REINFORCE differentiates the same pi_T that sampled
+                        # this round. Optimizing pi_1 here would be off-policy.
+                        log_probs = torch.nn.functional.log_softmax(
+                            logits / sampling_temperature, dim=0
+                        )
                         probabilities = log_probs.exp()
                         # Both baselines are action-independent at this decision.
                         # Keep the learned V detached from the policy gradient.
@@ -477,6 +542,7 @@ def train_selfplay(
                  if completed_episodes else None),
                 (sum(_normalized_progress(ep) for ep, _ in completed_episodes)
                  / len(completed_episodes) if completed_episodes else None),
+                sampling_temperature,
             ))
             if checkpoint_path is not None:
                 save_checkpoint(
@@ -488,12 +554,16 @@ def train_selfplay(
     signature = hashlib.sha256(
         (
             f"{SELFPLAY_VERSION}:{seed}:{rounds}:{episodes_per_round}:"
-            f"{dimension}:{hidden}:{learning_rate}:{run_seed_prefix}"
+            f"{dimension}:{hidden}:{learning_rate}:{run_seed_prefix}:"
+            f"{sampling_temperature_start}:{sampling_temperature_end}:"
+            f"{temperature_decay_rounds}:{warm_start_sha256}"
         ).encode()
     ).hexdigest()[:12]
     final = _export(
         params, dimension, hidden,
-        model_id=f"selfplay-v3-{signature}",
-        value_head_trained=any(item.update_steps > 0 for item in metrics),
+        model_id=f"selfplay-v4-{signature}",
+        value_head_trained=initial_model.value_head_trained or any(
+            item.update_steps > 0 for item in metrics
+        ),
     )
     return SelfPlayResult(final, initial_model, tuple(metrics))
