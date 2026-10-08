@@ -45,6 +45,16 @@ sts2-emulator  <---  sts2-ai
 
 ## Current status
 
+**S1 research pilot:** `emulator/rejection.py` and `search/fair_replay.py`
+now connect fair stochastic PUCT to independently seeded, complete
+public-history-conditioned prototype emulator continuations. This is an
+exact rejection reference **under a declared synthetic 128-bit seed prior**;
+long histories have prohibitive acceptance rates and native STS2 chance
+prior fidelity remains to be validated. See
+[rejection-conditioned replay](docs/FAIR_REPLAY_CONDITIONING.md).
+The default agents and oracle-exact UCT remain unchanged.
+
+
 **New optional research components (PR #13):** a provenance-checked, aggregate
 human card-reward prior (with missing-card/Skip fallback), and a mathematical
 stochastic PUCT kernel over full public-history keys. These are independently
