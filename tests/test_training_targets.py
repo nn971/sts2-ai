@@ -191,7 +191,14 @@ def test_grouped_split_keeps_repeated_search_states_together() -> None:
     examples = tuple(
         replace(base, source_state_hash=f"state-{i}", observation_hash=f"obs-{i}")
         for i in range(8)
-    ) + (replace(base, source_search_id="other-budget"),)
+    ) + (
+        replace(
+            base,
+            source_state_hash="state-0",
+            observation_hash="obs-0",
+            source_search_id="other-budget",
+        ),
+    )
     train, validation = split_training_examples(examples, seed=7)
     train_states = {e.source_state_hash for e in train}
     validation_states = {e.source_state_hash for e in validation}
@@ -200,11 +207,11 @@ def test_grouped_split_keeps_repeated_search_states_together() -> None:
     reverse_train, reverse_validation = split_training_examples(tuple(reversed(examples)), seed=7)
     assert train == reverse_train
     assert validation == reverse_validation
-    assert {e.source_search_id for e in train if e.source_state_hash == "state-a"} in (
+    assert {e.source_search_id for e in train if e.source_state_hash == "state-0"} in (
         set(),
         {"search-a", "other-budget"},
     )
-    assert {e.source_search_id for e in validation if e.source_state_hash == "state-a"} in (
+    assert {e.source_search_id for e in validation if e.source_state_hash == "state-0"} in (
         set(),
         {"search-a", "other-budget"},
     )
