@@ -15,8 +15,8 @@ from sts2_ai.strategy_db import (
 from sts2_ai.training import (
     build_training_example,
     build_training_examples,
-    write_training_jsonl,
     split_training_examples,
+    write_training_jsonl,
 )
 
 
@@ -176,7 +176,7 @@ def test_training_export_uses_strongest_budget_per_state_by_default(
 
 def test_grouped_split_keeps_repeated_search_states_together() -> None:
     from dataclasses import replace
-    from sts2_ai.training import TrainingExample, PolicyTarget
+    from sts2_ai.training import PolicyTarget, TrainingExample
 
     base = TrainingExample(
         observation_hash="obs-a",
@@ -199,12 +199,18 @@ def test_grouped_split_keeps_repeated_search_states_together() -> None:
     reverse_train, reverse_validation = split_training_examples(tuple(reversed(examples)), seed=7)
     assert train == reverse_train
     assert validation == reverse_validation
-    assert {e.source_search_id for e in train if e.source_state_hash == "state-a"} in (set(), {"search-a", "other-budget"})
-    assert {e.source_search_id for e in validation if e.source_state_hash == "state-a"} in (set(), {"search-a", "other-budget"})
+    assert {e.source_search_id for e in train if e.source_state_hash == "state-a"} in (
+        set(),
+        {"search-a", "other-budget"},
+    )
+    assert {e.source_search_id for e in validation if e.source_state_hash == "state-a"} in (
+        set(),
+        {"search-a", "other-budget"},
+    )
 
 
 def test_grouped_split_rejects_single_state() -> None:
-    from sts2_ai.training import TrainingExample, PolicyTarget
+    from sts2_ai.training import PolicyTarget, TrainingExample
     example = TrainingExample(
         observation_hash="obs",
         information_policy="fair",
