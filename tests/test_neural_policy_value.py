@@ -14,6 +14,7 @@ import pytest
 from sts2_ai.agents import NeuralGreedyAgent
 from sts2_ai.emulator import LegalAction, Observation
 from sts2_ai.models import NeuralPolicyValueModel, load_model
+from sts2_ai.models.hashed_linear import policy_features, state_dict, state_features
 from sts2_ai.search import LearnedCutoffValue
 from sts2_ai.training.continuations import ContinuationRecord
 from sts2_ai.training.export import write_training_jsonl
@@ -139,6 +140,38 @@ def test_neural_training_and_inference_export(tmp_path: Path) -> None:
     assert loaded.evaluate(_observation(1), ()).value == pytest.approx(
         model.evaluate(_observation(1), ()).value
     )
+    # Verify the dependency-free inference reproduces the PyTorch layers.
+    import torch
+
+    observation = _observation(1)
+    action = LegalAction("rest", "rest_heal")
+    state = state_dict(observation.payload_json)
+    vector = torch.zeros(loaded.dimension)
+    for index, val in state_features(state, loaded.dimension).items():
+        vector[index] = val
+    action_vector = torch.zeros(loaded.dimension)
+    for index, val in policy_features(
+        state, action.kind, action.payload_json, loaded.dimension
+    ).items():
+        action_vector[index] = val
+    hidden = torch.nn.functional.relu(torch.nn.functional.linear(
+        vector, torch.tensor(loaded.state_weight), torch.tensor(loaded.state_bias)
+    ))
+    torch_value = torch.tanh(
+        torch.dot(hidden, torch.tensor(loaded.value_weight)) + loaded.value_bias
+    ).item()
+    projected = torch.nn.functional.linear(
+        action_vector, torch.tensor(loaded.action_weight),
+        torch.tensor(loaded.action_bias),
+    )
+    torch_logit = (
+        torch.dot(torch.nn.functional.relu(hidden + projected),
+                  torch.tensor(loaded.policy_weight)) + loaded.policy_bias
+    ).item()
+    evaluated = loaded.evaluate(observation, (action,))
+    assert evaluated.value == pytest.approx(torch_value, abs=1e-6)
+    assert evaluated.action_logits[0] == pytest.approx(torch_logit, abs=1e-6)
+
     metrics = evaluate_neural(loaded, roots)
     assert metrics.roots == 4
     assert math.isfinite(metrics.root_value_rmse or 0.0)
