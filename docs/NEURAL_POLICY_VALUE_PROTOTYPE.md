@@ -4,13 +4,17 @@
 
 ## Architecture
 
-The portable sts2-neural-policy-value-v1 model scores player-visible observations
-and arbitrary legal actions using existing hashed semantic features.
+The portable sts2-neural-policy-value-v2-semantic-action model scores
+player-visible observations and arbitrary legal actions. The legacy v1 model
+remains loadable for reproducibility.
 
 - Shared state encoder: ReLU of a learned affine state projection.
 - Value head: tanh of a learned projection into [-1,1].
 - Policy head: an action-dependent nonlinear score for each legal action.
 - Defaults: 256 input features, 32 hidden units.
+- V2 uses compact action-kind/card/target semantic features, with state context
+  carried by the shared state encoder. V1 rehashed the entire state for every
+  legal action and was over five times slower in the first MCTS pilot.
 
 Training uses optional PyTorch; exported JSON is loaded for inference using the
 Python standard library, without PyTorch. Files have validated shapes and finite
@@ -89,3 +93,10 @@ least two source run seeds and some completed training continuations.
 A small model is intentional: this is an engineering and generalization
 baseline, not yet a large sequence architecture. A separate neural CPU CI job
 checks actual PyTorch training while the default CI remains lightweight.
+
+A first small real-emulator v1 pilot (40 teacher roots; 10 held-out roots) had
+near-uniform policy targets (mean normalized entropy 0.995). All three
+16-decision runs had reported frontier 1.0. MCTS time/run: baseline 4.10 s,
+value-only 4.13 s, neural-policy-only 23.60 s. This is **not** evidence for a
+strength improvement. V2 reduces redundant per-action state hashing and must
+be independently benchmarked with the same workload.
