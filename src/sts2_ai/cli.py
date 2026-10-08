@@ -39,10 +39,10 @@ from sts2_ai.strategy_db import (
 )
 from sts2_ai.training import (
     build_training_examples,
+    evaluate_hashed_linear,
     load_training_jsonl,
     split_training_examples,
     train_hashed_linear,
-    evaluate_hashed_linear,
     write_training_jsonl,
 )
 
@@ -61,7 +61,9 @@ def main() -> None:
     manifest.add_argument("--information-policy", default="fair-v1")
 
     evaluate = sub.add_parser("evaluate", help="run whole-run emulator baselines")
-    evaluate.add_argument("--agent", choices=("random", "heuristic", "route", "mcts"), required=True)
+    evaluate.add_argument(
+        "--agent", choices=("random", "heuristic", "route", "mcts"), required=True
+    )
     evaluate.add_argument("--budget", type=int, default=32, help="MCTS simulations per decision")
     evaluate.add_argument(
         "--rollout-depth",
@@ -291,7 +293,9 @@ def main() -> None:
             "train": asdict(training_metrics),
             "validation": asdict(evaluate_hashed_linear(model, validation)),
             "train_states": len({e.source_state_hash or e.observation_hash for e in train}),
-            "validation_states": len({e.source_state_hash or e.observation_hash for e in validation}),
+            "validation_states": len(
+                {e.source_state_hash or e.observation_hash for e in validation}
+            ),
             "model_path": str(args.output),
             "seed": args.seed,
         }
