@@ -24,18 +24,19 @@ jobs:
       - name: Install CPU-only PyTorch
         run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Validate real learning and terminal censorship
-        run: python -m pytest tests/test_neural_selfplay.py -q
+        run: python -m pytest tests/test_neural_selfplay.py tests/test_run_environment.py -q
       - name: Actual Silent whole-run neural training and heldout evaluation
         run: |
           python tools/train_selfplay.py \
             --build \
+            --environment legacy-prototype \
             --rounds 2 --episodes 3 \
             --workers 2 --checkpoint /tmp/sts2-selfplay-checkpoint.pt \
             --max-decisions 1024 --dimension 64 --hidden 8 \
             --evaluate-seeds 2 --seed 19 \
             --output /tmp/sts2-selfplay-model.json \
             --report /tmp/sts2-selfplay-report.json
-          python -c 'import json; from pathlib import Path; r=json.loads(Path("/tmp/sts2-selfplay-report.json").read_text()); m=json.loads(Path("/tmp/sts2-selfplay-model.json").read_text()); assert r["schema"]=="sts2-onpolicy-neural-training-smoke-v2"; assert r["policy_information"]=="prototype-fair-v0"; assert sum(x["played"] for x in r["rounds"])==6; assert r["gradient_updates"]==2, "One update per fresh on-policy round"; assert r["gradient_decision_samples"]>0; assert r["rollout_workers"]==2; assert Path("/tmp/sts2-selfplay-checkpoint.pt").is_file(); assert all(row["auxiliary_coefficient"]==0.4 for row in r["rounds"]) if sum(row["wins"] for row in r["rounds"])==0 else True; assert m["value_head_trained"] is True; assert set(r["heldout_evaluation"])=={"random","heuristic","initial_neural_greedy","neural_greedy"}; assert all(len(v)==2 for v in r["heldout_evaluation"].values()); assert all(x["completed"]+x["censored"]==2 for x in r["heldout_completed_only"].values())'
+          python -c 'import json; from pathlib import Path; r=json.loads(Path("/tmp/sts2-selfplay-report.json").read_text()); m=json.loads(Path("/tmp/sts2-selfplay-model.json").read_text()); assert r["schema"]=="sts2-onpolicy-neural-training-smoke-v2"; assert r["policy_information"]=="prototype-fair-v0"; assert r["training_environment"]=="legacy-prototype"; assert sum(x["played"] for x in r["rounds"])==6; assert r["gradient_updates"]==2, "One update per fresh on-policy round"; assert r["gradient_decision_samples"]>0; assert r["rollout_workers"]==2; assert Path("/tmp/sts2-selfplay-checkpoint.pt").is_file(); assert all(row["auxiliary_coefficient"]==0.4 for row in r["rounds"]) if sum(row["wins"] for row in r["rounds"])==0 else True; assert m["value_head_trained"] is True; assert set(r["heldout_evaluation"])=={"random","heuristic","initial_neural_greedy","neural_greedy"}; assert all(len(v)==2 for v in r["heldout_evaluation"].values()); assert all(x["completed"]+x["censored"]==2 for x in r["heldout_completed_only"].values())'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
