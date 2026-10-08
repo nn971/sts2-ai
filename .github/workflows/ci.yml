@@ -28,6 +28,11 @@ jobs:
           sts2-ai evaluate --agent random --seeds 1 --no-build
           sts2-ai evaluate --agent heuristic --seeds 1 --no-build
           sts2-ai evaluate --agent route --seeds 1 --no-build
+      - name: Paired visible-route planning diagnostic
+        run: |
+          sts2-ai benchmark --budgets --seeds 8 --seed-prefix route-ci \
+            --no-include-random --no-build \
+            --strategy-db /tmp/sts2-route-benchmark.sqlite
       - name: Small oracle MCTS workload profile
         run: |
           sts2-ai evaluate \
