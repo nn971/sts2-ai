@@ -1,6 +1,7 @@
 """Pinned bridge test for the first eligible full-game reward boundary."""
 from __future__ import annotations
 
+import json
 import shutil
 
 import pytest
@@ -31,10 +32,10 @@ def test_pristine_reward_transition_matches_ordinary_engine_replay() -> None:
                     reward_initial_state=7,
                 )
             found_reward = False
-            for step in range(100):
+            for _ in range(100):
                 menu = tuple(backend.legal_actions(state))
                 assert menu, "Fixture terminated before reward"
-                before_phase = int(__import__("json").loads(
+                before_phase = int(json.loads(
                     backend.observe(state, policy).payload_json
                 )["phase"])
                 if before_phase == 1:
@@ -48,7 +49,7 @@ def test_pristine_reward_transition_matches_ordinary_engine_replay() -> None:
                     )
                 child = backend.step(state, action).child
                 owned.append(child)
-                after_phase = int(__import__("json").loads(
+                after_phase = int(json.loads(
                     backend.observe(child, policy).payload_json
                 )["phase"])
                 if before_phase == 3 and after_phase == 5:
@@ -65,7 +66,7 @@ def test_pristine_reward_transition_matches_ordinary_engine_replay() -> None:
                         state, action, reward_initial_state=9,
                     )
                     owned.append(other)
-                    assert int(__import__("json").loads(
+                    assert int(json.loads(
                         backend.observe(other, policy).payload_json
                     )["phase"]) == 5
                     with pytest.raises(JsonlBridgeError):
