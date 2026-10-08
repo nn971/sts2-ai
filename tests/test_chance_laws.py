@@ -72,3 +72,11 @@ def test_real_fair_root_sampler_is_explicitly_unavailable() -> None:
 
     with pytest.raises(FairContinuationUnavailable):
         require_fair_sampler(UnverifiedSampler())
+
+
+def test_sparse_large_deck_support_is_tractable() -> None:
+    # Enumeration must visit O(60) outcomes, not all 2**60 inclusion masks.
+    law = KnownDeckDrawLaw.from_counts({f"card-{index:02d}": 1 for index in range(60)})
+    outcomes = law.distribution(1, max_outcomes=60)
+    assert len(outcomes) == 60
+    assert all(outcome.probability == pytest.approx(1 / 60) for outcome in outcomes)
