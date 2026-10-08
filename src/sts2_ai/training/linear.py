@@ -15,6 +15,8 @@ from sts2_ai.models.hashed_linear import (
     state_features,
 )
 
+from sts2_ai.search.mcts import sts2_value
+
 from .targets import TrainingExample
 
 
@@ -35,6 +37,7 @@ class HeldoutBaselineMetrics:
     uniform_top1_accuracy: float
     heuristic_top1_accuracy: float
     constant_value_rmse: float
+    handcrafted_value_rmse: float
     constant_value_prediction: float
 
 
@@ -50,6 +53,7 @@ def evaluate_heldout_baselines(
     heuristic = HeuristicAgent()
     uniform_losses: list[float] = []
     squared_errors: list[float] = []
+    handcrafted_squared_errors: list[float] = []
     uniform_correct = 0
     heuristic_correct = 0
 
@@ -66,6 +70,9 @@ def evaluate_heldout_baselines(
             policy_id=example.information_policy,
             payload_json=example.observation_json,
             observation_hash=example.observation_hash,
+        )
+        handcrafted_squared_errors.append(
+            (sts2_value(observation) - example.value_target) ** 2
         )
         actions = tuple(
             LegalAction(
@@ -86,6 +93,7 @@ def evaluate_heldout_baselines(
         uniform_top1_accuracy=uniform_correct / len(validation),
         heuristic_top1_accuracy=heuristic_correct / len(validation),
         constant_value_rmse=math.sqrt(fmean(squared_errors)),
+        handcrafted_value_rmse=math.sqrt(fmean(handcrafted_squared_errors)),
         constant_value_prediction=constant_value,
     )
 
