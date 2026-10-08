@@ -189,6 +189,13 @@ class JsonlEmulatorBackend:
             self._terminate()
             raise JsonlBridgeError("Unrecognized local combat-stream conditioning capability")
 
+        self._factorized_initial_stream_schema = hello.get("factorizedInitialStreamsId")
+        if self._factorized_initial_stream_schema not in (
+            None, "prototype-independent-initial-streams-v1"
+        ):
+            self._terminate()
+            raise JsonlBridgeError("Unrecognized factorized initial-stream capability")
+
         manifest = self._request("manifest").get("manifest")
         if not isinstance(manifest, dict):
             self._terminate()
@@ -221,6 +228,42 @@ class JsonlEmulatorBackend:
 
     def reset_operation_profile(self) -> None:
         self._operation_profile.clear()
+
+    @property
+    def factorized_initial_stream_schema(self) -> str | None:
+        """Versioned alternative independent-stream prior at RunStart only."""
+        value = self._factorized_initial_stream_schema
+        return value if isinstance(value, str) else None
+
+    def reset_factorized_hypothetical(
+        self,
+        initial_streams: Mapping[str, int],
+        ascension: int = 0,
+    ) -> StateHandle:
+        """Create a synthetic RunStart from six independent 64-bit states.
+
+        This operation is a distinct declared game prior, not a way to
+        reconstruct the real run seed or native randomness.
+        """
+        if self.factorized_initial_stream_schema is None:
+            raise JsonlBridgeError("Factorized initial-stream capability unavailable")
+        required = {
+            "map", "combat", "combat_targets", "reward", "shop", "event"
+        }
+        if set(initial_streams) != required:
+            raise ValueError("Exactly six named initial RNG streams are required")
+        for value in initial_streams.values():
+            if type(value) is not int or not 0 <= value < 1 << 64:
+                raise ValueError("Initial RNG streams must be unsigned 64-bit integers")
+        response = self._request(
+            "reset_factorized_hypothetical",
+            initial_streams={key: f"{initial_streams[key]:016x}" for key in sorted(required)},
+            ascension=ascension,
+        )
+        if (response.get("hypothetical") is not True
+                or response.get("schemaId") != self.factorized_initial_stream_schema):
+            raise JsonlBridgeError("Factorized reset response lacks verified hypothetical schema")
+        return self._require_string(response, "stateHandle")
 
     def reset(self, seed: str, ascension: int = 0) -> StateHandle:
         response = self._request("reset", seed=seed, ascension=ascension)
