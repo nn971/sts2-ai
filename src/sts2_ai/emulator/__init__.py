@@ -1,3 +1,9 @@
+from .rejection import (
+    SEED_PRIOR_ID,
+    FairHistoryRejectionSampler,
+    HistoryConditioningExhausted,
+    RejectionStats,
+)
 from .jsonl_backend import (
     FAIR_POLICY_ID,
     OBSERVATION_SCHEMA_ID,
@@ -28,6 +34,10 @@ __all__ = [
     "OBSERVATION_SCHEMA_ID",
     "Observation",
     "RULESET_ID",
+    "SEED_PRIOR_ID",
+    "FairHistoryRejectionSampler",
+    "HistoryConditioningExhausted",
+    "RejectionStats",
     "StateHandle",
     "StepFrame",
     "Transition",
