@@ -39,7 +39,8 @@ from sts2_ai.training.parallel_rollouts import (
     episode_actor_seed,
     open_worker_pool,
 )
-from sts2_ai.training.rollout_failure import PublicRolloutFailure, SCHEMA as FAILURE_SCHEMA
+from sts2_ai.training.rollout_failure import SCHEMA as FAILURE_SCHEMA
+from sts2_ai.training.rollout_failure import PublicRolloutFailure
 from sts2_ai.training.selfplay_checkpoint import load_checkpoint, save_checkpoint
 
 SELFPLAY_VERSION = "public-onpolicy-reinforce-actor-critic-v3-parallel-resumable"
