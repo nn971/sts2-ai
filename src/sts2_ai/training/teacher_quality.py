@@ -128,7 +128,7 @@ def grade_teacher_root(
         reasons.append("underexplored-semantic-action")
     if margin < config.min_semantic_top_margin:
         reasons.append("flat-semantic-policy")
-    if gap is None or gap < config.min_semantic_value_gap:
+    if gap is None or gap <= config.min_semantic_value_gap:
         reasons.append("no-measured-value-gap")
     if agrees is not True:
         reasons.append("visits-disagree-with-best-value")
