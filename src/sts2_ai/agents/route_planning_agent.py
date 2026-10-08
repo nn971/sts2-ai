@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import cache
 from typing import Any, cast
 
 from sts2_ai.agents.base import Decision
@@ -101,7 +101,7 @@ class RoutePlanner:
             )
         )
 
-        @lru_cache(maxsize=None)
+        @cache
         def best(
             node_id: str, remaining: int, combat_count: int, combat_streak: int
         ) -> RouteEstimate | None:
@@ -190,32 +190,23 @@ class RoutePlanningAgent:
             if not isinstance(payload, dict):
                 return Decision(fallback.action, self.policy_id)
             node_id = payload.get("NodeId", payload.get("node_id"))
-            if not isinstance(node_id, str):
+            if not isinstance(node_id, str) or node_id in candidates:
                 return Decision(fallback.action, self.policy_id)
-            candidates[action.action_id] = action
+            candidates[node_id] = action
 
-        ids = []
-        for action in legal_actions:
-            raw = cast(dict[str, Any], json.loads(action.payload_json))
-            ids.append(cast(str, raw.get("NodeId", raw.get("node_id"))))
-        estimates = self._planner.evaluate(state, ids)
-        if len(estimates) != len(set(ids)):
+        estimates = self._planner.evaluate(state, tuple(candidates))
+        if len(estimates) != len(candidates):
             return Decision(fallback.action, self.policy_id)
 
         # Deterministic tie-breaking by semantic action ID for reproducibility.
-        chosen = max(
-            legal_actions,
-            key=lambda action: (
-                estimates[cast(
-                    str, json.loads(action.payload_json).get(
-                        "NodeId", json.loads(action.payload_json).get("node_id")
-                    )
-                )].score,
-                action.action_id,
+        chosen_id = max(
+            candidates,
+            key=lambda node_id: (
+                estimates[node_id].score,
+                candidates[node_id].action_id,
             ),
         )
-        chosen_payload = cast(dict[str, Any], json.loads(chosen.payload_json))
-        chosen_id = cast(str, chosen_payload.get("NodeId", chosen_payload.get("node_id")))
+        chosen = candidates[chosen_id]
         metadata = {
             "route_score": estimates[chosen_id].score,
             "route_node_ids": estimates[chosen_id].node_ids,
