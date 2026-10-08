@@ -10,8 +10,7 @@ import pytest
 
 from sts2_ai.emulator import InformationPolicy, LegalAction, Observation, Transition
 from sts2_ai.models.neural import NeuralPolicyValueModel
-from sts2_ai.training.rollout_failure import PublicRolloutFailure, SCHEMA
-from tools.replay_rollout_failure import replay_public_failure
+from sts2_ai.training.rollout_failure import SCHEMA, PublicRolloutFailure
 from sts2_ai.training.selfplay import (
     Episode,
     _bounded_return,
@@ -20,6 +19,7 @@ from sts2_ai.training.selfplay import (
     sample_public_action,
     train_selfplay,
 )
+from tools.replay_rollout_failure import replay_public_failure
 
 POLICY = "prototype-fair-v0"
 A = LegalAction("choice-a", "choose_map_node", '{"node_id":"a"}')
