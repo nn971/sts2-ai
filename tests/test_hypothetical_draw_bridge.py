@@ -48,11 +48,21 @@ def test_pinned_experimental_draw_injection_is_hypothetical_only() -> None:
                     for node in public_map["map"]
                     if node["room_type"] == "Combat"
                 }
+                def target_node_id(action_payload: str) -> str | None:
+                    payload = json.loads(action_payload)
+                    # Observation DTOs use snake_case; action payloads are
+                    # currently emitted with PascalCase from the game action.
+                    return (
+                        payload.get("node_id")
+                        or payload.get("nodeId")
+                        or payload.get("NodeId")
+                    )
+
                 choice = next(
                     (
                         action for action in backend.legal_actions(map_state)
                         if action.kind == "choose_map_node"
-                        and json.loads(action.payload_json)["node_id"] in combat_nodes
+                        and target_node_id(action.payload_json) in combat_nodes
                     ),
                     None,
                 )
