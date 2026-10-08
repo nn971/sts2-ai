@@ -12,6 +12,7 @@ import importlib
 import json
 import math
 import random
+import time
 from collections.abc import Callable, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -83,6 +84,8 @@ class TrainingRound:
     mean_return: float | None
     mean_progress: float | None
     sampling_temperature: float = 1.0
+    rollout_wall_seconds: float = 0.0
+    optimization_wall_seconds: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -451,6 +454,7 @@ def train_selfplay(
                 f"{run_seed_prefix}-{round_index}-{episode_index}"
                 for episode_index in range(episodes_per_round)
             ]
+            rollout_started = time.perf_counter()
             if pool is None:
                 cohort = tuple(
                     collect_public_episode(
@@ -471,6 +475,7 @@ def train_selfplay(
                     environment=environment,
                     temperature=sampling_temperature,
                 )
+            rollout_seconds = time.perf_counter() - rollout_started
             for episode in cohort:
                 if not episode.completed:
                     censored += 1
@@ -480,6 +485,7 @@ def train_selfplay(
                 completed_episodes.append((episode, _bounded_return(episode, alpha)))
 
             decisions_seen = sum(len(ep.decisions) for ep, _ in completed_episodes)
+            optimization_started = time.perf_counter()
             mean_loss: float | None = None
             updates = 0
             if completed_episodes and decisions_seen:
@@ -538,6 +544,7 @@ def train_selfplay(
                 mean_loss = sum(losses)
                 updates = 1
 
+            optimization_seconds = time.perf_counter() - optimization_started
             cumulative_victories += wins
             metrics.append(TrainingRound(
                 round_index, episodes_per_round, completed, censored, wins,
@@ -548,6 +555,8 @@ def train_selfplay(
                 (sum(_normalized_progress(ep) for ep, _ in completed_episodes)
                  / len(completed_episodes) if completed_episodes else None),
                 sampling_temperature,
+                rollout_seconds,
+                optimization_seconds,
             ))
             if checkpoint_path is not None:
                 save_checkpoint(
