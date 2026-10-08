@@ -27,7 +27,10 @@ def wilson_win_interval(wins: int, completed: int) -> tuple[float, float] | None
     margin = Z_95 * math.sqrt(
         p * (1 - p) / completed + zz / (4 * completed * completed)
     ) / (1 + zz / completed)
-    return max(0.0, center - margin), min(1.0, center + margin)
+    # Exact Bernoulli endpoints should remain exact despite IEEE rounding.
+    lower = 0.0 if wins == 0 else max(0.0, center - margin)
+    upper = 1.0 if wins == completed else min(1.0, center + margin)
+    return lower, upper
 
 
 def summarize_completed_runs(runs: Sequence[RunSummary]) -> dict[str, Any]:
