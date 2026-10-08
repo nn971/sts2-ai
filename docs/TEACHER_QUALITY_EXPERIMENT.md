@@ -117,3 +117,50 @@ For semantic curation, distinct map branches must never be equated simply
 because they share a room type; only truly matching visible card plays
 against the same target can be merged. Eligibility filters remain
 uncalibrated heuristics, not proofs of correct action rankings.
+
+
+## Why visit-count imitation is not necessarily the right policy objective
+
+The acting MCTS agent selects the highest **estimated mean return**, using
+visits as a tie-breaker, whereas the original policy head was trained on
+the distribution of UCT **visit counts**. UCT allocates visits partly to
+exploration, so its distribution can remain flat even when the mean-value
+ranking is nonuniform.
+
+A separate opt-in distiller now exports softmax policies over each identifiable
+semantic action's *visit-weighted action Q estimate*. It distributes group
+mass equally over truly identical visible card plays, but does not merge
+different map paths or unresolved purchases.
+
+~~~fish
+sts2-ai distill-q-teacher results/high-roots.jsonl \
+    results/q-roots.jsonl \
+    --min-budget 64 --min-semantic-visits 2 \
+    --min-value-gap 0.05 --uncertainty-scale 0.25 \
+    --temperature 0.15 \
+    --json-output results/q-target-report.json
+~~~
+
+An example is **rejected**, not artificially sharpened, if: the budget is
+too low, some semantic action is underexplored, fewer than two actions
+are distinguished, or the leading action Q values are not separated by
+the configured gap and standard-error proxy. The proxy is deliberately
+not presented as a calibrated confidence interval because tree-search
+samples are correlated. Different configurations are encoded in the
+policy-target-mode field in every exported training example.
+
+For an experiment that trains only the policy (keeping handcrafted MCTS
+cutoffs), use:
+
+~~~fish
+sts2-ai train-neural results/q-roots.jsonl results/q-policy.json \
+    --root-value-weight 0 --json-output results/q-validation.json
+sts2-ai evaluate --agent mcts --budget 32 \
+    --neural-rollout-model results/q-policy.json \
+    --seed-prefix q-heldout --seeds 5
+~~~
+
+The model's **value head remains untrained** in this regime. Do not use it
+as a cutoff estimator. The matched-root workflow tests the conservative
+Q target and a clearly labeled exploratory weaker gate. If neither
+produces enough records, it does not train a new model at all.
