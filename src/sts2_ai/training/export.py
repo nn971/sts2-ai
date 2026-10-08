@@ -175,7 +175,7 @@ def split_training_examples(
     keys = sorted(
         groups,
         key=lambda key: (
-            hashlib.sha256(f"{seed}:{key}".encode("utf-8")).digest(),
+            hashlib.sha256(f"{seed}:{key}".encode()).digest(),
             key,
         ),
     )
