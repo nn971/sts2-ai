@@ -91,6 +91,8 @@ class _TrainingProgress:
             f"wins={row.wins} new_wins={self.wins_this_invocation} | "
             f"progress={progress}{moving} loss={loss} "
             f"updates={row.update_steps} decisions={row.decision_samples} | "
+            f"rollouts={row.rollout_wall_seconds:.1f}s "
+            f"optimizer={row.optimization_wall_seconds:.1f}s | "
             f"round={duration:.1f}s elapsed={elapsed:.1f}s eta={eta:.0f}s"
         )
 
