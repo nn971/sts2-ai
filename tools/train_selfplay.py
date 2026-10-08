@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from dataclasses import asdict
 from pathlib import Path
 
@@ -57,6 +58,7 @@ def main() -> None:
     if args.evaluate_seeds < 1:
         parser.error("--evaluate-seeds must be positive")
     with JsonlEmulatorBackend(build=args.build) as backend:
+        started_at = time.perf_counter()
         trained = train_selfplay(
             backend,
             rounds=args.rounds, episodes_per_round=args.episodes,
@@ -70,6 +72,7 @@ def main() -> None:
             checkpoint_path=args.checkpoint,
             resume=args.resume,
         )
+        training_wall_seconds = time.perf_counter() - started_at
         trained.model.save(args.output)
         contenders = {
             "random": RandomAgent(seed=args.seed + 999),
@@ -125,6 +128,7 @@ def main() -> None:
             "rollout_workers": args.workers,
             "checkpoint_path": str(args.checkpoint) if args.checkpoint is not None else None,
             "resumed": args.resume,
+            "training_wall_seconds_current_invocation": training_wall_seconds,
             "rounds": [asdict(row) for row in trained.rounds],
             "train_completed": sum(row.completed for row in trained.rounds),
             "train_censored": sum(row.censored for row in trained.rounds),
