@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -13,10 +14,12 @@ from sts2_ai.strategy_db import (
     record_search_result,
 )
 from sts2_ai.training import (
+    PolicyTarget,
+    TrainingExample,
     build_training_example,
     build_training_examples,
-    write_training_jsonl,
     split_training_examples,
+    write_training_jsonl,
 )
 
 
@@ -175,9 +178,6 @@ def test_training_export_uses_strongest_budget_per_state_by_default(
 
 
 def test_grouped_split_keeps_repeated_search_states_together() -> None:
-    from dataclasses import replace
-    from sts2_ai.training import TrainingExample, PolicyTarget
-
     base = TrainingExample(
         observation_hash="obs-a",
         information_policy="fair",
@@ -199,12 +199,20 @@ def test_grouped_split_keeps_repeated_search_states_together() -> None:
     reverse_train, reverse_validation = split_training_examples(tuple(reversed(examples)), seed=7)
     assert train == reverse_train
     assert validation == reverse_validation
-    assert {e.source_search_id for e in train if e.source_state_hash == "state-a"} in (set(), {"search-a", "other-budget"})
-    assert {e.source_search_id for e in validation if e.source_state_hash == "state-a"} in (set(), {"search-a", "other-budget"})
+    same_state_train = {
+        e.source_search_id for e in train if e.source_state_hash == "state-a"
+    }
+    same_state_validation = {
+        e.source_search_id for e in validation if e.source_state_hash == "state-a"
+    }
+    both_budgets = {"search-a", "other-budget"}
+    assert (same_state_train, same_state_validation) in (
+        (both_budgets, set()),
+        (set(), both_budgets),
+    )
 
 
 def test_grouped_split_rejects_single_state() -> None:
-    from sts2_ai.training import TrainingExample, PolicyTarget
     example = TrainingExample(
         observation_hash="obs",
         information_policy="fair",
@@ -216,3 +224,61 @@ def test_grouped_split_rejects_single_state() -> None:
     )
     with pytest.raises(ValueError, match="distinct states"):
         split_training_examples((example, example))
+
+
+
+def test_split_groups_hidden_states_with_same_fair_observation() -> None:
+    one = TrainingExample(
+        observation_hash="same-fair-observation",
+        information_policy="fair",
+        policy_targets=(PolicyTarget("a", 1.0),),
+        value_target=0.3,
+        source_search_id="sample-a",
+        emulator_revision="emu",
+        source_state_hash="hidden-state-1",
+    )
+    two = replace(
+        one,
+        source_search_id="sample-b",
+        source_state_hash="hidden-state-2",
+    )
+    other = replace(
+        one,
+        observation_hash="different-observation",
+        source_state_hash="hidden-state-3",
+        source_search_id="sample-c",
+    )
+    train, validation = split_training_examples((one, two, other), seed=11)
+    assert (one in train) == (two in train)
+    assert (one in validation) == (two in validation)
+    assert len(train) + len(validation) == 3
+
+
+def test_split_groups_transitive_observation_overlap() -> None:
+    one = TrainingExample(
+        observation_hash="fair-a",
+        information_policy="fair",
+        policy_targets=(PolicyTarget("a", 1.0),),
+        value_target=0.0,
+        source_search_id="sample-a",
+        emulator_revision="emu",
+        source_state_hash="hidden-state-1",
+    )
+    connected = (
+        one,
+        replace(one, observation_hash="fair-b", source_search_id="sample-b"),
+        replace(
+            one,
+            observation_hash="fair-b",
+            source_state_hash="hidden-state-2",
+            source_search_id="sample-c",
+        ),
+    )
+    separate = replace(
+        one,
+        observation_hash="other",
+        source_state_hash="hidden-state-3",
+        source_search_id="sample-d",
+    )
+    train, validation = split_training_examples((*connected, separate), seed=2)
+    assert all(e in train for e in connected) or all(e in validation for e in connected)
