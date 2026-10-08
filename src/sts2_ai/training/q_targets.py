@@ -13,7 +13,7 @@ from dataclasses import dataclass, replace
 from statistics import fmean
 from typing import Any
 
-from sts2_ai.models.hashed_linear import state_dict
+from sts2_ai.models.hashed_linear import semantic_action_label, state_dict
 
 from .targets import TrainingExample
 from .teacher_quality import conservative_semantic_group
@@ -65,6 +65,21 @@ def distill_one_q_target(
         return None, "one-semantic-action", None
 
     labels = sorted(groups)
+    # The v2 neural policy head only sees kind plus semantic-action label.
+    # It cannot distinguish two distinct map nodes of the same room type,
+    # unresolved event choices, etc. Do not train it on contradictory labels.
+    representable_groups: dict[str, set[str]] = defaultdict(set)
+    for group_label, indices in groups.items():
+        for index in indices:
+            action = example.policy_targets[index]
+            signature = (
+                action.action_kind + ":" + semantic_action_label(
+                    state, action.action_kind, action.action_payload_json
+                )
+            )
+            representable_groups[signature].add(group_label)
+    if any(len(group_set) > 1 for group_set in representable_groups.values()):
+        return None, "model-cannot-distinguish-actions", None
     means = []
     uncertainties = []
     for label in labels:
