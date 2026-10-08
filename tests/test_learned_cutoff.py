@@ -87,3 +87,37 @@ def test_invalid_model_values_do_not_enter_uct(tmp_path: Path) -> None:
     cutoff = LearnedCutoffValue.load(path)
     with pytest.raises(ValueError, match="invalid value"):
         cutoff(observation)
+
+
+def test_blended_cutoff_endpoints_and_midpoint(tmp_path: Path) -> None:
+    model = HashedLinearPolicyValueModel.zeros(64)
+    observation = _observation({"act": 1, "floor": 3, "hp": 20, "max_hp": 70})
+    feature_index = next(iter(state_features(json.loads(observation.payload_json), 64)))
+    model.value_weights[feature_index] = 0.8
+    path = tmp_path / "model.json"
+    model.save(path)
+
+    baseline = sts2_value(observation)
+    learned = LearnedCutoffValue.load(path, learned_weight=1.0)
+    quarter = LearnedCutoffValue.load(path, learned_weight=0.25)
+    half = LearnedCutoffValue.load(path, learned_weight=0.5)
+    handcrafted = LearnedCutoffValue.load(path, learned_weight=0.0)
+
+    assert handcrafted(observation) == baseline
+    assert learned(observation) == pytest.approx(model.evaluate(observation, ()).value)
+    assert half(observation) == pytest.approx((baseline + learned(observation)) / 2.0)
+    assert quarter(observation) == pytest.approx(
+        0.75 * baseline + 0.25 * learned(observation)
+    )
+    assert len({item.value_id for item in (handcrafted, quarter, half, learned)}) == 4
+    terminal = _observation({"terminal_outcome": "defeat", "hp": 20})
+    assert all(item(terminal) == -1.0 for item in (handcrafted, quarter, half, learned))
+
+
+@pytest.mark.parametrize("weight", [-0.1, 1.01, math.inf, math.nan])
+def test_invalid_blend_weights_are_rejected(tmp_path: Path, weight: float) -> None:
+    model = HashedLinearPolicyValueModel.zeros(64)
+    path = tmp_path / "model.json"
+    model.save(path)
+    with pytest.raises(ValueError, match="learned_weight"):
+        LearnedCutoffValue.load(path, learned_weight=weight)
