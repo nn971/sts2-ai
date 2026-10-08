@@ -61,7 +61,9 @@ def main() -> None:
     manifest.add_argument("--information-policy", default="fair-v1")
 
     evaluate = sub.add_parser("evaluate", help="run whole-run emulator baselines")
-    evaluate.add_argument("--agent", choices=("random", "heuristic", "route", "mcts"), required=True)
+    evaluate.add_argument(
+        "--agent", choices=("random", "heuristic", "route", "mcts"), required=True
+    )
     evaluate.add_argument("--budget", type=int, default=32, help="MCTS simulations per decision")
     evaluate.add_argument(
         "--rollout-depth",
