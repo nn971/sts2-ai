@@ -187,11 +187,14 @@ class FiniteSeedPosteriorSampler:
         except BaseException:
             # All surviving/new and unprocessed old handles belong to this
             # sampler, including states from partial transitions.
-            owned = remaining | produced
-            if owned:
-                self._backend.release_many(tuple(owned))
+            # Accepted children have already been moved into _states and
+            # removed from produced. A later failing particle must not leak
+            # those earlier accepted handles.
+            owned = remaining | produced | set(self._states)
             self._states = []
             self._closed = True
+            if owned:
+                self._backend.release_many(tuple(owned))
             raise
 
     def sample_fair_continuations(
