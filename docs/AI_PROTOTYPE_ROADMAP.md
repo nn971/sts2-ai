@@ -963,3 +963,48 @@ coverage, calibrated policy priors, fair search, and larger paired evaluations.
 
 Full reproducibility instructions are in
 docs/NEURAL_POLICY_VALUE_PROTOTYPE.md.
+
+
+## Teacher-quality and action-value supervision, October 8, 2026
+
+Higher-budget oracle-exact MCTS, semantic action auditing, and neural-v2
+policy/value guidance now have an end-to-end research workflow, rather than
+only a small architecture demonstration.
+
+**Empirical finding:** MCTS-96 did not fix the nearly uniform raw UCT visit
+targets produced by MCTS-12. On the corrected 3-run teacher comparison,
+mean normalized literal entropy was 0.998997 at budget 96 versus 0.99046
+at budget 12. The strict curator kept only 9 of 68 high-budget roots, too
+few to justify training solely on curated data. Six independent cutoff
+continuations were all losses, another weak supervision signal.
+
+A small 3-seed, 64-decision held-out MCTS-32 comparison gave mean continuous
+frontier progress 3.67 for handcrafted search, 2.67 with the neural value
+blend, and 4.67 with the neural rollout policy. The latter took 33.38 s/run
+versus 11.79 s/run for baseline. No runs won; all were truncated. Thus
+there is no credible demonstrated strength improvement.
+
+**New controls:**
+- The passive shadow teacher can evaluate a higher MCTS budget on the
+  exact same live root state as the acting low-budget policy. A separate
+  SQLite store and source-state hashes permit strictly matched comparisons.
+- Conservative semantic target diagnostics collapse identical visible card
+  plays but never assume map branches with the same room type are equivalent.
+- An explicit Q-softmax teacher targets the **mean action-value ranking**
+  actually used by the oracle MCTS agent, instead of its exploration visits.
+  The original visit-based labels remain the default and Q targets are
+  generated only when minimum visits, Q gaps and a specified uncalibrated
+  uncertainty proxy permit it.
+- Neural training can now use root-value-loss weight zero, yielding a
+  **policy-only** checkpoint whose value head is intentionally untrained.
+- A conditional experiment only trains a new policy from Q targets when
+  it has enough retained roots; otherwise it reports the evidence shortfall.
+
+The repository continues to distinguish oracle-exact research targets from
+a future fair hidden-information agent. Results of Q-supervision experiments
+will determine whether it is worth investing in higher-capacity models;
+otherwise the next priority is independent multi-continuation action-value
+supervision, better rollout policies, and complete-run evaluation.
+
+See docs/TEACHER_QUALITY_EXPERIMENT.md and the workflow
+.github/workflows/shadow-teacher-experiment.yml.
