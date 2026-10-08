@@ -51,6 +51,7 @@ from sts2_ai.training import (
 )
 from sts2_ai.training.continuations import (
     CutoffContinuationCollector,
+    ContinuationRecord,
     continuation_report,
     load_continuations,
 )
@@ -1114,8 +1115,8 @@ def _train_neural(args: argparse.Namespace) -> None:
     root_train, root_holdout = split_training_examples(
         roots, validation_fraction=args.validation_fraction, seed=args.seed
     )
-    cutoff_train = ()
-    cutoff_holdout = ()
+    cutoff_train: tuple[ContinuationRecord, ...] = ()
+    cutoff_holdout: tuple[ContinuationRecord, ...] = ()
     dropped = 0
     if args.cutoff_continuations is not None:
         cutoffs = load_continuations(args.cutoff_continuations)
