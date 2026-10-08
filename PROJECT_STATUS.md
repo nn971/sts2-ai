@@ -1,5 +1,23 @@
 # Project status
 
+## S1 fair-history replay pilot — conditional rejection (2026-10-08)
+
+The new `FairHistoryRejectionSampler` replays independent synthetic
+uniform-128-bit seeds through **every public observation and action**
+to sample the posterior conditional on the entire observable history.
+The `FairReplayPuctAdapter` retains one independently sampled latent
+emulator state per PUCT simulation, preserving correlations through
+subsequent mechanics. Both are opt-in and the exact-state oracle
+path remains separate.
+
+This is an exact reference **only under the versioned synthetic seed
+ensemble**, not a verified STS2 native seed distribution. Acceptance
+collapses on distinctive maps and long histories; the sampler has
+a hard cap and fails closed. No live full-run fair agent or gameplay
+improvement is claimed. See
+[the implementation and limits](docs/FAIR_REPLAY_CONDITIONING.md).
+
+
 ## Optional card-statistics priors and fair-search kernel (2026-10-08)
 
 PR #13 introduces an authorized-snapshot-only aggregate card reward prior,

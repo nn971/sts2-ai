@@ -7,6 +7,7 @@ from .card_priors import (
     CardPriorDataset,
     blended_card_reward_prior,
 )
+from .fair_replay import FairReplayPuctAdapter
 from .learned_value import LearnedCutoffValue
 from .mcts import UctMcts, sts2_value
 from .puct import (
@@ -29,6 +30,7 @@ __all__ = [
     "CardPriorDataset",
     "FAIR_TRANSITION_CAPABILITY_ID",
     "FairPuctUnavailable",
+    "FairReplayPuctAdapter",
     "IncompleteChanceRollout",
     "LearnedCutoffValue",
     "PublicSearchNode",

@@ -27,6 +27,9 @@ class FairContinuationUnavailable(RuntimeError):
 class PublicHistoryStep:
     observation: Observation
     chosen_action: LegalAction | None
+    # The complete visible action menu is information available to the player.
+    # None permits legacy storage but fair posterior conditioning rejects it.
+    legal_actions: tuple[LegalAction, ...] | None = None
 
 
 @runtime_checkable

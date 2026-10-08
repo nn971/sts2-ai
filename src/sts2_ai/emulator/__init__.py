@@ -16,6 +16,12 @@ from .protocol import (
     StepFrame,
     Transition,
 )
+from .rejection import (
+    SEED_PRIOR_ID,
+    FairHistoryRejectionSampler,
+    HistoryConditioningExhausted,
+    RejectionStats,
+)
 
 __all__ = [
     "BridgeOperationStats",
@@ -28,6 +34,10 @@ __all__ = [
     "OBSERVATION_SCHEMA_ID",
     "Observation",
     "RULESET_ID",
+    "SEED_PRIOR_ID",
+    "FairHistoryRejectionSampler",
+    "HistoryConditioningExhausted",
+    "RejectionStats",
     "StateHandle",
     "StepFrame",
     "Transition",
