@@ -45,16 +45,16 @@ sts2-emulator  <---  sts2-ai
 
 ## Current status
 
-**Native-structure Overgrowth training gate (blocked on emulator interface):**
-the six-floor Silent environment is no longer the default requested
-experiment. `tools/train_selfplay.py` now selects `native-overgrowth`
-and **fails closed** until the emulator JSONL server explicitly exposes
-the existing C# native-overgrowth run factory. No emulator code has been
-changed. Six-floor testing remains available via
-`--environment legacy-prototype`; old checkpoints cannot resume
-across modes. Act 1 progress for native-shaped runs is normalized on
-16 floors rather than 6. See
-[missing interface contract](docs/NATIVE_OVERGROWTH_TRAINING_GATE.md).
+**Native-structure Overgrowth training is now wired to the verified emulator reset:**
+`sts2-ai` pins `sts2-emulator` at `87bac0f425314a267948d235c6f4ac5bd89af4c7`,
+whose versioned JSONL `reset_native_overgrowth` capability and native
+Neow/13-card/16-floor opening were verified by emulator CI. The AI's default
+training environment is `native-overgrowth`; no fallback to the old six-floor
+mode is allowed. The AI CI runs native-structure public gameplay, checks
+actual card offers and card picks, and archives a diagnostic report. Start
+a **fresh** checkpoint because the previous 9700X experiment was trained
+under the six-floor legacy mode. See
+[native Overgrowth integration](docs/NATIVE_OVERGROWTH_TRAINING_GATE.md).
 
 
 **Parallel, resumable neural self-play:** the teacher-free learner now supports
