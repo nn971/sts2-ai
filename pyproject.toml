@@ -17,6 +17,9 @@ dependencies = []
 sts2-ai = "sts2_ai.cli:main"
 
 [project.optional-dependencies]
+neural = [
+  "torch>=2.4",
+]
 dev = [
   "pytest>=8",
   "ruff>=0.11",
