@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import random
 from collections.abc import Sequence
+from pathlib import Path
 
 import pytest
 
@@ -225,3 +226,58 @@ def test_adaptive_curriculum_never_disappears_when_all_real_runs_fail() -> None:
     assert all(row.mean_return is not None and row.mean_return > 0
                for row in trained.rounds)
     assert not backend._states
+
+
+def test_resumed_training_matches_uninterrupted_training(tmp_path: Path) -> None:
+    """AdamW weights + every round must be restored, not just the actor JSON."""
+    pytest.importorskip("torch")
+    config = dict(
+        episodes_per_round=6, dimension=16, hidden=4,
+        learning_rate=0.006, auxiliary_weight=0.4,
+        win_anneal_threshold=6, max_decisions=4, seed=71,
+    )
+    reference = train_selfplay(ToyFullRunBackend(), rounds=4, **config)
+    checkpoint = tmp_path / "train.pt"
+    first_half = train_selfplay(
+        ToyFullRunBackend(), rounds=2,
+        checkpoint_path=checkpoint, **config,
+    )
+    assert checkpoint.is_file()
+    assert len(first_half.rounds) == 2
+    resumed = train_selfplay(
+        ToyFullRunBackend(), rounds=4, checkpoint_path=checkpoint,
+        resume=True, **config,
+    )
+    assert resumed.rounds == reference.rounds
+    assert resumed.initial_model.to_dict() == reference.initial_model.to_dict()
+    assert resumed.model.to_dict() == reference.model.to_dict()
+    assert not ToyFullRunBackend()._states
+
+
+def test_checkpoint_refuses_changed_training_contract(tmp_path: Path) -> None:
+    pytest.importorskip("torch")
+    path = tmp_path / "train.pt"
+    train_selfplay(
+        ToyFullRunBackend(), rounds=1, episodes_per_round=3,
+        dimension=16, hidden=4, seed=12, checkpoint_path=path,
+    )
+    with pytest.raises(ValueError, match="configuration mismatch"):
+        train_selfplay(
+            ToyFullRunBackend(), rounds=2, episodes_per_round=4,
+            dimension=16, hidden=4, seed=12, checkpoint_path=path, resume=True,
+        )
+    with pytest.raises(ValueError, match="requires a checkpoint"):
+        train_selfplay(ToyFullRunBackend(), resume=True)
+
+
+def test_parallel_requires_isolated_real_emulator() -> None:
+    with pytest.raises(ValueError, match="JSONL emulator"):
+        train_selfplay(ToyFullRunBackend(), workers=2)
+
+
+def test_worker_actor_seed_is_stable_and_seed_distinct() -> None:
+    from sts2_ai.training.parallel_rollouts import episode_actor_seed
+
+    assert episode_actor_seed(8, "s0") == episode_actor_seed(8, "s0")
+    assert episode_actor_seed(8, "s0") != episode_actor_seed(8, "s1")
+    assert episode_actor_seed(8, "s0") != episode_actor_seed(9, "s0")

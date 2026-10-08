@@ -45,6 +45,16 @@ sts2-emulator  <---  sts2-ai
 
 ## Current status
 
+**Parallel, resumable neural self-play:** the teacher-free learner now supports
+`--workers N` with independent pinned .NET emulators and actor RNG seeds
+stable across worker scheduling. Each cohort is collected under one frozen
+public-observation policy, then optimized once. Atomic round-complete
+checkpoints retain AdamW and weights; `--resume` validates all training
+hyperparameters and emulator revision. A Ryzen 9700X / RTX 5070 / 24 GB
+pilot starts with four CPU rollout workers before using CUDA. See
+[parallel neural training](docs/PARALLEL_NEURAL_TRAINING_9700X.md).
+
+
 **Adaptive teacher-free neural learning (v2):** completed-run auxiliary
 floor/HP rewards now persist until the agent actually starts winning,
 then anneal by observed victories rather than by arbitrary elapsed

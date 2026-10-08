@@ -1,5 +1,24 @@
 # Project status
 
+## Four-worker rollout and resumable training pilot (2026-10-08)
+
+Parallel observation-only trajectory collection now assigns independent
+reproducible actor RNG seeds by run, forks isolated worker Python processes
+using `spawn`, and starts one pinned release-build .NET emulator bridge
+per worker. The same frozen network is used throughout each on-policy
+cohort, and completed episodes return in fixed request order for deterministic
+optimization regardless of scheduler order. The learner itself remains
+single-process CPU Torch for now.
+
+Each completed round is atomically checkpointed with all network/AdamW
+states, Torch RNG, recorded metrics and a validated training-config +
+emulator-revision fingerprint. `--resume` skips completed rounds and
+rejects incompatible configurations; changing worker count alone is
+permitted. CI tests checkpointed versus uninterrupted training equality
+and exercises two simultaneous full Silent rollout workers. See
+[9700X training pilot](docs/PARALLEL_NEURAL_TRAINING_9700X.md).
+
+
 ## Adaptive on-policy self-play and four-way evaluation (2026-10-08)
 
 The first teacher-free learner now uses true one-update-per-on-policy-
