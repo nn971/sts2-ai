@@ -109,6 +109,9 @@ class UctMcts:
         rollout_mode: str = "fixed",
         virtual_loss: float | None = None,
         cutoff_observer: Callable[[Observation], None] | None = None,
+        continuation_observer: (
+            Callable[[Observation, StateHandle, str], None] | None
+        ) = None,
         seed: int = 0,
     ) -> None:
         if rollout_depth < 0:
@@ -132,6 +135,7 @@ class UctMcts:
         self._virtual_loss = virtual_loss
         # Passive diagnostic hook; it never participates in action selection.
         self._cutoff_observer = cutoff_observer
+        self._continuation_observer = continuation_observer
         self.search_version = _configured_search_version(
             rollout_policy=rollout_policy,
             value_fn=value_fn,
@@ -500,8 +504,7 @@ class UctMcts:
                 ]
                 for index, rollout in enumerate(rollouts):
                     if rollout.value is None and not rollout.legal_actions:
-                        if self._cutoff_observer is not None:
-                            self._cutoff_observer(rollout.observation)
+                        self._observe_cutoff(rollout, "no-actions")
                         rollouts[index].value = self._value_fn(rollout.observation)
 
                 if not active_indices:
@@ -543,13 +546,13 @@ class UctMcts:
                         rollout.started_in_combat
                         and not _is_combat_observation(frame.observation)
                     ):
+                        self._observe_cutoff(rollout, "combat-exit")
                         rollout.value = self._value_fn(frame.observation)
                         rollout.ended_boundary = True
 
             for rollout in rollouts:
                 if rollout.value is None:
-                    if self._cutoff_observer is not None:
-                        self._cutoff_observer(rollout.observation)
+                    self._observe_cutoff(rollout, "depth")
                     rollout.value = self._value_fn(rollout.observation)
 
             terminal_count = sum(
@@ -572,6 +575,15 @@ class UctMcts:
         finally:
             if temporary:
                 self._backend.release_many(temporary)
+
+    def _observe_cutoff(self, rollout: _RolloutState, reason: str) -> None:
+        """Call diagnostic hooks while the exact leaf handle remains live."""
+        if self._cutoff_observer is not None:
+            self._cutoff_observer(rollout.observation)
+        if self._continuation_observer is not None:
+            self._continuation_observer(
+                rollout.observation, rollout.handle, reason
+            )
 
     @staticmethod
     def _edge_evaluation(edge: _Edge) -> ActionEvaluation:
