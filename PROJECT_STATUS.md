@@ -1,5 +1,23 @@
 # Project status
 
+## Exact enumerated finite seed posterior (2026-10-08)
+
+Added `ExactFiniteSeedPosteriorSampler`, which enumerates **every atom**
+of a declared finite uniform hypothetical-seed prior, replays the entire
+public action/observation/menu history, and uniformly samples the exactly
+compatible full emulator states for stochastic PUCT. It computes the
+finite-prior evidence fraction exactly and does not use the live run seed.
+
+This is an honest discrete alternate-game prior, not an approximation
+claim about native STS2. Its maps can identify one seed, causing trivial
+remaining uncertainty; arbitrary native maps may have zero support.
+Tests compare enumerated conditional probabilities, future correlated
+outcomes, fair PUCT estimates, and pinned map-to-combat public replay.
+We also fixed cleanup of previously accepted particles when conditioning
+fails midway. See
+[exact enumerated public posterior](docs/EXACT_ENUMERATED_PUBLIC_POSTERIOR.md).
+
+
 ## Local conditional combat-stream replay (2026-10-08)
 
 The emulator gitlink advances to `8eefaf5b67139bfcb7b6047a9fb7188c44126535`.
