@@ -1,22 +1,21 @@
 # Project status
 
-## Native-structure Overgrowth: AI integration staged, emulator blocked (2026-10-08)
+## Native-structure Overgrowth: emulator interface available and pinned (2026-10-09)
 
-Audited pinned `sts2-emulator` and confirmed that
-`PrototypeNativeOvergrowthRunFactory.Create` exists but **no matching
-JSONL reset operation or advertised capability exists**. Implemented
-only the AI side: default train CLI mode `native-overgrowth`
-requires a versioned hello capability, requests a dedicated reset,
-validates public initial map/deck/Neow and refuses silent fallback.
-The emulator repository was **not modified**.
+Pinned the independently verified `sts2-emulator` active-branch revision
+`87bac0f425314a267948d235c6f4ac5bd89af4c7`, which adds
+`nativeOvergrowthResetId` and `reset_native_overgrowth` to the
+existing JSONL bridge. The emulator's [CI](https://github.com/nn971/sts2-emulator/actions/runs/37807144383)
+passed its live-handle Neow/13-card/16-floor replay smoke. The
+AI's `native-overgrowth` default now has a real compatible factory
+interface and refuses legacy substitution. Added two-seed public
+gameplay smoke recording reward offers, acquired cards and deck sizes
+in AI CI, before launching large neural experiments.
 
-The existing legacy training environment remains an explicit opt-in,
-so baseline regression CI is still usable. Mode is now part of
-checkpoint identity; 16-floor Act 1 plus six-floor Act 2/3
-normalization replaces the old 18-floor assumptions only in native
-mode. Native training will **not begin** until the user authorizes
-an emulator-side JSONL bridge interface. See
-[blocking request](docs/NATIVE_OVERGROWTH_TRAINING_GATE.md).
+Legacy run checkpoints MUST NOT be resumed under native mode. Once
+AI CI passes, start a fresh pilot on the 9700X. The native-overgrowth
+profile applies only to Act 1; Acts 2/3 remain the six-floor prototype.
+See [integration guide](docs/NATIVE_OVERGROWTH_TRAINING_GATE.md).
 
 
 ## Four-worker rollout and resumable training pilot (2026-10-08)

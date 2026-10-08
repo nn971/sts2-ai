@@ -1,101 +1,103 @@
-# Native-structure Overgrowth training: AI-side gate, emulator interface BLOCKED
+# Native Overgrowth training — pinned bridge integration
 
-**Status: NOT RUNNABLE on the pinned emulator.** This file describes an AI
-consumer contract, NOT an emulator implementation. No files in
-`sts2-emulator` are modified by this change.
+**Status: emulator interface implemented, AI integration under CI validation.**
+The AI submodule is now pinned to
+`87bac0f425314a267948d235c6f4ac5bd89af4c7` on
+`nn971/sts2-emulator`'s `prototype/full-run-silent` branch.
 
-## Why this is necessary
+The [emulator CI](https://github.com/nn971/sts2-emulator/actions/runs/37807144383)
+passed its black-box `reset_native_overgrowth` public replay smoke.
+This pin changes **only the AI repo gitlink**: the emulator implementation
+was independently committed before the AI integration.
 
-The regular pinned `JsonlEmulatorBackend.reset(seed)` starts the original
-`prototype-silent-v0` six-floor-per-act game. It does **not** execute
-`PrototypeNativeOvergrowthRunFactory.Create`.
+## Current JSONL contract
 
-The pinned emulator **does** contain an opt-in
-`PrototypeNativeOvergrowthRunFactory.Create(seed, ascension)` in
-`src/Sts2Emulator.Core/PrototypeNativeOvergrowthMap.cs`. It yields:
+`hello` declares
+`nativeOvergrowthResetId: "prototype-native-overgrowth-reset-v1"`.
+The live `reset_native_overgrowth` operation takes `seed` and optional
+`ascension`, calls
+`PrototypeNativeOvergrowthRunFactory.Create(seed, ascension)`,
+and responds with `stateHandle` and matching `schemaId`. Handles
+support `observe`, `legal_actions`, `step`, `is_terminal` and
+`release_many` without hypothetical provenance.
 
-- an Act 1 Overgrowth map with 15 traversable rows and boss floor 16;
-- a Neow event before the first map choice;
-- a 13-card Silent starter with Restlessness;
-- existing Overgrowth enemy/weak/normal/elite/boss pools;
-- the version-pinned native-shaped Act 1 encounter-card rarity/pity path,
-  which the six-floor map does not activate.
+The AI's `--environment native-overgrowth` default insists on this
+capability and validates the public initial observation before any
+training episode: native map-profile ID, Act 1 16th-floor boss, 13
+persistent Silent cards (including Restlessness) and Neow opening
+event. No six-floor fallback is allowed. The explicit legacy
+environment remains available for regression tests.
 
-But **`PrototypeAiJsonlServer` has no such reset operation or hello
-capability field**. Since all Python rollout workers and held-out evaluation
-use JSONL, **the AI cannot request the native factory today**. A direct
-Python-side reconstruction using the same seed and generic `reset` would
-misrepresent the actual game and is intentionally forbidden.
+The AI CI now runs `tools/smoke_native_overgrowth.py` to collect
+**actual public gameplay** from a heuristic agent, logging card
+reward offers, reward picks, persistent deck growth and run depths.
+These observations are a prerequisite diagnostic for a larger
+experiment; they are not proof of native-game balance or AI strength.
 
-## Required emulator interface — request only, not implemented
+## Recommended first local experiment (fish)
 
-Please add to the emulator's existing JSONL server, after separate
-authorization:
+Pull the updated AI parent and its pinned submodule:
 
-1. At `hello`, report a declared capability
-   `nativeOvergrowthResetId: "prototype-native-overgrowth-reset-v1"`.
-2. Add operation `reset_native_overgrowth` with `seed: string` and
-   `ascension: int` (default zero) that calls **exactly**
-   `PrototypeNativeOvergrowthRunFactory.Create(seed, ascension)`,
-   stores the state in the normal handle table, and returns
-   `{stateHandle, schemaId: "prototype-native-overgrowth-reset-v1"}`
-   in the existing JSONL response envelope (`ok`, `requestId`).
-3. The returned handle must support the same `observe`,
-   `legal_actions`, `step`, `is_terminal` and `release_many`
-   operations as an ordinary live run. This is **not a hypothetical
-   search handle**.
-4. Add an emulator-side test verifying the initial *public* observation:
-   map profile `native-overgrowth-map-structure-v0.111.0-v1`, boss
-   floor 16, Neow event `proto.native.event.neow`, 13 persistent
-   cards including Restlessness, and replayable legal actions.
+```fish
+git pull --ff-only
+git submodule update --init --recursive
+git -C emulator rev-parse HEAD
+```
 
-No other new emulator interface is required for first-stage
-observation-only neural training. Importantly, the existence of the
-internal factory does not imply this operation exists.
+The reported submodule revision should be
+`87bac0f425314a267948d235c6f4ac5bd89af4c7`.
+If your virtual environment is already installed, activate it:
 
-## AI behavior already prepared
+```fish
+source .venv/bin/activate.fish
+```
 
-The `tools/train_selfplay.py` default is now
-`--environment native-overgrowth`. On the old pinned bridge it raises
-`JsonlBridgeError` **before Torch training, opening a parallel
-worker pool, or writing checkpoints**. It never replaces the native
-request with generic `reset`, even if the six-floor game happens to
-have the same seed.
+First run a lightweight reward/deck diagnostic before spending time
+on training:
 
-`--environment legacy-prototype` retains the old reproducible
-six-floor experiment, including the existing CI training smoke.
+```fish
+python tools/smoke_native_overgrowth.py \
+  --build --runs 8 --max-decisions 4096 \
+  --report results/native-public-smoke.json
+```
 
-Once the emulator implements and advertises the capability, Python
-checks the response schema ID and validates the **public** initial
-state (map profile, floor 16, Neow, Restlessness, 13 cards). Only
-after these checks may a complete training episode begin. The
-ordinary public-only policy is unchanged.
+Then start a **new** native-structure 60-episode training pilot on
+four isolated CPU workers:
 
-Training/report/checkpoint metadata includes the environment name.
-Checkpoint fingerprints reject resuming a six-floor run under the
-native-structure mode, regardless of whether model dimensions and
-train seeds match. Do **not** resume the existing `9700x-train.pt`
-for the new mode.
+```fish
+set -gx OMP_NUM_THREADS 1
+set -gx MKL_NUM_THREADS 1
+python tools/train_selfplay.py \
+  --build \
+  --environment native-overgrowth \
+  --workers 4 --rounds 5 --episodes 12 \
+  --max-decisions 4096 \
+  --dimension 128 --hidden 32 \
+  --evaluate-seeds 16 --seed 19 \
+  --checkpoint results/native-9700x-train.pt \
+  --output results/native-9700x-model.json \
+  --report results/native-9700x-report.json
+```
 
-## Progress metric
+Send back `results/native-public-smoke.json` and
+`results/native-9700x-report.json`. The first lets us inspect
+reward availability and deck growth; the second compares trained,
+untrained, random and heuristic policies on held-out seeds.
 
-The current prototype has three acts of six floors each (18 total).
-The native-shaped factory changes **only Act 1** to 16 floors; later
-acts currently retain the six-floor generator. For this hybrid game,
-progress is
+**Do not resume** `results/9700x-train.pt` from the legacy
+six-floor training experiment. The checkpoint fingerprints already
+include both the emulator revision and the environment; the new
+run should begin with new checkpoint, model and report filenames.
 
-- Act 1: 0–16
-- Act 2: 16–22
-- Act 3: 22–28.
+## Geometry and limitations
 
-The v3 training curriculum now uses progress divided by 28, and
-seed-paired held-out frontier progress uses the same 16/6/6 geometry.
-The legacy metric remains 6/6/6. This is **not** a claim of fully
-native Act 2/3 content or geometry, only an explicitly identified
-hybrid prototype.
+This is a deliberate **hybrid** emulator configuration:
+native-shaped Overgrowth Act 1 has 16 floors and the current prototype
+Acts 2/3 still have six each. The shaping-progress normalization
+accounts for this 16/6/6 structure (28 floors total), but we should
+not interpret this as full native-game RNG or balance fidelity.
 
-Even after the interface is exposed and training runs, native
-randomness, AI model architecture, and win-rate calibration remain
-independent validation tasks. For the user's requested experiment,
-the first priority is to verify that the agent actually reaches
-several reward rooms and builds a stronger deck before the boss.
+The training agent still sees only the player-visible observation and
+legal-action menu, never the internal seed or hidden RNG. No
+additional bridge modification is needed for the initial native
+experiment as long as the AI integration smoke passes.

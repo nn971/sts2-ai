@@ -70,7 +70,7 @@ def test_independent_terminal_label_and_deduplication(tmp_path: Path) -> None:
     assert record.outcome == "victory"
     assert 0 < record.continuation_decisions <= 3
     assert record.source_exact_hash == backend.exact_hash("0")
-    assert record.continuation_policy_id == "heuristic-v2-payload-aware"
+    assert record.continuation_policy_id == "heuristic-v3-claim-visible-rewards"
 
     output = tmp_path / "nested" / "labels.jsonl"
     assert collector.write_jsonl(output, provenance={"emulator_revision": "mock"}) == 1

@@ -37,6 +37,23 @@ jobs:
             --output /tmp/sts2-selfplay-model.json \
             --report /tmp/sts2-selfplay-report.json
           python -c 'import json; from pathlib import Path; r=json.loads(Path("/tmp/sts2-selfplay-report.json").read_text()); m=json.loads(Path("/tmp/sts2-selfplay-model.json").read_text()); assert r["schema"]=="sts2-onpolicy-neural-training-smoke-v2"; assert r["policy_information"]=="prototype-fair-v0"; assert r["training_environment"]=="legacy-prototype"; assert sum(x["played"] for x in r["rounds"])==6; assert r["gradient_updates"]==2, "One update per fresh on-policy round"; assert r["gradient_decision_samples"]>0; assert r["rollout_workers"]==2; assert Path("/tmp/sts2-selfplay-checkpoint.pt").is_file(); assert all(row["auxiliary_coefficient"]==0.4 for row in r["rounds"]) if sum(row["wins"] for row in r["rounds"])==0 else True; assert m["value_head_trained"] is True; assert set(r["heldout_evaluation"])=={"random","heuristic","initial_neural_greedy","neural_greedy"}; assert all(len(v)==2 for v in r["heldout_evaluation"].values()); assert all(x["completed"]+x["censored"]==2 for x in r["heldout_completed_only"].values())'
+      - name: Native-structure Overgrowth public gameplay and card rewards
+        run: |
+          python tools/smoke_native_overgrowth.py \
+            --runs 2 --max-decisions 2048 \
+            --report /tmp/sts2-native-overgrowth-smoke.json
+          python -c 'import json; from pathlib import Path; r=json.loads(Path("/tmp/sts2-native-overgrowth-smoke.json").read_text()); assert r["environment"]=="native-overgrowth"; assert len(r["runs"])==2; assert r["total_card_reward_menus"]>0; assert r["total_card_rewards_taken"]>0'
+      - name: First real native-Overgrowth neural optimizer update
+        run: |
+          python tools/train_selfplay.py \
+            --environment native-overgrowth \
+            --workers 2 --rounds 1 --episodes 2 \
+            --max-decisions 2048 --dimension 64 --hidden 8 \
+            --evaluate-seeds 1 --seed 23 \
+            --checkpoint /tmp/sts2-native-train-checkpoint.pt \
+            --output /tmp/sts2-native-train-model.json \
+            --report /tmp/sts2-native-train-report.json
+          python -c 'import json; from pathlib import Path; r=json.loads(Path("/tmp/sts2-native-train-report.json").read_text()); assert r["training_environment"]=="native-overgrowth"; assert r["gradient_updates"]>0; assert r["gradient_decision_samples"]>0; assert r["train_completed"]>0'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -45,4 +62,8 @@ jobs:
             /tmp/sts2-selfplay-model.json
             /tmp/sts2-selfplay-report.json
             /tmp/sts2-selfplay-checkpoint.pt
+            /tmp/sts2-native-overgrowth-smoke.json
+            /tmp/sts2-native-train-report.json
+            /tmp/sts2-native-train-model.json
+            /tmp/sts2-native-train-checkpoint.pt
           if-no-files-found: ignore
