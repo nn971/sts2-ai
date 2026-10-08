@@ -16,7 +16,6 @@ from .protocol import (
     StepFrame,
     Transition,
 )
-
 from .rejection import (
     SEED_PRIOR_ID,
     FairHistoryRejectionSampler,
