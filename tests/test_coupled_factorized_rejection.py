@@ -18,14 +18,14 @@ from sts2_ai.emulator.coupled_factorized_rejection import (
     COUPLED_FACTORIZED_PRIOR_ID,
     CoupledFactorizedHistoryRejectionSampler,
 )
+from sts2_ai.emulator.factorized_runstart import (
+    FACTORIZED_RUNSTART_SCHEMA_ID,
+    FactorizedRunStartPosteriorSampler,
+)
 from sts2_ai.emulator.incremental_coupled_particles import (
     INCREMENTAL_COUPLED_COHORT_PRIOR_ID,
     IncrementalCoupledParticlePosterior,
     IncrementalCoupledPosteriorExhausted,
-)
-from sts2_ai.emulator.factorized_runstart import (
-    FACTORIZED_RUNSTART_SCHEMA_ID,
-    FactorizedRunStartPosteriorSampler,
 )
 from sts2_ai.emulator.protocol import InformationPolicy, LegalAction, Observation, Transition
 from sts2_ai.emulator.rejection import HistoryConditioningExhausted
