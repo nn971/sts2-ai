@@ -164,7 +164,13 @@ def test_diagnostics_reproduce_and_capture_boss_public_history() -> None:
         max_decisions=10, max_boss_actions=1,
     )
     first = diagnose_neural_temperatures(backend, model(), **kwargs)
-    assert first == diagnose_neural_temperatures(backend, model(), **kwargs)
+    second = diagnose_neural_temperatures(backend, model(), **kwargs)
+    # Runtime measurements vary; model decisions, trajectories, and all
+    # diagnostic content apart from wall-clock values must be deterministic.
+    for name in first["temperatures"]:
+        first["summary"][name].pop("mean_agent_compute_seconds")
+        second["summary"][name].pop("mean_agent_compute_seconds")
+    assert first == second
     assert first["temperatures"] == ["t1", "t0.25", "greedy"]
     assert len(first["paired_completed_only"]) == 2
     for name in first["temperatures"]:
