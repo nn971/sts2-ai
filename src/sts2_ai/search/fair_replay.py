@@ -64,6 +64,10 @@ class FairReplayPuctAdapter:
             (
                 step.observation.policy_id,
                 step.observation.payload_json,
+                None if step.legal_actions is None else [
+                    (action.action_id, action.kind, action.payload_json)
+                    for action in step.legal_actions
+                ],
                 None if step.chosen_action is None else (
                     step.chosen_action.action_id,
                     step.chosen_action.kind,
@@ -109,8 +113,17 @@ class FairReplayPuctAdapter:
         history: Sequence[PublicHistoryStep],
         legal_actions: Sequence[LegalAction],
     ) -> PublicSearchNode:
-        self._sampler._validate_history(history)
         transcript = tuple(history)
+        if not transcript:
+            raise ValueError("A search root needs public history")
+        if transcript[-1].legal_actions is None:
+            last = transcript[-1]
+            transcript = transcript[:-1] + (
+                PublicHistoryStep(last.observation, last.chosen_action, tuple(legal_actions)),
+            )
+        self._sampler._validate_history(transcript)
+        if transcript[-1].legal_actions != tuple(legal_actions):
+            raise ValueError("Search-root legal actions disagree with public history")
         key = self._key(transcript)
         terminal = self._visible_outcome(transcript[-1].observation.payload_json, self._goal)
         legal: tuple[LegalAction, ...]
@@ -179,14 +192,14 @@ class FairReplayPuctAdapter:
         self._backend.release_many([state])
         self.transition_count += 1
         observed = self._backend.observe(transition.child, policy)
-        expanded = transcript[:-1] + (
-            PublicHistoryStep(transcript[-1].observation, action),
-            PublicHistoryStep(observed, None),
-        )
         terminal = self._visible_outcome(observed.payload_json, self._goal)
-        actions = (
-            () if terminal is not None
-            else tuple(self._backend.legal_actions(transition.child))
+        visible_actions = tuple(self._backend.legal_actions(transition.child))
+        actions = () if terminal is not None else visible_actions
+        expanded = transcript[:-1] + (
+            PublicHistoryStep(
+                transcript[-1].observation, action, transcript[-1].legal_actions,
+            ),
+            PublicHistoryStep(observed, None, visible_actions),
         )
         key = self._key(expanded)
         prior = self._histories.get(key)
