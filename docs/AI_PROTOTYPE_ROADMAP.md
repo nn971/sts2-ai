@@ -713,6 +713,42 @@ with search, and value RMSE. These are search-distillation metrics rather than
 game-winning metrics; compare against the heuristic and uniform-policy baselines
 before deciding whether to use the model inside MCTS.
 
+### First actual policy/value distillation pilot (2026-10-08)
+
+A four-seed common-emulator search run at MCTS budgets 8 and 32, depth 16,
+produced **681** persisted training examples. The split holds out connected
+groups of exact states and identical fair observations, leaving 545 training
+and 136 validation examples. This is a small feasibility test, not a claim of
+out-of-distribution game-playing generalization.
+
+The first hashed-linear learner used unnormalized hashed feature vectors.
+Its held-out policy cross-entropy was **10.161** (uniform policy: **1.671**)
+and value RMSE **0.664** (constant train-mean target: **0.348**). The long
+state/action feature vectors made this training setup numerically unstable.
+
+Model format v2 normalizes state and policy feature vectors to L2 norm 1
+and explicitly refuses v1 weights. Reusing exactly the same saved dataset,
+split seed, and 2048-dimensional configuration gave:
+
+| Offline metric | Uniform/heuristic/constant | Normalized v2, 8 epochs | v2, 24 epochs |
+| --- | ---: | ---: | ---: |
+| Policy cross-entropy (lower) | 1.671 uniform | 1.669 | 1.669 |
+| Policy top-1 agreement (higher) | 20.6% heuristic | 19.1% | 18.4% |
+| Value RMSE (lower) | 0.348 train-mean constant | 0.284 | **0.255** |
+
+The value model has genuinely beaten a train-only constant baseline on this
+holdout, while learned policy guidance remains substantially weaker than needed.
+In particular, even its cross-entropy barely improves over uniform. Top-1
+agreement is a fragile metric for nearly tied visit distributions, so future
+reports should examine teacher-target entropy and meaningful-action agreement
+before relying on that number.
+
+Next: preserve the measured value regression improvement, audit target-policy
+entropy and calibration, and compare an *optional value-only model cutoff*
+against the original hand-crafted cutoff under equal emulator/compute budgets.
+Preserve true terminal outcomes and search provenance; do not automatically
+replace the rollout action policy with the learned one.
+
 ## Immediate implementation sprint
 
 Execute this sequence next:
