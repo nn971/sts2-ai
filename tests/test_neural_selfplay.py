@@ -45,7 +45,8 @@ class ToyFullRunBackend:
         assert policy.policy_id == POLICY
         phase = self._states[state]
         payload = (
-            '{"phase":2,"act":1,"floor":1,"hp":20,"max_hp":20}'
+            '{"phase":2,"act":1,"floor":1,"hp":20,"max_hp":20,'
+            '"map":[{"node_id":"a","room_type":0},{"node_id":"b","room_type":4}]}'
             if phase == "root" else
             ('{"phase":10,"act":1,"floor":2,"hp":20,"max_hp":20,'
              '"terminal_outcome":"victory"}' if phase == "win" else
