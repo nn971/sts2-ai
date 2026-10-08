@@ -18,6 +18,7 @@ def record_search_result(
     emulator_revision: str,
     game_build: str,
     model_id: str | None = None,
+    run_seed: str | None = None,
 ) -> None:
     store.upsert_search_observation(
         SearchObservationEvidence(
@@ -70,3 +71,5 @@ def record_search_result(
         for evaluation in result.evaluations
     )
     store.upsert_search(root, actions)
+    if run_seed is not None:
+        store.add_search_origin(root, run_seed)
