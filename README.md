@@ -45,6 +45,15 @@ sts2-emulator  <---  sts2-ai
 
 ## Current status
 
+**Exact enumerated full-history posterior pilot:** a declared finite,
+uniform seed universe can now be exhausted and conditioned against every
+public observation, player action, and complete legal menu. PUCT samples
+independent exact posterior continuations **under that alternate finite
+game prior**. This does not reconstruct the native 128-bit seed
+distribution or generalize to arbitrary natural-game maps.
+See [exact finite public posterior](docs/EXACT_ENUMERATED_PUBLIC_POSTERIOR.md).
+
+
 **Local full-room combat RNG replay pilot:** the optional pinned
 `prototype-local-combat-stream-condition-v1` bridge conditions an independently
 sampled hypothetical *pre-entry* combat RNG stream on the player's entire
