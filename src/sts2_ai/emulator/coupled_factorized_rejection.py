@@ -27,7 +27,7 @@ from .factorized_runstart import (
     FactorizedRunStartBackend,
     FactorizedRunStartPosteriorSampler,
 )
-from .protocol import InformationPolicy, StateHandle
+from .protocol import StateHandle
 from .rejection import FairHistoryRejectionSampler, HistoryConditioningExhausted
 
 COUPLED_FACTORIZED_PRIOR_ID = FACTORIZED_RUNSTART_PRIOR_ID
