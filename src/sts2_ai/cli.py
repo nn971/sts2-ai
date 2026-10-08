@@ -706,6 +706,8 @@ def _evaluate(args: argparse.Namespace) -> None:
                     def sink(
                         result: SearchResult,
                         chosen_action: LegalAction,
+                        *,
+                        origin_seed: str = f"{args.seed_prefix}-{index}",
                     ) -> None:
                         if strategy_store is None:
                             return
@@ -718,7 +720,7 @@ def _evaluate(args: argparse.Namespace) -> None:
                             search_budget=args.budget,
                             emulator_revision=backend.emulator_revision,
                             game_build=args.game_build,
-                            run_seed=f"{args.seed_prefix}-{index}",
+                            run_seed=origin_seed,
                         )
 
                     agent = OracleMctsAgent(
@@ -745,6 +747,7 @@ def _evaluate(args: argparse.Namespace) -> None:
                             actions: tuple[LegalAction, ...],
                             chosen: Decision,
                             fixed_shadow: UctMcts = shadow_search,
+                            origin_seed: str = f"{args.seed_prefix}-{index}",
                         ) -> None:
                             del chosen
                             if len(actions) < 2:
@@ -773,7 +776,7 @@ def _evaluate(args: argparse.Namespace) -> None:
                                 search_budget=args.shadow_budget,
                                 emulator_revision=backend.emulator_revision,
                                 game_build=args.game_build,
-                                run_seed=f"{args.seed_prefix}-{index}",
+                                run_seed=origin_seed,
                             )
                         decision_observer = observe_shadow
 
@@ -998,6 +1001,7 @@ def _benchmark(args: argparse.Namespace) -> None:
                             chosen_action: LegalAction,
                             *,
                             search_budget: int = budget,
+                            origin_seed: str = f"{args.seed_prefix}-{index}",
                         ) -> None:
                             record_search_result(
                                 strategy_store,
