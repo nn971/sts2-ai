@@ -1,44 +1,50 @@
 # Project status
 
-## Current phase
+## Current phase — search-first strategic AI experiments
 
-**Phase 1 — begin the search-first AI prototype.**
+`sts2-ai` now has working whole-run emulator integrations and multiple baseline
+agents, not just the original project scaffold. The pinned `emulator/` submodule
+currently points to `sts2-emulator` commit
+`7a005a00b9d353fd944af4f62e4516c705fad143`, which includes the
+strategic-map profile and completed-room history.
 
-The emulator is now considered sufficient for the first experimental AI loop. Broad fidelity work is paused; the next task is to repin the emulator submodule, connect the real JSONL backend, and build random/heuristic/search baselines.
+### Implemented
 
-## Present capabilities
+- Real, revision-checked, long-lived emulator JSONL backend with batched transitions.
+- Complete-run drivers, provenance, seed-matched evaluation and benchmark ladders.
+- Random and observation-only heuristic agents.
+- Transposition-aware, batched `oracle-exact` MCTS with persistent search evidence
+  and rollout configuration fingerprinting.
+- Search-target export, grouped training/validation split, and hashed linear
+  policy/value baseline.
+- Observation-only `RoutePlanningAgent`: dynamic programming on the visible map
+  DAG, using public HP/gold, completed route history and a documented room-value
+  proxy; the previous heuristic remains unchanged.
+- Route-policy opt-in for MCTS rollouts and independent route rows in the
+  common-seed benchmark.
+- CI integration checks against the real pinned emulator and a route-agent
+  whole-run smoke.
 
-- public Python-side protocol for an emulator backend;
-- baseline random agent and search interfaces;
-- experiment/reproducibility manifest utilities;
-- SQLite strategic-evidence store prototype;
-- dataset/scenario manifest types;
-- mock backend used for architectural tests;
-- configuration and experiment directory conventions;
-- submodule bootstrap tooling.
+### Information-policy boundary
 
-## Explicitly absent
+`route` reads **only player-visible observations and legal actions**. It
+never forks an exact hidden emulator state. Its deterministic map projection
+is not a calibrated expected outcome. Existing MCTS is explicitly labeled
+`oracle-exact`: forked hidden-state search is intentionally unfair and not
+yet an information-set agent.
 
-- real emulator bindings;
-- learned models;
-- serious tree search;
-- whole-run training;
-- strategic claims or benchmark scores.
+### Next questions
 
-## Next parent-repo tasks
+1. Measure `heuristic` vs `route` on paired seeds; retain route lookahead
+   only if it improves strategy under a stated time budget.
+2. Compare `oracle-exact` MCTS rollouts with and without route planning,
+   preserving their distinct search-version fingerprints.
+3. Establish a fair belief-state or stochastic-sampling interface; never
+   mistake hidden-state probing for a fair agent.
+4. Use persisted search evidence and reproducible training splits to train
+   and validate an improved value/policy model.
+5. Profile real search before investing in additional emulator optimization.
 
-1. Add the real `sts2-emulator` Git submodule.
-2. Define the first stable Python/native binding adapter once the emulator API settles.
-3. Add integration tests that compare binding-visible transitions with emulator CLI/native fixtures.
-4. Build a deterministic random-policy run generator for smoke testing.
-5. Establish experiment manifest generation and dataset provenance in actual runs.
-6. Wait for sufficient emulator parity before investing heavily in strategic learning.
-
-
-## Active roadmap
-
-See [docs/AI_PROTOTYPE_ROADMAP.md](docs/AI_PROTOTYPE_ROADMAP.md).
-
-That document is the self-contained handoff for a fresh development context. The next implementation
-step is to repin the emulator submodule to the current `prototype/full-run-silent` revision and
-implement the real Python JSONL backend.
+See [the AI prototype roadmap](docs/AI_PROTOTYPE_ROADMAP.md) for prior
+experiments and [the route-planning baseline](docs/ROUTE_PLANNING_BASELINE.md)
+for the current new experiment.

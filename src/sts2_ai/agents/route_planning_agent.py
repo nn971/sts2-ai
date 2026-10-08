@@ -115,7 +115,9 @@ class RoutePlanner:
                 # A small, explicitly approximate marginal value of +20 gold.
                 local += 1.0
 
-            result = RouteEstimate(local, (node_id,))
+            # A chosen route cannot stop early to avoid an undesirable room.
+            # Include a successor whenever a valid forward edge is visible.
+            result: RouteEstimate | None = None
             for child_id in next_ids:
                 child = nodes.get(child_id)
                 # Only reason across verified forward map edges. This prevents
@@ -129,11 +131,11 @@ class RoutePlanner:
                     local + self.discount * suffix.score,
                     (node_id, *suffix.node_ids),
                 )
-                if (combined.score, combined.node_ids) > (
+                if result is None or (combined.score, combined.node_ids) > (
                     result.score, result.node_ids
                 ):
                     result = combined
-            return result
+            return result if result is not None else RouteEstimate(local, (node_id,))
 
         return {
             candidate: estimate
