@@ -5,14 +5,15 @@ import random
 from pathlib import Path
 
 import pytest
+from test_neural_selfplay import A, B, ToyFullRunBackend, zero_model
 
+from sts2_ai.emulator import InformationPolicy
 from sts2_ai.training.selfplay import (
     sample_public_action,
     temperature_for_round,
     train_selfplay,
 )
 
-from test_neural_selfplay import A, B, ToyFullRunBackend, zero_model
 
 
 def test_geometric_schedule_and_strict_validation() -> None:
@@ -31,9 +32,7 @@ def test_temperature_one_preserves_original_categorical_draw() -> None:
     model = zero_model()
     backend = ToyFullRunBackend()
     handle = backend.reset("peek")
-    obs = backend.observe(handle, __import__(
-        "sts2_ai.emulator", fromlist=["InformationPolicy"]
-    ).InformationPolicy("prototype-fair-v0"))
+    obs = backend.observe(handle, InformationPolicy("prototype-fair-v0"))
     backend.release_many((handle,))
     for seed in (1, 7, 18):
         a = sample_public_action(model, obs, (A, B), rng=random.Random(seed))
