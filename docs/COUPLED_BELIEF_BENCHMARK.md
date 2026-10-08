@@ -102,6 +102,59 @@ bias/missing rare states for lower marginal cost. Compare their
 number of simulator resets, replay steps and late-depth failures,
 not wall-clock seconds alone.
 
+## First pinned-CI measurements (October 8, 2026)
+
+[GitHub Actions PR run 37785087953](https://github.com/nn971/sts2-ai/actions/runs/37785087953)
+used the pinned emulator, the synthetic initial-stream fixture in the
+script, the deterministic visible-only card-playing policy,
+`--post-map-decisions 48`, and a fresh-rejection budget of eight
+per checkpoint. These observations are **empirical results of this
+specific synthetic fixture**, not estimates of native STS2 difficulty.
+
+| Measurement | Cohort 16 | Cohort 64 |
+| --- | ---: | ---: |
+| Initial particles | 16 | 64 |
+| Opening-combat survivors | 11 | 31 |
+| Survivors after subsequent combat card/turn decisions | 11 | 31 |
+| Survivors at first transition to reward | **0** | **0** |
+| Total particle simulator transitions | 390 | 1,118 |
+| Initial cohort materialization time | ~0.033 s | ~0.121 s |
+
+After the opening encounter's public observation, the cohort
+survival fractions are approximately 69% and 48%; they remain
+constant through the ensuing card-play and end-turn history.
+**Both fixed empirical cohorts collapse at the first reward
+transition**, when a new full public reward observation becomes
+available. Its immediate cause may involve reward-stream
+constraints, but these results alone do not identify which RNG
+events are sufficient to explain the collapse.
+
+The fixture continues through reward choices, a shop, an event,
+and entry into another combat. Fresh complete-state rejection
+from the exact factorized prior (one requested sample at each
+checkpoint) produced:
+
+| Public checkpoint | Accepted | Trials | Replayed post-map decisions | Wall time |
+| --- | --- | ---: | ---: | ---: |
+| 2 — opening combat | Yes | 3 | 3 | ~0.018 s |
+| 25 — later first combat | Yes | 3 | 26 | ~0.046 s |
+| 49 — next combat after reward/shop/event | No | 8 | 144 | ~0.234 s |
+
+The late failure means **no match in the finite budget**, not
+that the public history has zero probability. These are
+GitHub-hosted runner timings from one run: use relative simulator
+work and repeated measurements before making performance claims.
+
+**Engineering consequence:** simply reusing the same empirical
+cohort avoids repeated replay but does not prevent sudden
+collapse at a highly informative reward boundary. Increasing
+the cohort size can be expensive without guaranteeing
+representation of rare reward histories. The strongest next
+direction is a verified proposal or exact conditional sampler
+at reward generation that preserves the joint probability law
+of all consumed streams, with explicit likelihood weighting
+when the proposal differs from the prior.
+
 ## What to prioritize after collecting measurements
 
 If the observed opening-combat history commonly eliminates an entire
