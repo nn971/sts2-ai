@@ -69,6 +69,8 @@ class FairHistoryRejectionSampler:
         policy_id = history[0].observation.policy_id
         if any(step.observation.policy_id != policy_id for step in history):
             raise ValueError("Cannot condition on mixed information policies")
+        if any(step.legal_actions is None for step in history):
+            raise ValueError("Fair conditioning requires each visible legal-action menu")
         if any(step.chosen_action is None for step in history[:-1]):
             raise ValueError("Every historical observation requires its chosen action")
         if history[-1].chosen_action is not None:
@@ -105,8 +107,11 @@ class FairHistoryRejectionSampler:
                         ):
                             consistent = False
                             break
+                        actions = tuple(self._backend.legal_actions(state))
+                        if actions != record.legal_actions:
+                            consistent = False
+                            break
                         if record.chosen_action is not None:
-                            actions = self._backend.legal_actions(state)
                             selected = next(
                                 (
                                     action for action in actions
