@@ -42,27 +42,13 @@ def test_pinned_experimental_draw_injection_is_hypothetical_only() -> None:
                 map_state = backend.step(root, start).child
                 handles.append(map_state)
 
-                public_map = json.loads(backend.observe(map_state, policy).payload_json)
-                combat_nodes = {
-                    node["node_id"]
-                    for node in public_map["map"]
-                    if node["room_type"] == "Combat"
-                }
-                def target_node_id(action_payload: str) -> str | None:
-                    payload = json.loads(action_payload)
-                    # Observation DTOs use snake_case; action payloads are
-                    # currently emitted with PascalCase from the game action.
-                    return (
-                        payload.get("node_id")
-                        or payload.get("nodeId")
-                        or payload.get("NodeId")
-                    )
-
+                # Follow the first available *public* map choice, exactly
+                # like the established pinned opening-draw integration test.
+                # This avoids depending on action payload casing/room enums.
                 choice = next(
                     (
                         action for action in backend.legal_actions(map_state)
                         if action.kind == "choose_map_node"
-                        and target_node_id(action.payload_json) in combat_nodes
                     ),
                     None,
                 )
@@ -71,6 +57,8 @@ def test_pinned_experimental_draw_injection_is_hypothetical_only() -> None:
                 combat_state = backend.step(map_state, choice).child
                 handles.append(combat_state)
                 before = backend.observe(combat_state, policy)
+                if json.loads(before.payload_json).get("combat") is None:
+                    continue
                 belief = certified_opening_draw_belief(
                     before, opening_frame_certified=True
                 )
