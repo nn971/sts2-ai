@@ -1,5 +1,22 @@
 # Project status
 
+## Incremental finite public-belief cohort (2026-10-08)
+
+Added opt-in `FiniteSeedPosteriorSampler`: independently search-seeded
+hypothetical emulator runs are filtered against complete public observations
+and legal-action menus after each real action. PUCT can repeatedly draw
+hypothetical continuations by forking independently generated cohort states,
+avoiding repeated seed resets and full-history replays per search simulation.
+
+This conditional sampler is **exact only for its finite empirical seed prior**.
+Particle depletion on distinctive maps/history causes a clean failure;
+there is no native-game probability-law calibration or honest full-prior
+variance-training claim. Toy conditional-distribution tests and pinned-emulator
+JSONL integration cover the implementation. The main heuristic/oracle baselines
+are unchanged. See
+[incremental public belief](docs/INCREMENTAL_FINITE_BELIEF.md).
+
+
 ## S1 fair-history replay pilot — conditional rejection (2026-10-08)
 
 The new `FairHistoryRejectionSampler` replays independent synthetic
