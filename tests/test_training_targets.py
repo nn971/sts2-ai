@@ -176,6 +176,7 @@ def test_training_export_uses_strongest_budget_per_state_by_default(
 
 def test_grouped_split_keeps_repeated_search_states_together() -> None:
     from dataclasses import replace
+
     from sts2_ai.training import PolicyTarget, TrainingExample
 
     base = TrainingExample(
