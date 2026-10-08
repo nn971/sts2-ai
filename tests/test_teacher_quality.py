@@ -217,3 +217,30 @@ def test_exact_root_teacher_pair_requires_matching_root_state() -> None:
         paired_teacher_quality_report(
             (before,), (replace(after, observation_hash="changed"),)
         )
+
+
+def test_matched_teacher_q_rank_stability_detects_flips_and_ties() -> None:
+    low = _example(budget=12, values=(0.6, 0.6, 0.1))
+    stable = _example(budget=96, values=(0.7, 0.7, 0.2))
+    unchanged = paired_teacher_quality_report((low,), (stable,))
+    assert unchanged["q_winner_resolved_both"] == 1
+    assert unchanged["q_winner_agreement_fraction"] == 1.0
+    assert unchanged["q_winner_flip_count"] == 0
+    assert unchanged["mean_high_semantic_q_gap"] == pytest.approx(0.5)
+
+    flipped = _example(budget=96, values=(0.1, 0.1, 0.8))
+    changed = paired_teacher_quality_report((low,), (flipped,))
+    assert changed["q_winner_agreement_fraction"] == 0.0
+    assert changed["q_winner_flip_count"] == 1
+
+    tied = _example(budget=96, values=(0.4, 0.4, 0.4))
+    uncertain = paired_teacher_quality_report((low,), (tied,))
+    assert uncertain["q_winner_resolved_both"] == 0
+    assert uncertain["q_winner_agreement_fraction"] is None
+    assert uncertain["q_winner_unresolved_high_given_resolved_low"] == 1
+    assert uncertain["mean_high_semantic_q_gap"] == pytest.approx(0.0)
+
+    underexplored = _example(budget=12, visits=(0, 0, 20))
+    unresolved = paired_teacher_quality_report((underexplored,), (stable,))
+    assert unresolved["q_winner_resolved_both"] == 0
+    assert unresolved["mean_low_semantic_q_gap"] is None
