@@ -1,4 +1,4 @@
-name: matched-root-shadow-teacher
+name: matched-root-q-policy-six-seed
 # Q-supervision v2 excludes unrepresentable neural action labels.
 
 on:
@@ -10,7 +10,7 @@ on:
 jobs:
   compare:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
@@ -85,16 +85,16 @@ jobs:
               --root-value-weight 0 \
               --json-output results/shadow/q-neural-validation.json
           fi
-      - name: Compare Q-distilled rollout policy on two independent seed runs
+      - name: Compare Q-distilled rollout policy on six independent seed runs
         run: |
           if test -f results/shadow/q-neural.json; then
             sts2-ai evaluate --agent mcts --budget 16 --rollout-depth 24 \
-              --rollout-batch-size 8 --seeds 2 --max-decisions 48 \
+              --rollout-batch-size 8 --seeds 6 --max-decisions 64 \
               --seed-prefix qteacher-heldout --no-build \
               --strategy-db results/shadow/heldout-baseline.sqlite \
               --json-output results/shadow/heldout-baseline.json
             sts2-ai evaluate --agent mcts --budget 16 --rollout-depth 24 \
-              --rollout-batch-size 8 --seeds 2 --max-decisions 48 \
+              --rollout-batch-size 8 --seeds 6 --max-decisions 64 \
               --seed-prefix qteacher-heldout --no-build \
               --neural-rollout-model results/shadow/q-neural.json \
               --strategy-db results/shadow/heldout-q-neural.sqlite \
@@ -107,7 +107,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: matched-root-shadow-teacher-evidence
+          name: matched-root-q-policy-six-seed-evidence
           path: results/shadow/
           if-no-files-found: warn
           retention-days: 14
