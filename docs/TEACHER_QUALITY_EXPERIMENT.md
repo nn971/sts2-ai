@@ -57,3 +57,63 @@ need substantially more full-run heldout seeds and equal runtime budgets.
 
 The emulator pin, default heuristic MCTS, and oracle-exact information-policy
 boundary are unchanged.
+
+
+## First completed measurement — October 8, 2026
+
+The first larger experiment (https://github.com/nn971/sts2-ai/actions/runs/37752770078)
+compared MCTS-12 to MCTS-96 on matching initial seed prefixes. Their game
+trajectories can diverge, so aggregate teacher comparisons are confounded.
+
+| Metric | MCTS-12 | MCTS-96 |
+| --- | ---: | ---: |
+| Searched roots | 71 | 68 |
+| Mean normalized literal visit entropy | 0.99046 | 0.998997 |
+| Mean semantic normalized entropy, multi-choice | 0.94751 | 0.95223 |
+| Strictly curated high-budget roots | — | 9 |
+| Time per run | 3.09 s | 15.48 s |
+
+Since fewer than twelve high-budget records met the quality threshold, the
+experiment recorded a fallback to all 68 high-budget roots. All six sampled
+independent exact-state heuristic continuations terminated in **defeat**;
+none were censored, but their value labels have no class discrimination.
+
+Three unseen seed-matched MCTS-32 heldout runs, capped at 64 decisions each,
+reported the following continuous frontier progress, rather than victories:
+
+| Configuration | Mean progress | Mean time/run | Compared with baseline |
+| --- | ---: | ---: | --- |
+| Handcrafted MCTS | 3.67 | 11.79 s | baseline |
+| Neural value (25% blend) | 2.67 | 12.97 s | behind on 3/3 |
+| Neural rollout policy | 4.67 | 33.38 s | ahead on 2/3 |
+
+All nine evaluations were truncated and none won. The value head performed
+worse. The neural policy has an exploratory positive signal but costs 2.8x
+runtime and is not established as stronger.
+
+## Same-state shadow search
+
+A later research hook allows exact-root teacher comparisons that do not
+confound action quality with divergent run trajectories:
+
+~~~fish
+sts2-ai evaluate --agent mcts --budget 12 --shadow-budget 96 \
+    --strategy-db results/low.sqlite \
+    --shadow-strategy-db results/high-shadow.sqlite \
+    --seed-prefix teacher-controlled --seeds 3 --max-decisions 28
+
+sts2-ai export-training results/low.sqlite results/low.jsonl
+sts2-ai export-training results/high-shadow.sqlite results/high.jsonl
+sts2-ai compare-teachers results/low.jsonl results/high.jsonl
+~~~
+
+The higher-budget shadow runs from each exact live decision state before
+the acting agent plays its selected action. The two exported datasets
+match on source exact hash, fair observation, and legal actions. Shadow
+searches do not change game decisions, but they consume extra diagnostic
+compute, so the main run wall-clock is not a fair baseline benchmark.
+
+For semantic curation, distinct map branches must never be equated simply
+because they share a room type; only truly matching visible card plays
+against the same target can be merged. Eligibility filters remain
+uncalibrated heuristics, not proofs of correct action rankings.
