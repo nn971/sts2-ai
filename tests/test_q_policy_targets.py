@@ -124,3 +124,26 @@ def test_q_teacher_can_train_policy_without_root_value_supervision() -> None:
     assert metrics.policy_cross_entropy > 0.0
     with pytest.raises(ValueError, match="Root value"):
         train_neural((q_root,), root_value_weight=-1.0)
+
+
+
+def test_q_teacher_refuses_targets_neural_action_encoder_cannot_represent() -> None:
+    source = replace(
+        _root(),
+        observation_json=json.dumps({
+            "phase": 2,
+            "map": [
+                {"node_id": "left", "room_type": 0},
+                {"node_id": "right", "room_type": 0},
+            ],
+        }),
+        policy_targets=(
+            PolicyTarget("path-left", 0.5, "choose_map_node",
+                         '{"node_id":"left"}', search_value=0.8, visits=10),
+            PolicyTarget("path-right", 0.5, "choose_map_node",
+                         '{"node_id":"right"}', search_value=0.1, visits=10),
+        ),
+    )
+    selected, report = distill_q_targets((source,))
+    assert selected == ()
+    assert report["reason_counts"]["model-cannot-distinguish-actions"] == 1
