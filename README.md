@@ -45,6 +45,17 @@ sts2-emulator  <---  sts2-ai
 
 ## Current status
 
+**Adaptive teacher-free neural learning (v2):** completed-run auxiliary
+floor/HP rewards now persist until the agent actually starts winning,
+then anneal by observed victories rather than by arbitrary elapsed
+rounds. A full freshly collected on-policy cohort produces one
+correctly accumulated gradient update, avoiding sequential stale
+per-decision updates. Held-out evaluation compares initial neural
+weights, trained neural, random and visible-only heuristic on paired
+seeds with censored-aware Wilson win intervals. See
+[first neural self-play](docs/FIRST_NEURAL_SELFPLAY.md).
+
+
 **Teacher-free neural self-play pilot:** an observation-only small
 policy–value neural agent now collects actual complete Silent runs
 under ordinary emulator randomness, samples from its own action
