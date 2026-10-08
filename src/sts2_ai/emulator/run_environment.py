@@ -8,9 +8,10 @@ altering any emulator operation.
 from __future__ import annotations
 
 import json
-from typing import Protocol
+from collections.abc import Callable
+from typing import cast
 
-from .protocol import InformationPolicy, Observation, StateHandle
+from .protocol import EmulatorBackend, InformationPolicy, Observation, StateHandle
 
 LEGACY = "legacy-prototype"
 NATIVE_OVERGROWTH = "native-overgrowth"
@@ -21,27 +22,14 @@ NATIVE_RESET_SCHEMA = "prototype-native-overgrowth-reset-v1"
 NATIVE_MAP_PROFILE = "native-overgrowth-map-structure-v0.111.0-v1"
 
 
-class RunEnvironmentBackend(Protocol):
-    @property
-    def native_overgrowth_reset_schema(self) -> str | None: ...
-
-    def reset(self, seed: str, ascension: int = 0) -> StateHandle: ...
-
-    def reset_native_overgrowth(self, seed: str, ascension: int = 0) -> StateHandle: ...
-
-    def observe(self, state: StateHandle, policy: InformationPolicy) -> Observation: ...
-
-    def release_many(self, states: list[StateHandle]) -> int: ...
-
-
-def require_environment(backend: RunEnvironmentBackend, environment: str) -> None:
+def require_environment(backend: EmulatorBackend, environment: str) -> None:
     from .jsonl_backend import JsonlBridgeError
 
     if environment not in ENVIRONMENTS:
         raise ValueError(f"Unknown training environment: {environment!r}")
     if (
         environment == NATIVE_OVERGROWTH
-        and backend.native_overgrowth_reset_schema != NATIVE_RESET_SCHEMA
+        and getattr(backend, "native_overgrowth_reset_schema", None) != NATIVE_RESET_SCHEMA
     ):
         raise JsonlBridgeError(
             "Native-structure Overgrowth training is unavailable: the pinned "
@@ -92,7 +80,10 @@ def reset_training_run(
     require_environment(backend, environment)
     if environment == LEGACY:
         return backend.reset(seed, ascension)
-    state = backend.reset_native_overgrowth(seed, ascension)
+    native_reset = cast(
+        Callable[[str, int], StateHandle], getattr(backend, "reset_native_overgrowth")
+    )
+    state = native_reset(seed, ascension)
     try:
         validate_native_start(
             backend.observe(state, InformationPolicy("prototype-fair-v0"))
