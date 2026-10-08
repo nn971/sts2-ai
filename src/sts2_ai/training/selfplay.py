@@ -15,7 +15,7 @@ import random
 import time
 from collections.abc import Callable, Sequence
 from contextlib import ExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -84,8 +84,9 @@ class TrainingRound:
     mean_return: float | None
     mean_progress: float | None
     sampling_temperature: float = 1.0
-    rollout_wall_seconds: float = 0.0
-    optimization_wall_seconds: float = 0.0
+    # Observational timing must NOT affect deterministic round equality.
+    rollout_wall_seconds: float = field(default=0.0, compare=False)
+    optimization_wall_seconds: float = field(default=0.0, compare=False)
 
 
 @dataclass(frozen=True, slots=True)
