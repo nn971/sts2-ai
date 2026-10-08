@@ -93,6 +93,39 @@ episode seeds or the on-policy cohort, and is not included in the checkpoint
 fingerprint. If necessary, decrease `--workers` without restarting the
 learning experiment; preserve all other training arguments.
 
+## Fixed-seed monitoring and the floor-13 emulator fix
+
+The earlier recovery run stopped before round 87 (86 completed rounds,
+2,752 training episodes) on an upgraded lethal Dagger Throw killing a
+12-HP Mawler while leaving a mandatory discard choice. The previous
+emulator prematurely entered combat victory before the discard
+continuation was resolved. The current emulator submodule pin includes
+the regression-tested correction in `sts2-emulator`.
+
+A changed emulator pin requires a **new** training experiment; export
+the latest recovered weights from
+`results/native-tempered-recovery-255.pt` rather than passing
+`--resume` to this older run. This will retain the learned policy,
+not the old optimizer state. Retain both checkpoints and failure files.
+
+For subsequent experiments, periodic **greedy fixed-seed monitoring**
+now runs after rounds 1, 10, 20, ... by default on 64 seed names
+`selfplay-monitor-0` through `selfplay-monitor-63`, distinct from the
+training seeds. Its summary and per-seed frontiers are written atomically
+to `<report-stem>.monitor.jsonl`. Logs show 10- and 50-round moving
+averages, and checkpoint monitoring records mean frontier progress,
+floor-16 reaches, Act-1 clears, full victories and censored episodes.
+Use `--monitor-every 0` to disable, or
+`--monitor-every 10 --monitor-seeds 64` explicitly.
+
+Crucially, fixed-seed greedy performance reflects the **changing
+policy** on exactly the same environments. Unlike noisy training
+cohort averages, it supports genuinely paired comparisons. It is an
+evaluation metric only: no teacher labels or monitored returns enter
+the gradients. More precisely, repeated use of the same monitoring
+seeds can bias development decisions; retain the separately held-out
+final evaluation and independently seeded replication.
+
 The updated trainer emits a flushed live progress report for **every
 round** and evaluation milestones, and `tee` retains a complete log.
 This does not recover old optimizer momentum, but no learned neural
