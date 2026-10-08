@@ -104,7 +104,8 @@ class DrawBelief:
     def ordered_distribution(
         self, draws: int, *, max_outcomes: int = 4096
     ) -> tuple[OrderedDrawOutcome, ...]:
-        if isinstance(draws, bool) or not isinstance(draws, int) or not 0 <= draws <= self.remaining:
+        if (isinstance(draws, bool) or not isinstance(draws, int)
+                or not 0 <= draws <= self.remaining):
             raise ValueError("Draws must lie between zero and remaining cards")
         if isinstance(max_outcomes, bool) or max_outcomes <= 0:
             raise ValueError("max_outcomes must be positive")
@@ -135,7 +136,8 @@ class DrawBelief:
         self, draws: int, *, search_rng: random.Random
     ) -> tuple[str, ...]:
         """Sample a legal ordered future without using the live game's RNG."""
-        if isinstance(draws, bool) or not isinstance(draws, int) or not 0 <= draws <= self.remaining:
+        if (isinstance(draws, bool) or not isinstance(draws, int)
+                or not 0 <= draws <= self.remaining):
             raise ValueError("Draws must lie between zero and remaining cards")
         fixed = self.known_top[:draws]
         remaining = draws - len(fixed)
