@@ -1,6 +1,7 @@
 """Teacher-free actor learning and strictly censored/public-only trajectories."""
 from __future__ import annotations
 
+import pickle
 import random
 from collections.abc import Sequence
 from pathlib import Path
@@ -9,6 +10,8 @@ import pytest
 
 from sts2_ai.emulator import InformationPolicy, LegalAction, Observation, Transition
 from sts2_ai.models.neural import NeuralPolicyValueModel
+from sts2_ai.training.rollout_failure import PublicRolloutFailure, SCHEMA
+from tools.replay_rollout_failure import replay_public_failure
 from sts2_ai.training.selfplay import (
     Episode,
     _bounded_return,
@@ -281,3 +284,61 @@ def test_worker_actor_seed_is_stable_and_seed_distinct() -> None:
     assert episode_actor_seed(8, "s0") == episode_actor_seed(8, "s0")
     assert episode_actor_seed(8, "s0") != episode_actor_seed(8, "s1")
     assert episode_actor_seed(8, "s0") != episode_actor_seed(9, "s0")
+
+
+def test_failing_emulator_step_records_pickle_safe_public_replay() -> None:
+    class BrokenEnemyBackend(ToyFullRunBackend):
+        def step(self, state: str, action: LegalAction) -> Transition:
+            self.action_calls += 1
+            raise RuntimeError(
+                "Enemy 'proto.enemy.wriggler' AI conditional state "
+                "'init' has no matching branch."
+            )
+
+    backend = BrokenEnemyBackend()
+    with pytest.raises(PublicRolloutFailure) as raised:
+        collect_public_episode(
+            backend, zero_model(), seed="deterministic-failure",
+            actor_rng=random.Random(3),
+        )
+    error = raised.value
+    report = error.report
+    assert report["schema"] == SCHEMA
+    assert report["seed"] == "deterministic-failure"
+    assert report["environment"] == "legacy-prototype"
+    assert report["decision_index"] == 0
+    assert report["chosen_action_ids"] == [report["failing_action"]["action_id"]]
+    assert report["failing_action"]["kind"] == "choose_map_node"
+    assert report["failing_public_observation"]["act"] == 1
+    assert report["failing_observation_hash"]
+    assert report["error_type"] == "RuntimeError"
+    assert "wriggler" in str(error)
+    assert pickle.loads(pickle.dumps(error)).report == report
+    assert backend.action_calls == 1
+    assert not backend._states  # Also released the handle on exception.
+
+    outcome = replay_public_failure(backend, report)
+    assert outcome["reproduced"] is True
+    assert backend.action_calls == 2
+    assert not backend._states
+
+    invalid = {**report, "chosen_action_ids": ["wrong-action"]}
+    with pytest.raises(ValueError, match="absent or ambiguous"):
+        replay_public_failure(backend, invalid)
+    assert not backend._states
+
+
+def test_selfplay_emulator_failures_are_never_scored_as_censored() -> None:
+    pytest.importorskip("torch")
+
+    class BrokenEnemyBackend(ToyFullRunBackend):
+        def step(self, state: str, action: LegalAction) -> Transition:
+            raise RuntimeError("simulation state invalid")
+
+    backend = BrokenEnemyBackend()
+    with pytest.raises(PublicRolloutFailure, match="simulation state invalid"):
+        train_selfplay(
+            backend, rounds=2, episodes_per_round=3,
+            dimension=16, hidden=4, seed=7,
+        )
+    assert not backend._states
