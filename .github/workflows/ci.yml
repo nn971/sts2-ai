@@ -38,6 +38,8 @@ jobs:
           sts2-ai evaluate \
             --agent mcts \
             --budget 8 \
+            --shadow-budget 16 \
+            --shadow-strategy-db /tmp/sts2-ai-shadow.sqlite \
             --rollout-depth 32 \
             --rollout-batch-size 8 \
             --seeds 1 \
@@ -52,3 +54,7 @@ jobs:
           sts2-ai diagnose-training \
             /tmp/sts2-ai-roots.jsonl \
             --cutoff-samples /tmp/sts2-ai-cutoffs.jsonl
+          sts2-ai export-training \
+            /tmp/sts2-ai-shadow.sqlite /tmp/sts2-ai-shadow-roots.jsonl
+          sts2-ai compare-teachers \
+            /tmp/sts2-ai-roots.jsonl /tmp/sts2-ai-shadow-roots.jsonl
