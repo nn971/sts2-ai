@@ -1,4 +1,3 @@
-from .fair_replay import FairReplayPuctAdapter
 from .base import ActionEvaluation, SearchAlgorithm, SearchBudget, SearchResult
 from .card_priors import (
     CARD_PRIOR_FORMAT,
@@ -8,6 +7,7 @@ from .card_priors import (
     CardPriorDataset,
     blended_card_reward_prior,
 )
+from .fair_replay import FairReplayPuctAdapter
 from .learned_value import LearnedCutoffValue
 from .mcts import UctMcts, sts2_value
 from .puct import (
