@@ -14,7 +14,6 @@ from sts2_ai.models.hashed_linear import (
     state_dict,
     state_features,
 )
-
 from sts2_ai.search.mcts import sts2_value
 
 from .targets import TrainingExample
