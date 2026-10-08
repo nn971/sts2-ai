@@ -150,7 +150,8 @@ class FiniteSeedPosteriorSampler:
         history = self._history
         if history is None:
             raise RuntimeError("Initialize the finite cohort before advancing")
-        if action not in history[-1].legal_actions:
+        current_menu = history[-1].legal_actions
+        if current_menu is None or action not in current_menu:
             raise ValueError("Chosen action is not in the last public legal menu")
         next_step = PublicHistoryStep(next_observation, None, tuple(next_legal_actions))
         if next_observation.policy_id != history[-1].observation.policy_id:
