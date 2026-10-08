@@ -1,0 +1,87 @@
+name: neural-first-real-emulator-pilot
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/neural-experiment.yml"
+
+jobs:
+  pilot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install sts2-ai
+        run: python -m pip install -e '.[dev]'
+      - name: Build pinned emulator
+        run: |
+          dotnet build emulator/src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj \
+            --configuration Release --nologo --verbosity quiet
+      - name: Generate searched-root teacher and cutoff states
+        run: |
+          mkdir -p results/neural-pilot
+          sts2-ai evaluate \
+            --agent mcts --budget 12 --rollout-depth 24 \
+            --rollout-batch-size 6 --seeds 3 --max-decisions 16 \
+            --seed-prefix neural-teacher --no-build \
+            --strategy-db results/neural-pilot/teacher.sqlite \
+            --cutoff-samples results/neural-pilot/cutoffs.jsonl \
+            --cutoff-sample-every 16 \
+            --json-output results/neural-pilot/teacher-evaluation.json
+          sts2-ai export-training \
+            results/neural-pilot/teacher.sqlite \
+            results/neural-pilot/roots.jsonl
+          sts2-ai diagnose-training \
+            results/neural-pilot/roots.jsonl \
+            --cutoff-samples results/neural-pilot/cutoffs.jsonl \
+            --json-output results/neural-pilot/data-diagnostics.json
+      - name: Train neural policy and searched-root value
+        run: |
+          sts2-ai train-neural \
+            results/neural-pilot/roots.jsonl \
+            results/neural-pilot/neural-v1.json \
+            --epochs 8 --dimension 128 --hidden 24 \
+            --validation-fraction 0.25 \
+            --json-output results/neural-pilot/neural-validation.json
+      - name: Independent paired seed baseline
+        run: |
+          sts2-ai evaluate --agent mcts --budget 12 --rollout-depth 24 \
+            --rollout-batch-size 6 --seeds 1 --max-decisions 16 \
+            --seed-prefix neural-pilot-heldout --no-build \
+            --strategy-db results/neural-pilot/baseline.sqlite \
+            --json-output results/neural-pilot/baseline.json
+      - name: Neural-value-only paired seed
+        run: |
+          sts2-ai evaluate --agent mcts --budget 12 --rollout-depth 24 \
+            --rollout-batch-size 6 --seeds 1 --max-decisions 16 \
+            --seed-prefix neural-pilot-heldout --no-build \
+            --cutoff-model results/neural-pilot/neural-v1.json \
+            --learned-weight 0.25 \
+            --strategy-db results/neural-pilot/neural-value.sqlite \
+            --json-output results/neural-pilot/neural-value.json
+      - name: Neural-policy-only paired seed
+        run: |
+          sts2-ai evaluate --agent mcts --budget 12 --rollout-depth 24 \
+            --rollout-batch-size 6 --seeds 1 --max-decisions 16 \
+            --seed-prefix neural-pilot-heldout --no-build \
+            --neural-rollout-model results/neural-pilot/neural-v1.json \
+            --strategy-db results/neural-pilot/neural-policy.sqlite \
+            --json-output results/neural-pilot/neural-policy.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sts2-neural-pilot
+          path: results/neural-pilot/
+          if-no-files-found: warn
+          retention-days: 14
