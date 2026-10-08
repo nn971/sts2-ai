@@ -106,6 +106,10 @@ def main() -> None:
         "--cutoff-model", type=Path,
         help="optional normalized v2 model weights for nonterminal MCTS cutoffs",
     )
+    evaluate.add_argument(
+        "--learned-weight", type=float, default=1.0,
+        help="weight of learned cutoff; 0 uses the handcrafted value, 1 uses the model",
+    )
     evaluate.add_argument("--seeds", type=int, default=10, help="number of deterministic run seeds")
     evaluate.add_argument("--seed-prefix", default="eval")
     evaluate.add_argument("--agent-seed", type=int, default=0)
@@ -159,6 +163,10 @@ def main() -> None:
     benchmark.add_argument(
         "--cutoff-model", type=Path,
         help="optional normalized v2 model weights for nonterminal MCTS cutoffs",
+    )
+    benchmark.add_argument(
+        "--learned-weight", type=float, default=1.0,
+        help="weight of learned cutoff; 0 uses the handcrafted value, 1 uses the model",
     )
     benchmark.add_argument(
         "--include-route", action=argparse.BooleanOptionalAction, default=True,
@@ -321,6 +329,13 @@ def _rollout_agent(args: argparse.Namespace) -> HeuristicAgent | RoutePlanningAg
     return _route_agent(args) if args.rollout_policy == "route" else HeuristicAgent()
 
 
+def _check_learned_args(args: argparse.Namespace) -> None:
+    if not 0.0 <= args.learned_weight <= 1.0:
+        raise SystemExit("--learned-weight must lie in [0, 1]")
+    if args.cutoff_model is None and args.learned_weight != 1.0:
+        raise SystemExit("--learned-weight requires --cutoff-model")
+
+
 def _check_route_args(args: argparse.Namespace) -> None:
     if args.route_horizon <= 0:
         raise SystemExit("--route-horizon must be positive")
@@ -330,6 +345,7 @@ def _check_route_args(args: argparse.Namespace) -> None:
 
 def _evaluate(args: argparse.Namespace) -> None:
     _check_route_args(args)
+    _check_learned_args(args)
     if args.seeds <= 0:
         raise SystemExit("--seeds must be positive")
     if args.budget < 0:
@@ -343,7 +359,10 @@ def _evaluate(args: argparse.Namespace) -> None:
 
     if args.cutoff_model is not None and (args.agent != "mcts" or args.budget == 0):
         raise SystemExit("--cutoff-model requires MCTS with a positive budget")
-    cutoff = LearnedCutoffValue.load(args.cutoff_model) if args.cutoff_model else None
+    cutoff = (
+        LearnedCutoffValue.load(args.cutoff_model, learned_weight=args.learned_weight)
+        if args.cutoff_model else None
+    )
     policy = InformationPolicy(FAIR_POLICY_ID)
     summaries = []
     bridge_profile: Mapping[str, BridgeOperationStats] = {}
@@ -460,6 +479,7 @@ def _evaluate(args: argparse.Namespace) -> None:
             "route_discount": args.route_discount,
             "virtual_loss": args.virtual_loss if args.agent == "mcts" else None,
             "cutoff_value_id": cutoff.value_id if cutoff is not None else None,
+            "learned_weight": args.learned_weight if cutoff is not None else None,
             "runs": [asdict(summary) for summary in summaries],
             "bridge_profile": {
                 operation: asdict(stats)
@@ -485,6 +505,7 @@ def _print_bridge_profile(profile: Mapping[str, BridgeOperationStats]) -> None:
 
 def _benchmark(args: argparse.Namespace) -> None:
     _check_route_args(args)
+    _check_learned_args(args)
     if args.seeds <= 0:
         raise SystemExit("--seeds must be positive")
     if any(budget <= 0 for budget in args.budgets):
@@ -501,7 +522,10 @@ def _benchmark(args: argparse.Namespace) -> None:
     budgets = sorted(args.budgets)
     if args.cutoff_model is not None and not budgets:
         raise SystemExit("--cutoff-model requires at least one MCTS budget")
-    cutoff = LearnedCutoffValue.load(args.cutoff_model) if args.cutoff_model else None
+    cutoff = (
+        LearnedCutoffValue.load(args.cutoff_model, learned_weight=args.learned_weight)
+        if args.cutoff_model else None
+    )
     policy = InformationPolicy(FAIR_POLICY_ID)
     rows = []
     summaries_by_label: dict[str, list[RunSummary]] = {}
@@ -631,6 +655,7 @@ def _benchmark(args: argparse.Namespace) -> None:
             "include_route": args.include_route,
             "virtual_loss": args.virtual_loss,
             "cutoff_value_id": cutoff.value_id if cutoff is not None else None,
+            "learned_weight": args.learned_weight if cutoff is not None else None,
             "rows": [asdict(row) for row in rows],
             "paired_vs_heuristic": [asdict(row) for row in paired],
             "runs": serialized_runs,
