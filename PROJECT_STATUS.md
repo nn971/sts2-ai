@@ -1,5 +1,24 @@
 # Project status
 
+## Native-structure Overgrowth: AI integration staged, emulator blocked (2026-10-08)
+
+Audited pinned `sts2-emulator` and confirmed that
+`PrototypeNativeOvergrowthRunFactory.Create` exists but **no matching
+JSONL reset operation or advertised capability exists**. Implemented
+only the AI side: default train CLI mode `native-overgrowth`
+requires a versioned hello capability, requests a dedicated reset,
+validates public initial map/deck/Neow and refuses silent fallback.
+The emulator repository was **not modified**.
+
+The existing legacy training environment remains an explicit opt-in,
+so baseline regression CI is still usable. Mode is now part of
+checkpoint identity; 16-floor Act 1 plus six-floor Act 2/3
+normalization replaces the old 18-floor assumptions only in native
+mode. Native training will **not begin** until the user authorizes
+an emulator-side JSONL bridge interface. See
+[blocking request](docs/NATIVE_OVERGROWTH_TRAINING_GATE.md).
+
+
 ## Four-worker rollout and resumable training pilot (2026-10-08)
 
 Parallel observation-only trajectory collection now assigns independent

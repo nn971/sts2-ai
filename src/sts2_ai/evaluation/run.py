@@ -14,6 +14,11 @@ from sts2_ai.emulator import (
     Observation,
     StateHandle,
 )
+from sts2_ai.emulator.run_environment import (
+    LEGACY,
+    cumulative_floor_progress,
+    reset_training_run,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +39,7 @@ class RunSummary:
     full_game_victory: bool | None = None
     censored: bool = False
     episode_goal_version: str = "prototype-three-act-v0"
+    environment: str = LEGACY
 
     @property
     def won(self) -> bool:
@@ -41,9 +47,10 @@ class RunSummary:
 
     @property
     def terminal_progress(self) -> float:
-        if self.terminal_act is None:
-            return float(self.terminal_floor or 0)
-        return float(((self.terminal_act - 1) * 6) + (self.terminal_floor or 0))
+        result, _ = cumulative_floor_progress(
+            self.terminal_act, self.terminal_floor, self.environment
+        )
+        return result
 
     @property
     def transitions_per_decision(self) -> float:
@@ -60,6 +67,7 @@ def play_run(
     policy: InformationPolicy,
     ascension: int = 0,
     max_decisions: int | None = None,
+    environment: str = LEGACY,
     decision_observer: (
         Callable[[StateHandle, Observation, tuple[LegalAction, ...], Decision], None]
         | None
@@ -68,7 +76,7 @@ def play_run(
     """Drive one complete emulator run while keeping only the live state handle."""
 
     started = time.perf_counter()
-    state = backend.reset(seed, ascension)
+    state = reset_training_run(backend, seed, environment, ascension)
     hp_trajectory: list[int] = []
     decisions = 0
     emulator_transitions = 0
@@ -134,7 +142,7 @@ def play_run(
             emulator_transitions=emulator_transitions,
             wall_seconds=time.perf_counter() - started,
             agent_compute_seconds=agent_compute_seconds,
-            frontier_progress=_continuous_progress(frontier_state),
+            frontier_progress=_continuous_progress(frontier_state, environment),
             frontier_enemy_hp=_remaining_enemy_hp(frontier_state),
             hp_trajectory=tuple(hp_trajectory),
             # Reaching Act 2 certifies an Act-1 clear even if the run
@@ -150,6 +158,7 @@ def play_run(
                 else None
             ),
             censored=outcome not in ("victory", "defeat"),
+            environment=environment,
         )
     finally:
         backend.release_many([state])
@@ -166,23 +175,24 @@ def _search_transitions(metadata_json: str) -> int:
     return value if isinstance(value, int) and value >= 0 else 0
 
 
-def _continuous_progress(state: dict[str, Any]) -> float:
-    """Prototype run progress with a continuous within-combat component."""
+def _continuous_progress(
+    state: dict[str, Any], environment: str = LEGACY
+) -> float:
+    """Geometry-aware progress, plus within-combat fraction of a room.
 
-    act = _number(state.get("act"), 1.0)
-    floor = _number(state.get("floor"), 0.0)
-    act = max(1.0, min(3.0, act))
-    floor = max(0.0, min(6.0, floor))
-
+    Native-structure mode uses 16 rooms in Act 1 but still six-room
+    prototype Acts 2/3. The old benchmark keeps its 6/6/6 geometry.
+    """
+    act = int(_number(state.get("act"), 1.0))
+    floor = int(_number(state.get("floor"), 0.0))
+    progress, _ = cumulative_floor_progress(act, floor, environment)
     enemy_hp = _remaining_enemy_hp(state)
-    if enemy_hp is not None and floor > 0.0:
+    if enemy_hp is not None and floor > 0:
         import math
 
         completion = math.exp(-enemy_hp / 80.0)
-        effective_floor = max(0.0, floor - 1.0 + completion)
-    else:
-        effective_floor = floor
-    return ((act - 1.0) * 6.0) + effective_floor
+        return max(0.0, progress - 1.0 + completion)
+    return progress
 
 
 def _remaining_enemy_hp(state: dict[str, Any]) -> int | None:

@@ -196,6 +196,15 @@ class JsonlEmulatorBackend:
             self._terminate()
             raise JsonlBridgeError("Unrecognized pristine-reward proposal capability")
 
+        # Optional, currently ABSENT in the pinned emulator. Never infer it
+        # from the existence of a C# factory or substitute ordinary reset.
+        self._native_overgrowth_reset_schema = hello.get("nativeOvergrowthResetId")
+        if self._native_overgrowth_reset_schema not in (
+            None, "prototype-native-overgrowth-reset-v1"
+        ):
+            self._terminate()
+            raise JsonlBridgeError("Unrecognized native Overgrowth reset capability")
+
         self._factorized_initial_stream_schema = hello.get("factorizedInitialStreamsId")
         if self._factorized_initial_stream_schema not in (
             None, "prototype-independent-initial-streams-v1"
@@ -305,6 +314,35 @@ class JsonlEmulatorBackend:
         if (response.get("hypothetical") is not True
                 or response.get("schemaId") != self.factorized_initial_stream_schema):
             raise JsonlBridgeError("Factorized reset response lacks verified hypothetical schema")
+        return self._require_string(response, "stateHandle")
+
+    @property
+    def native_overgrowth_reset_schema(self) -> str | None:
+        """Optional bridge capability; NOT in the currently pinned emulator."""
+        value = self._native_overgrowth_reset_schema
+        return value if isinstance(value, str) else None
+
+    def reset_native_overgrowth(self, seed: str, ascension: int = 0) -> StateHandle:
+        """Request the native-structure run *only* from an advertising bridge.
+
+        No generic reset fallback: such a fallback produces the six-floor
+        prototype while mislabelling its progress/terminal training rewards.
+        """
+        from .run_environment import NATIVE_RESET_SCHEMA
+
+        if self.native_overgrowth_reset_schema != NATIVE_RESET_SCHEMA:
+            raise JsonlBridgeError(
+                "Pinned emulator does not expose native Overgrowth JSONL reset; "
+                "no fallback to the six-floor prototype is permitted"
+            )
+        response = self._request(
+            "reset_native_overgrowth", seed=seed, ascension=ascension
+        )
+        if response.get("schemaId") != NATIVE_RESET_SCHEMA:
+            state = response.get("stateHandle")
+            if isinstance(state, str):
+                self.release_many((state,))
+            raise JsonlBridgeError("Native Overgrowth reset response schema mismatch")
         return self._require_string(response, "stateHandle")
 
     def reset(self, seed: str, ascension: int = 0) -> StateHandle:

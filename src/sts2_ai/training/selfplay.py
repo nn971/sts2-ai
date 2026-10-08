@@ -25,6 +25,12 @@ from sts2_ai.emulator import (
     LegalAction,
     Observation,
 )
+from sts2_ai.emulator.run_environment import (
+    LEGACY,
+    cumulative_floor_progress,
+    require_environment,
+    reset_training_run,
+)
 from sts2_ai.models.hashed_linear import neural_action_features, state_dict, state_features
 from sts2_ai.models.neural import NeuralPolicyValueModel
 from sts2_ai.training.neural import _dense, _export, _forward, _new_params
@@ -54,6 +60,7 @@ class Episode:
     floor: int | None
     hp_ratio: float
     completed: bool
+    environment: str = LEGACY
 
     @property
     def won(self) -> bool:
@@ -139,6 +146,7 @@ def collect_public_episode(
     actor_rng: random.Random,
     max_decisions: int = 2048,
     policy_id: str = "prototype-fair-v0",
+    environment: str = LEGACY,
 ) -> Episode:
     """Run the actual emulator; never give hidden handles to the actor.
 
@@ -149,7 +157,7 @@ def collect_public_episode(
     if max_decisions <= 0:
         raise ValueError("max_decisions must be positive")
     policy = InformationPolicy(policy_id)
-    state = backend.reset(seed)
+    state = reset_training_run(backend, seed, environment)
     history: list[PublicDecision] = []
     try:
         while True:
@@ -162,12 +170,12 @@ def collect_public_episode(
                 if outcome not in ("victory", "defeat"):
                     raise ValueError("Terminal episode lacks a certified victory/defeat")
                 return Episode(
-                    seed, tuple(history), outcome, act, floor, hp_ratio, True
+                    seed, tuple(history), outcome, act, floor, hp_ratio, True, environment
                 )
             if len(history) >= max_decisions:
                 act, floor, hp_ratio = _public_metrics(frame)
                 return Episode(
-                    seed, tuple(history), "truncated", act, floor, hp_ratio, False
+                    seed, tuple(history), "truncated", act, floor, hp_ratio, False, environment
                 )
 
             actions = tuple(backend.legal_actions(state))
@@ -183,12 +191,11 @@ def collect_public_episode(
 
 
 def _normalized_progress(episode: Episode) -> float:
-    """Prototype's three-act, six-floor progress proxy, not native STS2."""
-    return min(
-        1.0,
-        max(0.0, ((max(1, episode.act or 1) - 1) * 6
-                   + max(0, episode.floor or 0)) / 18.0),
+    """Normalize using the geometry of the episode's actual run mode."""
+    current, maximum = cumulative_floor_progress(
+        episode.act, episode.floor, episode.environment
     )
+    return current / maximum
 
 
 def _curriculum_coefficient(
@@ -250,6 +257,7 @@ def train_selfplay(
     workers: int = 1,
     checkpoint_path: Path | None = None,
     resume: bool = False,
+    environment: str = LEGACY,
 ) -> SelfPlayResult:
     """Run genuine full-game episodes and optimize an on-policy neural actor.
 
@@ -279,6 +287,9 @@ def train_selfplay(
         raise ValueError("Resume requires a checkpoint path")
     if workers > 1 and not isinstance(backend, JsonlEmulatorBackend):
         raise ValueError("Parallel workers require a pinned JSONL emulator backend")
+    # Check capability BEFORE importing Torch or opening workers / writing a
+    # checkpoint. A missing bridge operation must never silently train legacy.
+    require_environment(backend, environment)
     try:
         torch: Any = importlib.import_module("torch")
     except ImportError as exc:
@@ -310,6 +321,7 @@ def train_selfplay(
         "update_epochs": update_epochs,
         "max_decisions": max_decisions,
         "run_seed_prefix": run_seed_prefix,
+        "environment": environment,
     }
     if resume:
         assert checkpoint_path is not None
@@ -353,6 +365,7 @@ def train_selfplay(
                         seed=run_seed,
                         actor_rng=random.Random(episode_actor_seed(seed, run_seed)),
                         max_decisions=max_decisions,
+                        environment=environment,
                     )
                     for run_seed in run_seeds
                 )
@@ -361,6 +374,7 @@ def train_selfplay(
                     pool, model, run_seeds,
                     base_seed=seed, max_decisions=max_decisions,
                     policy_id="prototype-fair-v0",
+                    environment=environment,
                 )
             for episode in cohort:
                 if not episode.completed:

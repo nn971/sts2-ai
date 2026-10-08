@@ -1,5 +1,15 @@
 # 9700X / RTX 5070 / 24 GB RAM — first parallel training
 
+> **Important after the map audit:** The historical commands in this
+> guide ran the six-floor `legacy-prototype` environment. To reproduce
+> those experiments, explicitly add `--environment legacy-prototype`
+> to each command. The current CLI defaults to native-structure Overgrowth,
+> but it will deliberately **stop with an unsupported-interface error**
+> until the emulator JSONL bridge implements the requested reset. Do not
+> resume the legacy checkpoint in native mode. See
+> [native Overgrowth gate](NATIVE_OVERGROWTH_TRAINING_GATE.md).
+
+
 The v3 neural learner uses **one GPU-free PyTorch learner** and `--workers`
 **independent emulator worker processes**. Each worker starts a separate
 pinned .NET JSONL bridge *without recompiling*, and receives the **same frozen

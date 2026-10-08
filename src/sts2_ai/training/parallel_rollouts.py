@@ -32,6 +32,7 @@ class EpisodeRequest:
     actor_seed: int
     max_decisions: int
     policy_id: str
+    environment: str
 
 
 def episode_actor_seed(base_seed: int, run_seed: str) -> int:
@@ -69,6 +70,7 @@ def _worker_collect(request: EpisodeRequest) -> Episode:
         actor_rng=random.Random(request.actor_seed),
         max_decisions=request.max_decisions,
         policy_id=request.policy_id,
+        environment=request.environment,
     )
 
 
@@ -95,6 +97,7 @@ def collect_parallel(
     base_seed: int,
     max_decisions: int,
     policy_id: str,
+    environment: str,
 ) -> tuple[Episode, ...]:
     if not run_seeds:
         return ()
@@ -104,7 +107,7 @@ def collect_parallel(
     requests = [
         EpisodeRequest(
             payload, seed, episode_actor_seed(base_seed, seed),
-            max_decisions, policy_id,
+            max_decisions, policy_id, environment,
         )
         for seed in run_seeds
     ]
