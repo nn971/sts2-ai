@@ -31,7 +31,7 @@ from sts2_ai.evaluation.selfplay_metrics import (
 )
 from sts2_ai.training.selfplay import SELFPLAY_VERSION, TrainingRound, train_selfplay
 from sts2_ai.training.rollout_failure import PublicRolloutFailure
-from tools.fixed_seed_monitor import FixedSeedMonitor
+from sts2_ai.evaluation.fixed_seed_monitor import FixedSeedMonitor
 
 
 def _progress(message: str) -> None:
