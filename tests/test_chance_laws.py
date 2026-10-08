@@ -65,7 +65,9 @@ def test_real_fair_root_sampler_is_explicitly_unavailable() -> None:
     class UnverifiedSampler:
         fair_continuation_capability_id = "randomly-reseeded-oracle-v0"
 
-        def sample_fair_continuations(self, history: object, *, search_rng: object, count: int) -> tuple[str, ...]:
+        def sample_fair_continuations(
+            self, history: object, *, search_rng: object, count: int
+        ) -> tuple[str, ...]:
             return ("unsafe",) * count
 
     with pytest.raises(FairContinuationUnavailable):
