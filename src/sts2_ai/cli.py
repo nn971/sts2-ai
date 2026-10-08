@@ -13,6 +13,7 @@ from sts2_ai.agents import (
     HeuristicAgent,
     OracleMctsAgent,
     RandomAgent,
+    RoutePlanningAgent,
 )
 from sts2_ai.emulator import (
     FAIR_POLICY_ID,
@@ -60,7 +61,7 @@ def main() -> None:
     manifest.add_argument("--information-policy", default="fair-v1")
 
     evaluate = sub.add_parser("evaluate", help="run whole-run emulator baselines")
-    evaluate.add_argument("--agent", choices=("random", "heuristic", "mcts"), required=True)
+    evaluate.add_argument("--agent", choices=("random", "heuristic", "route", "mcts"), required=True)
     evaluate.add_argument("--budget", type=int, default=32, help="MCTS simulations per decision")
     evaluate.add_argument(
         "--rollout-depth",
@@ -92,6 +93,12 @@ def main() -> None:
             "omit for mean-preserving reservations"
         ),
     )
+    evaluate.add_argument(
+        "--rollout-policy", choices=("heuristic", "route"), default="heuristic",
+        help="MCTS rollout agent; route is an experimental visible-map baseline",
+    )
+    evaluate.add_argument("--route-horizon", type=int, default=6)
+    evaluate.add_argument("--route-discount", type=float, default=0.8)
     evaluate.add_argument("--seeds", type=int, default=10, help="number of deterministic run seeds")
     evaluate.add_argument("--seed-prefix", default="eval")
     evaluate.add_argument("--agent-seed", type=int, default=0)
@@ -137,6 +144,15 @@ def main() -> None:
         default="fixed",
     )
     benchmark.add_argument("--virtual-loss", type=float)
+    benchmark.add_argument(
+        "--rollout-policy", choices=("heuristic", "route"), default="heuristic",
+    )
+    benchmark.add_argument("--route-horizon", type=int, default=6)
+    benchmark.add_argument("--route-discount", type=float, default=0.8)
+    benchmark.add_argument(
+        "--include-route", action=argparse.BooleanOptionalAction, default=True,
+        help="include visible-route planner as an independent fair baseline",
+    )
     benchmark.add_argument("--repo-root", type=Path, default=Path.cwd())
     benchmark.add_argument("--no-build", action="store_true")
     benchmark.add_argument(
@@ -283,7 +299,23 @@ def main() -> None:
 
 
 
+def _route_agent(args: argparse.Namespace) -> RoutePlanningAgent:
+    return RoutePlanningAgent(horizon=args.route_horizon, discount=args.route_discount)
+
+
+def _rollout_agent(args: argparse.Namespace) -> HeuristicAgent | RoutePlanningAgent:
+    return _route_agent(args) if args.rollout_policy == "route" else HeuristicAgent()
+
+
+def _check_route_args(args: argparse.Namespace) -> None:
+    if args.route_horizon <= 0:
+        raise SystemExit("--route-horizon must be positive")
+    if not 0.0 < args.route_discount <= 1.0:
+        raise SystemExit("--route-discount must lie in (0, 1]")
+
+
 def _evaluate(args: argparse.Namespace) -> None:
+    _check_route_args(args)
     if args.seeds <= 0:
         raise SystemExit("--seeds must be positive")
     if args.budget < 0:
@@ -314,13 +346,15 @@ def _evaluate(args: argparse.Namespace) -> None:
                 agent: Agent | ExactStateAgent
                 if args.agent == "random":
                     agent = RandomAgent(seed=args.agent_seed + index)
+                elif args.agent == "route":
+                    agent = _route_agent(args)
                 elif args.agent == "heuristic" or args.budget == 0:
                     agent = HeuristicAgent()
                 else:
                     search = UctMcts(
                         backend,
                         policy=policy,
-                        rollout_policy=HeuristicAgent(),
+                        rollout_policy=_rollout_agent(args),
                         rollout_depth=args.rollout_depth,
                         rollout_batch_size=args.rollout_batch_size,
                         rollout_mode=args.rollout_mode,
@@ -403,6 +437,9 @@ def _evaluate(args: argparse.Namespace) -> None:
                 args.rollout_batch_size if args.agent == "mcts" else None
             ),
             "rollout_mode": args.rollout_mode if args.agent == "mcts" else None,
+            "rollout_policy": args.rollout_policy if args.agent == "mcts" else None,
+            "route_horizon": args.route_horizon,
+            "route_discount": args.route_discount,
             "virtual_loss": args.virtual_loss if args.agent == "mcts" else None,
             "runs": [asdict(summary) for summary in summaries],
             "bridge_profile": {
@@ -428,6 +465,7 @@ def _print_bridge_profile(profile: Mapping[str, BridgeOperationStats]) -> None:
 
 
 def _benchmark(args: argparse.Namespace) -> None:
+    _check_route_args(args)
     if args.seeds <= 0:
         raise SystemExit("--seeds must be positive")
     if any(budget <= 0 for budget in args.budgets):
@@ -456,6 +494,8 @@ def _benchmark(args: argparse.Namespace) -> None:
             if args.include_random:
                 labels.append(("random", None))
             labels.append(("heuristic", 0))
+            if args.include_route:
+                labels.append(("route", None))
             labels.extend((f"MCTS-{budget}", budget) for budget in budgets)
 
             for label, budget in labels:
@@ -464,6 +504,8 @@ def _benchmark(args: argparse.Namespace) -> None:
                     agent: Agent | ExactStateAgent
                     if label == "random":
                         agent = RandomAgent(seed=args.agent_seed + index)
+                    elif label == "route":
+                        agent = _route_agent(args)
                     elif budget == 0:
                         agent = HeuristicAgent()
                     else:
@@ -471,7 +513,7 @@ def _benchmark(args: argparse.Namespace) -> None:
                         search = UctMcts(
                             backend,
                             policy=policy,
-                            rollout_policy=HeuristicAgent(),
+                            rollout_policy=_rollout_agent(args),
                             rollout_depth=args.rollout_depth,
                             rollout_batch_size=args.rollout_batch_size,
                             rollout_mode=args.rollout_mode,
@@ -519,7 +561,17 @@ def _benchmark(args: argparse.Namespace) -> None:
                     asdict(summary) for summary in summaries
                 ]
 
-    paired = [
+    paired = []
+    if args.include_route:
+        paired.append(
+            compare_paired_runs(
+                "heuristic",
+                summaries_by_label["heuristic"],
+                "route",
+                summaries_by_label["route"],
+            )
+        )
+    paired.extend([
         compare_paired_runs(
             "heuristic",
             summaries_by_label["heuristic"],
@@ -527,7 +579,7 @@ def _benchmark(args: argparse.Namespace) -> None:
             summaries_by_label[f"MCTS-{budget}"],
         )
         for budget in budgets
-    ]
+    ])
 
     print(markdown_table(rows))
     print()
@@ -550,6 +602,10 @@ def _benchmark(args: argparse.Namespace) -> None:
             "rollout_depth": args.rollout_depth,
             "rollout_batch_size": args.rollout_batch_size,
             "rollout_mode": args.rollout_mode,
+            "rollout_policy": args.rollout_policy,
+            "route_horizon": args.route_horizon,
+            "route_discount": args.route_discount,
+            "include_route": args.include_route,
             "virtual_loss": args.virtual_loss,
             "rows": [asdict(row) for row in rows],
             "paired_vs_heuristic": [asdict(row) for row in paired],
