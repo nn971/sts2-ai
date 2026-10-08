@@ -1,5 +1,22 @@
 # Project status
 
+## Mechanic-aware known-deck draw slice (2026-10-08)
+
+Added `DrawBelief` and `certified_opening_draw_belief`: conditional
+ordered draw laws from an exchangeable card multiset, observed-card
+posterior updates, certified top-of-deck knowledge, and constrained
+discard reshuffles. The pinned prototype `combat` shuffle/draw code
+was inspected and public opening-combat inventory is tested through
+the real JSONL emulator. External certification is required: generated
+cards, nonempty mutable card state, unmatched pile counts and unknown
+zone operations fail closed.
+
+This is an idealized uniform-shuffle chance *model*, not proof of
+native seed-conditioned permutation uniformity, nor a full fair
+successor-state engine. See
+[certified combat draw contract](docs/CERTIFIED_COMBAT_DRAWS.md).
+
+
 ## Incremental finite public-belief cohort (2026-10-08)
 
 Added opt-in `FiniteSeedPosteriorSampler`: independently search-seeded
