@@ -93,6 +93,98 @@ episode seeds or the on-policy cohort, and is not included in the checkpoint
 fingerprint. If necessary, decrease `--workers` without restarting the
 learning experiment; preserve all other training arguments.
 
+## Fixed-seed monitoring and the floor-13 emulator fix
+
+The earlier recovery run stopped before round 87 (86 completed rounds,
+2,752 training episodes) on an upgraded lethal Dagger Throw killing a
+12-HP Mawler while leaving a mandatory discard choice. The previous
+emulator prematurely entered combat victory before the discard
+continuation was resolved. The current emulator submodule pin includes
+the regression-tested correction in `sts2-emulator`.
+
+A changed emulator pin requires a **new** training experiment; export
+the latest recovered weights from
+`results/native-tempered-recovery-255.pt` rather than passing
+`--resume` to this older run. This will retain the learned policy,
+not the old optimizer state. Retain both checkpoints and failure files.
+
+### Recover after the second failure: 86 completed rounds
+
+The recovery log confirms the **first 86 rounds were completed**, but the
+last cohort (round 87) failed. Your command still used **4 workers**.
+The pinned emulator now fixes this *specific* lethal card/selection ordering.
+
+To retain the original research budget, the remaining experiment is
+`169 rounds × 32 episodes = 5,408 episodes`. Together with the
+original 45 completed rounds (1,440 episodes) and second set of 86
+completed rounds (2,752 episodes), this gives 9,600 completed episode
+starts across **three separate optimizer experiments**. They are not
+equivalent to a single uninterrupted on-policy optimizer run.
+
+```fish
+git pull --ff-only
+git submodule update --init --recursive
+source .venv/bin/activate.fish
+
+python tools/export_selfplay_checkpoint_model.py \
+  --checkpoint results/native-tempered-recovery-255.pt \
+  --output results/native-tempered-round131-model.json
+
+set -gx OMP_NUM_THREADS 1
+set -gx MKL_NUM_THREADS 1
+
+python -u tools/train_selfplay.py \
+  --build --environment native-overgrowth \
+  --initialize-from-model results/native-tempered-round131-model.json \
+  --workers 15 --rounds 169 --episodes 32 \
+  --max-decisions 4096 --dimension 128 --hidden 32 \
+  --seed 45 --learning-rate 0.001 \
+  --temperature-start 0.035 --temperature-end 0.035 \
+  --temperature-decay-rounds 1 --entropy-weight 0.002 \
+  --monitor-every 10 --monitor-seeds 64 \
+  --evaluate-seeds 128 \
+  --checkpoint results/native-tempered-final169.pt \
+  --output results/native-tempered-final169-model.json \
+  --report results/native-tempered-final169-report.json \
+  2>&1 | tee results/native-tempered-final169.log
+```
+
+This deliberately retains the low-temperature behavior at the end
+of the second experiment. It may produce **slow exploration** and
+is not guaranteed to achieve any victory. Inspect the fixed-seed
+monitor after 20–40 rounds; if greedy progress is stagnant, investigate
+the model/reward policy rather than blindly increasing the training
+budget. For consistent checkpoint resumption, do not change
+temperature, seeds or warm-start JSON within this third experiment.
+
+For subsequent experiments, periodic **greedy fixed-seed monitoring**
+now runs after rounds 1, 10, 20, ... by default on 64 seed names
+`selfplay-monitor-0` through `selfplay-monitor-63`, distinct from the
+training seeds. Its summary and per-seed frontiers are written atomically
+to `<report-stem>.monitor.jsonl`. Logs show 10- and 50-round moving
+averages, and checkpoint monitoring records mean frontier progress,
+floor-16 reaches, Act-1 clears, full victories and censored episodes.
+Use `--monitor-every 0` to disable, or
+`--monitor-every 10 --monitor-seeds 64` explicitly.
+
+Every training-round record also measures `rollout_wall_seconds`
+(sequential emulator/Python actor inference across the worker cohort)
+and `optimization_wall_seconds` (single-threaded sequential PyTorch
+gradient construction and AdamW update). Live progress prints both.
+This is the first profiling check before investing in CUDA. The current
+128×32 network and individual-action CPU inference would require a
+different **batched, cross-worker inference design** to make GPU
+acceleration worthwhile. Do not assume that moving the existing
+per-decision operations to CUDA helps; watch these timings first.
+
+Crucially, fixed-seed greedy performance reflects the **changing
+policy** on exactly the same environments. Unlike noisy training
+cohort averages, it supports genuinely paired comparisons. It is an
+evaluation metric only: no teacher labels or monitored returns enter
+the gradients. More precisely, repeated use of the same monitoring
+seeds can bias development decisions; retain the separately held-out
+final evaluation and independently seeded replication.
+
 The updated trainer emits a flushed live progress report for **every
 round** and evaluation milestones, and `tee` retains a complete log.
 This does not recover old optimizer momentum, but no learned neural

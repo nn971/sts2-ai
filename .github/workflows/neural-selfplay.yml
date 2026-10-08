@@ -24,7 +24,7 @@ jobs:
       - name: Install CPU-only PyTorch
         run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Validate real learning and terminal censorship
-        run: python -m pytest tests/test_neural_selfplay.py tests/test_run_environment.py tests/test_neural_temperature_diagnostics.py tests/test_neural_training_temperature.py tests/test_training_progress.py tests/test_checkpoint_weight_export.py -q
+        run: python -m pytest tests/test_neural_selfplay.py tests/test_run_environment.py tests/test_neural_temperature_diagnostics.py tests/test_neural_training_temperature.py tests/test_training_progress.py tests/test_checkpoint_weight_export.py tests/test_fixed_seed_monitor.py -q
       - name: Actual Silent whole-run neural training and heldout evaluation
         run: |
           python tools/train_selfplay.py \
@@ -76,12 +76,13 @@ jobs:
             --workers 2 --rounds 2 --episodes 3 \
             --temperature-start 0.2 --temperature-end 0.05 \
             --temperature-decay-rounds 1 --entropy-weight 0.002 \
+            --monitor-every 1 --monitor-seeds 2 \
             --max-decisions 2048 --dimension 64 --hidden 8 \
             --evaluate-seeds 1 --seed 47 \
             --checkpoint /tmp/sts2-native-tempered-checkpoint.pt \
             --output /tmp/sts2-native-tempered-model.json \
             --report /tmp/sts2-native-tempered-report.json
-          python -c 'import json; from pathlib import Path; r=json.loads(Path("/tmp/sts2-native-tempered-report.json").read_text()); assert r["train_completed"]>0; assert r["gradient_updates"]==2; assert [round(x["sampling_temperature"],6) for x in r["rounds"]]==[0.2,0.05]; assert r["initialized_from_model"]=="/tmp/sts2-native-train-model.json"; assert Path("/tmp/sts2-native-tempered-checkpoint.pt").exists()'
+          python -c 'import json; from pathlib import Path; r=json.loads(Path("/tmp/sts2-native-tempered-report.json").read_text()); assert r["train_completed"]>0; assert r["gradient_updates"]==2; assert [round(x["sampling_temperature"],6) for x in r["rounds"]]==[0.2,0.05]; assert r["initialized_from_model"]=="/tmp/sts2-native-train-model.json"; assert Path("/tmp/sts2-native-tempered-checkpoint.pt").exists(); p=Path("/tmp/sts2-native-tempered-report.monitor.jsonl"); assert p.exists(); rows=[json.loads(line) for line in p.read_text().splitlines()]; assert [x["training_round"] for x in rows]==[1,2]; assert all(x["seed_count"]==2 and len(x["per_seed"])==2 for x in rows)'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -97,6 +98,7 @@ jobs:
             /tmp/sts2-native-train-checkpoint.pt
             /tmp/sts2-native-temperature-diagnostics.json
             /tmp/sts2-native-tempered-report.json
+            /tmp/sts2-native-tempered-report.monitor.jsonl
             /tmp/sts2-native-tempered-model.json
             /tmp/sts2-native-tempered-checkpoint.pt
           if-no-files-found: ignore

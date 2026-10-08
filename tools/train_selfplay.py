@@ -12,6 +12,7 @@ import argparse
 import json
 import sys
 import time
+from statistics import fmean
 from dataclasses import asdict
 from pathlib import Path
 
@@ -30,6 +31,7 @@ from sts2_ai.evaluation.selfplay_metrics import (
 )
 from sts2_ai.training.selfplay import SELFPLAY_VERSION, TrainingRound, train_selfplay
 from sts2_ai.training.rollout_failure import PublicRolloutFailure
+from sts2_ai.evaluation.fixed_seed_monitor import FixedSeedMonitor
 
 
 def _progress(message: str) -> None:
@@ -46,6 +48,7 @@ class _TrainingProgress:
         self.round_started = self.started
         self.completed_this_invocation = 0
         self.wins_this_invocation = 0
+        self.progress_this_invocation: list[float] = []
         self.first_round_index: int | None = None
 
     def start(self, round_index: int, total_rounds: int, temperature: float) -> None:
@@ -64,6 +67,8 @@ class _TrainingProgress:
 
     def complete(self, row: TrainingRound) -> None:
         self.completed_this_invocation += 1
+        if row.mean_progress is not None:
+            self.progress_this_invocation.append(row.mean_progress)
         self.wins_this_invocation += row.wins
         elapsed = time.perf_counter() - self.started
         duration = time.perf_counter() - self.round_started
@@ -73,12 +78,21 @@ class _TrainingProgress:
             f"{row.mean_progress:.1%}" if row.mean_progress is not None else "n/a"
         )
         loss = f"{row.mean_loss:.4f}" if row.mean_loss is not None else "n/a"
+        moving = ""
+        for window in (10, 50):
+            if len(self.progress_this_invocation) >= window:
+                moving += (
+                    f" avg{window}="
+                    f"{fmean(self.progress_this_invocation[-window:]):.1%}"
+                )
         _progress(
             f"[train] round {row.round_index + 1}/{self.total_rounds} complete | "
             f"completed={row.completed}/{row.played} censored={row.censored} "
             f"wins={row.wins} new_wins={self.wins_this_invocation} | "
-            f"progress={progress} loss={loss} "
+            f"progress={progress}{moving} loss={loss} "
             f"updates={row.update_steps} decisions={row.decision_samples} | "
+            f"rollouts={row.rollout_wall_seconds:.1f}s "
+            f"optimizer={row.optimization_wall_seconds:.1f}s | "
             f"round={duration:.1f}s elapsed={elapsed:.1f}s eta={eta:.0f}s"
         )
 
@@ -124,12 +138,26 @@ def main() -> None:
         help="Restore model/AdamW/round metrics from --checkpoint (same config)",
     )
     parser.add_argument("--evaluate-seeds", type=int, default=3)
+    parser.add_argument(
+        "--monitor-every", type=int, default=10,
+        help="Evaluate greedy checkpoints on fixed held-out seeds every N rounds; 0 disables",
+    )
+    parser.add_argument(
+        "--monitor-seeds", type=int, default=64,
+        help="Number of identical unseen seed names in every periodic evaluation",
+    )
+    parser.add_argument(
+        "--monitor-file", type=Path,
+        help="Progress JSONL file (default: --report stem plus .monitor.jsonl)",
+    )
     parser.add_argument("--build", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
     if args.evaluate_seeds < 1:
         parser.error("--evaluate-seeds must be positive")
+    if args.monitor_every < 0 or args.monitor_seeds < 1:
+        parser.error("--monitor-every must be nonnegative; --monitor-seeds positive")
     _progress(
         f"[train] opening emulator | environment={args.environment} "
         f"rounds={args.rounds} episodes/round={args.episodes} "
@@ -142,6 +170,22 @@ def main() -> None:
         require_environment(backend, args.environment)
         started_at = time.perf_counter()
         progress = _TrainingProgress(args.rounds, args.episodes)
+        monitor_path = args.monitor_file or args.report.with_name(
+            args.report.stem + ".monitor.jsonl"
+        )
+        monitor = (
+            FixedSeedMonitor(
+                backend,
+                environment=args.environment,
+                max_decisions=args.max_decisions,
+                every=args.monitor_every,
+                seeds=args.monitor_seeds,
+                path=monitor_path,
+                resume=args.resume,
+                progress=_progress,
+            )
+            if args.monitor_every else None
+        )
         _progress(
             f"[train] emulator ready: revision={backend.emulator_revision} | "
             f"temperature={args.temperature_start:g}->{args.temperature_end:g} "
@@ -168,6 +212,7 @@ def main() -> None:
                 environment=args.environment,
                 on_round_start=progress.start,
                 on_round_complete=progress.complete,
+                on_model_snapshot=monitor,
             )
         except PublicRolloutFailure as failure:
             # Broken emulator transitions are not valid censored episodes.
@@ -287,6 +332,10 @@ def main() -> None:
                 if args.initialize_from_model is not None else None
             ),
             "rollout_workers": args.workers,
+            "monitor_every": args.monitor_every,
+            "monitor_seeds": args.monitor_seeds,
+            "monitor_file": str(monitor_path) if monitor is not None else None,
+            "periodic_heldout_evaluation": monitor.records if monitor is not None else [],
             "checkpoint_path": str(args.checkpoint) if args.checkpoint is not None else None,
             "resumed": args.resume,
             "training_wall_seconds_current_invocation": training_wall_seconds,
