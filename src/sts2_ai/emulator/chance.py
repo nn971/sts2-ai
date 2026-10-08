@@ -17,6 +17,7 @@ from typing import Protocol, runtime_checkable
 from .protocol import LegalAction, Observation, StateHandle
 
 CHANCE_LAW_VERSION = "known-deck-draw-v1"
+FAIR_CONTINUATION_CAPABILITY_ID = "history-conditioned-fair-v1"
 
 
 class FairContinuationUnavailable(RuntimeError):
@@ -37,6 +38,9 @@ class FairContinuationSampler(Protocol):
     live engine state is an acceptable implementation of this protocol.
     """
 
+    @property
+    def fair_continuation_capability_id(self) -> str: ...
+
     def sample_fair_continuations(
         self,
         history: Sequence[PublicHistoryStep],
@@ -48,7 +52,10 @@ class FairContinuationSampler(Protocol):
 
 def require_fair_sampler(backend: object) -> FairContinuationSampler:
     """Fail closed rather than silently substituting oracle-exact forks."""
-    if not isinstance(backend, FairContinuationSampler):
+    if (
+        not isinstance(backend, FairContinuationSampler)
+        or backend.fair_continuation_capability_id != FAIR_CONTINUATION_CAPABILITY_ID
+    ):
         raise FairContinuationUnavailable(
             "Backend has no validated history-conditioned fair sampler. "
             "Exact-state fork/expand and reseeding the live hidden state are oracle-only."
