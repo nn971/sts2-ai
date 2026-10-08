@@ -102,10 +102,13 @@ def _winner(
     return ordered[0][1], "resolved"
 
 
+_DEFAULT_CONSENSUS = ConsensusConfig()
+
+
 def distill_consensus_targets(
     low: tuple[TrainingExample, ...],
     high: tuple[TrainingExample, ...],
-    config: ConsensusConfig = ConsensusConfig(),
+    config: ConsensusConfig = _DEFAULT_CONSENSUS,
 ) -> tuple[tuple[TrainingExample, ...], dict[str, Any]]:
     """Export only high-budget action-Q targets whose low-budget winner agrees."""
     low_index, high_index = _indexed(low), _indexed(high)
