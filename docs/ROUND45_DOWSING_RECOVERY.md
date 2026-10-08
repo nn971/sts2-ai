@@ -108,6 +108,55 @@ the latest recovered weights from
 `--resume` to this older run. This will retain the learned policy,
 not the old optimizer state. Retain both checkpoints and failure files.
 
+### Recover after the second failure: 86 completed rounds
+
+The recovery log confirms the **first 86 rounds were completed**, but the
+last cohort (round 87) failed. Your command still used **4 workers**.
+The pinned emulator now fixes this *specific* lethal card/selection ordering.
+
+To retain the original research budget, the remaining experiment is
+`169 rounds × 32 episodes = 5,408 episodes`. Together with the
+original 45 completed rounds (1,440 episodes) and second set of 86
+completed rounds (2,752 episodes), this gives 9,600 completed episode
+starts across **three separate optimizer experiments**. They are not
+equivalent to a single uninterrupted on-policy optimizer run.
+
+```fish
+git pull --ff-only
+git submodule update --init --recursive
+source .venv/bin/activate.fish
+
+python tools/export_selfplay_checkpoint_model.py \
+  --checkpoint results/native-tempered-recovery-255.pt \
+  --output results/native-tempered-round131-model.json
+
+set -gx OMP_NUM_THREADS 1
+set -gx MKL_NUM_THREADS 1
+
+python -u tools/train_selfplay.py \
+  --build --environment native-overgrowth \
+  --initialize-from-model results/native-tempered-round131-model.json \
+  --workers 15 --rounds 169 --episodes 32 \
+  --max-decisions 4096 --dimension 128 --hidden 32 \
+  --seed 45 --learning-rate 0.001 \
+  --temperature-start 0.035 --temperature-end 0.035 \
+  --temperature-decay-rounds 1 --entropy-weight 0.002 \
+  --monitor-every 10 --monitor-seeds 64 \
+  --evaluate-seeds 128 \
+  --checkpoint results/native-tempered-final169.pt \
+  --output results/native-tempered-final169-model.json \
+  --report results/native-tempered-final169-report.json \
+  2>&1 | tee results/native-tempered-final169.log
+```
+
+This deliberately retains the low-temperature behavior at the end
+of the second experiment. It may produce **slow exploration** and
+is not guaranteed to achieve any victory. Inspect the fixed-seed
+monitor after 20–40 rounds; if greedy progress is stagnant, investigate
+the model/reward policy rather than blindly increasing the training
+budget. For consistent checkpoint resumption, do not change
+temperature, seeds or warm-start JSON within this third experiment.
+
 For subsequent experiments, periodic **greedy fixed-seed monitoring**
 now runs after rounds 1, 10, 20, ... by default on 64 seed names
 `selfplay-monitor-0` through `selfplay-monitor-63`, distinct from the
