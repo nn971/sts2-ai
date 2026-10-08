@@ -1,3 +1,4 @@
+from .fair_replay import FairReplayPuctAdapter
 from .base import ActionEvaluation, SearchAlgorithm, SearchBudget, SearchResult
 from .card_priors import (
     CARD_PRIOR_FORMAT,
@@ -29,6 +30,7 @@ __all__ = [
     "CardPriorDataset",
     "FAIR_TRANSITION_CAPABILITY_ID",
     "FairPuctUnavailable",
+    "FairReplayPuctAdapter",
     "IncompleteChanceRollout",
     "LearnedCutoffValue",
     "PublicSearchNode",
