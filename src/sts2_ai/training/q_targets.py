@@ -46,6 +46,9 @@ class QTeacherConfig:
         )
 
 
+_DEFAULT_Q_CONFIG = QTeacherConfig()
+
+
 def distill_one_q_target(
     example: TrainingExample, config: QTeacherConfig
 ) -> tuple[TrainingExample | None, str, float | None]:
@@ -112,7 +115,7 @@ def distill_one_q_target(
 
 def distill_q_targets(
     examples: tuple[TrainingExample, ...],
-    config: QTeacherConfig = QTeacherConfig(),
+    config: QTeacherConfig = _DEFAULT_Q_CONFIG,
 ) -> tuple[tuple[TrainingExample, ...], dict[str, Any]]:
     if not examples:
         raise ValueError("Q-target distillation needs searched-root data")
