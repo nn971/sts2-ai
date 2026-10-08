@@ -104,6 +104,21 @@ CREATE TABLE IF NOT EXISTS search_action_evidence (
 );
 CREATE INDEX IF NOT EXISTS idx_search_action_state
 ON search_action_evidence(state_hash, information_policy, search_regime);
+
+CREATE TABLE IF NOT EXISTS search_root_origin (
+    state_hash TEXT NOT NULL,
+    information_policy TEXT NOT NULL,
+    search_regime TEXT NOT NULL,
+    search_budget INTEGER NOT NULL,
+    search_version TEXT NOT NULL,
+    emulator_revision TEXT NOT NULL,
+    game_build TEXT NOT NULL,
+    run_seed TEXT NOT NULL,
+    PRIMARY KEY (
+        state_hash, information_policy, search_regime, search_budget,
+        search_version, emulator_revision, game_build, run_seed
+    )
+);
 """
 
 
@@ -536,6 +551,48 @@ class SQLiteStrategyStore:
             ORDER BY state_hash ASC
             """,
             parameters,
+        ).fetchall()
+        return tuple(str(row[0]) for row in rows)
+
+    def add_search_origin(self, root: SearchRootEvidence, run_seed: str) -> None:
+        """Attribute one exact search root to every run that produced it.
+
+        The search evidence itself is keyed by state/config; multiple original
+        run seeds can legitimately reach it. Store provenance separately rather
+        than overwriting the last seed in the upsert.
+        """
+        if not run_seed:
+            raise ValueError("run_seed must be nonempty")
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT OR IGNORE INTO search_root_origin (
+                    state_hash, information_policy, search_regime, search_budget,
+                    search_version, emulator_revision, game_build, run_seed
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    root.state_hash, root.information_policy, root.search_regime,
+                    root.search_budget, root.search_version,
+                    root.emulator_revision, root.game_build, run_seed,
+                ),
+            )
+
+    def search_origins(self, root: SearchRootEvidence) -> tuple[str, ...]:
+        rows = self._connection.execute(
+            """
+            SELECT run_seed FROM search_root_origin
+            WHERE state_hash = ? AND information_policy = ?
+              AND search_regime = ? AND search_budget = ?
+              AND search_version = ? AND emulator_revision = ?
+              AND game_build = ?
+            ORDER BY run_seed
+            """,
+            (
+                root.state_hash, root.information_policy, root.search_regime,
+                root.search_budget, root.search_version,
+                root.emulator_revision, root.game_build,
+            ),
         ).fetchall()
         return tuple(str(row[0]) for row in rows)
 
