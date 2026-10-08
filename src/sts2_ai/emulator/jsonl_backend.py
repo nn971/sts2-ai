@@ -189,6 +189,13 @@ class JsonlEmulatorBackend:
             self._terminate()
             raise JsonlBridgeError("Unrecognized local combat-stream conditioning capability")
 
+        self._pristine_reward_proposal_schema = hello.get("pristineRewardProposalId")
+        if self._pristine_reward_proposal_schema not in (
+            None, "prototype-pristine-reward-branch-v1"
+        ):
+            self._terminate()
+            raise JsonlBridgeError("Unrecognized pristine-reward proposal capability")
+
         self._factorized_initial_stream_schema = hello.get("factorizedInitialStreamsId")
         if self._factorized_initial_stream_schema not in (
             None, "prototype-independent-initial-streams-v1"
@@ -228,6 +235,41 @@ class JsonlEmulatorBackend:
 
     def reset_operation_profile(self) -> None:
         self._operation_profile.clear()
+
+    @property
+    def pristine_reward_proposal_schema(self) -> str | None:
+        """Capability to propose independent pristine reward RNG states."""
+        value = self._pristine_reward_proposal_schema
+        return value if isinstance(value, str) else None
+
+    def propose_pristine_reward(
+        self,
+        state: StateHandle,
+        action: LegalAction,
+        *,
+        reward_initial_state: int,
+    ) -> StateHandle:
+        """Advance a hypothetical combat->reward action with one 64-bit proposal.
+
+        The emulator enforces the independent-stream experimental prior,
+        an untouched reward cursor, and an actual first-reward transition.
+        The caller must independently check the complete public next frame
+        and menu. This cannot condition native one-seed game RNG.
+        """
+        if self.pristine_reward_proposal_schema is None:
+            raise JsonlBridgeError("Pristine reward branching is unavailable")
+        if type(reward_initial_state) is not int or not 0 <= reward_initial_state < 1 << 64:
+            raise ValueError("Reward proposal must be an unsigned 64-bit integer")
+        response = self._request(
+            "propose_pristine_reward",
+            state_handle=state,
+            action_id=action.action_id,
+            reward_initial_state_hex=f"{reward_initial_state:016x}",
+        )
+        if (response.get("schemaId") != self.pristine_reward_proposal_schema
+                or response.get("policyId") != FAIR_POLICY_ID):
+            raise JsonlBridgeError("Reward proposal response violates declared capability")
+        return self._require_string(response, "child")
 
     @property
     def factorized_initial_stream_schema(self) -> str | None:
