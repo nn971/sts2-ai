@@ -1368,10 +1368,12 @@ def _train_neural(args: argparse.Namespace) -> None:
         "policy_target_modes": sorted({r.policy_target_mode for r in roots}),
         "value_target_kind": (
             "heuristic-continuation-terminal" if args.cutoff_continuations is not None
-            else "searched-root-best-action"
+            else ("searched-root-best-action" if args.root_value_weight > 0 else "untrained")
         ),
         "root_train": asdict(evaluate_neural(
-            model, root_train, compare_root_values=args.cutoff_continuations is None
+            model, root_train, compare_root_values=(
+                args.cutoff_continuations is None and args.root_value_weight > 0
+            )
         )),
         "root_validation": asdict(evaluate_neural(
             model, root_holdout, compare_root_values=args.cutoff_continuations is None
