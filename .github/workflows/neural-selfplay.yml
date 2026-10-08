@@ -43,6 +43,17 @@ jobs:
             --runs 2 --max-decisions 2048 \
             --report /tmp/sts2-native-overgrowth-smoke.json
           python -c 'import json; from pathlib import Path; r=json.loads(Path("/tmp/sts2-native-overgrowth-smoke.json").read_text()); assert r["environment"]=="native-overgrowth"; assert len(r["runs"])==2; assert r["total_card_reward_menus"]>0; assert r["total_card_rewards_taken"]>0'
+      - name: First real native-Overgrowth neural optimizer update
+        run: |
+          python tools/train_selfplay.py \
+            --environment native-overgrowth \
+            --workers 2 --rounds 1 --episodes 2 \
+            --max-decisions 2048 --dimension 64 --hidden 8 \
+            --evaluate-seeds 1 --seed 23 \
+            --checkpoint /tmp/sts2-native-train-checkpoint.pt \
+            --output /tmp/sts2-native-train-model.json \
+            --report /tmp/sts2-native-train-report.json
+          python -c 'import json; from pathlib import Path; r=json.loads(Path("/tmp/sts2-native-train-report.json").read_text()); assert r["training_environment"]=="native-overgrowth"; assert r["gradient_updates"]>0; assert r["gradient_decision_samples"]>0; assert r["train_completed"]>0'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -52,4 +63,7 @@ jobs:
             /tmp/sts2-selfplay-report.json
             /tmp/sts2-selfplay-checkpoint.pt
             /tmp/sts2-native-overgrowth-smoke.json
+            /tmp/sts2-native-train-report.json
+            /tmp/sts2-native-train-model.json
+            /tmp/sts2-native-train-checkpoint.pt
           if-no-files-found: ignore
