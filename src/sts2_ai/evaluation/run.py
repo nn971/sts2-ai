@@ -29,6 +29,11 @@ class RunSummary:
     frontier_progress: float
     frontier_enemy_hp: int | None
     hp_trajectory: tuple[int, ...]
+    # Optional defaults preserve compatibility with historical serialized runs.
+    act1_cleared: bool | None = None
+    full_game_victory: bool | None = None
+    censored: bool = False
+    episode_goal_version: str = "prototype-three-act-v0"
 
     @property
     def won(self) -> bool:
@@ -109,9 +114,9 @@ def play_run(
         terminal = backend.is_terminal(state)
         outcome_raw = final_state.get("terminal_outcome")
         outcome = (
-            str(outcome_raw)
-            if isinstance(outcome_raw, str)
-            else ("truncated" if not terminal else "unknown")
+            "truncated"
+            if not terminal
+            else (str(outcome_raw) if isinstance(outcome_raw, str) else "unknown")
         )
         act = final_state.get("act")
         floor = final_state.get("floor")
@@ -132,6 +137,19 @@ def play_run(
             frontier_progress=_continuous_progress(frontier_state),
             frontier_enemy_hp=_remaining_enemy_hp(frontier_state),
             hp_trajectory=tuple(hp_trajectory),
+            # Reaching Act 2 certifies an Act-1 clear even if the run
+            # later truncates; an unfinished Act-1 run remains unknown.
+            act1_cleared=(
+                True if (isinstance(act, int) and act >= 2) or outcome == "victory"
+                else False if outcome == "defeat"
+                else None
+            ),
+            full_game_victory=(
+                True if outcome == "victory"
+                else False if outcome == "defeat"
+                else None
+            ),
+            censored=outcome not in ("victory", "defeat"),
         )
     finally:
         backend.release_many([state])
