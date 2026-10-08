@@ -718,6 +718,7 @@ def _evaluate(args: argparse.Namespace) -> None:
                             search_budget=args.budget,
                             emulator_revision=backend.emulator_revision,
                             game_build=args.game_build,
+                            run_seed=f"{args.seed_prefix}-{index}",
                         )
 
                     agent = OracleMctsAgent(
@@ -772,6 +773,7 @@ def _evaluate(args: argparse.Namespace) -> None:
                                 search_budget=args.shadow_budget,
                                 emulator_revision=backend.emulator_revision,
                                 game_build=args.game_build,
+                                run_seed=f"{args.seed_prefix}-{index}",
                             )
                         decision_observer = observe_shadow
 
@@ -1006,6 +1008,7 @@ def _benchmark(args: argparse.Namespace) -> None:
                                 search_budget=search_budget,
                                 emulator_revision=backend.emulator_revision,
                                 game_build=args.game_build,
+                                run_seed=f"{args.seed_prefix}-{index}",
                             )
 
                         agent = OracleMctsAgent(
