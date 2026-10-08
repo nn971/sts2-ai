@@ -788,14 +788,36 @@ V_alpha = ALPHA * V_learned + (1 - ALPHA) * V_handcrafted
 ```
 
 Both alpha and the model hash are recorded in the search-version identity.
-Exact terminal rewards are never blended. Alpha 0.25 and 0.5 are being
-checked as preselected conservative alternatives on the same three seeds;
-no mixture is promoted to the default without stronger multi-seed evidence.
+Exact terminal rewards are never blended. The preselected alpha = 0.25 and
+0.5 alternatives have now been tested on the same three seeds at MCTS-32:
+
+| Learned weight | MCTS-32 frontier | Terminal progress | Time/run |
+| ---: | ---: | ---: | ---: |
+| 0 (handcrafted) | 5.239 | 6.00 | 15.42 s |
+| 0.25 | 5.248 | 6.00 | 26.75 s |
+| 0.50 | 5.181 | 6.00 | 44.74 s |
+| 1 (fully learned) | 4.714 | 5.33 | 17.35 s |
+
+The 0.25 mixture differs from the handcrafted baseline by only +0.009
+frontier progress on three seeds, much too little to justify a strength
+claim, and the learned mixtures are materially more expensive on these runs.
+For now **the handcrafted cutoff remains the default** and the weight flag
+remains purely experimental.
+
+A further **offline comparator** on the exact same grouped 136-example
+holdout evaluates the old handcrafted cutoff against MCTS root-value labels.
+Its RMSE is **0.308**, versus **0.255** for learned v2 and **0.348** for the
+constant training-mean baseline. Thus the learned predictor does beat the
+hand-built one at fitting *those root labels*, even as full-game decisions
+regress. This increases the importance of distinguishing the distributions
+and semantics of root labels and rollout-cutoff evaluations.
 
 Next: preserve the root- and fair-observation-grouped train/test split;
 measure teacher-action entropy and distribution shift between searched roots
 and rollout-cutoff states; collect sufficiently broad run-level training
-signals before adding a larger model.
+signals before adding a larger model. Explicitly test a value model trained
+on actual rollout-cutoff states rather than continuing to tune mixtures
+on the same three seeds.
 
 ## Immediate implementation sprint
 
