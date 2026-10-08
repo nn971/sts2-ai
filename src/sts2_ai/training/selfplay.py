@@ -303,7 +303,7 @@ def train_selfplay(
         (
             f"{SELFPLAY_VERSION}:{seed}:{rounds}:{episodes_per_round}:"
             f"{dimension}:{hidden}:{learning_rate}:{run_seed_prefix}"
-        ).encode("utf-8")
+        ).encode()
     ).hexdigest()[:12]
     final = _export(
         params, dimension, hidden,
