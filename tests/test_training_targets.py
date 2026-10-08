@@ -222,7 +222,7 @@ def test_grouped_split_rejects_single_state() -> None:
         emulator_revision="emu",
         source_state_hash="one-state",
     )
-    with pytest.raises(ValueError, match="distinct states"):
+    with pytest.raises(ValueError, match="distinct observation groups"):
         split_training_examples((example, example))
 
 
