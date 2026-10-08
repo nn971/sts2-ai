@@ -37,6 +37,12 @@ from sts2_ai.strategy_db import (
     diagnose_budget_disagreements,
     record_search_result,
 )
+from sts2_ai.training.diagnostics import (
+    CutoffSampler,
+    load_cutoff_samples,
+    observation_shift_report,
+    teacher_policy_report,
+)
 from sts2_ai.training import (
     build_training_examples,
     evaluate_hashed_linear,
@@ -125,6 +131,18 @@ def main() -> None:
         help="SQLite evidence store used by MCTS evaluations",
     )
     evaluate.add_argument("--game-build", default="unknown")
+    evaluate.add_argument(
+        "--cutoff-samples", type=Path,
+        help="write unlabeled sampled nonterminal MCTS cutoff observations to JSONL",
+    )
+    evaluate.add_argument(
+        "--cutoff-sample-every", type=int, default=32,
+        help="retain every Nth nonterminal cutoff callback",
+    )
+    evaluate.add_argument(
+        "--cutoff-sample-limit", type=int, default=10000,
+        help="maximum number of unique cutoff observations to retain",
+    )
     evaluate.add_argument(
         "--profile",
         action="store_true",
@@ -229,6 +247,14 @@ def main() -> None:
         help="emit every matching budget instead of the strongest root per exact state",
     )
 
+    diagnose_training = sub.add_parser(
+        "diagnose-training",
+        help="report teacher entropy and optional root-to-cutoff distribution shift",
+    )
+    diagnose_training.add_argument("dataset", type=Path)
+    diagnose_training.add_argument("--cutoff-samples", type=Path)
+    diagnose_training.add_argument("--json-output", type=Path)
+
     train_linear = sub.add_parser(
         "train-linear",
         help="train the dependency-free hashed linear policy/value baseline",
@@ -284,6 +310,21 @@ def main() -> None:
 
     if args.command == "export-training":
         _export_training(args)
+        return
+
+    if args.command == "diagnose-training":
+        examples = load_training_jsonl(args.dataset)
+        report: dict[str, object] = {"teacher_policy": teacher_policy_report(examples)}
+        if args.cutoff_samples is not None:
+            samples = load_cutoff_samples(args.cutoff_samples)
+            report["root_to_cutoff_shift"] = observation_shift_report(
+                examples, samples
+            )
+        rendered = json.dumps(report, sort_keys=True, indent=2)
+        print(rendered)
+        if args.json_output is not None:
+            args.json_output.parent.mkdir(parents=True, exist_ok=True)
+            args.json_output.write_text(rendered + "\n", encoding="utf-8")
         return
 
     if args.command == "train-linear":
@@ -354,16 +395,24 @@ def _evaluate(args: argparse.Namespace) -> None:
         raise SystemExit("--rollout-depth must be non-negative")
     if args.rollout_batch_size <= 0:
         raise SystemExit("--rollout-batch-size must be positive")
+    if args.cutoff_sample_every <= 0 or args.cutoff_sample_limit <= 0:
+        raise SystemExit("--cutoff-sample-every and --cutoff-sample-limit must be positive")
     if args.virtual_loss is not None and not -1.0 <= args.virtual_loss <= 1.0:
         raise SystemExit("--virtual-loss must lie in [-1, 1]")
 
     if args.cutoff_model is not None and (args.agent != "mcts" or args.budget == 0):
         raise SystemExit("--cutoff-model requires MCTS with a positive budget")
+    if args.cutoff_samples is not None and (args.agent != "mcts" or args.budget == 0):
+        raise SystemExit("--cutoff-samples requires MCTS with a positive budget")
     cutoff = (
         LearnedCutoffValue.load(args.cutoff_model, learned_weight=args.learned_weight)
         if args.cutoff_model else None
     )
     policy = InformationPolicy(FAIR_POLICY_ID)
+    sampler = (
+        CutoffSampler(every=args.cutoff_sample_every, max_unique=args.cutoff_sample_limit)
+        if args.cutoff_samples is not None else None
+    )
     summaries = []
     bridge_profile: Mapping[str, BridgeOperationStats] = {}
     strategy_store = (
@@ -396,6 +445,11 @@ def _evaluate(args: argparse.Namespace) -> None:
                         rollout_batch_size=args.rollout_batch_size,
                         rollout_mode=args.rollout_mode,
                         virtual_loss=args.virtual_loss,
+                        cutoff_observer=(
+                            (lambda obs, run_seed=f"{args.seed_prefix}-{index}":
+                                sampler.record(obs, run_seed=run_seed))
+                            if sampler is not None else None
+                        ),
                         seed=args.agent_seed + index,
                     )
 
@@ -436,6 +490,27 @@ def _evaluate(args: argparse.Namespace) -> None:
     finally:
         if strategy_store is not None:
             strategy_store.close()
+
+    if sampler is not None:
+        count = sampler.write_jsonl(
+            args.cutoff_samples,
+            provenance={
+                "search_regime": "oracle-exact",
+                "emulator_revision": backend.emulator_revision,
+                "game_build": args.game_build,
+                "rollout_policy": args.rollout_policy,
+                "rollout_mode": args.rollout_mode,
+                "rollout_depth": args.rollout_depth,
+                "rollout_batch_size": args.rollout_batch_size,
+                "budget": args.budget,
+                "cutoff_value_id": cutoff.value_id if cutoff is not None else "sts2-value-v2-progress-hp",
+            },
+        )
+        print(
+            f"Captured {count} unique cutoff observations from "
+            f"{sampler.sampled}/{sampler.seen} eligible callbacks: "
+            f"{args.cutoff_samples}"
+        )
 
     wins = sum(summary.won for summary in summaries)
     avg_progress = statistics.fmean(summary.terminal_progress for summary in summaries)
@@ -480,6 +555,8 @@ def _evaluate(args: argparse.Namespace) -> None:
             "virtual_loss": args.virtual_loss if args.agent == "mcts" else None,
             "cutoff_value_id": cutoff.value_id if cutoff is not None else None,
             "learned_weight": args.learned_weight if cutoff is not None else None,
+            "cutoff_sample_path": str(args.cutoff_samples) if sampler is not None else None,
+            "cutoff_eligible_callbacks": sampler.seen if sampler is not None else None,
             "runs": [asdict(summary) for summary in summaries],
             "bridge_profile": {
                 operation: asdict(stats)
