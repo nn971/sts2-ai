@@ -45,6 +45,16 @@ sts2-emulator  <---  sts2-ai
 
 ## Current status
 
+**Joint post-map history conditioning (synthetic independent-stream prior):**
+`CoupledFactorizedHistoryRejectionSampler` now draws complete hypothetical
+states from the exact factorized RunStart posterior and replays every
+subsequent publicly observed action/observation/menu together, preserving
+all six RNG streams and correlations. The accepted states are exact
+conditional samples under the **declared alternate game prior**; finite
+rejection caps fail explicitly. This is a correctness pilot, not a native
+STS2 chance model. See [joint history conditioning](docs/COUPLED_FACTORIZED_HISTORY_REJECTION.md).
+
+
 **Exact factorized RunStart posterior (alternate game prior):** a new
 two-frame public-history sampler conditions independent map and combat
 stream priors in `O(|M|+|C|)` rather than enumerating every pair,
