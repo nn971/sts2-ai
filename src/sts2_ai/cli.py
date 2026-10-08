@@ -333,21 +333,21 @@ def main() -> None:
     q_teacher.add_argument("--temperature", type=float, default=0.15)
     q_teacher.add_argument("--json-output", type=Path)
 
-    q_consensus = sub.add_parser(
+    consensus_parser = sub.add_parser(
         "distill-consensus-q-teacher",
         help="filter same-root high-budget Q policy targets by low-budget winner agreement",
     )
-    q_consensus.add_argument("low", type=Path)
-    q_consensus.add_argument("high", type=Path)
-    q_consensus.add_argument("output", type=Path)
-    q_consensus.add_argument("--min-budget", type=int, default=64)
-    q_consensus.add_argument("--min-semantic-visits", type=int, default=2)
-    q_consensus.add_argument("--min-value-gap", type=float, default=0.02)
-    q_consensus.add_argument("--uncertainty-scale", type=float, default=0.0)
-    q_consensus.add_argument("--temperature", type=float, default=0.15)
-    q_consensus.add_argument("--min-low-semantic-visits", type=int, default=1)
-    q_consensus.add_argument("--min-low-value-gap", type=float, default=0.01)
-    q_consensus.add_argument("--json-output", type=Path)
+    consensus_parser.add_argument("low", type=Path)
+    consensus_parser.add_argument("high", type=Path)
+    consensus_parser.add_argument("output", type=Path)
+    consensus_parser.add_argument("--min-budget", type=int, default=64)
+    consensus_parser.add_argument("--min-semantic-visits", type=int, default=2)
+    consensus_parser.add_argument("--min-value-gap", type=float, default=0.02)
+    consensus_parser.add_argument("--uncertainty-scale", type=float, default=0.0)
+    consensus_parser.add_argument("--temperature", type=float, default=0.15)
+    consensus_parser.add_argument("--min-low-semantic-visits", type=int, default=1)
+    consensus_parser.add_argument("--min-low-value-gap", type=float, default=0.01)
+    consensus_parser.add_argument("--json-output", type=Path)
 
     teacher_pair = sub.add_parser(
         "compare-teachers",
@@ -481,7 +481,7 @@ def main() -> None:
         return
 
     if args.command == "distill-consensus-q-teacher":
-        config = ConsensusConfig(
+        consensus_config = ConsensusConfig(
             high_q=QTeacherConfig(
                 min_budget=args.min_budget,
                 min_semantic_visits=args.min_semantic_visits,
@@ -492,14 +492,14 @@ def main() -> None:
             min_low_semantic_visits=args.min_low_semantic_visits,
             min_low_value_gap=args.min_low_value_gap,
         )
-        selected, report = distill_consensus_targets(
+        selected, consensus_report = distill_consensus_targets(
             load_training_jsonl(args.low),
             load_training_jsonl(args.high),
-            config,
+            consensus_config,
         )
         write_training_jsonl(selected, args.output)
-        report["output"] = str(args.output)
-        rendered = json.dumps(report, indent=2, sort_keys=True)
+        consensus_report["output"] = str(args.output)
+        rendered = json.dumps(consensus_report, indent=2, sort_keys=True)
         print(rendered)
         if args.json_output is not None:
             args.json_output.parent.mkdir(parents=True, exist_ok=True)
