@@ -32,6 +32,7 @@ from sts2_ai.evaluation import (
     play_run,
     summarize_runs,
 )
+from sts2_ai.models import HashedLinearPolicyValueModel
 from sts2_ai.search import LearnedCutoffValue, SearchResult, UctMcts
 from sts2_ai.strategy_db import (
     SQLiteStrategyStore,
@@ -46,6 +47,11 @@ from sts2_ai.training import (
     split_training_examples,
     train_hashed_linear,
     write_training_jsonl,
+)
+from sts2_ai.training.continuations import (
+    CutoffContinuationCollector,
+    continuation_report,
+    load_continuations,
 )
 from sts2_ai.training.diagnostics import (
     CutoffSampler,
@@ -143,6 +149,22 @@ def main() -> None:
     evaluate.add_argument(
         "--cutoff-sample-limit", type=int, default=10000,
         help="maximum number of unique cutoff observations to retain",
+    )
+    evaluate.add_argument(
+        "--cutoff-continuations", type=Path,
+        help="save forked heuristic continuation outcomes from sampled exact cutoff states",
+    )
+    evaluate.add_argument(
+        "--continuation-every", type=int, default=64,
+        help="label every Nth eligible MCTS cutoff (subject to sample limit)",
+    )
+    evaluate.add_argument(
+        "--continuation-limit", type=int, default=64,
+        help="max unique exact cutoff states to label",
+    )
+    evaluate.add_argument(
+        "--continuation-max-decisions", type=int, default=512,
+        help="maximum heuristic decisions per fork (incomplete returns stay censored)",
     )
     evaluate.add_argument(
         "--profile",
@@ -256,6 +278,14 @@ def main() -> None:
     diagnose_training.add_argument("--cutoff-samples", type=Path)
     diagnose_training.add_argument("--json-output", type=Path)
 
+    diagnose_continuations = sub.add_parser(
+        "diagnose-continuations",
+        help="measure actual heuristic continuation outcomes and cutoff value RMSE",
+    )
+    diagnose_continuations.add_argument("dataset", type=Path)
+    diagnose_continuations.add_argument("--cutoff-model", type=Path)
+    diagnose_continuations.add_argument("--json-output", type=Path)
+
     train_linear = sub.add_parser(
         "train-linear",
         help="train the dependency-free hashed linear policy/value baseline",
@@ -322,6 +352,19 @@ def main() -> None:
                 examples, samples
             )
         rendered = json.dumps(diagnostic_report, sort_keys=True, indent=2)
+        print(rendered)
+        if args.json_output is not None:
+            args.json_output.parent.mkdir(parents=True, exist_ok=True)
+            args.json_output.write_text(rendered + "\n", encoding="utf-8")
+        return
+
+    if args.command == "diagnose-continuations":
+        records = load_continuations(args.dataset)
+        model = (
+            HashedLinearPolicyValueModel.load(args.cutoff_model)
+            if args.cutoff_model is not None else None
+        )
+        rendered = json.dumps(continuation_report(records, model=model), indent=2, sort_keys=True)
         print(rendered)
         if args.json_output is not None:
             args.json_output.parent.mkdir(parents=True, exist_ok=True)
@@ -398,6 +441,11 @@ def _evaluate(args: argparse.Namespace) -> None:
         raise SystemExit("--rollout-batch-size must be positive")
     if args.cutoff_sample_every <= 0 or args.cutoff_sample_limit <= 0:
         raise SystemExit("--cutoff-sample-every and --cutoff-sample-limit must be positive")
+    if min(
+        args.continuation_every, args.continuation_limit,
+        args.continuation_max_decisions,
+    ) <= 0:
+        raise SystemExit("Continuation limits must be positive")
     if args.virtual_loss is not None and not -1.0 <= args.virtual_loss <= 1.0:
         raise SystemExit("--virtual-loss must lie in [-1, 1]")
 
@@ -405,6 +453,8 @@ def _evaluate(args: argparse.Namespace) -> None:
         raise SystemExit("--cutoff-model requires MCTS with a positive budget")
     if args.cutoff_samples is not None and (args.agent != "mcts" or args.budget == 0):
         raise SystemExit("--cutoff-samples requires MCTS with a positive budget")
+    if args.cutoff_continuations is not None and (args.agent != "mcts" or args.budget == 0):
+        raise SystemExit("--cutoff-continuations requires MCTS with a positive budget")
     cutoff = (
         LearnedCutoffValue.load(args.cutoff_model, learned_weight=args.learned_weight)
         if args.cutoff_model else None
@@ -414,6 +464,7 @@ def _evaluate(args: argparse.Namespace) -> None:
         CutoffSampler(every=args.cutoff_sample_every, max_unique=args.cutoff_sample_limit)
         if args.cutoff_samples is not None else None
     )
+    collector: CutoffContinuationCollector | None = None
     summaries = []
     bridge_profile: Mapping[str, BridgeOperationStats] = {}
     strategy_store = (
@@ -428,6 +479,15 @@ def _evaluate(args: argparse.Namespace) -> None:
             build=not args.no_build,
         ) as backend:
             backend.reset_operation_profile()
+            if args.cutoff_continuations is not None:
+                collector = CutoffContinuationCollector(
+                    backend,
+                    policy=policy,
+                    continuation_policy=_rollout_agent(args),
+                    every=args.continuation_every,
+                    max_unique=args.continuation_limit,
+                    max_decisions=args.continuation_max_decisions,
+                )
             for index in range(args.seeds):
                 agent: Agent | ExactStateAgent
                 if args.agent == "random":
@@ -449,6 +509,10 @@ def _evaluate(args: argparse.Namespace) -> None:
                         cutoff_observer=(
                             partial(sampler.record, run_seed=f"{args.seed_prefix}-{index}")
                             if sampler is not None else None
+                        ),
+                        continuation_observer=(
+                            partial(collector.record, run_seed=f"{args.seed_prefix}-{index}")
+                            if collector is not None else None
                         ),
                         seed=args.agent_seed + index,
                     )
@@ -515,6 +579,32 @@ def _evaluate(args: argparse.Namespace) -> None:
             f"{args.cutoff_samples}"
         )
 
+    if collector is not None:
+        record_count = collector.write_jsonl(
+            args.cutoff_continuations,
+            provenance={
+                "search_regime": "oracle-exact",
+                "emulator_revision": backend.emulator_revision,
+                "binding_version": backend.binding_version,
+                "game_build": args.game_build,
+                "rollout_policy": args.rollout_policy,
+                "rollout_mode": args.rollout_mode,
+                "rollout_depth": args.rollout_depth,
+                "budget": args.budget,
+                "agent_seed": args.agent_seed,
+                "seed_prefix": args.seed_prefix,
+                "cutoff_value_id": (
+                    cutoff.value_id if cutoff is not None
+                    else "sts2-value-v2-progress-hp"
+                ),
+            },
+        )
+        print(
+            f"Collected {record_count} independent cutoff continuations "
+            f"from {collector.sampled}/{collector.seen} eligible callbacks: "
+            f"{args.cutoff_continuations}"
+        )
+
     wins = sum(summary.won for summary in summaries)
     avg_progress = statistics.fmean(summary.terminal_progress for summary in summaries)
     avg_decisions = statistics.fmean(summary.decisions for summary in summaries)
@@ -559,6 +649,9 @@ def _evaluate(args: argparse.Namespace) -> None:
             "cutoff_value_id": cutoff.value_id if cutoff is not None else None,
             "learned_weight": args.learned_weight if cutoff is not None else None,
             "cutoff_sample_path": str(args.cutoff_samples) if sampler is not None else None,
+            "cutoff_continuation_path": (
+                str(args.cutoff_continuations) if collector is not None else None
+            ),
             "cutoff_eligible_callbacks": sampler.seen if sampler is not None else None,
             "runs": [asdict(summary) for summary in summaries],
             "bridge_profile": {
