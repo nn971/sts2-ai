@@ -53,7 +53,7 @@ python -u tools/train_selfplay.py \
   --build \
   --environment native-overgrowth \
   --initialize-from-model results/native-round20-model.json \
-  --workers 4 --rounds 300 --episodes 32 \
+  --workers 15 --rounds 300 --episodes 32 \
   --max-decisions 4096 --dimension 128 --hidden 32 \
   --seed 43 --learning-rate 0.001 \
   --temperature-start 0.12 \
@@ -77,8 +77,12 @@ both streams only into a file; that hides live progress. The final full JSON
 report is written separately to the `--report` path.
 
 The experiment runs **300 cohorts × 32 episodes = 9,600 training runs**,
-approximately 40× the 240-episode pilot. Four isolated .NET workers are
-a conservative fit for 8 CPU cores and 24 GB RAM. A Torch checkpoint is
+approximately 40× the 240-episode pilot. Fifteen isolated .NET
+workers may better saturate a Ryzen 9700X with 16 hardware threads, but are
+an aggressive choice for 24 GB RAM; watch process memory/swap and round
+duration rather than assuming linear throughput. Scheduling more workers
+does not change which seed is used by each episode or the learner's
+32-episode cohort. A Torch checkpoint is
 written atomically after every completed cohort, so a graceful interruption
 does not lose completed rounds. If any emulator step crashes, the cohort
 fails closed and writes `results/native-tempered-300-report.failure.json`

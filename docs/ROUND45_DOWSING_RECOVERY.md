@@ -70,7 +70,7 @@ python -u tools/train_selfplay.py \
   --build \
   --environment native-overgrowth \
   --initialize-from-model results/native-tempered-round45-model.json \
-  --workers 4 --rounds 255 --episodes 32 \
+  --workers 15 --rounds 255 --episodes 32 \
   --max-decisions 4096 --dimension 128 --hidden 32 \
   --seed 44 --learning-rate 0.001 \
   --temperature-start 0.08 \
@@ -83,6 +83,15 @@ python -u tools/train_selfplay.py \
   --report results/native-tempered-recovery-255-report.json \
   2>&1 | tee results/native-tempered-recovery-255.log
 ```
+
+With 32 episodes per cohort, 15 process-isolated workers can run up to
+15 emulator episodes concurrently. This is deliberately aggressive for a
+Ryzen 9700X (8 cores / 16 threads) and 24 GB RAM: monitor memory pressure,
+swapping and elapsed seconds per round. More processes are not guaranteed to
+reduce round time. The worker count is scheduling only, does not change
+episode seeds or the on-policy cohort, and is not included in the checkpoint
+fingerprint. If necessary, decrease `--workers` without restarting the
+learning experiment; preserve all other training arguments.
 
 The updated trainer emits a flushed live progress report for **every
 round** and evaluation milestones, and `tee` retains a complete log.
