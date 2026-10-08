@@ -16,6 +16,12 @@ from pathlib import Path
 
 from sts2_ai.agents import HeuristicAgent, NeuralGreedyAgent, RandomAgent
 from sts2_ai.emulator import FAIR_POLICY_ID, InformationPolicy, JsonlEmulatorBackend
+from sts2_ai.emulator.run_environment import (
+    ENVIRONMENTS,
+    LEGACY,
+    NATIVE_OVERGROWTH,
+    require_environment,
+)
 from sts2_ai.evaluation import RunSummary, play_run
 from sts2_ai.evaluation.selfplay_metrics import (
     compare_completed_pairs,
@@ -26,6 +32,11 @@ from sts2_ai.training.selfplay import SELFPLAY_VERSION, train_selfplay
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--environment", choices=ENVIRONMENTS, default=NATIVE_OVERGROWTH,
+        help="Native Overgrowth REQUIRES an advertised emulator JSONL capability; "
+             "legacy-prototype explicitly opts back into six-floor research runs",
+    )
     parser.add_argument("--rounds", type=int, default=3)
     parser.add_argument("--episodes", type=int, default=4)
     parser.add_argument("--max-decisions", type=int, default=2048)
@@ -58,6 +69,9 @@ def main() -> None:
     if args.evaluate_seeds < 1:
         parser.error("--evaluate-seeds must be positive")
     with JsonlEmulatorBackend(build=args.build) as backend:
+        # Refuse before Torch initialization, game generation or checkpoint
+        # writes if the pinned bridge lacks the requested native mode.
+        require_environment(backend, args.environment)
         started_at = time.perf_counter()
         trained = train_selfplay(
             backend,
@@ -71,6 +85,7 @@ def main() -> None:
             workers=args.workers,
             checkpoint_path=args.checkpoint,
             resume=args.resume,
+            environment=args.environment,
         )
         training_wall_seconds = time.perf_counter() - started_at
         trained.model.save(args.output)
@@ -94,6 +109,7 @@ def main() -> None:
                     backend, agent, seed=f"selfplay-heldout-{index}",
                     policy=InformationPolicy(FAIR_POLICY_ID),
                     max_decisions=args.max_decisions,
+                    environment=args.environment,
                 )
                 raw_runs[name].append(episode)
                 evaluations[name].append({
@@ -119,7 +135,12 @@ def main() -> None:
         report = {
             "schema": "sts2-onpolicy-neural-training-smoke-v2",
             "training_version": SELFPLAY_VERSION,
-            "game_prior": "ordinary-prototype-emulator-reset",
+            "game_prior": (
+                "native-structure-overgrowth-prototype-rng"
+                if args.environment == NATIVE_OVERGROWTH
+                else "ordinary-prototype-emulator-reset"
+            ),
+            "training_environment": args.environment,
             "policy_information": FAIR_POLICY_ID,
             "emulator_revision": backend.emulator_revision,
             "model_id": trained.model.model_id,
