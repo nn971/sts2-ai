@@ -45,6 +45,16 @@ sts2-emulator  <---  sts2-ai
 
 ## Current status
 
+**Exact factorized RunStart posterior (alternate game prior):** a new
+two-frame public-history sampler conditions independent map and combat
+stream priors in `O(|M|+|C|)` rather than enumerating every pair,
+while resampling the other four streams independently. An accepted
+complete emulator state advances every RNG cursor through the ordinary
+RunStart mechanics. Exactness is **only** for this explicitly declared
+independent-stream model and the `RunStart → MapChoice` boundary.
+See [factorized RunStart posterior](docs/FACTORIZED_RUNSTART_POSTERIOR.md).
+
+
 **Exact enumerated full-history posterior pilot:** a declared finite,
 uniform seed universe can now be exhausted and conditioned against every
 public observation, player action, and complete legal menu. PUCT samples
