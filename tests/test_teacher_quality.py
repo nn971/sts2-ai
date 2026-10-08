@@ -1,0 +1,119 @@
+"""Teacher signal diagnostics: duplicated actions are not distinct strategy."""
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
+
+from sts2_ai.training.export import load_training_jsonl, write_training_jsonl
+from sts2_ai.training.targets import PolicyTarget, TrainingExample
+from sts2_ai.training.teacher_quality import (
+    TeacherFilter,
+    curate_teacher_examples,
+    grade_teacher_root,
+    teacher_quality_report,
+)
+
+
+def _example(
+    *,
+    visits: tuple[int, int, int] = (7, 7, 6),
+    probabilities: tuple[float, float, float] = (0.35, 0.35, 0.30),
+    values: tuple[float, float, float] = (0.4, 0.4, 0.1),
+    budget: int = 64,
+) -> TrainingExample:
+    state = {
+        "phase": 2,
+        "map": [
+            {"node_id": "left", "room_type": 0},
+            {"node_id": "right", "room_type": 0},
+            {"node_id": "rest", "room_type": 4},
+        ],
+    }
+    return TrainingExample(
+        observation_hash="obs-map",
+        information_policy="fair",
+        policy_targets=tuple(
+            PolicyTarget(
+                action_id=f"choice-{node_id}",
+                action_kind="choose_map_node",
+                action_payload_json=json.dumps({"node_id": node_id}),
+                probability=probabilities[i],
+                visits=visits[i],
+                search_value=values[i],
+            )
+            for i, node_id in enumerate(("left", "right", "rest"))
+        ),
+        value_target=0.4,
+        source_search_id="search-map",
+        emulator_revision="emulator",
+        observation_json=json.dumps(state),
+        source_state_hash="exact",
+        search_budget=budget,
+    )
+
+
+def test_semantic_aggregation_finds_signal_hidden_by_duplicates() -> None:
+    example = _example()
+    quality = grade_teacher_root(example)
+    assert quality.semantic_actions == 2
+    assert quality.legal_actions == 3
+    assert quality.literal_normalized_entropy > 0.99
+    assert quality.semantic_normalized_entropy < 0.89
+    assert quality.semantic_top_probability == pytest.approx(0.70)
+    assert quality.semantic_top_margin == pytest.approx(0.20)
+    assert quality.best_semantic_value_gap == pytest.approx(0.30)
+    assert quality.semantic_min_visits == 6
+    assert quality.value_visit_agreement is True
+    assert quality.eligible
+    report = teacher_quality_report((example,))
+    assert report["eligible_examples"] == 1
+    assert report["mean_semantic_actions"] == 2.0
+
+
+def test_teacher_gate_rejects_flat_underexplored_and_conflicting_roots() -> None:
+    sample = _example()
+    flat = _example(probabilities=(0.25, 0.25, 0.50))
+    underexplored = _example(visits=(0, 0, 20))
+    conflict = _example(values=(0.1, 0.1, 0.8))
+    low_budget = _example(budget=12)
+    assert "flat-semantic-policy" in grade_teacher_root(flat).reasons
+    assert "underexplored-semantic-action" in grade_teacher_root(underexplored).reasons
+    assert "visits-disagree-with-best-value" in grade_teacher_root(conflict).reasons
+    assert "low-budget" in grade_teacher_root(low_budget).reasons
+    assert curate_teacher_examples((sample, flat, underexplored, conflict, low_budget)) == (
+        sample,
+    )
+
+
+def test_teacher_curator_preserves_original_targets(tmp_path: Path) -> None:
+    example = _example()
+    weak = replace(_example(budget=8), observation_hash="weak", source_search_id="weak")
+    source = tmp_path / "roots.jsonl"
+    write_training_jsonl((example, weak), source)
+    output = tmp_path / "strong.jsonl"
+    finished = subprocess.run(
+        [
+            sys.executable, "-m", "sts2_ai.cli", "curate-teacher",
+            str(source), "--output", str(output), "--min-budget", "48",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert json.loads(finished.stdout)["eligible_examples"] == 1
+    assert load_training_jsonl(output) == (example,)
+    assert output.read_text()  # The curator does not renormalize or sharpen visits.
+
+
+def test_bad_filters_and_missing_actions_are_rejected() -> None:
+    with pytest.raises(ValueError, match="budget"):
+        TeacherFilter(min_budget=-1)
+    with pytest.raises(ValueError, match="margin"):
+        TeacherFilter(min_semantic_top_margin=1.0)
+    with pytest.raises(ValueError, match="no legal action"):
+        grade_teacher_root(replace(_example(), policy_targets=()))
