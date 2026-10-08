@@ -16,7 +16,7 @@ class HeuristicAgent:
     to be a useful rollout baseline, not a hand-authored expert.
     """
 
-    policy_id = "heuristic-v2-payload-aware"
+    policy_id = "heuristic-v3-claim-visible-rewards"
 
     def choose(
         self,
@@ -28,9 +28,24 @@ class HeuristicAgent:
 
         raw = json.loads(observation.payload_json)
         state = cast(dict[str, Any], raw if isinstance(raw, dict) else {})
+        # Native encounter rewards are independent and may expose
+        # leave_reward alongside unclaimed card/relic/potion/gold offers.
+        # The old unconditional score of 100 for leave_reward caused the
+        # heuristic to walk away from EVERY combat card reward. Claim or
+        # explicitly skip available offers before taking leave_reward.
+        candidates = tuple(legal_actions)
+        if isinstance(state.get("reward"), dict) and any(
+            action.kind == "leave_reward" for action in candidates
+        ):
+            unresolved = tuple(
+                action for action in candidates if action.kind != "leave_reward"
+            )
+            if unresolved:
+                candidates = unresolved
+
         scored = [
             (self._score(state, action), action.action_id, action)
-            for action in legal_actions
+            for action in candidates
         ]
         _, _, action = max(scored)
         return Decision(action=action, policy_name=self.policy_id)
@@ -61,17 +76,19 @@ class HeuristicAgent:
         if kind == "rest_train":
             return 5.0 if hp_ratio >= 0.70 else 2.5
 
-        if kind == "take_reward_relic":
+        if kind in {"take_reward_relic", "take_reward_extra_relic"}:
             return 15.0
+        if kind == "take_reward_gold":
+            return 8.0
         if kind == "take_reward_potion":
             return 7.0
         if kind == "skip_reward_potion":
             return 1.0
-        if kind == "take_reward_card":
+        if kind in {"take_reward_card", "take_reward_card_group"}:
             deck = state.get("deck")
             deck_size = len(deck) if isinstance(deck, list) else 0
             return 6.0 if deck_size < 24 else 2.0
-        if kind == "skip_reward_card":
+        if kind in {"skip_reward_card", "skip_reward_card_group"}:
             deck = state.get("deck")
             deck_size = len(deck) if isinstance(deck, list) else 0
             return 4.0 if deck_size >= 24 else 1.0
