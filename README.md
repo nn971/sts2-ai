@@ -45,6 +45,18 @@ sts2-emulator  <---  sts2-ai
 
 ## Current status
 
+**Native-structure Overgrowth training gate (blocked on emulator interface):**
+the six-floor Silent environment is no longer the default requested
+experiment. `tools/train_selfplay.py` now selects `native-overgrowth`
+and **fails closed** until the emulator JSONL server explicitly exposes
+the existing C# native-overgrowth run factory. No emulator code has been
+changed. Six-floor testing remains available via
+`--environment legacy-prototype`; old checkpoints cannot resume
+across modes. Act 1 progress for native-shaped runs is normalized on
+16 floors rather than 6. See
+[missing interface contract](docs/NATIVE_OVERGROWTH_TRAINING_GATE.md).
+
+
 **Parallel, resumable neural self-play:** the teacher-free learner now supports
 `--workers N` with independent pinned .NET emulators and actor RNG seeds
 stable across worker scheduling. Each cohort is collected under one frozen
