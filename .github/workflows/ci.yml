@@ -58,3 +58,4 @@ jobs:
             /tmp/sts2-ai-shadow.sqlite /tmp/sts2-ai-shadow-roots.jsonl
           sts2-ai compare-teachers \
             /tmp/sts2-ai-roots.jsonl /tmp/sts2-ai-shadow-roots.jsonl
+          python -c 'import json; from pathlib import Path; files = [Path("/tmp/sts2-ai-roots.jsonl"), Path("/tmp/sts2-ai-shadow-roots.jsonl")]; rows = [[json.loads(line) for line in file.read_text().splitlines()] for file in files]; assert all(dataset and all(item["source_run_seeds"] == ["eval-0"] for item in dataset) for dataset in rows), "root run provenance is missing or wrong"'
