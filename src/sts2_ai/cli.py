@@ -180,6 +180,10 @@ def main() -> None:
         help="max unique exact cutoff states to label",
     )
     evaluate.add_argument(
+        "--continuation-max-per-seed", type=int,
+        help="optional cap per original run seed to prevent early seeds filling the sample",
+    )
+    evaluate.add_argument(
         "--continuation-max-decisions", type=int, default=512,
         help="maximum heuristic decisions per fork (incomplete returns stay censored)",
     )
@@ -534,7 +538,10 @@ def _evaluate(args: argparse.Namespace) -> None:
     if min(
         args.continuation_every, args.continuation_limit,
         args.continuation_max_decisions,
-    ) <= 0:
+    ) <= 0 or (
+        args.continuation_max_per_seed is not None
+        and args.continuation_max_per_seed <= 0
+    ):
         raise SystemExit("Continuation limits must be positive")
     if args.virtual_loss is not None and not -1.0 <= args.virtual_loss <= 1.0:
         raise SystemExit("--virtual-loss must lie in [-1, 1]")
@@ -578,6 +585,7 @@ def _evaluate(args: argparse.Namespace) -> None:
                     continuation_policy=_rollout_agent(args),
                     every=args.continuation_every,
                     max_unique=args.continuation_limit,
+                    max_per_seed=args.continuation_max_per_seed,
                     max_decisions=args.continuation_max_decisions,
                 )
             for index in range(args.seeds):
@@ -685,6 +693,7 @@ def _evaluate(args: argparse.Namespace) -> None:
                 "rollout_mode": args.rollout_mode,
                 "rollout_depth": args.rollout_depth,
                 "budget": args.budget,
+                "continuation_max_per_seed": args.continuation_max_per_seed,
                 "agent_seed": args.agent_seed,
                 "seed_prefix": args.seed_prefix,
                 "cutoff_value_id": (
