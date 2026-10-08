@@ -219,7 +219,7 @@ class RoutePlanningAgent:
 
 
 def _numeric(value: object, default: float) -> float:
-    return float(value) if type(value) in (int, float) else default
+    return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else default
 
 
 def _room_value(room_type: int, hp_fraction: float, gold: float) -> float:
