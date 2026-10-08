@@ -49,24 +49,23 @@ observations and legal actions.
 
 ## Wriggler / Dense Vegetation (2026-10-09)
 
-A native Overgrowth rollout raised:
+The native Overgrowth rollout previously raised:
 
 ```text
 InvalidOperationException: Enemy 'proto.enemy.wriggler' AI conditional state 'init' has no matching branch.
 ```
 
-The emulator's Wriggler initial conditional needs `SlotNameEquals("bite")`
-or `SlotNameEquals("wriggle")`. Phrog Parasite death summons supply those
-slots, but `proto.native.encounter.dense_vegetation_event` lists four
-unnamed Wrigglers. The existing Dense Vegetation test enters combat then
-kills enemies, bypassing normal enemy action resolution. The requested
-**emulator-side** regression is `rest → fight → end_turn` with a living
-Wriggler: [sts2-emulator issue #6](https://github.com/nn971/sts2-emulator/issues/6).
+Root cause: Dense Vegetation spawned four unnamed Wrigglers whereas the
+Wriggler AI resolves its initial move from a numbered encounter slot.
+[Emulator issue #6](https://github.com/nn971/sts2-emulator/issues/6) is
+resolved in `cc78c367a80f88ecef72cc72899892298f20ef90`:
+the encounter and the Wriggler conditional both use source-grounded slot
+names `wriggler1` through `wriggler4`. Phrog Parasite summons also use
+those slot names. Tests exercise two full enemy turns at Ascension 0 and 10;
+the emulator's two CI workflows passed.
 
-The AI deliberately does not disable that encounter, substitute enemy
-behavior, or reinterpret failed transitions as normal episodes. Once the
-emulator fix is independently merged, it should be tested, then pinned in
-`sts2-ai` through a reviewed gitlink update. The existing checkpoint
-contract rejects a changed emulator revision, so start a **new** training
-experiment after repinning. Checkpoints from completed rounds remain useful
-as reproducible records of the old environment.
+`sts2-ai` now pins the repaired emulator. The AI never substitutes enemy
+AI or skips failing encounters. After repinning, restart with a **new**
+training checkpoint; completed-round checkpoints from an earlier emulator
+revision remain reproducible historical artifacts but cannot be resumed
+across this ruleset change.
