@@ -182,6 +182,13 @@ class JsonlEmulatorBackend:
             self._terminate()
             raise JsonlBridgeError("Unrecognized hypothetical draw-order capability")
 
+        self._local_combat_entry_schema = hello.get("conditionalCombatEntryId")
+        if self._local_combat_entry_schema not in (
+            None, "prototype-local-combat-stream-condition-v1"
+        ):
+            self._terminate()
+            raise JsonlBridgeError("Unrecognized local combat-stream conditioning capability")
+
         manifest = self._request("manifest").get("manifest")
         if not isinstance(manifest, dict):
             self._terminate()
@@ -271,6 +278,63 @@ class JsonlEmulatorBackend:
             self.release_many((child,))
             raise JsonlBridgeError("Hypothetical draw injection changed public observation")
         return child
+
+    @property
+    def local_combat_entry_schema(self) -> str | None:
+        """Experimental local chance-stream conditioning; never full-history fair."""
+        value = self._local_combat_entry_schema
+        return value if isinstance(value, str) else None
+
+    def condition_local_combat_entry(
+        self,
+        hypothetical_map_state: StateHandle,
+        map_choice: LegalAction,
+        expected_observation: Observation,
+        expected_legal_actions: Sequence[LegalAction],
+        *,
+        search_seed: int,
+        max_candidates: int = 256,
+    ) -> tuple[StateHandle, int]:
+        """Condition one synthetic pre-entry combat stream on its entire public frame.
+
+        The backend executes complete map-to-combat transitions for candidate
+        search streams and retains the accepted RNG cursor. This is a local,
+        fixed-hypothetical-map-state model, not the native full-run posterior.
+        """
+        if self.local_combat_entry_schema is None:
+            raise JsonlBridgeError("Local combat-entry capability unavailable")
+        if type(search_seed) is not int or not 0 <= search_seed < 1 << 128:
+            raise ValueError("search_seed must be a 128-bit unsigned integer")
+        if type(max_candidates) is not int or not 1 <= max_candidates <= 16384:
+            raise ValueError("max_candidates must lie between 1 and 16384")
+        if map_choice.kind != "choose_map_node":
+            raise ValueError("A public map-node choice is required")
+        if expected_observation.policy_id != FAIR_POLICY_ID:
+            raise ValueError("Expected observation must use the public fair policy")
+        actions = tuple(expected_legal_actions)
+        if not actions or any(not action.action_id for action in actions):
+            raise ValueError("The complete expected legal action menu is required")
+        response = self._request(
+            "condition_combat_entry",
+            state_handle=hypothetical_map_state,
+            action_id=map_choice.action_id,
+            expected_observation_hash=expected_observation.observation_hash,
+            expected_legal_action_ids=[action.action_id for action in actions],
+            search_seed=f"{search_seed:032x}",
+            max_candidates=max_candidates,
+        )
+        child = self._require_string(response, "child")
+        if (response.get("schemaId") != self.local_combat_entry_schema
+                or response.get("policyId") != FAIR_POLICY_ID
+                or response.get("observationHash")
+                != expected_observation.observation_hash):
+            self.release_many((child,))
+            raise JsonlBridgeError("Local combat-entry response violates public contract")
+        candidates = response.get("candidates")
+        if type(candidates) is not int or not 1 <= candidates <= max_candidates:
+            self.release_many((child,))
+            raise JsonlBridgeError("Invalid local combat-entry candidate count")
+        return child, candidates
 
     def legal_actions(self, state: StateHandle) -> tuple[LegalAction, ...]:
         response = self._request("legal_actions", state_handle=state)
