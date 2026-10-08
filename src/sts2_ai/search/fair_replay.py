@@ -113,6 +113,7 @@ class FairReplayPuctAdapter:
         transcript = tuple(history)
         key = self._key(transcript)
         terminal = self._visible_outcome(transcript[-1].observation.payload_json, self._goal)
+        legal: tuple[LegalAction, ...]
         if terminal is not None:
             if legal_actions:
                 raise ValueError("Declared goal terminal must have no search actions")
