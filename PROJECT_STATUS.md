@@ -48,3 +48,13 @@ yet an information-set agent.
 See [the AI prototype roadmap](docs/AI_PROTOTYPE_ROADMAP.md) for prior
 experiments and [the route-planning baseline](docs/ROUTE_PLANNING_BASELINE.md)
 for the current new experiment.
+
+
+### Initial route-planning measurement (2026-10-08)
+
+On eight common-seed runs under the new pinned emulator, the visible-route
+baseline **underperformed** the original heuristic: mean frontier progress
+4.065 vs 4.561, paired delta -0.496 (route ahead/tied/behind 1/1/6).
+Neither policy won a complete run in this sample. Keep the route policy
+opt-in; do not default MCTS rollouts to it or claim a strength gain.
+Details and reproduction: [route baseline](docs/ROUTE_PLANNING_BASELINE.md).
