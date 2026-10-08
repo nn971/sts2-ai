@@ -24,7 +24,7 @@ jobs:
       - name: Install CPU-only PyTorch
         run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Validate real learning and terminal censorship
-        run: python -m pytest tests/test_neural_selfplay.py tests/test_run_environment.py -q
+        run: python -m pytest tests/test_neural_selfplay.py tests/test_run_environment.py tests/test_neural_temperature_diagnostics.py -q
       - name: Actual Silent whole-run neural training and heldout evaluation
         run: |
           python tools/train_selfplay.py \
@@ -54,6 +54,14 @@ jobs:
             --output /tmp/sts2-native-train-model.json \
             --report /tmp/sts2-native-train-report.json
           python -c 'import json; from pathlib import Path; r=json.loads(Path("/tmp/sts2-native-train-report.json").read_text()); assert r["training_environment"]=="native-overgrowth"; assert r["gradient_updates"]>0; assert r["gradient_decision_samples"]>0; assert r["train_completed"]>0'
+      - name: Paired temperature and floor-16 public diagnostic smoke
+        run: |
+          python tools/diagnose_neural_policy.py \
+            --model /tmp/sts2-native-train-model.json \
+            --report /tmp/sts2-native-temperature-diagnostics.json \
+            --runs 2 --temperatures 1 0.5 greedy \
+            --max-decisions 2048 --max-boss-actions 8
+          python -c 'import json; from pathlib import Path; r=json.loads(Path("/tmp/sts2-native-temperature-diagnostics.json").read_text()); assert r["schema"]=="sts2-neural-temperature-diagnostics-v1"; assert r["environment"]=="native-overgrowth"; assert r["temperatures"]==["t1","t0.5","greedy"]; assert all(x["attempted"]==2 for x in r["summary"].values()); assert all(len(x)==2 for x in r["runs"].values()); assert len(r["paired_completed_only"])==2'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -66,4 +74,5 @@ jobs:
             /tmp/sts2-native-train-report.json
             /tmp/sts2-native-train-model.json
             /tmp/sts2-native-train-checkpoint.pt
+            /tmp/sts2-native-temperature-diagnostics.json
           if-no-files-found: ignore
