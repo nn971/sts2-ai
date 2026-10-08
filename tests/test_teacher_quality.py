@@ -28,26 +28,28 @@ def _example(
     budget: int = 64,
 ) -> TrainingExample:
     state = {
-        "phase": 2,
-        "map": [
-            {"node_id": "left", "room_type": 0},
-            {"node_id": "right", "room_type": 0},
-            {"node_id": "rest", "room_type": 4},
-        ],
+        "phase": 3,
+        "combat": {
+            "hand": [
+                {"instance_id": 1, "card_id": "STRIKE", "cost": 1},
+                {"instance_id": 2, "card_id": "STRIKE", "cost": 1},
+                {"instance_id": 3, "card_id": "DEFEND", "cost": 1},
+            ],
+        },
     }
     return TrainingExample(
         observation_hash="obs-map",
         information_policy="fair",
         policy_targets=tuple(
             PolicyTarget(
-                action_id=f"choice-{node_id}",
-                action_kind="choose_map_node",
-                action_payload_json=json.dumps({"node_id": node_id}),
+                action_id=f"card-{node_id}",
+                action_kind="play_card",
+                action_payload_json=json.dumps({"card_instance_id": node_id}),
                 probability=probabilities[i],
                 visits=visits[i],
                 search_value=values[i],
             )
-            for i, node_id in enumerate(("left", "right", "rest"))
+            for i, node_id in enumerate((1, 2, 3))
         ),
         value_target=0.4,
         source_search_id="search-map",
@@ -166,3 +168,33 @@ def test_unresolved_event_choices_are_not_assumed_equivalent() -> None:
     grade = grade_teacher_root(example)
     assert grade.semantic_actions == 2
     assert grade.eligible
+
+
+
+def test_equal_room_type_does_not_make_paths_equivalent() -> None:
+    example = replace(
+        _example(),
+        observation_json=json.dumps({
+            "phase": 2,
+            "map": [
+                {"node_id": "a", "room_type": 0},
+                {"node_id": "b", "room_type": 0},
+                {"node_id": "c", "room_type": 4},
+            ],
+        }),
+        policy_targets=tuple(
+            PolicyTarget(f"path-{i}", p, "choose_map_node",
+                         json.dumps({"node_id": node_id}), visits=visits,
+                         search_value=value)
+            for i, (node_id, p, visits, value) in enumerate([
+                ("a", 0.35, 7, 0.4),
+                ("b", 0.35, 7, 0.4),
+                ("c", 0.30, 6, 0.1),
+            ])
+        ),
+    )
+    quality = grade_teacher_root(example)
+    assert quality.semantic_actions == 3
+    assert quality.literal_normalized_entropy == pytest.approx(
+        quality.semantic_normalized_entropy
+    )
