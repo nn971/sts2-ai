@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from .hashed_linear import HashedLinearPolicyValueModel
-from .neural import NEURAL_FORMAT, NeuralPolicyValueModel
+from .neural import LEGACY_NEURAL_FORMAT, NEURAL_FORMAT, NeuralPolicyValueModel
 from .protocol import PolicyValueEstimate, PolicyValueModel
 
 __all__ = [
@@ -21,6 +21,6 @@ def load_model(path: Path) -> HashedLinearPolicyValueModel | NeuralPolicyValueMo
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise ValueError("Model weights must be a JSON object")
-    if raw.get("format") == NEURAL_FORMAT:
+    if raw.get("format") in {NEURAL_FORMAT, LEGACY_NEURAL_FORMAT}:
         return NeuralPolicyValueModel.load(path)
     return HashedLinearPolicyValueModel.load(path)
