@@ -45,6 +45,17 @@ sts2-emulator  <---  sts2-ai
 
 ## Current status
 
+**Guarded first-reward conditional proposals:** the pinned emulator now
+permits independent reward-stream proposals only while that stream
+has never been consumed, on independent hypothetical Combat → Reward
+transitions. The incremental joint particle filter can generate an
+equal number of such proposals per existing particle and retain **all**
+publicly compatible successors, automatically preserving likelihood-based
+parent weighting. This is a finite empirical research model, **not**
+a native RNG posterior or a guarantee against rare-reward collapse.
+See [pristine reward conditioning](docs/PRISTINE_REWARD_POSTERIOR.md).
+
+
 **Longer Overgrowth posterior benchmark:** a reproducible public-only synthetic
 Silent trace compares retained full-RNG particle cohorts against bounded,
 fresh whole-history joint rejection. Reports include survival by observed
