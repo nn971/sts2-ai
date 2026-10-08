@@ -7,11 +7,12 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Any
+from typing import Any
 
 from sts2_ai.agents import NeuralGreedyAgent
-from sts2_ai.emulator import EmulatorBackend, FAIR_POLICY_ID, InformationPolicy
+from sts2_ai.emulator import FAIR_POLICY_ID, EmulatorBackend, InformationPolicy
 from sts2_ai.evaluation import RunSummary, play_run
 from sts2_ai.evaluation.selfplay_metrics import summarize_completed_runs
 from sts2_ai.models.neural import NeuralPolicyValueModel
