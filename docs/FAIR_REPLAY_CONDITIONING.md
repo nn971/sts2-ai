@@ -33,7 +33,7 @@ is deterministic conditional on (U), for every compatible event (B),
 Accepted seeds thus follow the exact conditional distribution for
 the **specified artificial seed prior**. Neither the live run's seed
 nor its exact fork is passed to the sampler. The matching test includes
-every public observation and the legal chosen action at every step.
+every public observation, the entire legal-action menu, and the chosen action at every step.
 Only accepted state handles survive the sampling call; all rejected
 states are immediately released.
 
@@ -91,8 +91,8 @@ Long full-game rollouts may be very expensive; this example illustrates
 the interface and carries **no guarantee of useful search results**.
 
 For decisions after RunStart, supply the *entire* public transcript:
-every historical `PublicHistoryStep(observation, chosen_action)`, then
-`PublicHistoryStep(current_observation, None)`. Merely supplying the
+every historical `PublicHistoryStep(observation, chosen_action, legal_actions)`, then
+`PublicHistoryStep(current_observation, None, legal_actions)`. Merely supplying the
 current screen drops historical conditioning and is invalid.
 
 ## Censoring and goal semantics
