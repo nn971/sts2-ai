@@ -220,3 +220,60 @@ correlated, the high budget may change its preferred action for valid reasons,
 and Q differences remain noisy. A confident policy should not be trained
 solely because UCT visits are concentrated; inspect the matched-root
 Q-winner consistency and Q-target rejection counts together.
+
+## Six-seed replication and agreement-gated Q teacher (October 8, 2026)
+
+The six held-out run-seed replication of the exploratory Q-softmax-v2
+policy is complete:
+
+https://github.com/nn971/sts2-ai/actions/runs/37755895476
+
+| Six capped runs | Handcrafted MCTS-16 | Exploratory neural rollout |
+| --- | ---: | ---: |
+| Mean frontier progress | 3.5907 | 3.1894 |
+| Mean wall seconds/run | 11.55 | 31.23 |
+| Full-run victories | 0 | 0 |
+
+The learned policy was ahead on 2 seeds and behind on 4, with mean frontier
+difference **-0.4012**. All runs hit the 64-decision truncation limit, so
+none of this establishes completed-run strength. The earlier two-seed positive
+comparison did not replicate.
+
+The same matched-root diagnostic found 113 roots at which both MCTS-12 and
+MCTS-96 had a resolved best semantic action. The winner agreed on 67 and
+**flipped on 46**, only **59.29% agreement**. The teacher is likely too unstable
+for unfiltered action-Q imitation to deliver a reliable policy.
+
+A new *consensus teacher* explicitly gates evidence on both search budgets:
+it requires identical exact-root and legal-action provenance, enough
+low-budget visits to cover all semantic alternatives, a non-tied low-budget
+Q winner, agreement with the high-budget winner, and then the existing
+high-budget Q gap / uncertainty / neural-action-representability checks.
+Labels are copied from the high-budget softmax only when **all** gates pass;
+they are never sharpened just to satisfy the filter.
+
+Reproduce the consensus audit on an existing matched-root pair using fish:
+
+~~~fish
+sts2-ai distill-consensus-q-teacher \
+    results/shadow/low-roots.jsonl \
+    results/shadow/high-roots.jsonl \
+    results/shadow/q-consensus.jsonl \
+    --min-budget 64 --min-semantic-visits 2 \
+    --min-value-gap 0.02 --uncertainty-scale 0 \
+    --min-low-value-gap 0.01 \
+    --json-output results/shadow/q-consensus-audit.json
+~~~
+
+This is a **correlated-search agreement check**, not an independent label,
+confidence interval, or proof that the high-budget choice is optimal. Low and
+high searches use the same hidden state and heuristic cutoff. If insufficient
+roots survive, we should not automatically relax the thresholds. The
+matched-root workflow now conditionally trains and evaluates a
+consensus-gated policy only when at least twelve roots survive, and compares
+it on the same six untouched run seeds. If fewer survive, the evidence
+shortfall remains the experiment's legitimate result.
+
+Longer-term improvements will need independent action-return measurements,
+better exploration and broader complete-run coverage, rather than arbitrary
+reweighting of one noisy teacher.
