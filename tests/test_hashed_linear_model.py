@@ -145,6 +145,7 @@ def test_heldout_reference_metrics_use_only_training_value_mean() -> None:
     assert baseline.examples == 2
     assert abs(baseline.uniform_policy_cross_entropy - 0.69314718056) < 1e-9
     assert baseline.constant_value_prediction == 0.0
+    assert baseline.handcrafted_value_rmse >= 0.0
     assert abs(baseline.constant_value_rmse - (0.26**0.5)) < 1e-9
     assert 0.0 <= baseline.heuristic_top1_accuracy <= 1.0
     assert 0.0 <= baseline.uniform_top1_accuracy <= 1.0
