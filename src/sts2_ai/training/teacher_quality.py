@@ -83,6 +83,16 @@ def grade_teacher_root(
     groups: dict[str, list[int]] = defaultdict(list)
     for i, action in enumerate(example.policy_targets):
         label = semantic_action_label(state, action.action_kind, action.action_payload_json)
+        # Never declare two choices equivalent solely because the semantic
+        # resolver lacks that action type or fails to resolve its card/target.
+        # Unknown shop/event decisions can have very different outcomes.
+        if (
+            label == action.action_kind
+            or "unknown-card" in label
+            or "unknown-enemy" in label
+            or label.endswith("room=None")
+        ):
+            label = f"unresolved:{action.action_id}"
         groups[label].append(i)
 
     semantic_labels = sorted(groups)
