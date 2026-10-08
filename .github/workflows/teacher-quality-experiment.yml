@@ -1,0 +1,132 @@
+name: stronger-teacher-and-neural-heldout
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/teacher-quality-experiment.yml"
+
+jobs:
+  teacher:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install CPU-only PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install project and build pinned emulator
+        run: |
+          python -m pip install -e '.[dev]'
+          dotnet build emulator/src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj \
+            --configuration Release --nologo --verbosity quiet
+          mkdir -p results/teacher-quality
+      - name: Low-budget MCTS-12 teacher on fixed seeds
+        run: |
+          sts2-ai evaluate \
+            --agent mcts --budget 12 --rollout-depth 24 \
+            --rollout-batch-size 8 --seeds 3 --max-decisions 28 \
+            --seed-prefix teacher-quality --no-build \
+            --strategy-db results/teacher-quality/low.sqlite \
+            --json-output results/teacher-quality/low-evaluation.json
+          sts2-ai export-training \
+            results/teacher-quality/low.sqlite results/teacher-quality/low-roots.jsonl
+          sts2-ai diagnose-training results/teacher-quality/low-roots.jsonl \
+            --json-output results/teacher-quality/low-diagnostic.json
+      - name: High-budget MCTS-96 teacher on matching initial seeds
+        run: |
+          sts2-ai evaluate \
+            --agent mcts --budget 96 --rollout-depth 24 \
+            --rollout-batch-size 8 --seeds 3 --max-decisions 28 \
+            --seed-prefix teacher-quality --no-build \
+            --strategy-db results/teacher-quality/high.sqlite \
+            --cutoff-continuations results/teacher-quality/continuations.jsonl \
+            --continuation-every 128 --continuation-limit 6 \
+            --continuation-max-per-seed 2 \
+            --continuation-max-decisions 512 \
+            --json-output results/teacher-quality/high-evaluation.json
+          sts2-ai export-training \
+            results/teacher-quality/high.sqlite results/teacher-quality/high-roots.jsonl
+          sts2-ai diagnose-training results/teacher-quality/high-roots.jsonl \
+            --json-output results/teacher-quality/high-diagnostic.json
+          sts2-ai diagnose-continuations \
+            results/teacher-quality/continuations.jsonl \
+            --json-output results/teacher-quality/continuation-diagnostic.json
+          sts2-ai compare-evaluations \
+            results/teacher-quality/low-evaluation.json \
+            results/teacher-quality/high-evaluation.json \
+            --json-output results/teacher-quality/teacher-budget-comparison.json
+      - name: Audit and optionally curate stronger policy targets
+        run: |
+          sts2-ai curate-teacher results/teacher-quality/high-roots.jsonl \
+            --min-budget 64 --min-visits-per-semantic-action 2 \
+            --min-semantic-top-margin 0.08 --min-semantic-value-gap 0.01 \
+            --output results/teacher-quality/curated-roots.jsonl \
+            --json-output results/teacher-quality/curation-report.json
+          if test "$(wc -l < results/teacher-quality/curated-roots.jsonl)" -ge 12; then
+            echo curated > results/teacher-quality/teacher-choice.txt
+            cp results/teacher-quality/curated-roots.jsonl \
+              results/teacher-quality/chosen-roots.jsonl
+          else
+            echo all-high-budget > results/teacher-quality/teacher-choice.txt
+            cp results/teacher-quality/high-roots.jsonl \
+              results/teacher-quality/chosen-roots.jsonl
+          fi
+      - name: Train neural model and grouped root validation
+        run: |
+          sts2-ai train-neural \
+            results/teacher-quality/chosen-roots.jsonl \
+            results/teacher-quality/neural.json \
+            --epochs 12 --dimension 256 --hidden 32 \
+            --json-output results/teacher-quality/neural-validation.json
+      - name: Held-out MCTS baseline (three unseen run seeds)
+        run: |
+          sts2-ai evaluate \
+            --agent mcts --budget 32 --rollout-depth 24 \
+            --rollout-batch-size 8 --seeds 3 --max-decisions 64 \
+            --seed-prefix neural-quality-heldout --no-build \
+            --strategy-db results/teacher-quality/heldout-baseline.sqlite \
+            --json-output results/teacher-quality/heldout-baseline.json
+      - name: Held-out neural value only
+        run: |
+          sts2-ai evaluate \
+            --agent mcts --budget 32 --rollout-depth 24 \
+            --rollout-batch-size 8 --seeds 3 --max-decisions 64 \
+            --seed-prefix neural-quality-heldout --no-build \
+            --cutoff-model results/teacher-quality/neural.json \
+            --learned-weight 0.25 \
+            --strategy-db results/teacher-quality/heldout-value.sqlite \
+            --json-output results/teacher-quality/heldout-value.json
+          sts2-ai compare-evaluations \
+            results/teacher-quality/heldout-baseline.json \
+            results/teacher-quality/heldout-value.json \
+            --json-output results/teacher-quality/value-comparison.json
+      - name: Held-out neural rollout policy only
+        run: |
+          sts2-ai evaluate \
+            --agent mcts --budget 32 --rollout-depth 24 \
+            --rollout-batch-size 8 --seeds 3 --max-decisions 64 \
+            --seed-prefix neural-quality-heldout --no-build \
+            --neural-rollout-model results/teacher-quality/neural.json \
+            --strategy-db results/teacher-quality/heldout-policy.sqlite \
+            --json-output results/teacher-quality/heldout-policy.json
+          sts2-ai compare-evaluations \
+            results/teacher-quality/heldout-baseline.json \
+            results/teacher-quality/heldout-policy.json \
+            --json-output results/teacher-quality/policy-comparison.json
+      - name: Preserve all diagnostics, seeds and model artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stronger-teacher-neural-heldout
+          path: results/teacher-quality/
+          retention-days: 14
+          if-no-files-found: warn
