@@ -17,7 +17,11 @@ import random
 from collections.abc import Sequence
 from typing import Any, cast
 
-from sts2_ai.emulator.chance import PublicHistoryStep
+from sts2_ai.emulator.chance import (
+    FairContinuationSampler,
+    PublicHistoryStep,
+    require_fair_sampler,
+)
 from sts2_ai.emulator.protocol import EmulatorBackend, InformationPolicy, LegalAction
 from sts2_ai.emulator.rejection import FairHistoryRejectionSampler
 
@@ -39,13 +43,15 @@ class FairReplayPuctAdapter:
         *,
         goal: str = "prototype-full-victory-v1",
         max_candidates: int = 256,
+        sampler: FairContinuationSampler | None = None,
     ) -> None:
         if goal not in {"prototype-full-victory-v1", "prototype-act1-clear-v1"}:
             raise ValueError("Unsupported or unversioned terminal objective")
         self._backend = backend
         self._goal = goal
-        self._sampler = FairHistoryRejectionSampler(
-            backend, max_candidates=max_candidates
+        self._sampler = require_fair_sampler(
+            sampler if sampler is not None
+            else FairHistoryRejectionSampler(backend, max_candidates=max_candidates)
         )
         self._histories: dict[str, tuple[PublicHistoryStep, ...]] = {}
         self._active_handle: str | None = None
@@ -53,7 +59,7 @@ class FairReplayPuctAdapter:
         self.transition_count = 0
 
     @property
-    def sampler(self) -> FairHistoryRejectionSampler:
+    def sampler(self) -> FairContinuationSampler:
         return self._sampler
 
     @staticmethod
@@ -121,7 +127,7 @@ class FairReplayPuctAdapter:
             transcript = transcript[:-1] + (
                 PublicHistoryStep(last.observation, last.chosen_action, tuple(legal_actions)),
             )
-        self._sampler._validate_history(transcript)
+        FairHistoryRejectionSampler._validate_history(transcript)
         if transcript[-1].legal_actions != tuple(legal_actions):
             raise ValueError("Search-root legal actions disagree with public history")
         key = self._key(transcript)

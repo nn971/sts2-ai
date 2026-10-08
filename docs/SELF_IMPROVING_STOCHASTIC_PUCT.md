@@ -1,6 +1,9 @@
 # Self-improving stochastic PUCT: bounded variance roadmap
 
-**Status:** active implementation; early S0/S1 foundations built, fair continuation and PUCT pending.
+**Status:** active implementation; an opt-in public-history-conditioned rejection
+reference, empirical finite-cohort sampler, and stochastic PUCT kernel exist.
+A *scalable, native-probability-calibrated* fair search/data-collection loop,
+neural v3, and self-improvement remain pending.
 **Scope:** single-player Silent; prioritize native Act 1 Overgrowth coverage in
 the pinned emulator, then expand to longer runs. Multiplayer-only and
 cross-character reward mechanics remain out of scope.

@@ -45,6 +45,15 @@ sts2-emulator  <---  sts2-ai
 
 ## Current status
 
+**Incremental fair-belief research:** a finite, independently search-seeded
+hypothetical cohort can now be conditioned across public actions and reused
+across stochastic PUCT simulations without restarting every candidate.
+This is exact **for the cohort's empirical seed prior**, not for the
+underlying game law, and fails explicitly if all candidates are eliminated.
+The default agents remain unchanged. See
+[finite-cohort posterior](docs/INCREMENTAL_FINITE_BELIEF.md).
+
+
 **S1 research pilot:** `emulator/rejection.py` and `search/fair_replay.py`
 now connect fair stochastic PUCT to independently seeded, complete
 public-history-conditioned prototype emulator continuations. This is an
