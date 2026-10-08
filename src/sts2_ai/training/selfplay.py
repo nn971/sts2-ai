@@ -12,7 +12,7 @@ import importlib
 import json
 import math
 import random
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
@@ -316,6 +316,8 @@ def train_selfplay(
     checkpoint_path: Path | None = None,
     resume: bool = False,
     environment: str = LEGACY,
+    on_round_start: Callable[[int, int, float], None] | None = None,
+    on_round_complete: Callable[[TrainingRound], None] | None = None,
 ) -> SelfPlayResult:
     """Run genuine full-game episodes and optimize an on-policy neural actor.
 
@@ -433,6 +435,8 @@ def train_selfplay(
                 round_index, start=sampling_temperature_start,
                 end=sampling_temperature_end, decay_rounds=temperature_decay_rounds,
             )
+            if on_round_start is not None:
+                on_round_start(round_index, rounds, sampling_temperature)
             model = _export(
                 params, dimension, hidden,
                 model_id=f"selfplay-actor-before-round-{round_index}",
@@ -550,6 +554,10 @@ def train_selfplay(
                     config=config, revision=revision, initial_model=initial_model,
                     metrics=metrics,
                 )
+            # The callback is intentionally outside the trainer's reproducibility
+            # fingerprint: observers cannot alter the optimizer, seeds or returns.
+            if on_round_complete is not None:
+                on_round_complete(metrics[-1])
 
     signature = hashlib.sha256(
         (
