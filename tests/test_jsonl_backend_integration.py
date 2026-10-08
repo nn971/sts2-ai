@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
 import pytest
 
+from sts2_ai.agents import RoutePlanningAgent
 from sts2_ai.emulator import (
     FAIR_POLICY_ID,
     InformationPolicy,
@@ -166,3 +168,33 @@ def test_released_handle_is_rejected(backend: JsonlEmulatorBackend) -> None:
     assert backend.release_many([state]) == 1
     with pytest.raises(JsonlBridgeError, match="Unknown state handle"):
         backend.exact_hash(state)
+
+
+def test_route_agent_uses_new_visible_map_without_hidden_state(
+    backend: JsonlEmulatorBackend,
+) -> None:
+    policy = InformationPolicy(FAIR_POLICY_ID)
+    root = backend.reset("route-planning-bridge-smoke")
+    started = backend.step(root, backend.legal_actions(root)[0])
+    try:
+        observation = backend.observe(started.child, policy)
+        payload = json.loads(observation.payload_json)
+        assert payload["map_generation_profile_id"] == "prototype-strategic-map-v1"
+        assert payload["completed_rooms"] == []
+        assert len(payload["map"]) > 10
+
+        legal = backend.legal_actions(started.child)
+        assert len(legal) == 3
+        assert {action.kind for action in legal} == {"choose_map_node"}
+        decision = RoutePlanningAgent().choose(observation, legal)
+        assert decision.action in legal
+
+        entered = backend.step(started.child, decision.action)
+        try:
+            entered_payload = json.loads(backend.observe(entered.child, policy).payload_json)
+            assert entered_payload["completed_rooms"] == []
+            assert entered_payload["phase"] == 3  # Combat
+        finally:
+            backend.release_many([entered.child])
+    finally:
+        backend.release_many([root, started.child])
