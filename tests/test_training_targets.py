@@ -16,6 +16,7 @@ from sts2_ai.training import (
     build_training_example,
     build_training_examples,
     write_training_jsonl,
+    split_training_examples,
 )
 
 
@@ -171,3 +172,47 @@ def test_training_export_uses_strongest_budget_per_state_by_default(
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["search_budget"] == 32
     assert payload["source_state_hash"] == "shared-state"
+
+
+def test_grouped_split_keeps_repeated_search_states_together() -> None:
+    from dataclasses import replace
+    from sts2_ai.training import TrainingExample, PolicyTarget
+
+    base = TrainingExample(
+        observation_hash="obs-a",
+        information_policy="fair",
+        policy_targets=(PolicyTarget("a", 1.0),),
+        value_target=0.2,
+        source_search_id="search-a",
+        emulator_revision="emu",
+        source_state_hash="state-a",
+    )
+    examples = tuple(
+        replace(base, source_state_hash=f"state-{i}", observation_hash=f"obs-{i}")
+        for i in range(8)
+    ) + (replace(base, source_search_id="other-budget"),)
+    train, validation = split_training_examples(examples, seed=7)
+    train_states = {e.source_state_hash for e in train}
+    validation_states = {e.source_state_hash for e in validation}
+    assert train_states.isdisjoint(validation_states)
+    assert len(train) + len(validation) == len(examples)
+    reverse_train, reverse_validation = split_training_examples(tuple(reversed(examples)), seed=7)
+    assert train == reverse_train
+    assert validation == reverse_validation
+    assert {e.source_search_id for e in train if e.source_state_hash == "state-a"} in (set(), {"search-a", "other-budget"})
+    assert {e.source_search_id for e in validation if e.source_state_hash == "state-a"} in (set(), {"search-a", "other-budget"})
+
+
+def test_grouped_split_rejects_single_state() -> None:
+    from sts2_ai.training import TrainingExample, PolicyTarget
+    example = TrainingExample(
+        observation_hash="obs",
+        information_policy="fair",
+        policy_targets=(PolicyTarget("a", 1.0),),
+        value_target=0.0,
+        source_search_id="search",
+        emulator_revision="emu",
+        source_state_hash="one-state",
+    )
+    with pytest.raises(ValueError, match="distinct states"):
+        split_training_examples((example, example))
