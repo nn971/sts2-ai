@@ -1,0 +1,75 @@
+name: learned-vs-handcrafted-cutoff
+
+on:
+  push:
+    branches:
+      - benchmark/learned-vs-handcrafted-cutoff
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e '.[dev]'
+      - uses: actions/download-artifact@v4
+        with:
+          name: heldout-distillation-4seed
+          run-id: 37731639664
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: input-data
+      - name: Train only on the original grouped training split
+        run: |
+          TARGETS="$(find input-data -name 'learning-pilot-targets.jsonl' -print -quit)"
+          test -n "$TARGETS"
+          sts2-ai validate-linear \
+            "$TARGETS" /tmp/cutoff-v2.json \
+            --validation-fraction 0.2 \
+            --dimension 2048 \
+            --epochs 24 \
+            --seed 7
+      - name: Common-seed handcrafted-cutoff baseline
+        run: |
+          sts2-ai benchmark \
+            --budgets 8 32 \
+            --seeds 3 \
+            --seed-prefix cutoff-eval \
+            --rollout-depth 16 \
+            --rollout-batch-size 8 \
+            --no-include-route \
+            --no-include-random \
+            --strategy-db /tmp/baseline.sqlite \
+            --json-output /tmp/baseline.json
+      - name: Common-seed learned-value cutoff
+        run: |
+          sts2-ai benchmark \
+            --budgets 8 32 \
+            --seeds 3 \
+            --seed-prefix cutoff-eval \
+            --rollout-depth 16 \
+            --rollout-batch-size 8 \
+            --cutoff-model /tmp/cutoff-v2.json \
+            --no-include-route \
+            --no-include-random \
+            --strategy-db /tmp/learned.sqlite \
+            --json-output /tmp/learned.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: learned-value-cutoff-pilot
+          path: |
+            /tmp/cutoff-v2.json
+            /tmp/baseline.json
+            /tmp/learned.json
