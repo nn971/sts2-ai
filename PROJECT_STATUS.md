@@ -1,5 +1,25 @@
 # Project status
 
+## Experimental full-combat draw-order realization (2026-10-08)
+
+The pinned emulator submodule is updated to
+`cad62474f25343e3acd39a6315ef3dd88a6fd96a` from the active
+`prototype/full-run-silent` branch, which exposes a strictly gated
+`hypothetical_draw_order` JSONL operation. The Python backend can now
+start separately seeded hypothetical runs, give a complete public-card
+variant permutation to a freshly entered combat, and receive a normal
+mechanically playable successor handle with unchanged player-visible
+observation. Ordinary live handles and post-opening combats are
+ineligible. A pinned integration test checks the handoff.
+
+**This is NOT an exact fair posterior transition:** later combat RNG
+correlations with the externally imposed draw order are not adjusted.
+It is a structural experiment only; do not use such runs as ground-truth
+fair targets or calibrated variance estimates. Existing default agents
+remain untouched. See
+[experimental draw-order bridge](docs/HYPOTHETICAL_DRAW_BRIDGE.md).
+
+
 ## Mechanic-aware known-deck draw slice (2026-10-08)
 
 Added `DrawBelief` and `certified_opening_draw_belief`: conditional
