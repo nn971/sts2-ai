@@ -283,15 +283,15 @@ def paired_teacher_quality_report(
         raise ValueError("Teacher datasets have no identical exact search roots")
     before, after = [], []
     for key in matched:
-        l, r = left[key], right[key]
-        if l.observation_hash != r.observation_hash:
+        lower, higher = left[key], right[key]
+        if lower.observation_hash != higher.observation_hash:
             raise ValueError("Same exact state yielded a different fair observation")
-        if {a.action_id for a in l.policy_targets} != {
-            a.action_id for a in r.policy_targets
+        if {a.action_id for a in lower.policy_targets} != {
+            a.action_id for a in higher.policy_targets
         }:
             raise ValueError("Paired roots disagree on legal actions")
-        before.append(grade_teacher_root(l, config))
-        after.append(grade_teacher_root(r, config))
+        before.append(grade_teacher_root(lower, config))
+        after.append(grade_teacher_root(higher, config))
     entropy_change = [
         b.semantic_normalized_entropy - a.semantic_normalized_entropy
         for a, b in zip(before, after, strict=True)
