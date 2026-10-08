@@ -749,6 +749,54 @@ against the original hand-crafted cutoff under equal emulator/compute budgets.
 Preserve true terminal outcomes and search provenance; do not automatically
 replace the rollout action policy with the learned one.
 
+### Learned-value search cutoff (2026-10-08)
+
+The normalized v2 hashed-linear model is now usable as a strictly **opt-in**
+MCTS nonterminal cutoff, via `--cutoff-model WEIGHTS.json`. The heuristic
+continues to control rollout decisions and true run terminals retain their exact
+values (+1 for victory and -1 for defeat). The persisted search-version
+identifier fingerprints the SHA-256 of the actual weight file; the benchmark
+report also records the chosen value-function identity.
+
+The first gameplay evaluation trained only on the old 545-example training
+partition, leaving the 136 examples of the offline validation partition
+unused, and then tested three previously unseen `cutoff-eval` run seeds.
+Every comparison used fixed rollout depth 16, batch size 8, identical seeds,
+and otherwise identical MCTS settings.
+
+| Budget | Handcrafted frontier | Learned frontier | Handcrafted time/run | Learned time/run |
+| ---: | ---: | ---: | ---: | ---: |
+| 8 | 5.262 | 5.089 | 5.02 s | 6.52 s |
+| 32 | 5.239 | 4.714 | 15.42 s | 17.35 s |
+
+All agents had zero full-run victories on these three seeds. For MCTS-32,
+terminal progress also declined from 6.00 to 5.33 with the learned cutoff.
+The offline improvement (held-out value RMSE 0.255 versus train-mean baseline
+0.348) therefore **did not translate to stronger gameplay** at this stage.
+
+A plausible explanation is distribution mismatch: the value model was
+supervised on searched-root values, but it is queried on states inside heuristic
+rollouts. Another is a target mismatch: the root label (best visited root
+action mean) is an imperfect target for an arbitrary cutoff state's future
+value. Neither hypothesis is demonstrated by this small experiment.
+
+An additional opt-in `--learned-weight ALPHA` now permits a conservative
+linear mixture for **nonterminal** states:
+
+```text
+V_alpha = ALPHA * V_learned + (1 - ALPHA) * V_handcrafted
+```
+
+Both alpha and the model hash are recorded in the search-version identity.
+Exact terminal rewards are never blended. Alpha 0.25 and 0.5 are being
+checked as preselected conservative alternatives on the same three seeds;
+no mixture is promoted to the default without stronger multi-seed evidence.
+
+Next: preserve the root- and fair-observation-grouped train/test split;
+measure teacher-action entropy and distribution shift between searched roots
+and rollout-cutoff states; collect sufficiently broad run-level training
+signals before adding a larger model.
+
 ## Immediate implementation sprint
 
 Execute this sequence next:
