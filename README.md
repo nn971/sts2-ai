@@ -45,15 +45,32 @@ sts2-emulator  <---  sts2-ai
 
 ## Current status
 
-This starter repository contains **research scaffolding, not a trained agent**. In particular:
+This repository has **working experimental agents, but not a trained expert**.
+The `emulator/` submodule is pinned to an implemented whole-run Silent prototype.
+The long-lived Python/JSONL bridge, deterministic whole-run evaluation, seeded
+baseline agents, transposition-aware **oracle-exact** MCTS, SQLite search-evidence
+capture, and preliminary policy/value training are implemented.
 
-- `sts2-emulator` is pinned as a Git submodule at `emulator/`, and its commit is part of experiment provenance;
-- the public Python-side emulator protocol is present so research code can be written against a stable boundary;
-- a mock backend is used by tests;
-- a small SQLite-backed strategic evidence store is included as a starting point, not as a final schema;
-- search/model/training modules define interfaces and baseline plumbing rather than claiming strategic competence.
+A distinct observation-only `route` agent now performs visible-map DAG
+lookahead. On an initial eight-seed paired benchmark it **underperformed**
+the simpler `heuristic` baseline, so route planning remains opt-in. The
+MCTS baseline is explicitly oracle-exact and must not be mistaken for a
+fair player; fair stochastic search is a separate research milestone.
 
-The immediate project dependency is **Milestone 1 of `sts2-emulator`: a trustworthy, practically fast whole-run emulator**.
+Quick reproducible commands (fish):
+
+```fish
+git submodule update --init --recursive
+python -m pip install -e '.[dev]'
+sts2-ai evaluate --agent heuristic --seeds 5
+sts2-ai evaluate --agent route --seeds 5
+sts2-ai benchmark --budgets --seeds 8 --no-include-random
+```
+
+See [current project status](PROJECT_STATUS.md),
+[AI prototype roadmap](docs/AI_PROTOTYPE_ROADMAP.md), and
+[route-planning baseline](docs/ROUTE_PLANNING_BASELINE.md).
+
 
 ## First-time setup
 
