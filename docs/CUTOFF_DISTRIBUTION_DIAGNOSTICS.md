@@ -2,7 +2,7 @@
 
 This is an **oracle-exact search diagnostic**, not a fair-agent or model-quality
 claim. The search tree can see true hidden RNG. Captured observations use
-\`prototype-fair-v0\`, but their *selection* follows oracle-exact search.
+`prototype-fair-v0`, but their *selection* follows oracle-exact search.
 
 ## Why collect cutoffs?
 
@@ -20,7 +20,7 @@ horizon, seed, and information regime.
 
 ## Reproducible capture (fish)
 
-\`\`\`fish
+```fish
 sts2-ai evaluate \
     --agent mcts --budget 32 --rollout-depth 16 \
     --seeds 5 --seed-prefix cutoff-audit \
@@ -36,11 +36,11 @@ sts2-ai diagnose-training \
     results/cutoff-roots.jsonl \
     --cutoff-samples results/cutoff-observations.jsonl \
     --json-output results/cutoff-diagnostic.json
-\`\`\`
+```
 
 When a strategy database contains more than one search configuration, pass
-\`--search-version\` to \`export-training\`. Keep the captured
-\`cutoff_value_id\`, seed prefix and rollout settings with the exported data.
+`--search-version` to `export-training`. Keep the captured
+`cutoff_value_id`, seed prefix and rollout settings with the exported data.
 
 The cutoff sampler is opt-in, retains every Nth callback (global callback
 order), and stores the first bounded set of unique observations, keeping a
