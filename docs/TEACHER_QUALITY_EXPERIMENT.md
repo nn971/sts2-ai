@@ -164,3 +164,41 @@ The model's **value head remains untrained** in this regime. Do not use it
 as a cutoff estimator. The matched-root workflow tests the conservative
 Q target and a clearly labeled exploratory weaker gate. If neither
 produces enough records, it does not train a new model at all.
+
+
+## Measured same-root and Q-policy experiments
+
+The first passive MCTS-12/MCTS-96 comparison used **131 identical exact
+decision roots**, preserving the acting MCTS-12 trajectory:
+
+https://github.com/nn971/sts2-ai/actions/runs/37753667685
+
+The mean high-minus-low semantic entropy change was **+0.00450**, with
+semantic entropy decreasing on 62.6% of matched multi-action roots, and
+38 of 131 high-budget roots satisfying the broader audit filter.
+The stricter curation criterion kept 26. This resolves the differing-route
+confound but still does not show that simply increasing MCTS budget makes
+the teacher much sharper.
+
+The first Q-target pilot then used the older, exploratory Q-distiller
+implementation:
+
+https://github.com/nn971/sts2-ai/actions/runs/37754267114
+
+- Conservative action-Q evidence threshold: only **3/131** roots accepted.
+- Exploratory threshold (Q gap 0.02, no uncertainty multiplier): **43/131**
+  accepted, allowing policy-only training.
+- Two independent seed-matched MCTS-16 runs, capped at 48 decisions:
+  mean frontier progress increased by 0.337 for Q-policy rollouts, one
+  ahead and one behind; neural policy took 25.7 s/run versus 9.9 s/run.
+- This is insufficient evidence to claim an improvement, and the
+  exploratory gate is not statistically calibrated.
+
+The stricter **Q-softmax-v2** format introduces a representability check:
+if two different game actions produce identical neural-v2 action features
+but imply conflicting policy targets, the root is rejected. For example,
+two map branches of the same room type are not interchangeable.
+Checkpoint metadata now also marks policy-only value heads untrained,
+and the learned cutoff loader rejects using them as evaluators.
+A rerun with those guards is the authoritative v2 experiment; the first
+pilot remains archived for comparison.
