@@ -3,13 +3,14 @@ from __future__ import annotations
 import argparse
 import json
 import statistics
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict
 from functools import partial
 from pathlib import Path
 
 from sts2_ai.agents import (
     Agent,
+    Decision,
     ExactStateAgent,
     HeuristicAgent,
     NeuralGreedyAgent,
@@ -23,6 +24,8 @@ from sts2_ai.emulator import (
     InformationPolicy,
     JsonlEmulatorBackend,
     LegalAction,
+    Observation,
+    StateHandle,
 )
 from sts2_ai.evaluation import (
     RunSummary,
@@ -35,7 +38,7 @@ from sts2_ai.evaluation import (
 )
 from sts2_ai.evaluation.experiment_report import paired_evaluation_report
 from sts2_ai.models import load_model
-from sts2_ai.search import LearnedCutoffValue, SearchResult, UctMcts
+from sts2_ai.search import LearnedCutoffValue, SearchBudget, SearchResult, UctMcts
 from sts2_ai.strategy_db import (
     SQLiteStrategyStore,
     diagnose_budget_disagreements,
@@ -92,6 +95,14 @@ def main() -> None:
         "--agent", choices=("random", "heuristic", "route", "mcts"), required=True
     )
     evaluate.add_argument("--budget", type=int, default=32, help="MCTS simulations per decision")
+    evaluate.add_argument(
+        "--shadow-budget", type=int,
+        help="optional extra research MCTS budget on the exact same live decision roots",
+    )
+    evaluate.add_argument(
+        "--shadow-strategy-db", type=Path,
+        help="independent SQLite evidence store for same-state shadow searches",
+    )
     evaluate.add_argument(
         "--rollout-depth",
         type=int,
@@ -529,6 +540,16 @@ def _evaluate(args: argparse.Namespace) -> None:
         raise SystemExit("--seeds must be positive")
     if args.budget < 0:
         raise SystemExit("--budget must be non-negative")
+    if (args.shadow_budget is None) != (args.shadow_strategy_db is None):
+        raise SystemExit("--shadow-budget and --shadow-strategy-db must be supplied together")
+    if args.shadow_budget is not None and (
+        args.shadow_budget <= 0 or args.agent != "mcts" or args.budget <= 0
+    ):
+        raise SystemExit("Shadow search requires MCTS and positive simulation budgets")
+    if args.shadow_strategy_db is not None and (
+        args.shadow_strategy_db.resolve() == args.strategy_db.resolve()
+    ):
+        raise SystemExit("Shadow evidence must have a separate SQLite database path")
     if args.rollout_depth < 0:
         raise SystemExit("--rollout-depth must be non-negative")
     if args.rollout_batch_size <= 0:
@@ -571,6 +592,10 @@ def _evaluate(args: argparse.Namespace) -> None:
         if args.agent == "mcts" and args.budget > 0
         else None
     )
+    shadow_store = (
+        SQLiteStrategyStore(args.shadow_strategy_db)
+        if args.shadow_strategy_db is not None else None
+    )
 
     try:
         with JsonlEmulatorBackend(
@@ -590,6 +615,10 @@ def _evaluate(args: argparse.Namespace) -> None:
                 )
             for index in range(args.seeds):
                 agent: Agent | ExactStateAgent
+                decision_observer: (
+                    Callable[[StateHandle, Observation, tuple[LegalAction, ...], Decision], None]
+                    | None
+                ) = None
                 if args.agent == "random":
                     agent = RandomAgent(seed=args.agent_seed + index)
                 elif args.agent == "route":
@@ -639,6 +668,54 @@ def _evaluate(args: argparse.Namespace) -> None:
                         simulations=args.budget,
                         result_sink=sink,
                     )
+                    if shadow_store is not None and args.shadow_budget is not None:
+                        shadow_search = UctMcts(
+                            backend,
+                            policy=policy,
+                            rollout_policy=_rollout_agent(args),
+                            value_fn=cutoff,
+                            rollout_depth=args.rollout_depth,
+                            rollout_batch_size=args.rollout_batch_size,
+                            rollout_mode=args.rollout_mode,
+                            virtual_loss=args.virtual_loss,
+                            seed=args.agent_seed + index,
+                        )
+
+                        def observe_shadow(
+                            state: StateHandle,
+                            obs: Observation,
+                            actions: tuple[LegalAction, ...],
+                            chosen: Decision,
+                        ) -> None:
+                            del chosen
+                            if len(actions) < 2:
+                                return
+                            if shadow_store is None or args.shadow_budget is None:
+                                raise RuntimeError("Missing shadow search configuration")
+                            result = shadow_search.search(
+                                state, SearchBudget(max_simulations=args.shadow_budget)
+                            )
+                            if result.root_observation_hash != obs.observation_hash:
+                                raise RuntimeError("Shadow search observation mismatch")
+                            visited = [e for e in result.evaluations if e.visits > 0]
+                            candidates = visited or list(result.evaluations)
+                            if not candidates:
+                                raise RuntimeError("Shadow search has no legal action")
+                            best = max(
+                                candidates,
+                                key=lambda e: (e.value, e.visits, e.action.action_id),
+                            )
+                            record_search_result(
+                                shadow_store,
+                                result,
+                                best.action,
+                                information_policy=policy.policy_id,
+                                search_regime="oracle-exact",
+                                search_budget=args.shadow_budget,
+                                emulator_revision=backend.emulator_revision,
+                                game_build=args.game_build,
+                            )
+                        decision_observer = observe_shadow
 
                 summaries.append(
                     play_run(
@@ -648,12 +725,15 @@ def _evaluate(args: argparse.Namespace) -> None:
                         policy=policy,
                         ascension=args.ascension,
                         max_decisions=args.max_decisions,
+                        decision_observer=decision_observer,
                     )
                 )
             bridge_profile = dict(backend.operation_profile())
     finally:
         if strategy_store is not None:
             strategy_store.close()
+        if shadow_store is not None:
+            shadow_store.close()
 
     if sampler is not None:
         count = sampler.write_jsonl(
@@ -740,6 +820,11 @@ def _evaluate(args: argparse.Namespace) -> None:
         payload = {
             "agent": label,
             "budget": args.budget if args.agent == "mcts" else None,
+            "shadow_budget": args.shadow_budget,
+            "shadow_strategy_db": (
+                str(args.shadow_strategy_db)
+                if args.shadow_strategy_db is not None else None
+            ),
             "rollout_depth": args.rollout_depth if args.agent == "mcts" else None,
             "rollout_batch_size": (
                 args.rollout_batch_size if args.agent == "mcts" else None
