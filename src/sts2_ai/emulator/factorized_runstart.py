@@ -29,7 +29,7 @@ from .chance import (
     FairContinuationUnavailable,
     PublicHistoryStep,
 )
-from .protocol import InformationPolicy, LegalAction, Observation, StateHandle
+from .protocol import InformationPolicy, LegalAction, Observation, StateHandle, Transition
 from .rejection import FairHistoryRejectionSampler
 
 FACTORIZED_RUNSTART_PRIOR_ID = "independent-streams-factorized-runstart-v1"
@@ -49,7 +49,7 @@ class FactorizedRunStartBackend(Protocol):
         self, initial_streams: Mapping[str, int], ascension: int = 0
     ) -> StateHandle: ...
 
-    def step(self, state: StateHandle, action: LegalAction) -> object: ...
+    def step(self, state: StateHandle, action: LegalAction) -> Transition: ...
 
     def observe(self, state: StateHandle, policy: InformationPolicy) -> Observation: ...
 
@@ -188,7 +188,7 @@ class FactorizedRunStartPosteriorSampler:
         if first.observation.policy_id != "prototype-fair-v0":
             raise ValueError("Factorized prior requires the prototype fair policy")
         state = json.loads(second.observation.payload_json)
-        if not isinstance(state, dict) or state.get("phase") != "MapChoice":
+        if not isinstance(state, dict) or state.get("phase") != 2:
             raise ValueError("Last frame must be a post-StartRun MapChoice")
         _boss(second.observation.payload_json)
         _frame_minus_boss(second.observation.payload_json)
