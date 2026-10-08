@@ -21,7 +21,7 @@ initialized, `.NET 9` SDK installed, and Python package installed):
 python tools/benchmark_coupled_belief.py \
   --build \
   --cohorts 32,128,512 \
-  --post-map-decisions 24 \
+  --post-map-decisions 48 \
   --rejection-probes 3 \
   --rejection-budget 32 \
   --json-out /tmp/overgrowth-coupled-belief.json
@@ -79,8 +79,8 @@ incompatible particles never creates new hidden alternatives.
 A collapsed cohort is closed and not silently regenerated at
 subsequent checkpoints.
 
-CI runs smaller cohorts `16,64`, eighteen post-map decisions, two fresh
-rejection probes with budget eight, checks the report invariant,
+CI runs smaller cohorts `16,64`, up to forty-eight post-map decisions,
+three fresh rejection probes (early, middle, late) with budget eight, checks the report invariant,
 and uploads `coupled-belief-survival-profile` as a build artifact.
 The larger example above is meant for local performance exploration.
 
