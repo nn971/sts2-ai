@@ -1,4 +1,4 @@
-name: neural-first-real-emulator-pilot
+name: neural-v2-real-emulator-pilot
 
 on:
   workflow_dispatch:
@@ -46,7 +46,7 @@ jobs:
             results/neural-pilot/roots.jsonl \
             --cutoff-samples results/neural-pilot/cutoffs.jsonl \
             --json-output results/neural-pilot/data-diagnostics.json
-      - name: Train neural policy and searched-root value
+      - name: Train neural v2 semantic-action policy and searched-root value
         run: |
           sts2-ai train-neural \
             results/neural-pilot/roots.jsonl \
@@ -81,7 +81,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: sts2-neural-pilot
+          name: sts2-neural-v2-pilot
           path: results/neural-pilot/
           if-no-files-found: warn
           retention-days: 14
