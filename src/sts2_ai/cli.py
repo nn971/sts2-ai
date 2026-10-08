@@ -24,7 +24,6 @@ from sts2_ai.emulator import (
     JsonlEmulatorBackend,
     LegalAction,
 )
-from sts2_ai.evaluation.experiment_report import paired_evaluation_report
 from sts2_ai.evaluation import (
     RunSummary,
     collect_experiment_manifest,
@@ -34,6 +33,7 @@ from sts2_ai.evaluation import (
     play_run,
     summarize_runs,
 )
+from sts2_ai.evaluation.experiment_report import paired_evaluation_report
 from sts2_ai.models import load_model
 from sts2_ai.search import LearnedCutoffValue, SearchResult, UctMcts
 from sts2_ai.strategy_db import (
@@ -62,15 +62,15 @@ from sts2_ai.training.diagnostics import (
     observation_shift_report,
     teacher_policy_report,
 )
-from sts2_ai.training.teacher_quality import (
-    TeacherFilter,
-    curate_teacher_examples,
-    teacher_quality_report,
-)
 from sts2_ai.training.neural import (
     evaluate_neural,
     split_continuations_by_seed,
     train_neural,
+)
+from sts2_ai.training.teacher_quality import (
+    TeacherFilter,
+    curate_teacher_examples,
+    teacher_quality_report,
 )
 
 
