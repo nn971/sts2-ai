@@ -6,6 +6,7 @@ on:
       - "src/sts2_ai/models/**"
       - "src/sts2_ai/training/neural.py"
       - "tests/test_neural_policy_value.py"
+      - "tests/test_q_policy_targets.py"
       - "pyproject.toml"
       - ".github/workflows/neural-ci.yml"
   pull_request:
@@ -30,4 +31,4 @@ jobs:
       - name: Install project and test tools
         run: python -m pip install -e '.[dev]'
       - name: Neural training, CLI and weight portability
-        run: python -m pytest tests/test_neural_policy_value.py -q
+        run: python -m pytest tests/test_neural_policy_value.py tests/test_q_policy_targets.py -q
