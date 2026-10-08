@@ -398,8 +398,8 @@ def main() -> None:
         return
 
     if args.command == "compare-evaluations":
-        report = paired_evaluation_report(args.baseline, args.contender)
-        rendered = json.dumps(report, sort_keys=True, indent=2)
+        paired_data = paired_evaluation_report(args.baseline, args.contender)
+        rendered = json.dumps(paired_data, sort_keys=True, indent=2)
         print(rendered)
         if args.json_output is not None:
             args.json_output.parent.mkdir(parents=True, exist_ok=True)
