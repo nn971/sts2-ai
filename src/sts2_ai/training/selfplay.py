@@ -368,6 +368,24 @@ def train_selfplay(
         params, dimension, hidden,
         model_id=f"selfplay-initial-seed-{seed}", value_head_trained=False,
     )
+    warm_start_sha256: str | None = None
+    if initialize_from_model is not None:
+        # A pretrained *public* policy supplies initial parameters; training
+        # still begins with a fresh optimizer and strictly on-policy rounds.
+        model_bytes = initialize_from_model.read_bytes()
+        warm_start_sha256 = hashlib.sha256(model_bytes).hexdigest()
+        warm = NeuralPolicyValueModel.from_dict(json.loads(model_bytes))
+        if warm.format_id != NEURAL_FORMAT:
+            raise ValueError("Warm start requires semantic-action neural format")
+        if (warm.dimension, warm.hidden) != (dimension, hidden):
+            raise ValueError("Warm start neural dimensions do not match trainer")
+        if not resume:
+            with torch.no_grad():
+                for name, tensor in params.items():
+                    tensor.copy_(torch.tensor(
+                        getattr(warm, name), dtype=tensor.dtype
+                    ))
+            initial_model = warm
     revision = getattr(backend, "emulator_revision", "test-backend")
     config: dict[str, Any] = {
         "training_version": SELFPLAY_VERSION,
@@ -380,6 +398,10 @@ def train_selfplay(
         "win_anneal_threshold": win_anneal_threshold,
         "value_weight": value_weight,
         "entropy_weight": entropy_weight,
+        "sampling_temperature_start": sampling_temperature_start,
+        "sampling_temperature_end": sampling_temperature_end,
+        "temperature_decay_rounds": temperature_decay_rounds,
+        "initialize_from_model_sha256": warm_start_sha256,
         "update_epochs": update_epochs,
         "max_decisions": max_decisions,
         "run_seed_prefix": run_seed_prefix,
@@ -407,10 +429,14 @@ def train_selfplay(
             alpha = _curriculum_coefficient(
                 auxiliary_weight, cumulative_victories, win_anneal_threshold
             )
+            sampling_temperature = temperature_for_round(
+                round_index, start=sampling_temperature_start,
+                end=sampling_temperature_end, decay_rounds=temperature_decay_rounds,
+            )
             model = _export(
                 params, dimension, hidden,
                 model_id=f"selfplay-actor-before-round-{round_index}",
-                value_head_trained=round_index > 0 and any(
+                value_head_trained=initial_model.value_head_trained or any(
                     row.update_steps > 0 for row in metrics
                 ),
             )
@@ -428,6 +454,7 @@ def train_selfplay(
                         actor_rng=random.Random(episode_actor_seed(seed, run_seed)),
                         max_decisions=max_decisions,
                         environment=environment,
+                        temperature=sampling_temperature,
                     )
                     for run_seed in run_seeds
                 )
@@ -437,6 +464,7 @@ def train_selfplay(
                     base_seed=seed, max_decisions=max_decisions,
                     policy_id="prototype-fair-v0",
                     environment=environment,
+                    temperature=sampling_temperature,
                 )
             for episode in cohort:
                 if not episode.completed:
@@ -470,7 +498,11 @@ def train_selfplay(
                     for decision in episode.decisions:
                         obs, actions = _tensors(decision, dimension, torch)
                         estimate, logits = _forward(params, obs, actions, torch)
-                        log_probs = torch.nn.functional.log_softmax(logits, dim=0)
+                        # REINFORCE differentiates the same pi_T that sampled
+                        # this round. Optimizing pi_1 here would be off-policy.
+                        log_probs = torch.nn.functional.log_softmax(
+                            logits / sampling_temperature, dim=0
+                        )
                         probabilities = log_probs.exp()
                         # Both baselines are action-independent at this decision.
                         # Keep the learned V detached from the policy gradient.
@@ -510,6 +542,7 @@ def train_selfplay(
                  if completed_episodes else None),
                 (sum(_normalized_progress(ep) for ep, _ in completed_episodes)
                  / len(completed_episodes) if completed_episodes else None),
+                sampling_temperature,
             ))
             if checkpoint_path is not None:
                 save_checkpoint(
@@ -521,12 +554,16 @@ def train_selfplay(
     signature = hashlib.sha256(
         (
             f"{SELFPLAY_VERSION}:{seed}:{rounds}:{episodes_per_round}:"
-            f"{dimension}:{hidden}:{learning_rate}:{run_seed_prefix}"
+            f"{dimension}:{hidden}:{learning_rate}:{run_seed_prefix}:"
+            f"{sampling_temperature_start}:{sampling_temperature_end}:"
+            f"{temperature_decay_rounds}:{warm_start_sha256}"
         ).encode()
     ).hexdigest()[:12]
     final = _export(
         params, dimension, hidden,
-        model_id=f"selfplay-v3-{signature}",
-        value_head_trained=any(item.update_steps > 0 for item in metrics),
+        model_id=f"selfplay-v4-{signature}",
+        value_head_trained=initial_model.value_head_trained or any(
+            item.update_steps > 0 for item in metrics
+        ),
     )
     return SelfPlayResult(final, initial_model, tuple(metrics))
