@@ -113,6 +113,8 @@ def conservative_semantic_group(
 def grade_teacher_root(
     example: TrainingExample, config: TeacherFilter = _DEFAULT_FILTER
 ) -> TeacherRootQuality:
+    if example.policy_target_mode != "uct-visits-v1":
+        raise ValueError("Teacher quality audit requires unmodified UCT-visit targets")
     if not example.policy_targets:
         raise ValueError("Root is missing legal action targets")
     if len({p.action_id for p in example.policy_targets}) != len(example.policy_targets):
