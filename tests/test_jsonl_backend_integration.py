@@ -6,7 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from sts2_ai.agents import RoutePlanningAgent
+from sts2_ai.agents import HeuristicAgent, RoutePlanningAgent
+from sts2_ai.search import SearchBudget, UctMcts
+from sts2_ai.training.continuations import CutoffContinuationCollector
 from sts2_ai.emulator import (
     FAIR_POLICY_ID,
     InformationPolicy,
@@ -198,3 +200,51 @@ def test_route_agent_uses_new_visible_map_without_hidden_state(
             backend.release_many([entered.child])
     finally:
         backend.release_many([root, started.child])
+
+
+def test_forked_mcts_cutoff_continuation_on_real_emulator(
+    backend: JsonlEmulatorBackend,
+) -> None:
+    """A real cutoff fork is playable and preserves the original search result."""
+    policy = InformationPolicy(FAIR_POLICY_ID)
+    root = backend.reset("real-cutoff-continuation-smoke")
+    started = backend.step(root, backend.legal_actions(root)[0])
+    try:
+        options = dict(
+            policy=policy,
+            rollout_policy=HeuristicAgent(),
+            rollout_depth=0,
+            rollout_batch_size=4,
+            seed=5,
+        )
+        baseline = UctMcts(backend, **options).search(
+            started.child, SearchBudget(max_simulations=4)
+        )
+        collector = CutoffContinuationCollector(
+            backend,
+            policy=policy,
+            continuation_policy=HeuristicAgent(),
+            every=1,
+            max_unique=1,
+            max_decisions=512,
+        )
+        sampled = UctMcts(
+            backend,
+            continuation_observer=lambda obs, handle, reason: collector.record(
+                obs, handle, reason, run_seed="real-cutoff-continuation-smoke"
+            ),
+            **options,
+        ).search(started.child, SearchBudget(max_simulations=4))
+        assert baseline.evaluations == sampled.evaluations
+        assert baseline.search_version == sampled.search_version
+        assert collector.records
+        assert collector.records[0].source_exact_hash
+        assert collector.records[0].continuation_decisions > 0
+        assert collector.records[0].outcome in {
+            "victory", "defeat", "truncated", "stuck"
+        }
+        assert (collector.records[0].terminal_value is None) == (
+            collector.records[0].outcome in {"truncated", "stuck"}
+        )
+    finally:
+        backend.release_many((root, started.child))
