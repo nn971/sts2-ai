@@ -9,6 +9,7 @@ import pytest
 from sts2_ai.agents import HeuristicAgent
 from sts2_ai.emulator import InformationPolicy, Observation
 from sts2_ai.models import HashedLinearPolicyValueModel
+from sts2_ai.models.hashed_linear import state_features
 from sts2_ai.search import LearnedCutoffValue, UctMcts, sts2_value
 from sts2_ai.testing.mock_backend import MockLinearBackend
 
@@ -78,9 +79,11 @@ def test_weight_file_fingerprints_distinct_searches(tmp_path: Path) -> None:
 
 def test_invalid_model_values_do_not_enter_uct(tmp_path: Path) -> None:
     model = HashedLinearPolicyValueModel.zeros(64)
-    model.value_weights[0] = math.nan
+    observation = _observation({"phase": 3, "hp": 50})
+    feature_index = next(iter(state_features(json.loads(observation.payload_json), 64)))
+    model.value_weights[feature_index] = math.nan
     path = tmp_path / "bad.json"
     model.save(path)
     cutoff = LearnedCutoffValue.load(path)
     with pytest.raises(ValueError, match="invalid value"):
-        cutoff(_observation({"phase": 3, "hp": 50}))
+        cutoff(observation)
