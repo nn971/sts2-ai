@@ -100,3 +100,30 @@ near-uniform policy targets (mean normalized entropy 0.995). All three
 value-only 4.13 s, neural-policy-only 23.60 s. This is **not** evidence for a
 strength improvement. V2 reduces redundant per-action state hashing and must
 be independently benchmarked with the same workload.
+
+
+## Follow-up v2 real emulator pilot
+
+The v2 architecture was retrained from the same 40 searchable teacher roots
+on the same pinned emulator and compared at fixed MCTS-12/rollout-depth-24
+with 16 decisions per held-out seed:
+
+| Configuration | v1 pilot (seconds/run) | v2 pilot (seconds/run) |
+| --- | ---: | ---: |
+| Handcrafted MCTS | 4.10 | 4.46 |
+| Neural cutoff, 25% blend | 4.13 | 4.52 |
+| Neural rollout policy | 23.60 | 6.95 |
+
+The v2 learned rollout reduces measured execution time by about 3.4x relative
+to the v1 policy pilot (different CI runners, so treat this as indicative).
+Relative to the concurrent handwritten-policy baseline, the extra runtime
+fell from ~5.75x to ~1.56x. All configurations retained the same reported
+frontier progress of 1.00 on the single held-out truncated run; no win
+or strategic improvement has been established. The v2 model's 10-root
+holdout value RMSE was 0.05375, vs 0.05371 in the v1 pilot (not a
+meaningful difference). Teacher normalized policy entropy remains 0.99488:
+the visit supervision is essentially uniform, so stronger teacher data are
+the next limiting factor.
+
+V2 experiment and its saved checkpoint:
+https://github.com/nn971/sts2-ai/actions/runs/37749836944
