@@ -127,3 +127,28 @@ the next limiting factor.
 
 V2 experiment and its saved checkpoint:
 https://github.com/nn971/sts2-ai/actions/runs/37749836944
+
+## Provenance-safe root validation (2026-10-08)
+
+New search evidence records **every originating run seed** in a separate,
+append-only SQLite table keyed by exact state and search configuration.
+Existing databases are upgraded automatically when opened; historical roots
+without source provenance continue to use the previous exact-state/fair-
+observation grouped validation. New JSONL search-root examples also include
+`source_run_seeds`, a possibly empty list.
+
+The grouped train/validation split now joins all roots sharing an exact state,
+a fair observation **or any originating run seed**, including transitive
+connections. Consequently, samples from different floors of the same seed
+cannot contaminate a held-out evaluation. If all states form one connected
+component (for example because of repeated identical opening observations),
+training/validation splitting intentionally fails rather than reporting a
+misleading holdout score. Use additional independent seed sets, or explicitly
+separate training and evaluation into different external datasets.
+
+The matched-root shadow-teacher experiment's separate low/high search budgets
+are not independent trajectories: both point to the same original run seeds.
+The new Q-winner stability diagnostic in `compare-teachers` reports how
+frequently the action with highest sampled mean value remains the same at
+both search budgets, excluding ties and underexplored roots. It is an
+uncalibrated consistency check, not a guarantee of optimal play.
