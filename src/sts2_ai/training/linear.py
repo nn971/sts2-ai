@@ -114,7 +114,7 @@ def train_hashed_linear(
 
     model = HashedLinearPolicyValueModel.zeros(
         dimension,
-        model_id=f"hashed-linear-v1-d{dimension}-seed{seed}",
+        model_id=f"hashed-linear-v2-d{dimension}-seed{seed}",
     )
     rng = random.Random(seed)
     order = list(range(len(examples)))
