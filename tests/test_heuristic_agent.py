@@ -92,3 +92,53 @@ def test_heuristic_reads_pascal_case_combat_payload() -> None:
     )
 
     assert agent.choose(observation, actions).action.action_id == "play_card:strike"
+
+
+def test_heuristic_claims_card_before_native_leave_reward() -> None:
+    agent = HeuristicAgent()
+    observation = _observation({
+        "hp": 50,
+        "max_hp": 70,
+        "reward": {"card_resolved": False},
+        "deck": [{"card_id": "proto.silent.strike"}] * 13,
+    })
+    actions = (
+        LegalAction("leave", "leave_reward"),
+        LegalAction("take", "take_reward_card", '{"Index":0}'),
+        LegalAction("skip", "skip_reward_card"),
+    )
+    assert agent.choose(observation, actions).action.kind == "take_reward_card"
+
+
+def test_heuristic_claims_gold_and_relic_before_leaving_native_reward() -> None:
+    agent = HeuristicAgent()
+    frame = _observation({"hp": 50, "max_hp": 70, "reward": {}})
+    actions = (
+        LegalAction("leave", "leave_reward"),
+        LegalAction("gold", "take_reward_gold"),
+        LegalAction("relic", "take_reward_relic", '{"Index":0}'),
+    )
+    assert agent.choose(frame, actions).action.kind == "take_reward_relic"
+    assert agent.choose(frame, actions[:2]).action.kind == "take_reward_gold"
+
+
+def test_heuristic_can_leave_after_native_reward_claimed() -> None:
+    agent = HeuristicAgent()
+    observation = _observation({"reward": {"card_resolved": True}})
+    assert agent.choose(
+        observation, (LegalAction("leave", "leave_reward"),)
+    ).action.kind == "leave_reward"
+
+
+def test_heuristic_preserves_legacy_ordered_reward_choice() -> None:
+    agent = HeuristicAgent()
+    frame = _observation({
+        "hp": 60, "max_hp": 70,
+        "reward": {"independent_selection": False},
+        "deck": [{"card_id": "proto.silent.strike"}] * 13,
+    })
+    actions = (
+        LegalAction("take", "take_reward_card", '{"Index":0}'),
+        LegalAction("skip", "skip_reward_card"),
+    )
+    assert agent.choose(frame, actions).action.kind == "take_reward_card"
