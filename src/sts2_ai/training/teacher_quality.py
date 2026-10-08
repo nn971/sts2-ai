@@ -294,6 +294,46 @@ def paired_teacher_quality_report(
             raise ValueError("Paired roots disagree on legal actions")
         before.append(grade_teacher_root(lower, config))
         after.append(grade_teacher_root(higher, config))
+    # Q rankings are more relevant than visit entropy: the acting oracle
+    # chooses the largest root sampled MEAN VALUE, not the most visited edge.
+    # Evaluate rankings at exactly matched roots, and reject ambiguous ties.
+    q_pairs: list[tuple[str | None, str | None]] = []
+    gap_pairs: list[tuple[float | None, float | None]] = []
+
+    def ranked_q(example: TrainingExample) -> tuple[str | None, float | None]:
+        state = state_dict(example.observation_json)
+        sums: dict[str, float] = defaultdict(float)
+        counts: dict[str, int] = defaultdict(int)
+        for action in example.policy_targets:
+            if action.visits <= 0:
+                continue
+            group = conservative_semantic_group(state, action)
+            sums[group] += action.visits * action.search_value
+            counts[group] += action.visits
+        if len(counts) < 2:
+            return None, None
+        means = sorted(
+            ((sums[group] / n, group) for group, n in counts.items()),
+            reverse=True,
+        )
+        if abs(means[0][0] - means[1][0]) <= 1e-9:
+            return None, 0.0
+        return means[0][1], means[0][0] - means[1][0]
+
+    for key in matched:
+        left_root, right_root = left[key], right[key]
+        q_pairs.append((ranked_q(left_root)[0], ranked_q(right_root)[0]))
+        gap_pairs.append((ranked_q(left_root)[1], ranked_q(right_root)[1]))
+    both_resolved = [
+        (first, second) for first, second in q_pairs
+        if first is not None and second is not None
+    ]
+    flipped = sum(first != second for first, second in both_resolved)
+    from_low_resolved = [
+        (first, second) for first, second in q_pairs if first is not None
+    ]
+    gaps_low = [a for a, _ in gap_pairs if a is not None]
+    gaps_high = [b for _, b in gap_pairs if b is not None]
     entropy_change = [
         b.semantic_normalized_entropy - a.semantic_normalized_entropy
         for a, b in zip(before, after, strict=True)
@@ -322,6 +362,16 @@ def paired_teacher_quality_report(
         ),
         "eligible_low": sum(item.eligible for item in before),
         "eligible_high": sum(item.eligible for item in after),
+        "q_winner_resolved_both": len(both_resolved),
+        "q_winner_agreement_fraction": (
+            1.0 - flipped / len(both_resolved) if both_resolved else None
+        ),
+        "q_winner_flip_count": flipped,
+        "q_winner_unresolved_high_given_resolved_low": sum(
+            second is None for _, second in from_low_resolved
+        ),
+        "mean_low_semantic_q_gap": fmean(gaps_low) if gaps_low else None,
+        "mean_high_semantic_q_gap": fmean(gaps_high) if gaps_high else None,
         "warning": (
             "Only exactly matched root states are compared; search remains oracle-exact. "
             "Entropy changes measure target concentration, not decision correctness."
