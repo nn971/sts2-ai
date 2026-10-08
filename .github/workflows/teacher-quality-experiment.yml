@@ -1,4 +1,5 @@
 name: stronger-teacher-and-neural-heldout
+# Semantic-action audit v2: never collapse different map paths or event choices.
 
 on:
   workflow_dispatch:
