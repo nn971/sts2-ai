@@ -1,6 +1,7 @@
 from .base import Agent, Decision, ExactStateAgent
 from .heuristic_agent import HeuristicAgent
 from .mcts_agent import OracleMctsAgent
+from .neural_agent import NeuralGreedyAgent
 from .random_agent import RandomAgent
 from .route_planning_agent import RoutePlanner, RoutePlanningAgent
 
@@ -10,6 +11,7 @@ __all__ = [
     "ExactStateAgent",
     "HeuristicAgent",
     "OracleMctsAgent",
+    "NeuralGreedyAgent",
     "RandomAgent",
     "RoutePlanner",
     "RoutePlanningAgent",
