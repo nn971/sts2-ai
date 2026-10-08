@@ -16,10 +16,16 @@ from typing import Any
 
 from sts2_ai.emulator import LegalAction, Observation
 
-from .hashed_linear import policy_features, state_dict, state_features
+from .hashed_linear import (
+    neural_action_features,
+    policy_features,
+    state_dict,
+    state_features,
+)
 from .protocol import PolicyValueEstimate
 
-NEURAL_FORMAT = "sts2-neural-policy-value-v1"
+NEURAL_FORMAT = "sts2-neural-policy-value-v2-semantic-action"
+LEGACY_NEURAL_FORMAT = "sts2-neural-policy-value-v1"
 
 
 def _vector(value: object, length: int) -> list[float]:
@@ -65,10 +71,11 @@ class NeuralPolicyValueModel:
     value_weight: list[float]
     value_bias: float
     model_id: str
+    format_id: str = NEURAL_FORMAT
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> NeuralPolicyValueModel:
-        if raw.get("format") != NEURAL_FORMAT:
+        if raw.get("format") not in {NEURAL_FORMAT, LEGACY_NEURAL_FORMAT}:
             raise ValueError("Unsupported neural model format")
         dimension, hidden = raw.get("dimension"), raw.get("hidden")
         if (
@@ -95,6 +102,7 @@ class NeuralPolicyValueModel:
             value_weight=_vector(raw["value_weight"], hidden),
             value_bias=value_bias,
             model_id=model_id,
+            format_id=str(raw["format"]),
         )
 
     @classmethod
@@ -106,7 +114,7 @@ class NeuralPolicyValueModel:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "format": NEURAL_FORMAT,
+            "format": self.format_id,
             "dimension": self.dimension,
             "hidden": self.hidden,
             "state_weight": self.state_weight,
@@ -140,7 +148,11 @@ class NeuralPolicyValueModel:
         )
         logits = []
         for action in legal_actions:
-            action_vector = policy_features(
+            feature_fn = (
+                neural_action_features
+                if self.format_id == NEURAL_FORMAT else policy_features
+            )
+            action_vector = feature_fn(
                 state, action.kind, action.payload_json, self.dimension
             )
             projected = _sparse_matvec(
