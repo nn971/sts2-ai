@@ -19,6 +19,9 @@ def test_extract_checkpoint_weights_for_new_emulator_revision(tmp_path: Path) ->
         dimension=16, hidden=4, seed=7, checkpoint_path=checkpoint,
     )
     original = checkpoint.read_bytes()
+    with pytest.raises(ValueError, match="overwrite"):
+        export_checkpoint(checkpoint, checkpoint)
+    assert checkpoint.read_bytes() == original
     out = tmp_path / "exported-model.json"
     report = export_checkpoint(checkpoint, out)
     restored = NeuralPolicyValueModel.load(out)
