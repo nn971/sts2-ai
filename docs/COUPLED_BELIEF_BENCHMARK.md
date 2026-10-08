@@ -21,7 +21,7 @@ initialized, `.NET 9` SDK installed, and Python package installed):
 python tools/benchmark_coupled_belief.py \
   --build \
   --cohorts 32,128,512 \
-  --post-map-decisions 7 \
+  --post-map-decisions 24 \
   --rejection-probes 3 \
   --rejection-budget 32 \
   --json-out /tmp/overgrowth-coupled-belief.json
@@ -32,7 +32,7 @@ compiled). `--post-map-decisions` sets the number of intended public
 decisions following RunStart; execution may terminate sooner when the
 visible legal menu empties. The deterministic **visible-only** fixture
 policy selects the first public map choice and thereafter favors
-`end_turn` before falling back to other legal actions. This is
+`play_card` before `end_turn` and then falls back to other legal actions. This is
 intentionally not a good Silent-playing policy: it exposes random
 combat trajectories and posterior shrinkage reproducibly.
 
@@ -79,7 +79,7 @@ incompatible particles never creates new hidden alternatives.
 A collapsed cohort is closed and not silently regenerated at
 subsequent checkpoints.
 
-CI runs smaller cohorts `16,64`, six post-map decisions, two fresh
+CI runs smaller cohorts `16,64`, eighteen post-map decisions, two fresh
 rejection probes with budget eight, checks the report invariant,
 and uploads `coupled-belief-survival-profile` as a build artifact.
 The larger example above is meant for local performance exploration.
