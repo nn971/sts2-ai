@@ -20,9 +20,20 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install -U pip
       - run: python -m pip install -e '.[dev]'
-      - run: python -m ruff check src tests
+      - run: python -m ruff check src tests tools/benchmark_coupled_belief.py
       - run: python -m mypy src/sts2_ai
       - run: python -m pytest
+      - name: Reproducible coupled belief survival benchmark
+        run: |
+          python tools/benchmark_coupled_belief.py \
+            --cohorts 16,64 --post-map-decisions 6 \
+            --rejection-budget 8 --rejection-probes 2 \
+            --json-out /tmp/sts2-coupled-belief.json
+          python -c 'import json; from pathlib import Path; r = json.loads(Path("/tmp/sts2-coupled-belief.json").read_text()); assert r["schema"] == "synthetic-overgrowth-coupled-belief-benchmark-v1"; assert len(r["target_phases"]) >= 3; assert len(r["cohorts"]) == 2; assert len(r["fresh_rejection"]) == 2; assert all(c["factorized_runstarts"] == 7 and c["checkpoints"][0]["survivors"] == c["cohort_size"] and all(a["survivors"] >= b["survivors"] for a,b in zip(c["checkpoints"], c["checkpoints"][1:])) for c in r["cohorts"])'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coupled-belief-survival-profile
+          path: /tmp/sts2-coupled-belief.json
       - name: Whole-run baseline smoke
         run: |
           sts2-ai evaluate --agent random --seeds 1 --no-build
