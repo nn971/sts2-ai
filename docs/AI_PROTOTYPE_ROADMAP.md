@@ -693,6 +693,26 @@ Next:
 5. keep combat-exit and the current oracle-exact search as architecture/debugging tools.
 
 
+### Held-out model validation
+
+The training pipeline now includes `split_training_examples` and a
+`validate-linear` CLI command. The split groups examples by exact source state,
+keeping multiple budgets or search versions of one state in the same partition.
+The assignment is deterministic under a seed and invariant to JSONL input order.
+This avoids the most immediate validation leakage from repeated search roots.
+
+Example:
+
+```fish
+sts2-ai export-training results/strategy.sqlite results/search-targets.jsonl --min-budget 32
+sts2-ai validate-linear results/search-targets.jsonl results/linear-model.json --validation-fraction 0.2 --seed 7
+```
+
+The command prints training and held-out policy cross-entropy, top-1 agreement
+with search, and value RMSE. These are search-distillation metrics rather than
+game-winning metrics; compare against the heuristic and uniform-policy baselines
+before deciding whether to use the model inside MCTS.
+
 ## Immediate implementation sprint
 
 Execute this sequence next:
