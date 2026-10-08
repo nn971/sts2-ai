@@ -29,7 +29,7 @@ def test_pinned_bridge_accepts_public_run_start_without_live_rng() -> None:
             import random
 
             draws = sampler.sample_fair_continuations(
-                (PublicHistoryStep(initial, None),),
+                (PublicHistoryStep(initial, None, tuple(backend.legal_actions(live_a))),),
                 search_rng=random.Random(314159),
                 count=8,
             )
