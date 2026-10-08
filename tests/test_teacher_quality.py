@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from sts2_ai.evaluation.experiment_report import paired_evaluation_report
 from sts2_ai.training.export import load_training_jsonl, write_training_jsonl
 from sts2_ai.training.targets import PolicyTarget, TrainingExample
 from sts2_ai.training.teacher_quality import (
@@ -117,3 +118,34 @@ def test_bad_filters_and_missing_actions_are_rejected() -> None:
         TeacherFilter(min_semantic_top_margin=1.0)
     with pytest.raises(ValueError, match="no legal action"):
         grade_teacher_root(replace(_example(), policy_targets=()))
+
+
+
+def test_paired_report_uses_exact_seeds_and_frontier(tmp_path: Path) -> None:
+    def write(path: Path, offset: float, *, seed_suffix: str = "1") -> None:
+        path.write_text(json.dumps({
+            "agent": "MCTS-32",
+            "rollout_depth": 16,
+            "runs": [
+                {
+                    "seed": f"heldout-{seed_suffix}",
+                    "frontier_progress": 2.0 + offset,
+                    "wall_seconds": 3.0 + offset,
+                    "agent_compute_seconds": 2.5 + offset,
+                    "emulator_transitions": 200,
+                    "decisions": 20,
+                    "outcome": "truncated",
+                },
+            ],
+        }))
+    left, right = tmp_path / "baseline.json", tmp_path / "other.json"
+    write(left, 0.0)
+    write(right, 0.5)
+    report = paired_evaluation_report(left, right)
+    assert report["paired_mean_frontier_delta"] == pytest.approx(0.5)
+    assert report["paired_ahead"] == 1
+    assert report["paired_behind"] == 0
+    assert report["contender"]["mean_wall_seconds"] == pytest.approx(3.5)
+    write(right, 0.5, seed_suffix="different")
+    with pytest.raises(ValueError, match="identical"):
+        paired_evaluation_report(left, right)
