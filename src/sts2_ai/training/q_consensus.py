@@ -121,8 +121,12 @@ def distill_consensus_targets(
     comparable = 0
     agreeing = 0
     accepted_q_gaps = []
+    matched_phases: Counter[str] = Counter()
+    accepted_phases: Counter[str] = Counter()
     for key in matched:
         before, after = low_index[key], high_index[key]
+        phase = str(state_dict(after.observation_json).get("phase", "?"))
+        matched_phases[phase] += 1
         if before.search_budget >= after.search_budget:
             raise ValueError("Low teacher budget must be strictly below high budget")
         if before.observation_hash != after.observation_hash:
@@ -164,6 +168,7 @@ def distill_consensus_targets(
             replace(trained, policy_target_mode=config.mode)
         )
         reasons["accepted"] += 1
+        accepted_phases[phase] += 1
 
     report: dict[str, Any] = {
         "low_examples": len(low),
@@ -177,6 +182,8 @@ def distill_consensus_targets(
         "accepted_fraction_of_matched": len(accepted) / len(matched),
         "accepted_mean_q_gap": fmean(accepted_q_gaps) if accepted_q_gaps else None,
         "reason_counts": dict(sorted(reasons.items())),
+        "matched_phase_counts": dict(sorted(matched_phases.items())),
+        "accepted_phase_counts": dict(sorted(accepted_phases.items())),
         "policy_target_mode": config.mode,
         "source_run_seeds": sorted({
             seed for example in accepted for seed in example.source_run_seeds
