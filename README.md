@@ -45,6 +45,18 @@ sts2-emulator  <---  sts2-ai
 
 ## Current status
 
+**Teacher-free neural self-play pilot:** an observation-only small
+policy–value neural agent now collects actual complete Silent runs
+under ordinary emulator randomness, samples from its own action
+softmax, and updates its policy with episodic REINFORCE and a learned
+value baseline. Terminal win targets dominate with annealed
+bounded floor/HP auxiliaries; capped unfinished runs are **censored**,
+never mislabelled defeats. A dedicated CPU-Torch CI experiment saves
+a portable model and held-out seed-paired neural-vs-random report.
+No teacher, hidden seed, oracle MCTS or perfect chance posterior
+is used. See [first neural self-play](docs/FIRST_NEURAL_SELFPLAY.md).
+
+
 **Guarded first-reward conditional proposals:** the pinned emulator now
 permits independent reward-stream proposals only while that stream
 has never been consumed, on independent hypothetical Combat → Reward
