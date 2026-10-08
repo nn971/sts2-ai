@@ -257,7 +257,7 @@ def test_neural_policy_and_value_in_real_mcts(
 ) -> None:
     """Exercise both neural heads inside the pinned emulator's actual search."""
     model = NeuralPolicyValueModel.from_dict({
-        "format": "sts2-neural-policy-value-v1",
+        "format": "sts2-neural-policy-value-v2-semantic-action",
         "dimension": 16, "hidden": 4, "model_id": "bridge-neural-smoke",
         "state_weight": [[0.1] * 16 for _ in range(4)],
         "state_bias": [0.1] * 4,
