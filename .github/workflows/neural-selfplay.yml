@@ -24,7 +24,7 @@ jobs:
       - name: Install CPU-only PyTorch
         run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Validate real learning and terminal censorship
-        run: python -m pytest tests/test_neural_selfplay.py tests/test_run_environment.py tests/test_neural_temperature_diagnostics.py -q
+        run: python -m pytest tests/test_neural_selfplay.py tests/test_run_environment.py tests/test_neural_temperature_diagnostics.py tests/test_neural_training_temperature.py -q
       - name: Actual Silent whole-run neural training and heldout evaluation
         run: |
           python tools/train_selfplay.py \
@@ -62,6 +62,20 @@ jobs:
             --runs 2 --temperatures 1 0.5 greedy \
             --max-decisions 2048 --max-boss-actions 8
           python -c 'import json; from pathlib import Path; r=json.loads(Path("/tmp/sts2-native-temperature-diagnostics.json").read_text()); assert r["schema"]=="sts2-neural-temperature-diagnostics-v1"; assert r["environment"]=="native-overgrowth"; assert r["temperatures"]==["t1","t0.5","greedy"]; assert all(x["attempted"]==2 for x in r["summary"].values()); assert all(len(x)==2 for x in r["runs"].values()); assert len(r["paired_completed_only"])==2'
+      - name: Warm-start a native on-policy temperature-scheduled training cohort
+        run: |
+          python tools/train_selfplay.py \
+            --environment native-overgrowth \
+            --initialize-from-model /tmp/sts2-native-train-model.json \
+            --workers 2 --rounds 2 --episodes 3 \
+            --temperature-start 0.2 --temperature-end 0.05 \
+            --temperature-decay-rounds 1 --entropy-weight 0.002 \
+            --max-decisions 2048 --dimension 64 --hidden 8 \
+            --evaluate-seeds 1 --seed 47 \
+            --checkpoint /tmp/sts2-native-tempered-checkpoint.pt \
+            --output /tmp/sts2-native-tempered-model.json \
+            --report /tmp/sts2-native-tempered-report.json
+          python -c 'import json; from pathlib import Path; r=json.loads(Path("/tmp/sts2-native-tempered-report.json").read_text()); assert r["train_completed"]>0; assert r["gradient_updates"]==2; assert [round(x["sampling_temperature"],6) for x in r["rounds"]]==[0.2,0.05]; assert r["initialized_from_model"]=="/tmp/sts2-native-train-model.json"; assert Path("/tmp/sts2-native-tempered-checkpoint.pt").exists()'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -75,4 +89,7 @@ jobs:
             /tmp/sts2-native-train-model.json
             /tmp/sts2-native-train-checkpoint.pt
             /tmp/sts2-native-temperature-diagnostics.json
+            /tmp/sts2-native-tempered-report.json
+            /tmp/sts2-native-tempered-model.json
+            /tmp/sts2-native-tempered-checkpoint.pt
           if-no-files-found: ignore
