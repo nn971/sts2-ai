@@ -53,7 +53,7 @@ def _visible_action(actions: tuple[LegalAction, ...], *, map_entry: bool) -> Leg
         raise ValueError("A terminal public frame cannot select an action")
     preferred = (
         ("choose_map_node",) if map_entry else
-        ("end_turn", "skip_reward", "leave_shop", "leave_event", "choose_map_node")
+        ("play_card", "end_turn", "skip_reward", "leave_shop", "leave_event", "choose_map_node")
     )
     for kind in preferred:
         chosen = next((action for action in actions if action.kind == kind), None)
@@ -310,7 +310,7 @@ def _sizes(raw: str) -> tuple[int, ...]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cohorts", type=_sizes, default=(32, 128))
-    parser.add_argument("--post-map-decisions", type=int, default=7)
+    parser.add_argument("--post-map-decisions", type=int, default=24)
     parser.add_argument("--rejection-budget", type=int, default=16)
     parser.add_argument("--rejection-probes", type=int, default=3)
     parser.add_argument("--search-seed", type=int, default=711)
