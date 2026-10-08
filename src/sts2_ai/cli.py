@@ -61,6 +61,11 @@ from sts2_ai.training.diagnostics import (
     observation_shift_report,
     teacher_policy_report,
 )
+from sts2_ai.training.teacher_quality import (
+    TeacherFilter,
+    curate_teacher_examples,
+    teacher_quality_report,
+)
 from sts2_ai.training.neural import (
     evaluate_neural,
     split_continuations_by_seed,
@@ -289,6 +294,18 @@ def main() -> None:
     diagnose_training.add_argument("--cutoff-samples", type=Path)
     diagnose_training.add_argument("--json-output", type=Path)
 
+    curate = sub.add_parser(
+        "curate-teacher",
+        help="audit and optionally select roots with non-flat semantic MCTS evidence",
+    )
+    curate.add_argument("dataset", type=Path)
+    curate.add_argument("--output", type=Path)
+    curate.add_argument("--json-output", type=Path)
+    curate.add_argument("--min-budget", type=int, default=32)
+    curate.add_argument("--min-visits-per-semantic-action", type=int, default=2)
+    curate.add_argument("--min-semantic-top-margin", type=float, default=0.10)
+    curate.add_argument("--min-semantic-value-gap", type=float, default=0.0)
+
     diagnose_continuations = sub.add_parser(
         "diagnose-continuations",
         help="measure actual heuristic continuation outcomes and cutoff value RMSE",
@@ -368,9 +385,32 @@ def main() -> None:
         _export_training(args)
         return
 
+    if args.command == "curate-teacher":
+        examples = load_training_jsonl(args.dataset)
+        config = TeacherFilter(
+            min_budget=args.min_budget,
+            min_visits_per_semantic_action=args.min_visits_per_semantic_action,
+            min_semantic_top_margin=args.min_semantic_top_margin,
+            min_semantic_value_gap=args.min_semantic_value_gap,
+        )
+        summary = teacher_quality_report(examples, config)
+        if args.output is not None:
+            selected = curate_teacher_examples(examples, config)
+            write_training_jsonl(selected, args.output)
+            summary["curated_output"] = str(args.output)
+        text = json.dumps(summary, indent=2, sort_keys=True)
+        print(text)
+        if args.json_output is not None:
+            args.json_output.parent.mkdir(parents=True, exist_ok=True)
+            args.json_output.write_text(text + "\n", encoding="utf-8")
+        return
+
     if args.command == "diagnose-training":
         examples = load_training_jsonl(args.dataset)
-        diagnostic_report: dict[str, object] = {"teacher_policy": teacher_policy_report(examples)}
+        diagnostic_report: dict[str, object] = {
+            "teacher_policy": teacher_policy_report(examples),
+            "teacher_semantics": teacher_quality_report(examples),
+        }
         if args.cutoff_samples is not None:
             samples = load_cutoff_samples(args.cutoff_samples)
             diagnostic_report["root_to_cutoff_shift"] = observation_shift_report(
