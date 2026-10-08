@@ -207,7 +207,7 @@ def train_neural(
     signature = hashlib.sha256(
         (
             f"{seed}|{dimension}|{hidden}|{epochs}|{learning_rate}|"
-            f"{len(roots)}|{len(continuation_data)}"
+            f"{len(roots)}|{len(continuation_data)}|{root_value_weight}"
         ).encode()
     ).hexdigest()[:12]
     return _export(
