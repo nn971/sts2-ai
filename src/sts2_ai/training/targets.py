@@ -36,12 +36,15 @@ class TrainingExample:
     search_version: str = ""
     game_build: str = "unknown"
     policy_target_mode: str = "uct-visits-v1"
+    source_run_seeds: tuple[str, ...] = ()
 
 
 def build_training_example(
     root: SearchRootEvidence,
     actions: tuple[SearchActionEvidence, ...],
     observation: SearchObservationEvidence,
+    *,
+    source_run_seeds: tuple[str, ...] = (),
 ) -> TrainingExample:
     """Distill one searched root into a supervised policy/value example.
 
@@ -98,6 +101,7 @@ def build_training_example(
         search_budget=root.search_budget,
         search_version=root.search_version,
         game_build=root.game_build,
+        source_run_seeds=source_run_seeds,
     )
 
 
