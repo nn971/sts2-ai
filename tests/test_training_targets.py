@@ -18,6 +18,7 @@ from sts2_ai.training import (
     TrainingExample,
     build_training_example,
     build_training_examples,
+    load_training_jsonl,
     split_training_examples,
     write_training_jsonl,
 )
@@ -282,3 +283,75 @@ def test_split_groups_transitive_observation_overlap() -> None:
     )
     train, validation = split_training_examples((*connected, separate), seed=2)
     assert all(e in train for e in connected) or all(e in validation for e in connected)
+
+
+def test_search_run_seed_provenance_roundtrip_and_duplicate_origins(tmp_path: Path) -> None:
+    db = tmp_path / "legacy-upgrade.sqlite"
+    result = _search_result(
+        budget=32, first_visits=20, second_visits=12,
+        first_value=0.4, second_value=0.1,
+    )
+    with SQLiteStrategyStore(db) as store:
+        for seed in ("run-b", "run-a", "run-a"):
+            record_search_result(
+                store, result, result.evaluations[0].action,
+                information_policy="prototype-fair-v0",
+                search_regime="oracle-exact", search_budget=32,
+                emulator_revision="emu-1", game_build="build-1",
+                run_seed=seed,
+            )
+        roots = build_training_examples(store, "prototype-fair-v0")
+    assert len(roots) == 1
+    assert roots[0].source_run_seeds == ("run-a", "run-b")
+    output = tmp_path / "with-origins.jsonl"
+    write_training_jsonl(roots, output)
+    assert load_training_jsonl(output) == roots
+    assert json.loads(output.read_text())["source_run_seeds"] == ["run-a", "run-b"]
+
+
+def test_grouped_split_separates_entire_originating_runs() -> None:
+    sample = TrainingExample(
+        observation_hash="obs-0", information_policy="fair",
+        policy_targets=(PolicyTarget("a", 1.0),),
+        value_target=0.0, source_search_id="root-0",
+        emulator_revision="emu", source_state_hash="exact-0",
+        source_run_seeds=("run-a",),
+    )
+    first_run = tuple(
+        replace(sample, observation_hash=f"obs-{index}",
+                source_state_hash=f"exact-{index}",
+                source_search_id=f"root-{index}")
+        for index in range(3)
+    )
+    other = tuple(
+        replace(sample, observation_hash=f"obs-{index}",
+                source_state_hash=f"exact-{index}",
+                source_search_id=f"root-{index}",
+                source_run_seeds=("run-b",))
+        for index in range(3, 6)
+    )
+    train, validation = split_training_examples(first_run + other, seed=11)
+    assert train and validation
+    assert {seed for ex in train for seed in ex.source_run_seeds}.isdisjoint(
+        {seed for ex in validation for seed in ex.source_run_seeds}
+    )
+    assert len(train) + len(validation) == 6
+    # Two different runs are transitively linked by one shared exact state.
+    connected = replace(other[0], source_state_hash=first_run[0].source_state_hash)
+    with pytest.raises(ValueError, match="distinct observation groups"):
+        split_training_examples(first_run + (connected,) + other[1:])
+
+
+def test_loader_rejects_invalid_source_run_seed_shape(tmp_path: Path) -> None:
+    example = TrainingExample(
+        observation_hash="obs", information_policy="fair",
+        policy_targets=(PolicyTarget("a", 1.0),),
+        value_target=0.0, source_search_id="s", emulator_revision="emu",
+    )
+    output = tmp_path / "bad-seeds.jsonl"
+    write_training_jsonl((example,), output)
+    payload = json.loads(output.read_text())
+    payload["source_run_seeds"] = "one-string-is-not-a-list"
+    output.write_text(json.dumps(payload) + "\n")
+    with pytest.raises(ValueError, match="source run seeds"):
+        load_training_jsonl(output)
