@@ -4,6 +4,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import subprocess
+import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -13,6 +16,7 @@ from sts2_ai.emulator import LegalAction, Observation
 from sts2_ai.models import NeuralPolicyValueModel, load_model
 from sts2_ai.search import LearnedCutoffValue
 from sts2_ai.training.continuations import ContinuationRecord
+from sts2_ai.training.export import write_training_jsonl
 from sts2_ai.training.neural import evaluate_neural, split_continuations_by_seed, train_neural
 from sts2_ai.training.targets import PolicyTarget, TrainingExample
 
@@ -114,16 +118,15 @@ def test_cutoff_seed_split_drops_cross_seed_hash_leaks() -> None:
     assert {r.source_run_seed for r in training}.isdisjoint(
         {r.source_run_seed for r in validation}
     )
-    duplicate = _cutoff(6)
-    # Re-use a held-out source state under another run seed; it must not leak.
-    repeated = ContinuationRecord(
-        **{
-            **duplicate.__dict__,
-            "source_exact_hash": validation[0].source_exact_hash,
-            "observation_hash": validation[0].observation_hash,
-        }
-    ) if hasattr(duplicate, "__dict__") else None
-    assert repeated is None  # frozen+slots records have no mutable __dict__
+    # Re-use a held-out source state under a training seed; it must not leak.
+    duplicate = replace(
+        training[0],
+        source_exact_hash=validation[0].source_exact_hash,
+        observation_hash=validation[0].observation_hash,
+    )
+    modified = tuple(duplicate if record == training[0] else record for record in examples)
+    safe_train, _ = split_continuations_by_seed(modified, seed=1)
+    assert duplicate not in safe_train
 
 
 def test_neural_training_and_inference_export(tmp_path: Path) -> None:
@@ -140,6 +143,19 @@ def test_neural_training_and_inference_export(tmp_path: Path) -> None:
     assert metrics.roots == 4
     assert math.isfinite(metrics.value_rmse or 0.0)
     assert math.isfinite(metrics.policy_cross_entropy)
+
+    dataset = tmp_path / "roots.jsonl"
+    write_training_jsonl(roots, dataset)
+    cli_weights = tmp_path / "cli-neural.json"
+    cli = subprocess.run(
+        [
+            sys.executable, "-m", "sts2_ai.cli", "train-neural",
+            str(dataset), str(cli_weights), "--dimension", "32",
+            "--hidden", "8", "--epochs", "2",
+        ], check=True, capture_output=True, text=True,
+    )
+    assert "root_validation" in cli.stdout
+    assert NeuralPolicyValueModel.load(cli_weights).hidden == 8
 
     cutoffs = (_cutoff(1), _cutoff(2, outcome="defeat"))
     conditional = train_neural(roots, continuations=cutoffs,
