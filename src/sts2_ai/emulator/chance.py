@@ -11,7 +11,6 @@ import math
 import random
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from itertools import product
 from typing import Protocol, runtime_checkable
 
 from .protocol import LegalAction, Observation, StateHandle
@@ -97,32 +96,42 @@ class KnownDeckDrawLaw:
             raise ValueError("draw count must be between zero and remaining cards")
 
     def distribution(self, draws: int, *, max_outcomes: int = 4096) -> tuple[DrawOutcome, ...]:
-        """Enumerate exact small-support multiset probabilities, or refuse."""
+        """Enumerate a bounded exact support, pruning impossible partial draws."""
         self._validate_draw_count(draws)
         if max_outcomes < 1:
             raise ValueError("max_outcomes must be positive")
-        denom = math.comb(self.remaining, draws)
+        denominator = math.comb(self.remaining, draws)
         outcomes: list[DrawOutcome] = []
-        ranges = [range(min(count, draws) + 1) for _, count in self.counts]
-        for drawn in product(*ranges):
-            if sum(drawn) != draws:
-                continue
-            if len(outcomes) >= max_outcomes:
-                raise ValueError("draw support exceeds max_outcomes; use sampling")
-            numerator = math.prod(
-                math.comb(available, taken)
-                for (_, available), taken in zip(self.counts, drawn, strict=True)
-            )
-            outcomes.append(
-                DrawOutcome(
-                    counts=tuple(
-                        (card, count)
-                        for (card, _), count in zip(self.counts, drawn, strict=True)
-                        if count
-                    ),
-                    probability=numerator / denom,
+        tail_available = [0] * (len(self.counts) + 1)
+        for index in range(len(self.counts) - 1, -1, -1):
+            tail_available[index] = tail_available[index + 1] + self.counts[index][1]
+
+        def visit(
+            index: int,
+            remaining_draws: int,
+            numerator: int,
+            prefix: tuple[tuple[str, int], ...],
+        ) -> None:
+            if index == len(self.counts):
+                if remaining_draws == 0:
+                    if len(outcomes) >= max_outcomes:
+                        raise ValueError("draw support exceeds max_outcomes; use sampling")
+                    outcomes.append(DrawOutcome(prefix, numerator / denominator))
+                return
+
+            card, available = self.counts[index]
+            minimum = max(0, remaining_draws - tail_available[index + 1])
+            maximum = min(available, remaining_draws)
+            for taken in range(minimum, maximum + 1):
+                extended = prefix + ((card, taken),) if taken else prefix
+                visit(
+                    index + 1,
+                    remaining_draws - taken,
+                    numerator * math.comb(available, taken),
+                    extended,
                 )
-            )
+
+        visit(0, draws, 1, ())
         return tuple(outcomes)
 
     def sample_ordered(self, draws: int, *, rng: random.Random) -> tuple[str, ...]:
