@@ -32,7 +32,7 @@ def require_environment(backend: EmulatorBackend, environment: str) -> None:
     ):
         raise JsonlBridgeError(
             "Native-structure Overgrowth training requires the pinned "
-            "emulator JSONL bridge to advertise nativeOvergrowthResetId="
+            "emulator JSONL bridge; this backend does not advertise nativeOvergrowthResetId="
             f"{NATIVE_RESET_SCHEMA!r}. Normal reset generates the six-floor "
             "legacy prototype. This mode will not fall back or modify "
             "the emulator."
