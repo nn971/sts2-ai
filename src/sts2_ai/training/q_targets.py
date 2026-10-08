@@ -40,7 +40,7 @@ class QTeacherConfig:
     @property
     def mode(self) -> str:
         return (
-            f"q-softmax-v1-t{self.temperature.hex()}-b{self.min_budget}"
+            f"q-softmax-v2-t{self.temperature.hex()}-b{self.min_budget}"
             f"-v{self.min_semantic_visits}-g{self.min_value_gap.hex()}"
             f"-u{self.uncertainty_scale.hex()}"
         )
