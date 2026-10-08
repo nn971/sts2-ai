@@ -32,7 +32,7 @@ from sts2_ai.emulator.run_environment import (
     reset_training_run,
 )
 from sts2_ai.models.hashed_linear import neural_action_features, state_dict, state_features
-from sts2_ai.models.neural import NeuralPolicyValueModel
+from sts2_ai.models.neural import NEURAL_FORMAT, NeuralPolicyValueModel
 from sts2_ai.training.neural import _dense, _export, _forward, _new_params
 from sts2_ai.training.parallel_rollouts import (
     collect_parallel,
@@ -43,7 +43,7 @@ from sts2_ai.training.rollout_failure import SCHEMA as FAILURE_SCHEMA
 from sts2_ai.training.rollout_failure import PublicRolloutFailure
 from sts2_ai.training.selfplay_checkpoint import load_checkpoint, save_checkpoint
 
-SELFPLAY_VERSION = "public-onpolicy-reinforce-actor-critic-v3-parallel-resumable"
+SELFPLAY_VERSION = "public-onpolicy-reinforce-actor-critic-v4-temperature-warmstart"
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +82,7 @@ class TrainingRound:
     decision_samples: int
     mean_return: float | None
     mean_progress: float | None
+    sampling_temperature: float = 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,17 +101,36 @@ def _softmax(logits: Sequence[float]) -> tuple[float, ...]:
     return tuple(x / total for x in exp)
 
 
+def temperature_for_round(
+    round_index: int, *, start: float, end: float, decay_rounds: int
+) -> float:
+    """Geometric temperature schedule; each round freezes its sampling policy."""
+    if type(round_index) is not int or round_index < 0:
+        raise ValueError("Round index must be nonnegative")
+    if type(decay_rounds) is not int or decay_rounds <= 0:
+        raise ValueError("Temperature decay rounds must be positive")
+    if not all(math.isfinite(t) and t > 0 for t in (start, end)):
+        raise ValueError("Sampling temperatures must be positive and finite")
+    fraction = min(1.0, round_index / decay_rounds)
+    return math.exp((1.0 - fraction) * math.log(start) + fraction * math.log(end))
+
+
 def sample_public_action(
     model: NeuralPolicyValueModel,
     observation: Observation,
     actions: Sequence[LegalAction],
     *,
     rng: random.Random,
+    temperature: float = 1.0,
 ) -> int:
-    """On-policy categorical sampling over the *public* legal action list."""
+    """Sample from the public categorical policy softmax(logits / T)."""
+    if not math.isfinite(temperature) or temperature <= 0:
+        raise ValueError("Sampling temperature must be positive and finite")
     if not actions:
         raise ValueError("Cannot choose from an empty legal-action menu")
-    probabilities = _softmax(model.evaluate(observation, actions).action_logits)
+    probabilities = _softmax(tuple(
+        x / temperature for x in model.evaluate(observation, actions).action_logits
+    ))
     threshold = rng.random()
     total = 0.0
     for index, probability in enumerate(probabilities):
@@ -149,6 +169,7 @@ def collect_public_episode(
     max_decisions: int = 2048,
     policy_id: str = "prototype-fair-v0",
     environment: str = LEGACY,
+    temperature: float = 1.0,
 ) -> Episode:
     """Run the actual emulator; never give hidden handles to the actor.
 
@@ -158,6 +179,8 @@ def collect_public_episode(
     """
     if max_decisions <= 0:
         raise ValueError("max_decisions must be positive")
+    if not math.isfinite(temperature) or temperature <= 0:
+        raise ValueError("Sampling temperature must be positive and finite")
     policy = InformationPolicy(policy_id)
     state = reset_training_run(backend, seed, environment)
     history: list[PublicDecision] = []
@@ -181,7 +204,9 @@ def collect_public_episode(
                 )
 
             actions = tuple(backend.legal_actions(state))
-            index = sample_public_action(model, frame, actions, rng=actor_rng)
+            index = sample_public_action(
+                model, frame, actions, rng=actor_rng, temperature=temperature
+            )
             # Record *only* public inputs and the sampled legal index.
             history.append(PublicDecision(frame, actions, index))
             try:
@@ -279,6 +304,10 @@ def train_selfplay(
     win_anneal_threshold: int = 16,
     value_weight: float = 0.5,
     entropy_weight: float = 0.01,
+    sampling_temperature_start: float = 1.0,
+    sampling_temperature_end: float = 1.0,
+    temperature_decay_rounds: int = 1,
+    initialize_from_model: Path | None = None,
     update_epochs: int = 1,
     max_decisions: int = 2048,
     run_seed_prefix: str = "neural-train",
@@ -307,7 +336,11 @@ def train_selfplay(
     if not 0 <= value_weight <= 10 or not 0 <= entropy_weight <= 1:
         raise ValueError("Invalid value or entropy loss weight")
     if update_epochs != 1:
-        raise ValueError("Strict on-policy v2 uses exactly one update epoch")
+        raise ValueError("Strict on-policy learning uses exactly one update epoch")
+    temperature_for_round(
+        0, start=sampling_temperature_start,
+        end=sampling_temperature_end, decay_rounds=temperature_decay_rounds,
+    )
     if type(win_anneal_threshold) is not int or win_anneal_threshold <= 0:
         raise ValueError("win_anneal_threshold must be positive")
     if type(workers) is not int or workers <= 0:
