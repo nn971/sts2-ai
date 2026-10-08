@@ -935,3 +935,31 @@ real emulator binding
 ```
 
 The next fresh development context should start from the **multi-seed 8/32/128 budget ladder and search-quality diagnosis**.
+
+
+## Next milestone: first neural two-head baseline (2026-10-08)
+
+The first neural policy/value implementation is now available in sts2-ai.
+
+- Shared observation-only nonlinear state encoder, terminal-bounded value head,
+  and dynamic legal-action policy scorer.
+- Optional PyTorch training with standard-library portable JSON inference;
+  CPU Torch smoke tests and full emulator tests are separately checked.
+- Grouped training/validation for oracle-exact searched roots and optional
+  independent terminal continuation labels. The continuation value objective
+  *replaces* search-root proxy value training when selected. Censored
+  continuations are never interpreted as defeats.
+- Neural greedy rollout policy and neural cutoff value can each be enabled
+  independently in MCTS. Model-content fingerprints keep results separate.
+- An artifact-producing GitHub Actions pilot trains on real emulator searched
+  roots and performs three small same-seed comparisons: original MCTS, learned
+  value only, and learned rollout policy only.
+
+The initial network is a **research baseline**, not an established strength
+gain. Training/search labels are still sparse, search itself is oracle-exact,
+and performance must be judged on held-out complete runs and compute cost.
+The next steps are higher-quality teacher data, measured continuation-value
+coverage, calibrated policy priors, fair search, and larger paired evaluations.
+
+Full reproducibility instructions are in
+docs/NEURAL_POLICY_VALUE_PROTOTYPE.md.
