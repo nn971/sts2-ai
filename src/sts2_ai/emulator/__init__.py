@@ -1,3 +1,9 @@
+from .coupled_factorized_rejection import (
+    COUPLED_FACTORIZED_PRIOR_ID,
+    COUPLED_REJECTION_VERSION,
+    CoupledFactorizedHistoryRejectionSampler,
+    CoupledRejectionStats,
+)
 from .draw_belief import (
     DRAW_BELIEF_VERSION,
     DrawBelief,
@@ -49,6 +55,10 @@ from .rejection import (
 
 __all__ = [
     "BridgeOperationStats",
+    "COUPLED_FACTORIZED_PRIOR_ID",
+    "COUPLED_REJECTION_VERSION",
+    "CoupledFactorizedHistoryRejectionSampler",
+    "CoupledRejectionStats",
     "DRAW_BELIEF_VERSION",
     "DrawBelief",
     "OrderedDrawOutcome",
