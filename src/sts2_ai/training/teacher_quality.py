@@ -15,7 +15,7 @@ from typing import Any
 
 from sts2_ai.models.hashed_linear import semantic_action_label, state_dict
 
-from .targets import TrainingExample
+from .targets import PolicyTarget, TrainingExample
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +70,46 @@ def _entropy_normalized(probabilities: list[float]) -> float:
     return value / math.log(len(probabilities))
 
 
+def _conservative_semantic_group(
+    state: dict[str, Any], action: PolicyTarget
+) -> str:
+    """Merge identical visible card plays, but never distinct map branches.
+
+    Nodes sharing a room type may have different future routes. Distinct shop
+    choices and targets are not interchangeable either.
+    """
+    if action.action_kind != "play_card":
+        return "distinct:" + action.action_id
+    try:
+        payload = json.loads(action.action_payload_json)
+    except json.JSONDecodeError:
+        return "unresolved:" + action.action_id
+    if not isinstance(payload, dict):
+        return "unresolved:" + action.action_id
+    instance_id = payload.get("card_instance_id", payload.get("CardInstanceId"))
+    combat = state.get("combat")
+    if not isinstance(combat, dict) or not isinstance(combat.get("hand"), list):
+        return "unresolved:" + action.action_id
+    matching = [
+        card for card in combat["hand"]
+        if isinstance(card, dict) and card.get("instance_id") == instance_id
+    ]
+    if len(matching) != 1 or not isinstance(matching[0].get("card_id"), str):
+        return "unresolved:" + action.action_id
+    visible_card = {k: v for k, v in matching[0].items() if k != "instance_id"}
+    target = payload.get("target_enemy_id", payload.get("TargetEnemyId"))
+    return json.dumps(
+        {
+            "semantic": semantic_action_label(
+                state, action.action_kind, action.action_payload_json
+            ),
+            "card": visible_card,
+            "target_instance": target,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
 def grade_teacher_root(
     example: TrainingExample, config: TeacherFilter = _DEFAULT_FILTER
 ) -> TeacherRootQuality:
@@ -82,18 +122,7 @@ def grade_teacher_root(
     literal = _normalized([max(0.0, p.probability) for p in example.policy_targets])
     groups: dict[str, list[int]] = defaultdict(list)
     for i, action in enumerate(example.policy_targets):
-        label = semantic_action_label(state, action.action_kind, action.action_payload_json)
-        # Never declare two choices equivalent solely because the semantic
-        # resolver lacks that action type or fails to resolve its card/target.
-        # Unknown shop/event decisions can have very different outcomes.
-        if (
-            label == action.action_kind
-            or "unknown-card" in label
-            or "unknown-enemy" in label
-            or label.endswith("room=None")
-        ):
-            label = f"unresolved:{action.action_id}"
-        groups[label].append(i)
+        groups[_conservative_semantic_group(state, action)].append(i)
 
     semantic_labels = sorted(groups)
     semantic_weights = [
@@ -212,7 +241,7 @@ def teacher_quality_report(
             "min_semantic_value_gap": config.min_semantic_value_gap,
         },
         "warning": (
-            "Action semantics aggregate interchangeable legal actions. Eligibility is "
+            "Only matching visible card plays share one semantic group. Eligibility is "
             "a heuristic signal-quality gate, NOT a calibrated statistical confidence "
             "measure or proof of correct action ranking."
         ),
