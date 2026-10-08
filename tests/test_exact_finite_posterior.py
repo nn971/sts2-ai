@@ -234,8 +234,14 @@ def test_public_reveal_not_observed_from_real_hidden_seed() -> None:
         backend, seed_values=tuple(range(35))
     ) as posterior:
         posterior.initialize_history(public)
-        assert all(
-            backend.hint(backend.states[handle][0]) == chosen_hint
-            for handle in posterior._states  # inspecting fixture-owned synthetic states
+        samples = posterior.sample_fair_continuations(
+            public, search_rng=random.Random(4), count=40
         )
+        try:
+            assert all(
+                backend.hint(backend.states[handle][0]) == chosen_hint
+                for handle in samples
+            )
+        finally:
+            backend.release_many(samples)
     assert not backend.states
