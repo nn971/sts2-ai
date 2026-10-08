@@ -45,6 +45,8 @@ sts2-emulator  <---  sts2-ai
 
 ## Current status
 
+**Next development direction (planned, not implemented):** fair stochastic neural-guided PUCT and iterative self-improvement, with compact normalized progress/HP mean-and-variance predictions. See the [implementation roadmap](docs/SELF_IMPROVING_STOCHASTIC_PUCT.md).
+
 This repository has **working experimental agents, but not a trained expert**.
 The `emulator/` submodule is pinned to an implemented whole-run Silent prototype.
 The long-lived Python/JSONL bridge, deterministic whole-run evaluation, seeded
@@ -200,6 +202,7 @@ See [`docs/INFORMATION_POLICY.md`](docs/INFORMATION_POLICY.md).
 - [`docs/EMULATOR_CONTRACT.md`](docs/EMULATOR_CONTRACT.md) — what this repo may assume from `sts2-emulator`
 - [`docs/INFORMATION_POLICY.md`](docs/INFORMATION_POLICY.md) — engine state vs fair observation
 - [`docs/SEARCH_AND_LEARNING.md`](docs/SEARCH_AND_LEARNING.md) — proposed expert-iteration loop
+- [`docs/SELF_IMPROVING_STOCHASTIC_PUCT.md`](docs/SELF_IMPROVING_STOCHASTIC_PUCT.md) — **next implementation plan:** fair chance sampling, PUCT, bounded uniformized variance, annealed auxiliaries, and teacher-free self-improvement
 - [`docs/NEURAL_POLICY_VALUE_PROTOTYPE.md`](docs/NEURAL_POLICY_VALUE_PROTOTYPE.md) — first neural training, MCTS deployment, and held-out experiments
 - [`docs/TEACHER_QUALITY_EXPERIMENT.md`](docs/TEACHER_QUALITY_EXPERIMENT.md) — semantic teacher audit, exact-root shadow search, and Q-based policy targets
 - [`docs/STRATEGY_DATABASE.md`](docs/STRATEGY_DATABASE.md) — persistent strategic evidence
