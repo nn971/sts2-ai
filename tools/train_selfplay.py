@@ -12,6 +12,7 @@ import argparse
 import json
 import sys
 import time
+from statistics import fmean
 from dataclasses import asdict
 from pathlib import Path
 
@@ -30,6 +31,7 @@ from sts2_ai.evaluation.selfplay_metrics import (
 )
 from sts2_ai.training.selfplay import SELFPLAY_VERSION, TrainingRound, train_selfplay
 from sts2_ai.training.rollout_failure import PublicRolloutFailure
+from tools.fixed_seed_monitor import FixedSeedMonitor
 
 
 def _progress(message: str) -> None:
@@ -46,6 +48,7 @@ class _TrainingProgress:
         self.round_started = self.started
         self.completed_this_invocation = 0
         self.wins_this_invocation = 0
+        self.progress_this_invocation: list[float] = []
         self.first_round_index: int | None = None
 
     def start(self, round_index: int, total_rounds: int, temperature: float) -> None:
@@ -64,6 +67,8 @@ class _TrainingProgress:
 
     def complete(self, row: TrainingRound) -> None:
         self.completed_this_invocation += 1
+        if row.mean_progress is not None:
+            self.progress_this_invocation.append(row.mean_progress)
         self.wins_this_invocation += row.wins
         elapsed = time.perf_counter() - self.started
         duration = time.perf_counter() - self.round_started
@@ -73,11 +78,18 @@ class _TrainingProgress:
             f"{row.mean_progress:.1%}" if row.mean_progress is not None else "n/a"
         )
         loss = f"{row.mean_loss:.4f}" if row.mean_loss is not None else "n/a"
+        moving = ""
+        for window in (10, 50):
+            if len(self.progress_this_invocation) >= window:
+                moving += (
+                    f" avg{window}="
+                    f"{fmean(self.progress_this_invocation[-window:]):.1%}"
+                )
         _progress(
             f"[train] round {row.round_index + 1}/{self.total_rounds} complete | "
             f"completed={row.completed}/{row.played} censored={row.censored} "
             f"wins={row.wins} new_wins={self.wins_this_invocation} | "
-            f"progress={progress} loss={loss} "
+            f"progress={progress}{moving} loss={loss} "
             f"updates={row.update_steps} decisions={row.decision_samples} | "
             f"round={duration:.1f}s elapsed={elapsed:.1f}s eta={eta:.0f}s"
         )
