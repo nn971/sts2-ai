@@ -16,8 +16,8 @@ from statistics import fmean
 from typing import Any
 
 from sts2_ai.emulator import LegalAction, Observation
-from sts2_ai.models.hashed_linear import policy_features, state_dict, state_features
-from sts2_ai.models.neural import NeuralPolicyValueModel
+from sts2_ai.models.hashed_linear import neural_action_features, state_dict, state_features
+from sts2_ai.models.neural import NEURAL_FORMAT, NeuralPolicyValueModel
 from sts2_ai.training.continuations import ContinuationRecord
 
 from .targets import TrainingExample
@@ -71,7 +71,7 @@ def _policy_tensors(
 ) -> Any:
     state = state_dict(example.observation_json)
     matrix = [
-        _dense(policy_features(state, item.action_kind, item.action_payload_json, dimension),
+        _dense(neural_action_features(state, item.action_kind, item.action_payload_json, dimension),
                dimension)
         for item in example.policy_targets
     ]
@@ -120,7 +120,7 @@ def _export(
     for name, value in params.items():
         weights[name] = value.detach().cpu().tolist()
     return NeuralPolicyValueModel.from_dict({
-        "format": "sts2-neural-policy-value-v1",
+        "format": NEURAL_FORMAT,
         "dimension": dimension,
         "hidden": hidden,
         "model_id": model_id,
@@ -208,7 +208,7 @@ def train_neural(
         ).encode()
     ).hexdigest()[:12]
     return _export(
-        params, dimension, hidden, model_id=f"neural-v1-d{dimension}-h{hidden}-{signature}"
+        params, dimension, hidden, model_id=f"neural-v2-d{dimension}-h{hidden}-{signature}"
     )
 
 
