@@ -57,7 +57,10 @@ def test_real_pinned_opening_combat_known_deck_inventory() -> None:
                 assert len(belief.sample_ordered(
                     min(2, belief.remaining), search_rng=random.Random(index)
                 )) == min(2, belief.remaining)
-                assert sum(x.probability for x in belief.ordered_distribution(1)) == pytest.approx(1)
+                probability_total = sum(
+                    x.probability for x in belief.ordered_distribution(1)
+                )
+                assert probability_total == pytest.approx(1)
                 frames_checked += 1
             finally:
                 backend.release_many([handle])
