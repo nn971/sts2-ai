@@ -12,7 +12,7 @@ from sts2_ai.emulator import LegalAction, Observation
 
 from .protocol import PolicyValueEstimate
 
-_MODEL_FORMAT = "hashed-linear-policy-value-v1"
+_MODEL_FORMAT = "hashed-linear-policy-value-v2-unit-features"
 _SKIP_STATE_KEYS = {
     "canonical_state_hash",
     "current_map_node_id",
@@ -35,7 +35,7 @@ class HashedLinearPolicyValueModel:
     dimension: int
     policy_weights: list[float]
     value_weights: list[float]
-    model_id: str = "hashed-linear-v1"
+    model_id: str = "hashed-linear-v2"
 
     @classmethod
     def zeros(
@@ -50,7 +50,7 @@ class HashedLinearPolicyValueModel:
             dimension=dimension,
             policy_weights=[0.0] * dimension,
             value_weights=[0.0] * dimension,
-            model_id=model_id or f"hashed-linear-v1-d{dimension}",
+            model_id=model_id or f"hashed-linear-v2-d{dimension}",
         )
 
     def evaluate(
@@ -349,6 +349,12 @@ def _hash_features(
         ).digest()
         index = int.from_bytes(digest, "little") % dimension
         result[index] = result.get(index, 0.0) + value
+    # The old unnormalized vector made SGD updates scale with the size of a
+    # visible map/deck; a single long observation could drive enormous logits.
+    # Unit L2 norm makes the step size independent of observation length.
+    norm = math.sqrt(sum(value * value for value in result.values()))
+    if norm > 0.0:
+        return {index: value / norm for index, value in result.items()}
     return result
 
 
