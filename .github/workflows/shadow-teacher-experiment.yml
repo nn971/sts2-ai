@@ -1,4 +1,5 @@
 name: matched-root-shadow-teacher
+# Q-supervision v2 excludes unrepresentable neural action labels.
 
 on:
   workflow_dispatch:
