@@ -58,3 +58,23 @@ baseline **underperformed** the original heuristic: mean frontier progress
 Neither policy won a complete run in this sample. Keep the route policy
 opt-in; do not default MCTS rollouts to it or claim a strength gain.
 Details and reproduction: [route baseline](docs/ROUTE_PLANNING_BASELINE.md).
+
+
+### Neural policy/value baseline (2026-10-08)
+
+A first nonlinear, two-head neural architecture is now available, with optional
+PyTorch training, portable JSON inference, and grouped root holdout. The state
+encoder reads only fair observation features, and the dynamic action head
+scores variable legal-action sets. Experiments may opt into a neural rollout
+policy or a neural cutoff value without changing default heuristic search.
+Optional cutoff-supervised value learning uses independently measured terminal
+continuations, with censored records excluded.
+
+The CPU training and deployment integration is tested separately in
+neural-cpu-smoke CI, while normal emulator CI stays free of heavy dependencies.
+This is **not** a demonstrated strength improvement: the available teachers
+are small and noisy, and the first useful neural experiment still requires
+more search-root and labeled cutoff evidence plus paired held-out runs.
+
+See [neural policy/value prototype](docs/NEURAL_POLICY_VALUE_PROTOTYPE.md)
+for training, validation and deployment commands.
