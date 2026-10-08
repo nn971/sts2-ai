@@ -54,6 +54,55 @@ jobs:
             --min-semantic-top-margin 0.08 --min-semantic-value-gap 0.01 \
             --output results/shadow/curated-roots.jsonl \
             --json-output results/shadow/curation.json
+      - name: Distill directional Q-value policy labels with two evidence thresholds
+        run: |
+          sts2-ai distill-q-teacher \
+            results/shadow/high-roots.jsonl results/shadow/q-conservative.jsonl \
+            --json-output results/shadow/q-conservative-audit.json
+          sts2-ai distill-q-teacher \
+            results/shadow/high-roots.jsonl results/shadow/q-exploratory.jsonl \
+            --min-value-gap 0.02 --uncertainty-scale 0.0 \
+            --json-output results/shadow/q-exploratory-audit.json
+          if test "$(wc -l < results/shadow/q-conservative.jsonl)" -ge 16; then
+            cp results/shadow/q-conservative.jsonl results/shadow/chosen-q-roots.jsonl
+            echo conservative > results/shadow/q-evidence-level.txt
+          elif test "$(wc -l < results/shadow/q-exploratory.jsonl)" -ge 16; then
+            cp results/shadow/q-exploratory.jsonl results/shadow/chosen-q-roots.jsonl
+            echo exploratory > results/shadow/q-evidence-level.txt
+          else
+            echo insufficient > results/shadow/q-evidence-level.txt
+            echo "Too little directional Q evidence to justify neural training"
+          fi
+      - name: Train policy-only neural model if Q evidence is sufficient
+        run: |
+          if test -f results/shadow/chosen-q-roots.jsonl; then
+            python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+            sts2-ai train-neural \
+              results/shadow/chosen-q-roots.jsonl \
+              results/shadow/q-neural.json \
+              --epochs 12 --dimension 256 --hidden 32 \
+              --root-value-weight 0 \
+              --json-output results/shadow/q-neural-validation.json
+          fi
+      - name: Compare Q-distilled rollout policy on two independent seed runs
+        run: |
+          if test -f results/shadow/q-neural.json; then
+            sts2-ai evaluate --agent mcts --budget 16 --rollout-depth 24 \
+              --rollout-batch-size 8 --seeds 2 --max-decisions 48 \
+              --seed-prefix qteacher-heldout --no-build \
+              --strategy-db results/shadow/heldout-baseline.sqlite \
+              --json-output results/shadow/heldout-baseline.json
+            sts2-ai evaluate --agent mcts --budget 16 --rollout-depth 24 \
+              --rollout-batch-size 8 --seeds 2 --max-decisions 48 \
+              --seed-prefix qteacher-heldout --no-build \
+              --neural-rollout-model results/shadow/q-neural.json \
+              --strategy-db results/shadow/heldout-q-neural.sqlite \
+              --json-output results/shadow/heldout-q-neural.json
+            sts2-ai compare-evaluations \
+              results/shadow/heldout-baseline.json \
+              results/shadow/heldout-q-neural.json \
+              --json-output results/shadow/heldout-q-comparison.json
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
