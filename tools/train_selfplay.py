@@ -136,12 +136,26 @@ def main() -> None:
         help="Restore model/AdamW/round metrics from --checkpoint (same config)",
     )
     parser.add_argument("--evaluate-seeds", type=int, default=3)
+    parser.add_argument(
+        "--monitor-every", type=int, default=10,
+        help="Evaluate greedy checkpoints on fixed held-out seeds every N rounds; 0 disables",
+    )
+    parser.add_argument(
+        "--monitor-seeds", type=int, default=64,
+        help="Number of identical unseen seed names in every periodic evaluation",
+    )
+    parser.add_argument(
+        "--monitor-file", type=Path,
+        help="Progress JSONL file (default: --report stem plus .monitor.jsonl)",
+    )
     parser.add_argument("--build", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
     if args.evaluate_seeds < 1:
         parser.error("--evaluate-seeds must be positive")
+    if args.monitor_every < 0 or args.monitor_seeds < 1:
+        parser.error("--monitor-every must be nonnegative; --monitor-seeds positive")
     _progress(
         f"[train] opening emulator | environment={args.environment} "
         f"rounds={args.rounds} episodes/round={args.episodes} "
@@ -154,6 +168,22 @@ def main() -> None:
         require_environment(backend, args.environment)
         started_at = time.perf_counter()
         progress = _TrainingProgress(args.rounds, args.episodes)
+        monitor_path = args.monitor_file or args.report.with_name(
+            args.report.stem + ".monitor.jsonl"
+        )
+        monitor = (
+            FixedSeedMonitor(
+                backend,
+                environment=args.environment,
+                max_decisions=args.max_decisions,
+                every=args.monitor_every,
+                seeds=args.monitor_seeds,
+                path=monitor_path,
+                resume=args.resume,
+                progress=_progress,
+            )
+            if args.monitor_every else None
+        )
         _progress(
             f"[train] emulator ready: revision={backend.emulator_revision} | "
             f"temperature={args.temperature_start:g}->{args.temperature_end:g} "
@@ -180,6 +210,7 @@ def main() -> None:
                 environment=args.environment,
                 on_round_start=progress.start,
                 on_round_complete=progress.complete,
+                on_model_snapshot=monitor,
             )
         except PublicRolloutFailure as failure:
             # Broken emulator transitions are not valid censored episodes.
@@ -299,6 +330,10 @@ def main() -> None:
                 if args.initialize_from_model is not None else None
             ),
             "rollout_workers": args.workers,
+            "monitor_every": args.monitor_every,
+            "monitor_seeds": args.monitor_seeds,
+            "monitor_file": str(monitor_path) if monitor is not None else None,
+            "periodic_heldout_evaluation": monitor.records if monitor is not None else [],
             "checkpoint_path": str(args.checkpoint) if args.checkpoint is not None else None,
             "resumed": args.resume,
             "training_wall_seconds_current_invocation": training_wall_seconds,
