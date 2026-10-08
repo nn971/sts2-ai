@@ -61,7 +61,9 @@ def build_training_examples(
             raise RuntimeError(
                 f"Missing observation payload for searched root {root.state_hash}"
             )
-        examples.append(build_training_example(root, actions, observation))
+        examples.append(build_training_example(
+            root, actions, observation, source_run_seeds=store.search_origins(root)
+        ))
 
     examples.sort(
         key=lambda example: (
@@ -132,6 +134,11 @@ def load_training_jsonl(path: Path) -> tuple[TrainingExample, ...]:
                     )
                 )
 
+            raw_seeds = raw.get("source_run_seeds", [])
+            if not isinstance(raw_seeds, list) or not all(
+                isinstance(seed, str) and seed for seed in raw_seeds
+            ):
+                raise ValueError(f"Invalid source run seeds on line {line_number}")
             examples.append(
                 TrainingExample(
                     observation_hash=str(raw["observation_hash"]),
@@ -147,6 +154,7 @@ def load_training_jsonl(path: Path) -> tuple[TrainingExample, ...]:
                     search_version=str(raw.get("search_version", "")),
                     game_build=str(raw.get("game_build", "unknown")),
                     policy_target_mode=str(raw.get("policy_target_mode", "uct-visits-v1")),
+                    source_run_seeds=tuple(sorted(set(raw_seeds))),
                 )
             )
     return tuple(examples)
@@ -158,10 +166,12 @@ def split_training_examples(
     validation_fraction: float = 0.2,
     seed: int = 0,
 ) -> tuple[tuple[TrainingExample, ...], tuple[TrainingExample, ...]]:
-    """Split by connected exact-state and fair-observation groups.
+    """Split by connected exact-state, fair-observation and source-run groups.
 
-    Repeated budgets of an exact state and distinct hidden states with identical
-    fair observations must all land in the same partition. Group assignment and
+    Repeated budgets, identical fair observations, and separate roots belonging
+    to any shared originating run seed must all share one partition. Older
+    training records without run provenance still use the legacy state grouping.
+    Group assignment and
     record order are deterministic, independently of input JSONL order.
     """
     if not 0.0 < validation_fraction < 1.0:
@@ -186,6 +196,8 @@ def split_training_examples(
         state_key = "state:" + (example.source_state_hash or example.observation_hash)
         observation_key = "observation:" + example.observation_hash
         union(state_key, observation_key)
+        for run_seed in example.source_run_seeds:
+            union(state_key, "run-seed:" + run_seed)
 
     groups: dict[str, list[TrainingExample]] = {}
     for example in examples:
