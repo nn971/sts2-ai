@@ -8,12 +8,16 @@ from pathlib import Path
 from sts2_ai.emulator import Observation
 from sts2_ai.models import HashedLinearPolicyValueModel
 
+from .mcts import sts2_value
+
 
 class LearnedCutoffValue:
     """Opt-in learned value for nonterminal MCTS rollout cutoffs.
 
     The terminal game outcome always overrides the model. Policy logits are not
-    used: the heuristic continues to choose rollout actions. The content hash
+    used: the heuristic continues to choose rollout actions. A configurable
+    learned_weight blends the estimate with the hand-built nonterminal value.
+    The content hash
     fingerprints the *actual weight file*, not just a reusable model name.
     """
 
@@ -22,19 +26,32 @@ class LearnedCutoffValue:
         model: HashedLinearPolicyValueModel,
         *,
         model_sha256: str,
+        learned_weight: float = 1.0,
     ) -> None:
         if len(model_sha256) != 64 or any(
             character not in "0123456789abcdef" for character in model_sha256
         ):
             raise ValueError("model_sha256 must be a SHA-256 hexadecimal digest")
+        if not math.isfinite(learned_weight) or not 0.0 <= learned_weight <= 1.0:
+            raise ValueError("learned_weight must lie in [0, 1]")
         self._model = model
-        self.value_id = f"learned-linear-cutoff-v1-sha256-{model_sha256}"
+        self.learned_weight = learned_weight
+        self.value_id = (
+            f"learned-linear-blend-v1-weight-{learned_weight.hex()}"
+            f"-sha256-{model_sha256}"
+        )
 
     @classmethod
-    def load(cls, path: Path) -> LearnedCutoffValue:
+    def load(
+        cls, path: Path, *, learned_weight: float = 1.0
+    ) -> LearnedCutoffValue:
         payload = path.read_bytes()
         model = HashedLinearPolicyValueModel.load(path)
-        return cls(model, model_sha256=hashlib.sha256(payload).hexdigest())
+        return cls(
+            model,
+            model_sha256=hashlib.sha256(payload).hexdigest(),
+            learned_weight=learned_weight,
+        )
 
     def __call__(self, observation: Observation) -> float:
         raw = json.loads(observation.payload_json)
@@ -48,7 +65,13 @@ class LearnedCutoffValue:
         if outcome is not None:
             raise ValueError(f"Unsupported terminal outcome: {outcome!r}")
 
+        if self.learned_weight == 0.0:
+            return sts2_value(observation)
+
         prediction = self._model.evaluate(observation, ()).value
         if not math.isfinite(prediction) or not -1.0 <= prediction <= 1.0:
             raise ValueError("Learned cutoff produced an invalid value")
-        return prediction
+        if self.learned_weight == 1.0:
+            return prediction
+        baseline = sts2_value(observation)
+        return self.learned_weight * prediction + (1.0 - self.learned_weight) * baseline
