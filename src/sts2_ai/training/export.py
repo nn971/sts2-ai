@@ -181,16 +181,27 @@ def split_training_examples(
     )
     count = max(1, min(len(keys) - 1, round(len(keys) * validation_fraction)))
     validation_keys = set(keys[:count])
+    def sorted_group(key: str) -> list[TrainingExample]:
+        # Sort *inside* each exact-state group too. Otherwise reversing the
+        # source record order changes downstream model training order even
+        # though the partitions and group membership stay identical.
+        return sorted(
+            groups[key],
+            key=lambda example: json.dumps(
+                asdict(example), sort_keys=True, separators=(",", ":")
+            ),
+        )
+
     train = tuple(
         example
         for key in sorted(groups)
         if key not in validation_keys
-        for example in groups[key]
+        for example in sorted_group(key)
     )
     validation = tuple(
         example
         for key in sorted(groups)
         if key in validation_keys
-        for example in groups[key]
+        for example in sorted_group(key)
     )
     return train, validation
