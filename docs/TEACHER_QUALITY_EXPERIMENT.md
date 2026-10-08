@@ -202,3 +202,21 @@ Checkpoint metadata now also marks policy-only value heads untrained,
 and the learned cutoff loader rejects using them as evaluators.
 A rerun with those guards is the authoritative v2 experiment; the first
 pilot remains archived for comparison.
+
+## Exact-root Q-rank stability (2026-10-08)
+
+The `compare-teachers` report now also distinguishes **Q-value rankings**
+from UCT-visit target entropy. For identical exact roots at the two budgets,
+we aggregate sampled action means by conservative semantic action grouping,
+weighting each by its actual visit count. A winner is *resolved* only when at
+least two semantic actions were sampled and the best and runner-up values
+are not tied. The report includes the number of resolved pairs, Q-winner
+agreement fraction, winner flip count, high-budget unresolved winners given
+a resolved low-budget winner, and mean top-two Q gaps at each budget.
+
+This makes the teacher's **directional consistency** measurable even if visit
+counts are flat. It does not establish statistical significance: rollouts are
+correlated, the high budget may change its preferred action for valid reasons,
+and Q differences remain noisy. A confident policy should not be trained
+solely because UCT visits are concentrated; inspect the matched-root
+Q-winner consistency and Q-target rejection counts together.
