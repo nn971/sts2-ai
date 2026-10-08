@@ -1,6 +1,6 @@
 # Self-improving stochastic PUCT: bounded variance roadmap
 
-**Status:** approved design direction / implementation plan, **not implemented**.
+**Status:** active implementation; early S0/S1 foundations built, fair continuation and PUCT pending.
 **Scope:** single-player Silent; prioritize native Act 1 Overgrowth coverage in
 the pinned emulator, then expand to longer runs. Multiplayer-only and
 cross-character reward mechanics remain out of scope.
@@ -176,7 +176,7 @@ unchanged until an alternative wins a fair benchmark.
   rollout baselines against the pinned emulator and Act-1 goal.
 - [ ] Specify \`aux-v1\` progress/HP horizons and bounds and check
   them against Overgrowth map/terminal behavior.
-- [ ] Add clearly differentiated result fields:
+- [x] Add clearly differentiated result fields:
   \`act1_cleared\`, \`full_game_victory\`, \`censored\`, and
   \`episode_goal_version\`; preserve historical file compatibility.
 - [ ] Log exact seed partition, emulator revision, search regime,
@@ -395,6 +395,35 @@ once. In order:
 
 Only after that boundary is correct should we spend simulation budgets
 training the uniformized-variance heads and the four-iteration loop.
+
+## Foundation implementation (October 8, 2026)
+
+PR #12 implements a bounded, isolated first slice:
+
+- RunSummary stores explicit Act-1-clear, full-game-victory, censorship,
+  and prototype-three-act-v0 goal-version labels. An observed entry into Act 2
+  remains a positive Act-1 label even if later decisions are truncated.
+  The Act-1-native Overgrowth goal version still needs map-bound verification.
+- Training bounded_targets.py provides normalized fixed-interval outcomes,
+  Welford online sample statistics, an eight-sample variance mask, a
+  documented unbiased-variance clipping flag, feasible direct
+  mean/dispersion estimates, and total-variance chance mixtures.
+  These primitives are not trained neural heads yet.
+- Emulator chance.py provides a multivariate hypergeometric draw law and
+  independent search-RNG samples without replacement. Inputs must be a
+  publicly justified, exchangeable remaining-deck multiset. Known deck
+  order, top-card information, history correlations and hidden streams
+  require additional conditioning models.
+- Fair-root continuation capability is explicitly versioned and guarded.
+  The current JSONL backend lacks this capability. Existing exact-state
+  fork/expand operations remain oracle-only.
+
+Pending S0 work: frozen goal-specific baseline measurements, native
+Overgrowth progress/HP bounds, CI smoke with pinned emulator goal outcomes.
+Pending S1 work: real history-conditioned hidden-state sampling, probability
+calibration against emulator stochastic mechanics, seed-blind regression
+against multiple hidden states with matched public histories.
+Neural PUCT and teacher-free self-improvement remain later milestones.
 
 ## 6. Related documents and current evidence
 
