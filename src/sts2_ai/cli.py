@@ -24,6 +24,7 @@ from sts2_ai.emulator import (
     JsonlEmulatorBackend,
     LegalAction,
 )
+from sts2_ai.evaluation.experiment_report import paired_evaluation_report
 from sts2_ai.evaluation import (
     RunSummary,
     collect_experiment_manifest,
@@ -294,6 +295,13 @@ def main() -> None:
     diagnose_training.add_argument("--cutoff-samples", type=Path)
     diagnose_training.add_argument("--json-output", type=Path)
 
+    compare = sub.add_parser(
+        "compare-evaluations", help="strict seed-paired saved evaluation comparison"
+    )
+    compare.add_argument("baseline", type=Path)
+    compare.add_argument("contender", type=Path)
+    compare.add_argument("--json-output", type=Path)
+
     curate = sub.add_parser(
         "curate-teacher",
         help="audit and optionally select roots with non-flat semantic MCTS evidence",
@@ -383,6 +391,15 @@ def main() -> None:
 
     if args.command == "export-training":
         _export_training(args)
+        return
+
+    if args.command == "compare-evaluations":
+        report = paired_evaluation_report(args.baseline, args.contender)
+        rendered = json.dumps(report, sort_keys=True, indent=2)
+        print(rendered)
+        if args.json_output is not None:
+            args.json_output.parent.mkdir(parents=True, exist_ok=True)
+            args.json_output.write_text(rendered + "\n", encoding="utf-8")
         return
 
     if args.command == "curate-teacher":
