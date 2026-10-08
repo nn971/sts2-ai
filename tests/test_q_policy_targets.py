@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from sts2_ai.search import LearnedCutoffValue
 from sts2_ai.training.export import load_training_jsonl, write_training_jsonl
 from sts2_ai.training.neural import evaluate_neural, train_neural
 from sts2_ai.training.q_targets import QTeacherConfig, distill_q_targets
@@ -111,7 +112,7 @@ def test_q_teacher_cli_json_roundtrip(tmp_path: Path) -> None:
 
 
 
-def test_q_teacher_can_train_policy_without_root_value_supervision() -> None:
+def test_q_teacher_can_train_policy_without_root_value_supervision(tmp_path: Path) -> None:
     pytest.importorskip("torch")
     (q_root,), report = distill_q_targets((_root(),))
     assert report["accepted"] == 1
@@ -119,6 +120,11 @@ def test_q_teacher_can_train_policy_without_root_value_supervision() -> None:
         (q_root,), dimension=32, hidden=8, epochs=2, seed=11,
         root_value_weight=0.0,
     )
+    assert not model.value_head_trained
+    model_path = tmp_path / "q-policy-only.json"
+    model.save(model_path)
+    with pytest.raises(ValueError, match="untrained"):
+        LearnedCutoffValue.load(model_path)
     metrics = evaluate_neural(model, (q_root,), compare_root_values=False)
     assert metrics.root_value_rmse is None
     assert metrics.policy_cross_entropy > 0.0
