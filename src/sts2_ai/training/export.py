@@ -146,6 +146,7 @@ def load_training_jsonl(path: Path) -> tuple[TrainingExample, ...]:
                     search_budget=int(raw.get("search_budget", 0)),
                     search_version=str(raw.get("search_version", "")),
                     game_build=str(raw.get("game_build", "unknown")),
+                    policy_target_mode=str(raw.get("policy_target_mode", "uct-visits-v1")),
                 )
             )
     return tuple(examples)
