@@ -113,7 +113,8 @@ def main() -> None:
             raise SystemExit(
                 f"{failure}\nPublic replay saved: {artifact}\n"
                 "Training stopped without assigning a reward to this episode. "
-                "Fix the emulator and then resume from the last completed round."
+                "Completed-round checkpoints remain intact; an emulator "
+                "revision change requires a fresh training experiment."
             ) from failure
         training_wall_seconds = time.perf_counter() - started_at
         trained.model.save(args.output)
