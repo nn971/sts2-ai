@@ -1,5 +1,32 @@
 # Project status
 
+## Guarded first-reward joint conditional proposals (2026-10-08)
+
+Pinned emulator revision advances to
+`53ece7defe91e19ff27d455d5eaf6847c935d760`.
+The emulator exposes a hypothetical-only
+`propose_pristine_reward` operation, which replaces an independently
+initialized *unused* `reward` RNG stream immediately before a
+combat action actually enters Reward. All five other stream states
+and game mechanics remain intact. A used stream, ordinary seeded run
+or inappropriate phase fails closed.
+
+The AI's `IncrementalCoupledParticlePosterior` now has an optional
+`advance_pristine_reward` path: exactly K independent uniform
+reward-stream trials per empirical parent, with the **entire**
+resulting public reward and legal menu checked. Uniform surviving
+child weights approximate the correct likelihood-weighted
+conditional distribution of the parent particles. It does not
+pretend finite K reproduces the full prior or native STS2.
+
+A synthetic unequal-reward-likelihood test checks Bayes weighting
+and cleanup; a pinned bridge test checks exact replay of the actual
+first Overgrowth reward using its independent synthetic reward
+initial state. The bottleneck is now low-probability reward
+observations and proposal efficiency, not unprincipled rekeying.
+See [pristine reward conditioning](docs/PRISTINE_REWARD_POSTERIOR.md).
+
+
 ## Reproducible coupled-belief survival diagnostics (2026-10-08)
 
 Added `tools/benchmark_coupled_belief.py` to generate a deterministic
