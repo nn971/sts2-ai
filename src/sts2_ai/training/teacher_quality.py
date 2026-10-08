@@ -53,6 +53,9 @@ class TeacherRootQuality:
     reasons: tuple[str, ...]
 
 
+_DEFAULT_FILTER = TeacherFilter()
+
+
 def _normalized(weights: list[float]) -> list[float]:
     if not weights:
         return []
@@ -68,7 +71,7 @@ def _entropy_normalized(probabilities: list[float]) -> float:
 
 
 def grade_teacher_root(
-    example: TrainingExample, config: TeacherFilter = TeacherFilter()
+    example: TrainingExample, config: TeacherFilter = _DEFAULT_FILTER
 ) -> TeacherRootQuality:
     if not example.policy_targets:
         raise ValueError("Root is missing legal action targets")
@@ -154,7 +157,7 @@ def grade_teacher_root(
 
 def teacher_quality_report(
     examples: tuple[TrainingExample, ...],
-    config: TeacherFilter = TeacherFilter(),
+    config: TeacherFilter = _DEFAULT_FILTER,
 ) -> dict[str, Any]:
     if not examples:
         raise ValueError("Teacher audit requires searched roots")
@@ -208,7 +211,7 @@ def teacher_quality_report(
 
 def curate_teacher_examples(
     examples: tuple[TrainingExample, ...],
-    config: TeacherFilter = TeacherFilter(),
+    config: TeacherFilter = _DEFAULT_FILTER,
 ) -> tuple[TrainingExample, ...]:
     """Return unchanged selected examples; never fabricate sharpened labels."""
     return tuple(example for example in examples if grade_teacher_root(example, config).eligible)
