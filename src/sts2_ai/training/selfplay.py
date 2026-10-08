@@ -39,6 +39,8 @@ from sts2_ai.training.parallel_rollouts import (
     episode_actor_seed,
     open_worker_pool,
 )
+from sts2_ai.training.rollout_failure import SCHEMA as FAILURE_SCHEMA
+from sts2_ai.training.rollout_failure import PublicRolloutFailure
 from sts2_ai.training.selfplay_checkpoint import load_checkpoint, save_checkpoint
 
 SELFPLAY_VERSION = "public-onpolicy-reinforce-actor-critic-v3-parallel-resumable"
@@ -182,7 +184,34 @@ def collect_public_episode(
             index = sample_public_action(model, frame, actions, rng=actor_rng)
             # Record *only* public inputs and the sampled legal index.
             history.append(PublicDecision(frame, actions, index))
-            next_state = backend.step(state, actions[index]).child
+            try:
+                next_state = backend.step(state, actions[index]).child
+            except Exception as exc:
+                # Fail closed: a broken transition is neither a defeat nor an
+                # ordinary decision-cap truncation. Preserve the complete
+                # player-visible action path for deterministic emulator replay.
+                # The current handle is released by the outer finally block.
+                raise PublicRolloutFailure({
+                    "schema": FAILURE_SCHEMA,
+                    "seed": seed,
+                    "environment": environment,
+                    "policy_id": policy_id,
+                    "actor_model_id": model.model_id,
+                    "decision_index": len(history) - 1,
+                    "chosen_action_ids": [
+                        decision.legal_actions[decision.chosen_index].action_id
+                        for decision in history
+                    ],
+                    "failing_observation_hash": frame.observation_hash,
+                    "failing_public_observation": json.loads(frame.payload_json),
+                    "failing_action": {
+                        "action_id": actions[index].action_id,
+                        "kind": actions[index].kind,
+                        "payload_json": actions[index].payload_json,
+                    },
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                }) from exc
             old = state
             state = next_state
             backend.release_many((old,))

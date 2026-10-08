@@ -28,6 +28,7 @@ from sts2_ai.evaluation.selfplay_metrics import (
     summarize_completed_runs,
 )
 from sts2_ai.training.selfplay import SELFPLAY_VERSION, train_selfplay
+from sts2_ai.training.rollout_failure import PublicRolloutFailure
 
 
 def main() -> None:
@@ -73,20 +74,48 @@ def main() -> None:
         # writes if the pinned bridge lacks the requested native mode.
         require_environment(backend, args.environment)
         started_at = time.perf_counter()
-        trained = train_selfplay(
-            backend,
-            rounds=args.rounds, episodes_per_round=args.episodes,
-            max_decisions=args.max_decisions,
-            dimension=args.dimension, hidden=args.hidden,
-            learning_rate=args.learning_rate,
-            auxiliary_weight=args.auxiliary_weight,
-            win_anneal_threshold=args.win_anneal_threshold,
-            seed=args.seed,
-            workers=args.workers,
-            checkpoint_path=args.checkpoint,
-            resume=args.resume,
-            environment=args.environment,
-        )
+        try:
+            trained = train_selfplay(
+                backend,
+                rounds=args.rounds, episodes_per_round=args.episodes,
+                max_decisions=args.max_decisions,
+                dimension=args.dimension, hidden=args.hidden,
+                learning_rate=args.learning_rate,
+                auxiliary_weight=args.auxiliary_weight,
+                win_anneal_threshold=args.win_anneal_threshold,
+                seed=args.seed,
+                workers=args.workers,
+                checkpoint_path=args.checkpoint,
+                resume=args.resume,
+                environment=args.environment,
+            )
+        except PublicRolloutFailure as failure:
+            # Broken emulator transitions are not valid censored episodes.
+            # Persist a replayable public history before aborting the cohort;
+            # prior completed-round checkpoints remain intact.
+            artifact = args.report.with_name(args.report.stem + ".failure.json")
+            artifact.parent.mkdir(parents=True, exist_ok=True)
+            diagnostic = {
+                **failure.report,
+                "emulator_revision": backend.emulator_revision,
+                "training_version": SELFPLAY_VERSION,
+                "learner_seed": args.seed,
+                "episodes_per_round": args.episodes,
+                "dimension": args.dimension,
+                "hidden": args.hidden,
+                "checkpoint_path": (
+                    str(args.checkpoint) if args.checkpoint is not None else None
+                ),
+            }
+            artifact.write_text(
+                json.dumps(diagnostic, indent=2, sort_keys=True) + "\n"
+            )
+            raise SystemExit(
+                f"{failure}\nPublic replay saved: {artifact}\n"
+                "Training stopped without assigning a reward to this episode. "
+                "Completed-round checkpoints remain intact; an emulator "
+                "revision change requires a fresh training experiment."
+            ) from failure
         training_wall_seconds = time.perf_counter() - started_at
         trained.model.save(args.output)
         contenders = {
