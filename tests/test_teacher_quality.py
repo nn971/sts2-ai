@@ -116,7 +116,7 @@ def test_bad_filters_and_missing_actions_are_rejected() -> None:
         TeacherFilter(min_budget=-1)
     with pytest.raises(ValueError, match="margin"):
         TeacherFilter(min_semantic_top_margin=1.0)
-    with pytest.raises(ValueError, match="no legal action"):
+    with pytest.raises(ValueError, match="missing legal action"):
         grade_teacher_root(replace(_example(), policy_targets=()))
 
 
