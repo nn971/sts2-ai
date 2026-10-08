@@ -1,14 +1,16 @@
 # Native Overgrowth training — pinned bridge integration
 
-**Status: emulator interface implemented, AI integration under CI validation.**
-The AI submodule is now pinned to
-`87bac0f425314a267948d235c6f4ac5bd89af4c7` on
+**Status: Wriggler issue #6 fixed in the emulator; AI pin updated, paired CI required.**
+The AI submodule is pinned to
+`cc78c367a80f88ecef72cc72899892298f20ef90` on
 `nn971/sts2-emulator`'s `prototype/full-run-silent` branch.
 
-The [emulator CI](https://github.com/nn971/sts2-emulator/actions/runs/37807144383)
-passed its black-box `reset_native_overgrowth` public replay smoke.
-This pin changes **only the AI repo gitlink**: the emulator implementation
-was independently committed before the AI integration.
+The emulator's [CI run A](https://github.com/nn971/sts2-emulator/actions/runs/37812269900)
+and [run B](https://github.com/nn971/sts2-emulator/actions/runs/37812277158)
+passed at this exact revision. The update includes native Wriggler slots
+and tests that actually let all four Dense Vegetation Wrigglers act at A0
+and A10 (two successive turns). The AI tree points to this revision via a
+gitlink; the emulator's implementation and regressions remain independent.
 
 ## Current JSONL contract
 
@@ -45,7 +47,7 @@ git -C emulator rev-parse HEAD
 ```
 
 The reported submodule revision should be
-`87bac0f425314a267948d235c6f4ac5bd89af4c7`.
+`cc78c367a80f88ecef72cc72899892298f20ef90`.
 If your virtual environment is already installed, activate it:
 
 ```fish
@@ -85,9 +87,11 @@ reward availability and deck growth; the second compares trained,
 untrained, random and heuristic policies on held-out seeds.
 
 **Do not resume** `results/9700x-train.pt` from the legacy
-six-floor training experiment. The checkpoint fingerprints already
+six-floor training experiment, or native checkpoints made against the
+pre-fix emulator revision. Checkpoint pinning requires a fresh training
+run whenever the emulator revision changes. The checkpoint fingerprints
 include both the emulator revision and the environment; the new
-run should begin with new checkpoint, model and report filenames.
+run should use new checkpoint, model and report filenames.
 
 ## Geometry and limitations
 
@@ -99,5 +103,5 @@ not interpret this as full native-game RNG or balance fidelity.
 
 The training agent still sees only the player-visible observation and
 legal-action menu, never the internal seed or hidden RNG. No
-additional bridge modification is needed for the initial native
-experiment as long as the AI integration smoke passes.
+additional bridge modification is required for the initial native
+experiment after the AI integration smoke passes.
