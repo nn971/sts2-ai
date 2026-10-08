@@ -183,7 +183,10 @@ class FairReplayPuctAdapter:
             PublicHistoryStep(observed, None),
         )
         terminal = self._visible_outcome(observed.payload_json, self._goal)
-        actions = () if terminal is not None else tuple(self._backend.legal_actions(transition.child))
+        actions = (
+            () if terminal is not None
+            else tuple(self._backend.legal_actions(transition.child))
+        )
         key = self._key(expanded)
         prior = self._histories.get(key)
         if prior is not None and prior != expanded:
