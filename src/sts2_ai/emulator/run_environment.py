@@ -66,7 +66,7 @@ def validate_native_start(observation: Observation) -> None:
         raw.get("map_generation_profile_id") != NATIVE_MAP_PROFILE
         or raw.get("act") != 1
         or raw.get("floor") != 0
-        or raw.get("event_id") != "proto.native.neow"
+        or raw.get("event_id") != "proto.native.event.neow"
         or not isinstance(map_nodes, list)
         or 16 not in [node.get("floor") for node in map_nodes if isinstance(node, dict)]
         or not isinstance(deck, list)
