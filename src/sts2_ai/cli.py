@@ -37,12 +37,6 @@ from sts2_ai.strategy_db import (
     diagnose_budget_disagreements,
     record_search_result,
 )
-from sts2_ai.training.diagnostics import (
-    CutoffSampler,
-    load_cutoff_samples,
-    observation_shift_report,
-    teacher_policy_report,
-)
 from sts2_ai.training import (
     build_training_examples,
     evaluate_hashed_linear,
@@ -51,6 +45,12 @@ from sts2_ai.training import (
     split_training_examples,
     train_hashed_linear,
     write_training_jsonl,
+)
+from sts2_ai.training.diagnostics import (
+    CutoffSampler,
+    load_cutoff_samples,
+    observation_shift_report,
+    teacher_policy_report,
 )
 
 
@@ -503,7 +503,10 @@ def _evaluate(args: argparse.Namespace) -> None:
                 "rollout_depth": args.rollout_depth,
                 "rollout_batch_size": args.rollout_batch_size,
                 "budget": args.budget,
-                "cutoff_value_id": cutoff.value_id if cutoff is not None else "sts2-value-v2-progress-hp",
+                "cutoff_value_id": (
+                    cutoff.value_id if cutoff is not None
+                    else "sts2-value-v2-progress-hp"
+                ),
             },
         )
         print(
