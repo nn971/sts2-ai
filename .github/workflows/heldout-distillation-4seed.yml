@@ -1,0 +1,56 @@
+name: heldout-distillation-4seed
+
+on:
+  push:
+    branches:
+      - benchmark/heldout-distillation-4seed
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -U pip
+      - run: python -m pip install -e '.[dev]'
+      - name: Search training evidence on four common seeds
+        run: |
+          sts2-ai benchmark \
+            --budgets 8 32 \
+            --seeds 4 \
+            --seed-prefix learning-pilot \
+            --rollout-depth 16 \
+            --rollout-batch-size 8 \
+            --no-include-random \
+            --no-include-route \
+            --strategy-db /tmp/learning-pilot.sqlite \
+            --json-output /tmp/learning-pilot-runs.json
+      - name: Export and validate policy/value targets
+        run: |
+          sts2-ai export-training \
+            /tmp/learning-pilot.sqlite \
+            /tmp/learning-pilot-targets.jsonl \
+            --min-budget 8
+          sts2-ai validate-linear \
+            /tmp/learning-pilot-targets.jsonl \
+            /tmp/learning-pilot-model.json \
+            --validation-fraction 0.2 \
+            --dimension 2048 \
+            --epochs 8 \
+            --seed 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: heldout-distillation-4seed
+          path: |
+            /tmp/learning-pilot-runs.json
+            /tmp/learning-pilot-targets.jsonl
+            /tmp/learning-pilot-model.json
