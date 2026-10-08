@@ -157,7 +157,9 @@ def test_unresolved_event_choices_are_not_assumed_equivalent() -> None:
         _example(),
         observation_json=json.dumps({"phase": 6, "event": {}}),
         policy_targets=(
-            PolicyTarget("event-0", 0.7, "event_choice", '{"index":0}', visits=12, search_value=0.5),
+            PolicyTarget(
+                "event-0", 0.7, "event_choice", '{"index":0}', visits=12, search_value=0.5
+            ),
             PolicyTarget("event-1", 0.3, "event_choice", '{"index":1}', visits=8, search_value=0.2),
         ),
     )
