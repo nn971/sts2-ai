@@ -197,7 +197,17 @@ def main() -> None:
                 "revision change requires a fresh training experiment."
             ) from failure
         training_wall_seconds = time.perf_counter() - started_at
+        _progress(
+            f"[train] training complete | rounds={len(trained.rounds)} "
+            f"total_episodes={sum(x.played for x in trained.rounds)} "
+            f"wins={sum(x.wins for x in trained.rounds)} "
+            f"elapsed_this_invocation={training_wall_seconds:.1f}s"
+        )
         trained.model.save(args.output)
+        _progress(
+            f"[train] exported model={args.output} | "
+            f"evaluating {args.evaluate_seeds} held-out seeds per agent"
+        )
         contenders = {
             "random": RandomAgent(seed=args.seed + 999),
             "heuristic": HeuristicAgent(),
@@ -211,6 +221,8 @@ def main() -> None:
         raw_runs: dict[str, list[RunSummary]] = {}
         evaluations: dict[str, list[dict[str, object]]] = {}
         for name, agent in contenders.items():
+            _progress(f"[eval] {name}: starting {args.evaluate_seeds} seeds")
+            eval_started = time.perf_counter()
             raw_runs[name] = []
             evaluations[name] = []
             for index in range(args.evaluate_seeds):
@@ -221,6 +233,11 @@ def main() -> None:
                     environment=args.environment,
                 )
                 raw_runs[name].append(episode)
+                if (index + 1) % min(args.evaluate_seeds, 16) == 0:
+                    _progress(
+                        f"[eval] {name}: {index + 1}/{args.evaluate_seeds} | "
+                        f"elapsed={time.perf_counter() - eval_started:.1f}s"
+                    )
                 evaluations[name].append({
                     "seed": episode.seed,
                     "outcome": episode.outcome,
@@ -234,6 +251,12 @@ def main() -> None:
             name: summarize_completed_runs(runs)
             for name, runs in raw_runs.items()
         }
+        for name, row in completed_summaries.items():
+            _progress(
+                f"[eval] {name}: completed={row['completed']} "
+                f"censored={row['censored']} wins={row['wins']} "
+                f"mean_frontier={row['mean_frontier_progress_completed_only']}"
+            )
         paired_diagnostics = {
             f"neural_greedy_vs_{name}": compare_completed_pairs(
                 runs, raw_runs["neural_greedy"]
@@ -278,6 +301,7 @@ def main() -> None:
         }
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(report, sort_keys=True, indent=2) + "\n")
+    _progress(f"[train] report saved: {args.report}")
     print(json.dumps(report, sort_keys=True, indent=2))
 
 
