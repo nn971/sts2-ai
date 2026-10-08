@@ -5,6 +5,7 @@ import json
 import statistics
 from collections.abc import Mapping
 from dataclasses import asdict
+from functools import partial
 from pathlib import Path
 
 from sts2_ai.agents import (
@@ -314,13 +315,13 @@ def main() -> None:
 
     if args.command == "diagnose-training":
         examples = load_training_jsonl(args.dataset)
-        report: dict[str, object] = {"teacher_policy": teacher_policy_report(examples)}
+        diagnostic_report: dict[str, object] = {"teacher_policy": teacher_policy_report(examples)}
         if args.cutoff_samples is not None:
             samples = load_cutoff_samples(args.cutoff_samples)
-            report["root_to_cutoff_shift"] = observation_shift_report(
+            diagnostic_report["root_to_cutoff_shift"] = observation_shift_report(
                 examples, samples
             )
-        rendered = json.dumps(report, sort_keys=True, indent=2)
+        rendered = json.dumps(diagnostic_report, sort_keys=True, indent=2)
         print(rendered)
         if args.json_output is not None:
             args.json_output.parent.mkdir(parents=True, exist_ok=True)
@@ -446,8 +447,7 @@ def _evaluate(args: argparse.Namespace) -> None:
                         rollout_mode=args.rollout_mode,
                         virtual_loss=args.virtual_loss,
                         cutoff_observer=(
-                            (lambda obs, run_seed=f"{args.seed_prefix}-{index}":
-                                sampler.record(obs, run_seed=run_seed))
+                            partial(sampler.record, run_seed=f"{args.seed_prefix}-{index}")
                             if sampler is not None else None
                         ),
                         seed=args.agent_seed + index,
