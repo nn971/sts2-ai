@@ -6,7 +6,7 @@ import math
 from pathlib import Path
 
 from sts2_ai.emulator import Observation
-from sts2_ai.models import HashedLinearPolicyValueModel
+from sts2_ai.models import PolicyValueModel, load_model
 
 from .mcts import sts2_value
 
@@ -23,7 +23,7 @@ class LearnedCutoffValue:
 
     def __init__(
         self,
-        model: HashedLinearPolicyValueModel,
+        model: PolicyValueModel,
         *,
         model_sha256: str,
         learned_weight: float = 1.0,
@@ -37,7 +37,7 @@ class LearnedCutoffValue:
         self._model = model
         self.learned_weight = learned_weight
         self.value_id = (
-            f"learned-linear-blend-v1-weight-{learned_weight.hex()}"
+            f"learned-model-blend-v2-weight-{learned_weight.hex()}"
             f"-sha256-{model_sha256}"
         )
 
@@ -46,7 +46,7 @@ class LearnedCutoffValue:
         cls, path: Path, *, learned_weight: float = 1.0
     ) -> LearnedCutoffValue:
         payload = path.read_bytes()
-        model = HashedLinearPolicyValueModel.load(path)
+        model = load_model(path)
         return cls(
             model,
             model_sha256=hashlib.sha256(payload).hexdigest(),
