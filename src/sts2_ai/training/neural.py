@@ -137,6 +137,7 @@ def train_neural(
     epochs: int = 12,
     learning_rate: float = 0.002,
     weight_decay: float = 1e-5,
+    root_value_weight: float = 1.0,
     seed: int = 0,
 ) -> NeuralPolicyValueModel:
     """Train with AdamW. PyTorch is imported only for this opt-in command."""
@@ -146,6 +147,8 @@ def train_neural(
         raise ValueError("Architecture, epochs and learning rate must be positive")
     if weight_decay < 0 or not math.isfinite(learning_rate):
         raise ValueError("Invalid optimizer settings")
+    if not math.isfinite(root_value_weight) or root_value_weight < 0.0:
+        raise ValueError("Root value loss weight must be nonnegative and finite")
     for record in continuations:
         if record.terminal_value is None:
             raise ValueError("Censored records must be filtered before training")
@@ -192,7 +195,7 @@ def train_neural(
                 if continuation_data:
                     loss = policy_loss
                 else:
-                    loss = policy_loss + (value - root_value).square()
+                    loss = policy_loss + root_value_weight * (value - root_value).square()
             else:
                 state, target = continuation_data[index]
                 value, _ = _forward(params, state, None, torch)
