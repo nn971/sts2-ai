@@ -1,5 +1,9 @@
 # Project status
 
+## Next implementation plan — fair stochastic self-improvement (2026-10-08)
+
+The active **planned** direction is [self-improving stochastic PUCT with bounded uniformized variance](docs/SELF_IMPROVING_STOCHASTIC_PUCT.md). It specifies a seed-blind, known-probability chance interface, small PUCT neural model, direct normalized progress/HP variance heads, annealed auxiliary losses, teacher-free iterative run generation, and compute-matched held-out evaluation. **These milestones are not yet implemented.** Existing exact-state MCTS remains an oracle-only research baseline.
+
 ## Current phase — search-first strategic AI experiments
 
 `sts2-ai` now has working whole-run emulator integrations and multiple baseline
