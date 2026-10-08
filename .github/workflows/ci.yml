@@ -27,6 +27,7 @@ jobs:
         run: |
           sts2-ai evaluate --agent random --seeds 1 --no-build
           sts2-ai evaluate --agent heuristic --seeds 1 --no-build
+          sts2-ai evaluate --agent route --seeds 1 --no-build
       - name: Small oracle MCTS workload profile
         run: |
           sts2-ai evaluate \
