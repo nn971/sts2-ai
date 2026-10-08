@@ -12,6 +12,7 @@ from sts2_ai.agents import (
     Agent,
     ExactStateAgent,
     HeuristicAgent,
+    NeuralGreedyAgent,
     OracleMctsAgent,
     RandomAgent,
     RoutePlanningAgent,
@@ -32,7 +33,7 @@ from sts2_ai.evaluation import (
     play_run,
     summarize_runs,
 )
-from sts2_ai.models import HashedLinearPolicyValueModel
+from sts2_ai.models import load_model
 from sts2_ai.search import LearnedCutoffValue, SearchResult, UctMcts
 from sts2_ai.strategy_db import (
     SQLiteStrategyStore,
@@ -52,6 +53,11 @@ from sts2_ai.training.continuations import (
     CutoffContinuationCollector,
     continuation_report,
     load_continuations,
+)
+from sts2_ai.training.neural import (
+    evaluate_neural,
+    split_continuations_by_seed,
+    train_neural,
 )
 from sts2_ai.training.diagnostics import (
     CutoffSampler,
@@ -114,6 +120,10 @@ def main() -> None:
         help="MCTS rollout agent; route is an experimental visible-map baseline",
     )
     evaluate.add_argument("--route-horizon", type=int, default=6)
+    evaluate.add_argument(
+        "--neural-rollout-model", type=Path,
+        help="opt-in learned policy for rollout action selection (neural JSON weights)",
+    )
     evaluate.add_argument("--route-discount", type=float, default=0.8)
     evaluate.add_argument(
         "--cutoff-model", type=Path,
@@ -286,6 +296,20 @@ def main() -> None:
     diagnose_continuations.add_argument("--cutoff-model", type=Path)
     diagnose_continuations.add_argument("--json-output", type=Path)
 
+    neural = sub.add_parser(
+        "train-neural", help="train a neural policy/value model with grouped holdout"
+    )
+    neural.add_argument("dataset", type=Path)
+    neural.add_argument("output", type=Path)
+    neural.add_argument("--cutoff-continuations", type=Path)
+    neural.add_argument("--dimension", type=int, default=256)
+    neural.add_argument("--hidden", type=int, default=32)
+    neural.add_argument("--epochs", type=int, default=12)
+    neural.add_argument("--learning-rate", type=float, default=0.002)
+    neural.add_argument("--validation-fraction", type=float, default=0.2)
+    neural.add_argument("--seed", type=int, default=0)
+    neural.add_argument("--json-output", type=Path)
+
     train_linear = sub.add_parser(
         "train-linear",
         help="train the dependency-free hashed linear policy/value baseline",
@@ -361,7 +385,7 @@ def main() -> None:
     if args.command == "diagnose-continuations":
         records = load_continuations(args.dataset)
         model = (
-            HashedLinearPolicyValueModel.load(args.cutoff_model)
+            load_model(args.cutoff_model)
             if args.cutoff_model is not None else None
         )
         rendered = json.dumps(continuation_report(records, model=model), indent=2, sort_keys=True)
@@ -369,6 +393,10 @@ def main() -> None:
         if args.json_output is not None:
             args.json_output.parent.mkdir(parents=True, exist_ok=True)
             args.json_output.write_text(rendered + "\n", encoding="utf-8")
+        return
+
+    if args.command == "train-neural":
+        _train_neural(args)
         return
 
     if args.command == "train-linear":
@@ -410,7 +438,11 @@ def _route_agent(args: argparse.Namespace) -> RoutePlanningAgent:
     return RoutePlanningAgent(horizon=args.route_horizon, discount=args.route_discount)
 
 
-def _rollout_agent(args: argparse.Namespace) -> HeuristicAgent | RoutePlanningAgent:
+def _rollout_agent(
+    args: argparse.Namespace,
+) -> HeuristicAgent | RoutePlanningAgent | NeuralGreedyAgent:
+    if getattr(args, "neural_rollout_model", None) is not None:
+        return NeuralGreedyAgent.load(args.neural_rollout_model)
     return _route_agent(args) if args.rollout_policy == "route" else HeuristicAgent()
 
 
@@ -455,6 +487,8 @@ def _evaluate(args: argparse.Namespace) -> None:
         raise SystemExit("--cutoff-samples requires MCTS with a positive budget")
     if args.cutoff_continuations is not None and (args.agent != "mcts" or args.budget == 0):
         raise SystemExit("--cutoff-continuations requires MCTS with a positive budget")
+    if args.neural_rollout_model is not None and (args.agent != "mcts" or args.budget == 0):
+        raise SystemExit("--neural-rollout-model requires MCTS with a positive budget")
     cutoff = (
         LearnedCutoffValue.load(args.cutoff_model, learned_weight=args.learned_weight)
         if args.cutoff_model else None
@@ -643,6 +677,10 @@ def _evaluate(args: argparse.Namespace) -> None:
             ),
             "rollout_mode": args.rollout_mode if args.agent == "mcts" else None,
             "rollout_policy": args.rollout_policy if args.agent == "mcts" else None,
+            "neural_rollout_model": (
+                str(args.neural_rollout_model)
+                if args.neural_rollout_model is not None else None
+            ),
             "route_horizon": args.route_horizon,
             "route_discount": args.route_discount,
             "virtual_loss": args.virtual_loss if args.agent == "mcts" else None,
@@ -1066,6 +1104,84 @@ def _export_training(args: argparse.Namespace) -> None:
     print(f"Wrote {count} training examples to {args.output}")
     if selected_version is not None:
         print(f"Search configuration: {selected_version}")
+
+
+def _train_neural(args: argparse.Namespace) -> None:
+    """Train only on training groups; keep validation seeds/observations separate."""
+    roots = load_training_jsonl(args.dataset)
+    if not roots:
+        raise SystemExit("Search-root policy dataset is empty")
+    root_train, root_holdout = split_training_examples(
+        roots, validation_fraction=args.validation_fraction, seed=args.seed
+    )
+    cutoff_train = ()
+    cutoff_holdout = ()
+    dropped = 0
+    if args.cutoff_continuations is not None:
+        cutoffs = load_continuations(args.cutoff_continuations)
+        cutoff_train, cutoff_holdout = split_continuations_by_seed(
+            cutoffs, validation_fraction=args.validation_fraction, seed=args.seed
+        )
+        # Exact and visible states in the holdout must never be used as training
+        # data by either head, including across the two supervision datasets.
+        excluded_train = {r.observation_hash for r in cutoff_holdout}
+        excluded_holdout = {r.observation_hash for r in root_holdout}
+        old_count = len(root_train) + len(cutoff_train)
+        root_train = tuple(r for r in root_train if r.observation_hash not in excluded_train)
+        cutoff_train = tuple(
+            r for r in cutoff_train if r.observation_hash not in excluded_holdout
+        )
+        dropped = old_count - len(root_train) - len(cutoff_train)
+        cutoff_train = tuple(r for r in cutoff_train if r.terminal_value is not None)
+        if not cutoff_train:
+            raise SystemExit(
+                "No independently labeled training cutoffs; gather more seeds "
+                "or increase the continuation horizon"
+            )
+    model = train_neural(
+        root_train,
+        continuations=cutoff_train,
+        dimension=args.dimension,
+        hidden=args.hidden,
+        epochs=args.epochs,
+        learning_rate=args.learning_rate,
+        seed=args.seed,
+    )
+    model.save(args.output)
+    report: dict[str, object] = {
+        "model_path": str(args.output),
+        "model_id": model.model_id,
+        "value_target_kind": (
+            "heuristic-continuation-terminal" if args.cutoff_continuations is not None
+            else "searched-root-best-action"
+        ),
+        "root_train": asdict(evaluate_neural(
+            model, root_train, compare_root_values=args.cutoff_continuations is None
+        )),
+        "root_validation": asdict(evaluate_neural(
+            model, root_holdout, compare_root_values=args.cutoff_continuations is None
+        )),
+        "discarded_cross_source_overlaps": dropped,
+        "warning": (
+            "Search teacher roots are oracle-exact. Terminal continuation labels "
+            "reflect outcomes under a specified policy and hidden sampled state. "
+            "Offline scores do not imply stronger gameplay."
+        ),
+    }
+    if args.cutoff_continuations is not None:
+        report["cutoff_train"] = continuation_report(cutoff_train, model=model)
+        report["cutoff_validation"] = continuation_report(cutoff_holdout, model=model)
+        report["cutoff_validation_seeds"] = sorted(
+            {r.source_run_seed for r in cutoff_holdout}
+        )
+        report["cutoff_training_seeds"] = sorted(
+            {r.source_run_seed for r in cutoff_train}
+        )
+    rendered = json.dumps(report, indent=2, sort_keys=True)
+    print(rendered)
+    if args.json_output is not None:
+        args.json_output.parent.mkdir(parents=True, exist_ok=True)
+        args.json_output.write_text(rendered + "\n", encoding="utf-8")
 
 
 def _train_linear(args: argparse.Namespace) -> None:
