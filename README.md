@@ -201,6 +201,7 @@ See [`docs/INFORMATION_POLICY.md`](docs/INFORMATION_POLICY.md).
 - [`docs/INFORMATION_POLICY.md`](docs/INFORMATION_POLICY.md) — engine state vs fair observation
 - [`docs/SEARCH_AND_LEARNING.md`](docs/SEARCH_AND_LEARNING.md) — proposed expert-iteration loop
 - [`docs/NEURAL_POLICY_VALUE_PROTOTYPE.md`](docs/NEURAL_POLICY_VALUE_PROTOTYPE.md) — first neural training, MCTS deployment, and held-out experiments
+- [`docs/TEACHER_QUALITY_EXPERIMENT.md`](docs/TEACHER_QUALITY_EXPERIMENT.md) — semantic teacher audit, exact-root shadow search, and Q-based policy targets
 - [`docs/STRATEGY_DATABASE.md`](docs/STRATEGY_DATABASE.md) — persistent strategic evidence
 - [`docs/DATASETS.md`](docs/DATASETS.md) — truth/search/training/scenario corpora
 - [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md) — experiment identity and manifests
