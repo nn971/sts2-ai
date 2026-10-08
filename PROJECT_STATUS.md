@@ -96,10 +96,11 @@ The active **planned** direction is [self-improving stochastic PUCT with bounded
 ## Current phase — search-first strategic AI experiments
 
 `sts2-ai` now has working whole-run emulator integrations and multiple baseline
-agents, not just the original project scaffold. The pinned `emulator/` submodule
-currently points to `sts2-emulator` commit
-`7a005a00b9d353fd944af4f62e4516c705fad143`, which includes the
-strategic-map profile and completed-room history.
+agents, not just the original project scaffold. The earlier pinned
+`emulator/` revision `7a005a00b9d353fd944af4f62e4516c705fad143`
+included the strategic-map profile and completed-room history.
+The current experimental pin is `cad62474f25343e3acd39a6315ef3dd88a6fd96a`;
+re-run baseline comparisons before comparing across these revisions.
 
 ### Implemented
 
