@@ -16,7 +16,7 @@ class HeuristicAgent:
     to be a useful rollout baseline, not a hand-authored expert.
     """
 
-    policy_id = "heuristic-v2-payload-aware"
+    policy_id = "heuristic-v3-route-aware"
 
     def choose(
         self,
@@ -47,12 +47,7 @@ class HeuristicAgent:
 
         if kind == "choose_map_node":
             node_id = payload.get("node_id")
-            room_type = None
-            for node in self._list_of_dicts(state.get("map")):
-                if node.get("node_id") == node_id:
-                    room_type = node.get("room_type")
-                    break
-            return self._map_score(room_type, hp_ratio)
+            return self._map_score(state, node_id, hp_ratio)
 
         if kind == "rest_heal":
             return 12.0 if hp_ratio < 0.60 else 1.0
@@ -164,8 +159,47 @@ class HeuristicAgent:
                     break
         return score
 
+    @classmethod
+    def _map_score(
+        cls,
+        state: dict[str, Any],
+        node_id: object,
+        hp_ratio: float,
+        *,
+        horizon: int = 3,
+        discount: float = 0.55,
+    ) -> float:
+        if not isinstance(node_id, str):
+            return 0.0
+
+        nodes = {
+            str(node["node_id"]): node
+            for node in cls._list_of_dicts(state.get("map"))
+            if isinstance(node.get("node_id"), str)
+        }
+
+        def route_value(current_id: str, depth: int) -> float:
+            node = nodes.get(current_id)
+            if node is None:
+                return 0.0
+            immediate = cls._room_score(node.get("room_type"), hp_ratio)
+            if depth <= 1:
+                return immediate
+
+            next_ids = node.get("next_node_ids")
+            if not isinstance(next_ids, list):
+                return immediate
+            downstream = [
+                route_value(next_id, depth - 1)
+                for next_id in next_ids
+                if isinstance(next_id, str)
+            ]
+            return immediate + discount * max(downstream, default=0.0)
+
+        return route_value(node_id, horizon)
+
     @staticmethod
-    def _map_score(room_type: object, hp_ratio: float) -> float:
+    def _room_score(room_type: object, hp_ratio: float) -> float:
         # PrototypeRoomType: Combat=0, Elite=1, Event=2, Shop=3, Rest=4, Boss=5.
         if not isinstance(room_type, int):
             return 0.0
