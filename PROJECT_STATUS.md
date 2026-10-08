@@ -1,5 +1,20 @@
 # Project status
 
+## Reproducible coupled-belief survival diagnostics (2026-10-08)
+
+Added `tools/benchmark_coupled_belief.py` to generate a deterministic
+public Silent Overgrowth history under the explicit synthetic
+independent-stream prior. It profiles independent initial cohorts
+across longer histories, reports surviving full-state particles per
+public decision, counts simulator calls and wall time, and compares
+bounded *fresh* joint-history rejection at matching checkpoints.
+Collapse and failure remain explicit, and hidden fixture handles are
+released before conditioning. CI executes the tool, validates
+nonincreasing survival, and archives JSON as
+`coupled-belief-survival-profile`. See
+[coupled belief benchmark](docs/COUPLED_BELIEF_BENCHMARK.md).
+
+
 ## Incremental coupled joint-stream particles (2026-10-08)
 
 Added `IncrementalCoupledParticlePosterior`: sample a finite cohort
