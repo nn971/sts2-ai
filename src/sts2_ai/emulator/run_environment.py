@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from typing import cast
+from typing import Any, cast
 
 from .protocol import EmulatorBackend, InformationPolicy, Observation, StateHandle
 
@@ -72,7 +72,7 @@ def validate_native_start(observation: Observation) -> None:
 
 
 def reset_training_run(
-    backend: RunEnvironmentBackend,
+    backend: EmulatorBackend,
     seed: str,
     environment: str,
     ascension: int = 0,
@@ -81,7 +81,7 @@ def reset_training_run(
     if environment == LEGACY:
         return backend.reset(seed, ascension)
     native_reset = cast(
-        Callable[[str, int], StateHandle], getattr(backend, "reset_native_overgrowth")
+        Callable[[str, int], StateHandle], cast(Any, backend).reset_native_overgrowth
     )
     state = native_reset(seed, ascension)
     try:
