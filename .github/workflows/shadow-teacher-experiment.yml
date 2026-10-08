@@ -1,4 +1,4 @@
-name: matched-root-q-policy-six-seed
+name: matched-root-q-consensus-six-seed
 # Q-supervision v2 excludes unrepresentable neural action labels.
 
 on:
@@ -55,7 +55,7 @@ jobs:
             --min-semantic-top-margin 0.08 --min-semantic-value-gap 0.01 \
             --output results/shadow/curated-roots.jsonl \
             --json-output results/shadow/curation.json
-      - name: Distill directional Q-value policy labels with two evidence thresholds
+      - name: Distill directional and cross-budget-consensus Q-value targets
         run: |
           sts2-ai distill-q-teacher \
             results/shadow/high-roots.jsonl results/shadow/q-conservative.jsonl \
@@ -64,6 +64,19 @@ jobs:
             results/shadow/high-roots.jsonl results/shadow/q-exploratory.jsonl \
             --min-value-gap 0.02 --uncertainty-scale 0.0 \
             --json-output results/shadow/q-exploratory-audit.json
+          sts2-ai distill-consensus-q-teacher \
+            results/shadow/low-roots.jsonl \
+            results/shadow/high-roots.jsonl \
+            results/shadow/q-consensus.jsonl \
+            --min-value-gap 0.02 --uncertainty-scale 0.0 \
+            --min-low-value-gap 0.01 \
+            --json-output results/shadow/q-consensus-audit.json
+          if test "$(wc -l < results/shadow/q-consensus.jsonl)" -ge 12; then
+            echo eligible > results/shadow/q-consensus-evidence-level.txt
+          else
+            echo insufficient > results/shadow/q-consensus-evidence-level.txt
+            echo "Too few cross-budget-consistent Q roots for a model"
+          fi
           if test "$(wc -l < results/shadow/q-conservative.jsonl)" -ge 16; then
             cp results/shadow/q-conservative.jsonl results/shadow/chosen-q-roots.jsonl
             echo conservative > results/shadow/q-evidence-level.txt
@@ -85,6 +98,17 @@ jobs:
               --root-value-weight 0 \
               --json-output results/shadow/q-neural-validation.json
           fi
+          if test -f results/shadow/q-consensus.jsonl; then
+            if test "$(wc -l < results/shadow/q-consensus.jsonl)" -ge 12; then
+              python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+              sts2-ai train-neural \
+                results/shadow/q-consensus.jsonl \
+                results/shadow/q-consensus-neural.json \
+                --epochs 12 --dimension 256 --hidden 32 \
+                --root-value-weight 0 \
+                --json-output results/shadow/q-consensus-validation.json
+            fi
+          fi
       - name: Compare Q-distilled rollout policy on six independent seed runs
         run: |
           if test -f results/shadow/q-neural.json; then
@@ -104,10 +128,37 @@ jobs:
               results/shadow/heldout-q-neural.json \
               --json-output results/shadow/heldout-q-comparison.json
           fi
+      - name: Test consensus-gated neural policy on identical six held-out seeds
+        run: |
+          if test -f results/shadow/q-consensus-neural.json; then
+            if test ! -f results/shadow/heldout-baseline.json; then
+              sts2-ai evaluate --agent mcts --budget 16 --rollout-depth 24 \
+                --rollout-batch-size 8 --seeds 6 --max-decisions 64 \
+                --seed-prefix qteacher-heldout --no-build \
+                --strategy-db results/shadow/heldout-baseline.sqlite \
+                --json-output results/shadow/heldout-baseline.json
+            fi
+            sts2-ai evaluate --agent mcts --budget 16 --rollout-depth 24 \
+              --rollout-batch-size 8 --seeds 6 --max-decisions 64 \
+              --seed-prefix qteacher-heldout --no-build \
+              --neural-rollout-model results/shadow/q-consensus-neural.json \
+              --strategy-db results/shadow/heldout-consensus.sqlite \
+              --json-output results/shadow/heldout-consensus.json
+            sts2-ai compare-evaluations \
+              results/shadow/heldout-baseline.json \
+              results/shadow/heldout-consensus.json \
+              --json-output results/shadow/heldout-consensus-comparison.json
+            if test -f results/shadow/heldout-q-neural.json; then
+              sts2-ai compare-evaluations \
+                results/shadow/heldout-q-neural.json \
+                results/shadow/heldout-consensus.json \
+                --json-output results/shadow/consensus-vs-exploratory.json
+            fi
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: matched-root-q-policy-six-seed-evidence
+          name: matched-root-q-consensus-six-seed-evidence
           path: results/shadow/
           if-no-files-found: warn
           retention-days: 14
