@@ -9,6 +9,13 @@ from .exact_finite_posterior import (
     EXACT_FINITE_SEED_PRIOR_ID,
     ExactFiniteSeedPosteriorSampler,
 )
+from .factorized_runstart import (
+    FACTORIZED_RUNSTART_PRIOR_ID,
+    FACTORIZED_RUNSTART_SCHEMA_ID,
+    FactorizedRunStartPosteriorSampler,
+    FactorizedRunStartStats,
+    FactorizedRunStartUnavailable,
+)
 from .jsonl_backend import (
     FAIR_POLICY_ID,
     OBSERVATION_SCHEMA_ID,
@@ -48,6 +55,11 @@ __all__ = [
     "UncertifiedDrawPile",
     "certified_opening_draw_belief",
     "EmulatorBackend",
+    "FACTORIZED_RUNSTART_PRIOR_ID",
+    "FACTORIZED_RUNSTART_SCHEMA_ID",
+    "FactorizedRunStartPosteriorSampler",
+    "FactorizedRunStartStats",
+    "FactorizedRunStartUnavailable",
     "EXACT_FINITE_SEED_PRIOR_ID",
     "ExactFiniteSeedPosteriorSampler",
     "FINITE_COHORT_PRIOR_ID",
