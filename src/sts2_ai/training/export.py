@@ -148,3 +148,49 @@ def load_training_jsonl(path: Path) -> tuple[TrainingExample, ...]:
                 )
             )
     return tuple(examples)
+
+
+def split_training_examples(
+    examples: tuple[TrainingExample, ...],
+    *,
+    validation_fraction: float = 0.2,
+    seed: int = 0,
+) -> tuple[tuple[TrainingExample, ...], tuple[TrainingExample, ...]]:
+    """Deterministic exact-state grouped split, independent of input order.
+
+    All search budgets, versions and observation variants of one exact state
+    remain in one partition, preventing repeated-root validation leakage.
+    """
+    import hashlib
+
+    if not 0.0 < validation_fraction < 1.0:
+        raise ValueError("validation_fraction must lie strictly between 0 and 1")
+    groups: dict[str, list[TrainingExample]] = {}
+    for example in examples:
+        key = example.source_state_hash or example.observation_hash
+        groups.setdefault(key, []).append(example)
+    if len(groups) < 2:
+        raise ValueError("At least two distinct states are required for validation")
+
+    keys = sorted(
+        groups,
+        key=lambda key: (
+            hashlib.sha256(f"{seed}:{key}".encode("utf-8")).digest(),
+            key,
+        ),
+    )
+    count = max(1, min(len(keys) - 1, round(len(keys) * validation_fraction)))
+    validation_keys = set(keys[:count])
+    train = tuple(
+        example
+        for key in sorted(groups)
+        if key not in validation_keys
+        for example in groups[key]
+    )
+    validation = tuple(
+        example
+        for key in sorted(groups)
+        if key in validation_keys
+        for example in groups[key]
+    )
+    return train, validation
