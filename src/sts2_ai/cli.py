@@ -290,7 +290,7 @@ def main() -> None:
             seed=args.seed,
         )
         model.save(args.output)
-        report = {
+        validation_report = {
             "train": asdict(training_metrics),
             "validation": asdict(evaluate_hashed_linear(model, validation)),
             "baselines": asdict(evaluate_heldout_baselines(train, validation)),
@@ -301,7 +301,7 @@ def main() -> None:
             "model_path": str(args.output),
             "seed": args.seed,
         }
-        print(json.dumps(report, sort_keys=True, indent=2))
+        print(json.dumps(validation_report, sort_keys=True, indent=2))
 
 
 
