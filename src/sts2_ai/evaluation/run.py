@@ -7,17 +7,17 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from sts2_ai.agents import Agent, Decision, ExactStateAgent
-from sts2_ai.emulator.run_environment import (
-    LEGACY,
-    cumulative_floor_progress,
-    reset_training_run,
-)
 from sts2_ai.emulator import (
     EmulatorBackend,
     InformationPolicy,
     LegalAction,
     Observation,
     StateHandle,
+)
+from sts2_ai.emulator.run_environment import (
+    LEGACY,
+    cumulative_floor_progress,
+    reset_training_run,
 )
 
 
