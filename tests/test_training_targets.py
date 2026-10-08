@@ -187,7 +187,7 @@ def test_grouped_split_keeps_repeated_search_states_together() -> None:
         emulator_revision="emu",
         source_state_hash="state-a",
     )
-    examples = tuple(
+    examples = (base,) + tuple(
         replace(base, source_state_hash=f"state-{i}", observation_hash=f"obs-{i}")
         for i in range(8)
     ) + (replace(base, source_search_id="other-budget"),)
