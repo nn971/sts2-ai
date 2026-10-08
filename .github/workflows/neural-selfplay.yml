@@ -1,0 +1,44 @@
+name: neural-selfplay-smoke
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  teacher-free-selfplay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -U pip
+      - run: python -m pip install -e '.[dev]'
+      - name: Install CPU-only PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Validate real learning and terminal censorship
+        run: python -m pytest tests/test_neural_selfplay.py -q
+      - name: Actual Silent whole-run neural training and heldout evaluation
+        run: |
+          python tools/train_selfplay.py \
+            --rounds 2 --episodes 3 \
+            --max-decisions 1024 --dimension 64 --hidden 8 \
+            --evaluate-seeds 2 --seed 19 \
+            --output /tmp/sts2-selfplay-model.json \
+            --report /tmp/sts2-selfplay-report.json
+          python -c 'import json; from pathlib import Path; r=json.loads(Path("/tmp/sts2-selfplay-report.json").read_text()); m=json.loads(Path("/tmp/sts2-selfplay-model.json").read_text()); assert r["schema"]=="sts2-onpolicy-neural-training-smoke-v1"; assert r["policy_information"]=="prototype-fair-v0"; assert sum(x["played"] for x in r["rounds"])==6; assert r["gradient_updates"]>0, "Self-play must produce actual gradient updates"; assert m["value_head_trained"] is True; assert len(r["heldout_evaluation"]["random"])==2 and len(r["heldout_evaluation"]["neural_greedy"])==2'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: first-neural-selfplay
+          path: |
+            /tmp/sts2-selfplay-model.json
+            /tmp/sts2-selfplay-report.json
+          if-no-files-found: ignore
