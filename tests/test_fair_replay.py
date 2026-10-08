@@ -82,7 +82,7 @@ def test_sampling_is_seed_blind_and_independent_of_real_hidden_seed() -> None:
     sampler = FairHistoryRejectionSampler(backend, max_candidates=400)
     assert require_fair_sampler(sampler) is sampler
 
-    history = (PublicHistoryStep(obs1, None),)
+    history = (PublicHistoryStep(obs1, None, (REVEAL,)),)
     a = sampler.sample_fair_continuations(history, search_rng=random.Random(99), count=64)
     outcomes_a = [backend.bit(backend.states[handle][0]) for handle in a]
     backend.release_many(a)
@@ -104,8 +104,8 @@ def test_rejection_conditions_on_public_history_and_preserves_hidden_correlation
     observed_hint = backend.observe(after, POLICY)
     backend.release_many([initial, after])
     history = (
-        PublicHistoryStep(root_obs, REVEAL),
-        PublicHistoryStep(observed_hint, None),
+        PublicHistoryStep(root_obs, REVEAL, (REVEAL,)),
+        PublicHistoryStep(observed_hint, None, (FINISH,)),
     )
     sampler = FairHistoryRejectionSampler(backend, max_candidates=250)
     handles = sampler.sample_fair_continuations(history, search_rng=random.Random(13), count=30)
@@ -130,7 +130,7 @@ def test_exhausted_conditioning_releases_all_candidates() -> None:
     sampler = FairHistoryRejectionSampler(backend, max_candidates=5)
     with pytest.raises(HistoryConditioningExhausted, match="0/5"):
         sampler.sample_fair_continuations(
-            (PublicHistoryStep(impossible, None),),
+            (PublicHistoryStep(impossible, None, (REVEAL,)),),
             search_rng=random.Random(3), count=1,
         )
     backend.release_many([initial])
@@ -168,7 +168,7 @@ def test_deep_distinctive_reveal_exhausts_without_oracle_fallback() -> None:
     backend.release_many([live, progressed])
     adapter = FairReplayPuctAdapter(backend, max_candidates=1)
     node = adapter.root(
-        [PublicHistoryStep(obs, REVEAL), PublicHistoryStep(reveal, None)],
+        [PublicHistoryStep(obs, REVEAL, (REVEAL,)), PublicHistoryStep(reveal, None, (FINISH,))],
         (FINISH,),
     )
     # Rejection either succeeds with a legitimate matching draw or fails
