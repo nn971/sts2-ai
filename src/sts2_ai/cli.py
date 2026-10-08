@@ -1012,7 +1012,7 @@ def _benchmark(args: argparse.Namespace) -> None:
                                 search_budget=search_budget,
                                 emulator_revision=backend.emulator_revision,
                                 game_build=args.game_build,
-                                run_seed=f"{args.seed_prefix}-{index}",
+                                run_seed=origin_seed,
                             )
 
                         agent = OracleMctsAgent(
