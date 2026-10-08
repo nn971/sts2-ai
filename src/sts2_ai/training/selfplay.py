@@ -318,6 +318,7 @@ def train_selfplay(
     environment: str = LEGACY,
     on_round_start: Callable[[int, int, float], None] | None = None,
     on_round_complete: Callable[[TrainingRound], None] | None = None,
+    on_model_snapshot: Callable[[TrainingRound, NeuralPolicyValueModel], None] | None = None,
 ) -> SelfPlayResult:
     """Run genuine full-game episodes and optimize an on-policy neural actor.
 
@@ -558,6 +559,18 @@ def train_selfplay(
             # fingerprint: observers cannot alter the optimizer, seeds or returns.
             if on_round_complete is not None:
                 on_round_complete(metrics[-1])
+            if on_model_snapshot is not None:
+                # Monitoring is observation-only. A portable snapshot is
+                # exported after the cohort is fully updated and checkpointed.
+                # The callback cannot affect seeds, autograd or optimizer state.
+                on_model_snapshot(
+                    metrics[-1],
+                    _export(
+                        params, dimension, hidden,
+                        model_id=f"selfplay-monitor-after-round-{round_index}",
+                        value_head_trained=True,
+                    ),
+                )
 
     signature = hashlib.sha256(
         (
