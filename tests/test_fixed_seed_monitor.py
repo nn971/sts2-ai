@@ -9,8 +9,8 @@ from test_neural_selfplay import ToyFullRunBackend
 from test_neural_training_temperature import zero_model
 
 from sts2_ai.evaluation import RunSummary
-from sts2_ai.training.selfplay import TrainingRound, train_selfplay
 from sts2_ai.evaluation.fixed_seed_monitor import FixedSeedMonitor
+from sts2_ai.training.selfplay import TrainingRound, train_selfplay
 
 
 def _round(number: int) -> TrainingRound:
