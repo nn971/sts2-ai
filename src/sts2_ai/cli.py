@@ -706,13 +706,14 @@ def _evaluate(args: argparse.Namespace) -> None:
                             obs: Observation,
                             actions: tuple[LegalAction, ...],
                             chosen: Decision,
+                            fixed_shadow: UctMcts = shadow_search,
                         ) -> None:
                             del chosen
                             if len(actions) < 2:
                                 return
                             if shadow_store is None or args.shadow_budget is None:
                                 raise RuntimeError("Missing shadow search configuration")
-                            result = shadow_search.search(
+                            result = fixed_shadow.search(
                                 state, SearchBudget(max_simulations=args.shadow_budget)
                             )
                             if result.root_observation_hash != obs.observation_hash:
