@@ -93,7 +93,14 @@ class CardPriorDataset:
             card_id = item.get("card_id")
             if not isinstance(card_id, str):
                 raise ValueError("Card identifier must be a string")
-            cards.append(CardPickCount(card_id, item.get("offered"), item.get("picked")))
+            offered = item.get("offered")
+            picked = item.get("picked")
+            if (
+                isinstance(offered, bool) or not isinstance(offered, int)
+                or isinstance(picked, bool) or not isinstance(picked, int)
+            ):
+                raise ValueError("Card offered/picked counts must be integers")
+            cards.append(CardPickCount(card_id, offered, picked))
         if len({c.card_id for c in cards}) != len(cards):
             raise ValueError("Duplicate card identifier in aggregate snapshot")
         canonical = json.dumps(raw, sort_keys=True, separators=(",", ":"))
