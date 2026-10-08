@@ -50,8 +50,8 @@ from sts2_ai.training import (
     write_training_jsonl,
 )
 from sts2_ai.training.continuations import (
-    CutoffContinuationCollector,
     ContinuationRecord,
+    CutoffContinuationCollector,
     continuation_report,
     load_continuations,
 )
