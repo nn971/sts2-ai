@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -27,8 +28,59 @@ from sts2_ai.evaluation.selfplay_metrics import (
     compare_completed_pairs,
     summarize_completed_runs,
 )
-from sts2_ai.training.selfplay import SELFPLAY_VERSION, train_selfplay
+from sts2_ai.training.selfplay import SELFPLAY_VERSION, TrainingRound, train_selfplay
 from sts2_ai.training.rollout_failure import PublicRolloutFailure
+
+
+def _progress(message: str) -> None:
+    # Flush even when redirected or piped through tee. stderr keeps the
+    # machine-readable final stdout JSON unaffected.
+    print(message, file=sys.stderr, flush=True)
+
+
+class _TrainingProgress:
+    def __init__(self, total_rounds: int, episodes_per_round: int) -> None:
+        self.total_rounds = total_rounds
+        self.episodes_per_round = episodes_per_round
+        self.started = time.perf_counter()
+        self.round_started = self.started
+        self.completed_this_invocation = 0
+        self.wins_this_invocation = 0
+        self.first_round_index: int | None = None
+
+    def start(self, round_index: int, total_rounds: int, temperature: float) -> None:
+        if self.first_round_index is None:
+            self.first_round_index = round_index
+            if round_index > 0:
+                _progress(
+                    f"[train] resumed at round {round_index + 1}/{total_rounds}; "
+                    f"{round_index} rounds already in checkpoint"
+                )
+        self.round_started = time.perf_counter()
+        _progress(
+            f"[train] round {round_index + 1}/{total_rounds} starting | "
+            f"episodes={self.episodes_per_round} | temperature={temperature:.5g}"
+        )
+
+    def complete(self, row: TrainingRound) -> None:
+        self.completed_this_invocation += 1
+        self.wins_this_invocation += row.wins
+        elapsed = time.perf_counter() - self.started
+        duration = time.perf_counter() - self.round_started
+        remaining = self.total_rounds - row.round_index - 1
+        eta = elapsed / self.completed_this_invocation * remaining
+        progress = (
+            f"{row.mean_progress:.1%}" if row.mean_progress is not None else "n/a"
+        )
+        loss = f"{row.mean_loss:.4f}" if row.mean_loss is not None else "n/a"
+        _progress(
+            f"[train] round {row.round_index + 1}/{self.total_rounds} complete | "
+            f"completed={row.completed}/{row.played} censored={row.censored} "
+            f"wins={row.wins} new_wins={self.wins_this_invocation} | "
+            f"progress={progress} loss={loss} "
+            f"updates={row.update_steps} decisions={row.decision_samples} | "
+            f"round={duration:.1f}s elapsed={elapsed:.1f}s eta={eta:.0f}s"
+        )
 
 
 def main() -> None:
