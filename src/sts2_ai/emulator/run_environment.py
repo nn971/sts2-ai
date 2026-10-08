@@ -1,9 +1,8 @@
 """Versioned training environments, with native Overgrowth strictly fail-closed.
 
-The native-structure factory exists inside sts2-emulator, but its pinned JSONL
-server does NOT expose it. No call to the legacy reset is a valid substitute.
-This module describes the *requested* bridge contract without implementing or
-altering any emulator operation.
+The pinned emulator exports an explicit native Overgrowth JSONL reset operation.
+Only a declared, verified native reset may supply this environment; legacy
+reset cannot substitute. Emulator mechanics remain owned by sts2-emulator.
 """
 from __future__ import annotations
 
@@ -17,7 +16,7 @@ LEGACY = "legacy-prototype"
 NATIVE_OVERGROWTH = "native-overgrowth"
 ENVIRONMENTS = (NATIVE_OVERGROWTH, LEGACY)
 
-# Proposed AI/bridge handshake contract; not advertised by the pinned emulator.
+# Versioned native Overgrowth public bridge contract.
 NATIVE_RESET_SCHEMA = "prototype-native-overgrowth-reset-v1"
 NATIVE_MAP_PROFILE = "native-overgrowth-map-structure-v0.111.0-v1"
 
@@ -32,12 +31,11 @@ def require_environment(backend: EmulatorBackend, environment: str) -> None:
         and getattr(backend, "native_overgrowth_reset_schema", None) != NATIVE_RESET_SCHEMA
     ):
         raise JsonlBridgeError(
-            "Native-structure Overgrowth training is unavailable: the pinned "
-            "emulator JSONL bridge does not advertise nativeOvergrowthResetId="
-            f"{NATIVE_RESET_SCHEMA!r}. Its normal reset still generates the "
-            "six-floor legacy prototype. No fallback or emulator modification "
-            "is permitted. Request an explicit native-Overgrowth reset "
-            "operation in sts2-emulator first."
+            "Native-structure Overgrowth training requires the pinned "
+            "emulator JSONL bridge to advertise nativeOvergrowthResetId="
+            f"{NATIVE_RESET_SCHEMA!r}. Normal reset generates the six-floor "
+            "legacy prototype. This mode will not fall back or modify "
+            "the emulator."
         )
 
 
