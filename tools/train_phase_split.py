@@ -31,6 +31,7 @@ def main() -> None:
     p.add_argument("--hidden", type=int, default=32)
     p.add_argument("--learning-rate", type=float, default=0.003)
     p.add_argument("--boundary-weight", type=float, default=0.25)
+    p.add_argument("--hp-monotonic-weight", type=float, default=0.2)
     p.add_argument("--temperature-start", type=float, default=0.05)
     p.add_argument("--temperature-end", type=float, default=0.035)
     p.add_argument("--temperature-decay-rounds", type=int, default=20)
@@ -57,6 +58,7 @@ def main() -> None:
             f"actions=strategy:{row.strategic_decisions}/"
             f"combat:{row.tactical_decisions} "
             f"boundary_target={row.mean_combat_boundary_target} "
+            f"hp_pairs={row.hp_monotonic_pairs} "
             f"run_target={row.mean_run_return} loss={row.mean_loss} "
             f"updates={row.optimization_steps} "
             f"rollouts={row.rollout_seconds:.1f}s "
@@ -75,6 +77,7 @@ def main() -> None:
             workers=args.workers, dimension=args.dimension, hidden=args.hidden,
             learning_rate=args.learning_rate,
             boundary_weight=args.boundary_weight,
+            hp_monotonic_weight=args.hp_monotonic_weight,
             temperature_start=args.temperature_start,
             temperature_end=args.temperature_end,
             temperature_decay_rounds=args.temperature_decay_rounds,
@@ -122,6 +125,7 @@ def main() -> None:
             "heldout": evaluations,
             "elapsed_seconds": time.perf_counter() - started,
             "boundary_weight": args.boundary_weight,
+            "hp_monotonic_weight": args.hp_monotonic_weight,
             "warm_start": str(args.warm_start) if args.warm_start else None,
         }
         args.report.parent.mkdir(parents=True, exist_ok=True)
