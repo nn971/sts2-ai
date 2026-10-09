@@ -85,4 +85,7 @@ def test_phase_mean_vs_legacy_updates_are_not_silently_identical() -> None:
     )
     assert a_rows[0].strategic_decisions == b_rows[0].strategic_decisions
     assert a_rows[0].tactical_decisions == b_rows[0].tactical_decisions
-    assert a.combat.state_weight != b.combat.state_weight
+    # AdamW can yield nearly identical one-step parameter updates when
+    # gradients only differ by a positive scalar. Check the objective itself.
+    assert a_rows[0].mean_loss != pytest.approx(b_rows[0].mean_loss)
+    assert a.combat.format_id == b.combat.format_id
