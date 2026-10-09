@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import math
 from collections.abc import Callable, Sequence
 from statistics import fmean
 from typing import Any
@@ -77,8 +78,6 @@ def fit_outcome_predictor(
     survival = torch.tensor([ex.survived for ex in examples], dtype=torch.float32)
     hp = torch.tensor([ex.exit_hp_ratio for ex in examples], dtype=torch.float32)
     # Independent heads can later be replaced by a joint resource distribution.
-    import math
-
     trunk = torch.nn.Linear(dimension, hidden)
     survival_head = torch.nn.Linear(hidden, 1)
     hp_head = torch.nn.Linear(hidden, 1)
