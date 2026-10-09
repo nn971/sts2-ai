@@ -198,9 +198,10 @@ def tactical_action_features(
     payload = _action_payload(action_payload_json)
     semantic = _semantic_action_label(state, action_kind, action_payload_json)
     tokens: list[tuple[str, float]] = [
-        ("tactical:bias", 1.0),
-        (f"tactical:kind={action_kind}", 1.0),
-        (f"tactical:semantic={semantic}", 1.0),
+        # Keep v2 semantic tokens for approximate warm-start compatibility.
+        ("neural-action:bias", 1.0),
+        (f"neural-action:kind={action_kind}", 1.0),
+        (f"neural-action:semantic={semantic}", 1.0),
     ]
     combat = state.get("combat")
     if not isinstance(combat, dict):
