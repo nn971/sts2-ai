@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import json
 import random
-from pathlib import Path
 from collections.abc import Sequence
+from pathlib import Path
 
 from sts2_ai.agents.base import Decision
 from sts2_ai.agents.neural_temperature import temperature_probabilities
