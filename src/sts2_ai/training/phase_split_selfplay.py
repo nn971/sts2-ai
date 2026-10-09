@@ -55,6 +55,7 @@ from sts2_ai.training.selfplay import (
 )
 
 SPLIT_TRAINING_VERSION = "sts2-phase-split-reinforce-v2-hp-monotonicity"
+BALANCED_TRAINING_VERSION = "sts2-phase-split-reinforce-v3-phase-mean"
 SPLIT_CHECKPOINT_FORMAT = "sts2-phase-split-training-checkpoint-v1"
 
 
@@ -76,6 +77,7 @@ class PhaseSplitRound:
     rollout_seconds: float
     optimizer_seconds: float
     hp_monotonic_pairs: int = 0
+    phase_loss_diagnostics: dict[str, dict[str, float]] | None = None
 
 
 def _higher_hp_public_pair(
@@ -216,6 +218,7 @@ def train_phase_split(
     auxiliary_weight: float = 0.4, boundary_weight: float = 0.25,
     hp_monotonic_weight: float = 0.2,
     tactical_state_encoding: str = "legacy",
+    loss_normalization: str = "legacy_episode_sum",
     win_anneal_threshold: int = 16, max_decisions: int = 4096,
     temperature_start: float = 0.05, temperature_end: float = 0.035,
     temperature_decay_rounds: int = 20,
@@ -228,6 +231,8 @@ def train_phase_split(
 ) -> tuple[PhaseSplitNeuralModel, tuple[PhaseSplitRound, ...]]:
     if min(rounds, episodes_per_round, dimension, hidden, max_decisions, workers) <= 0:
         raise ValueError("Expected positive sizes and worker count")
+    if loss_normalization not in ("legacy_episode_sum", "phase_mean"):
+        raise ValueError("Loss normalization must be legacy_episode_sum or phase_mean")
     if tactical_state_encoding not in ("legacy", "structured"):
         raise ValueError("Tactical state encoding must be legacy or structured")
     if tactical_state_encoding == "structured" and dimension <= 32:
@@ -297,7 +302,10 @@ def train_phase_split(
                     ))
     revision = getattr(backend, "emulator_revision", "test-backend")
     config = {
-        "version": SPLIT_TRAINING_VERSION,
+        "version": (
+            BALANCED_TRAINING_VERSION if loss_normalization == "phase_mean"
+            else SPLIT_TRAINING_VERSION
+        ),
         "episodes_per_round": episodes_per_round,
         "dimension": dimension, "hidden": hidden,
         "learning_rate": learning_rate, "entropy_weight": entropy_weight,
@@ -391,9 +399,19 @@ def train_phase_split(
             strategic_count = tactical_count = 0
             combat_targets: list[float] = []
             losses: list[float] = []
+            phase_counts = {
+                phase: sum(
+                    dec.phase == phase
+                    for episode, _ in run_targets for dec in episode.decisions
+                )
+                for phase in ("strategy", "combat")
+            }
+            diagnostic_totals = {
+                phase: {"policy": 0.0, "value_mse": 0.0, "entropy": 0.0}
+                for phase in phase_counts
+            }
             for episode, run_target in run_targets:
-                # Targets for the entire cohort use the same frozen policy
-                # snapshot, even though the optimizer is subsequently updated.
+                # All targets/advantages use the same frozen cohort snapshot.
                 targets = [run_target] * len(episode.decisions)
                 for j, segment in enumerate(episode.combat_outcomes):
                     local_target = _combat_boundary_target(
@@ -405,9 +423,10 @@ def train_phase_split(
                         if episode.decisions[d].phase != "combat":
                             raise ValueError("Combat segment includes a strategy decision")
                         targets[d] = local_target
-                policy_terms = []
-                value_terms = []
-                entropy_terms = []
+                phase_terms: dict[str, dict[str, list[Any]]] = {
+                    phase: {"policy": [], "value_mse": [], "entropy": []}
+                    for phase in phase_counts
+                }
                 for decision, target in zip(episode.decisions, targets, strict=True):
                     phase = decision.phase
                     if phase not in params:
@@ -424,20 +443,67 @@ def train_phase_split(
                         logits / temperature, dim=0,
                     )
                     probs = log_probs.exp()
-                    advantage = torch.tensor(target, dtype=torch.float32) - value.detach()
-                    policy_terms.append(-log_probs[decision.chosen_index] * advantage)
-                    value_terms.append(
-                        (value - torch.tensor(target, dtype=torch.float32)).square()
+                    target_tensor = torch.tensor(target, dtype=torch.float32)
+                    advantage = target_tensor - value.detach()
+                    phase_terms[phase]["policy"].append(
+                        -log_probs[decision.chosen_index] * advantage
                     )
-                    entropy_terms.append(-(probs * log_probs).sum())
-                if policy_terms:
-                    loss = (
-                        torch.stack(policy_terms).sum()
-                        + value_weight * torch.stack(value_terms).mean()
-                        - entropy_weight * torch.stack(entropy_terms).mean()
-                    ) / max(1, len(run_targets))
-                    loss.backward()
-                    losses.append(float(loss.detach()))
+                    phase_terms[phase]["value_mse"].append(
+                        (value - target_tensor).square()
+                    )
+                    phase_terms[phase]["entropy"].append(
+                        -(probs * log_probs).sum()
+                    )
+                if loss_normalization == "legacy_episode_sum":
+                    # Preserve old behavior exactly for reproducibility.
+                    policy_terms = [
+                        x for phase in phase_counts for x in phase_terms[phase]["policy"]
+                    ]
+                    value_terms = [
+                        x for phase in phase_counts for x in phase_terms[phase]["value_mse"]
+                    ]
+                    entropy_terms = [
+                        x for phase in phase_counts for x in phase_terms[phase]["entropy"]
+                    ]
+                    if policy_terms:
+                        loss = (
+                            torch.stack(policy_terms).sum()
+                            + value_weight * torch.stack(value_terms).mean()
+                            - entropy_weight * torch.stack(entropy_terms).mean()
+                        ) / max(1, len(run_targets))
+                        loss.backward()
+                        losses.append(float(loss.detach()))
+                else:
+                    # Each phase has the SAME overall weight regardless of how
+                    # many card plays or map choices occur in a cohort.
+                    # Mean reduction also makes entropy/value coefficients
+                    # meaningful relative to the policy gradient.
+                    for phase, total in phase_counts.items():
+                        if not total or not phase_terms[phase]["policy"]:
+                            continue
+                        terms = phase_terms[phase]
+                        loss = (
+                            torch.stack(terms["policy"]).sum()
+                            + value_weight * torch.stack(terms["value_mse"]).sum()
+                            - entropy_weight * torch.stack(terms["entropy"]).sum()
+                        ) / total
+                        loss.backward()
+                        losses.append(float(loss.detach()))
+                for phase, phase_components in phase_terms.items():
+                    for name, component_tensors in phase_components.items():
+                        if component_tensors:
+                            diagnostic_totals[phase][name] += sum(
+                                float(tensor.detach())
+                                for tensor in component_tensors
+                            )
+            phase_diagnostics = {
+                phase: {
+                    key: total / phase_counts[phase]
+                    for key, total in terms.items()
+                }
+                for phase, terms in diagnostic_totals.items()
+                if phase_counts[phase]
+            }
             # Direct combat-boundary feedback to the strategic continuation
             # critic: for otherwise identical future resources, slightly more
             # HP is normally preferable. This does NOT fix a potion/HP rate.
@@ -508,6 +574,7 @@ def train_phase_split(
                 rollout_seconds=rollout_seconds,
                 optimizer_seconds=time.perf_counter() - optimizer_started,
                 hp_monotonic_pairs=len(monotonic_terms),
+                phase_loss_diagnostics=phase_diagnostics,
             )
             rows.append(row)
             if checkpoint is not None:
