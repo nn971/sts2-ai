@@ -6,7 +6,8 @@ import json
 import pytest
 
 from sts2_ai.training.combat_distribution import (
-    EmpiricalCombatDistribution, load_combat_samples,
+    EmpiricalCombatDistribution,
+    load_combat_samples,
 )
 
 
