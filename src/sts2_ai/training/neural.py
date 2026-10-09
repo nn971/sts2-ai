@@ -115,13 +115,13 @@ def _forward(
 
 def _export(
     params: dict[str, Any], dimension: int, hidden: int, *,
-    model_id: str, value_head_trained: bool,
+    model_id: str, value_head_trained: bool, format_id: str = NEURAL_FORMAT,
 ) -> NeuralPolicyValueModel:
     weights: dict[str, Any] = {}
     for name, value in params.items():
         weights[name] = value.detach().cpu().tolist()
     return NeuralPolicyValueModel.from_dict({
-        "format": NEURAL_FORMAT,
+        "format": format_id,
         "dimension": dimension,
         "hidden": hidden,
         "model_id": model_id,
