@@ -13,7 +13,12 @@ from pathlib import Path
 from typing import Any
 
 from sts2_ai.emulator import LegalAction, Observation
-from sts2_ai.models.neural import NEURAL_FORMAT, TACTICAL_FORMAT, NeuralPolicyValueModel
+from sts2_ai.models.neural import (
+    NEURAL_FORMAT,
+    TACTICAL_FORMAT,
+    TACTICAL_STRUCTURED_FORMAT,
+    NeuralPolicyValueModel,
+)
 from sts2_ai.models.protocol import PolicyValueEstimate
 
 PHASE_SPLIT_FORMAT = "sts2-phase-split-policy-value-v1"
@@ -37,7 +42,7 @@ class PhaseSplitNeuralModel:
             raise ValueError("Phase-split model requires a model identifier")
         if self.strategy.format_id != NEURAL_FORMAT:
             raise ValueError("Strategy head must use the semantic action format")
-        if self.combat.format_id != TACTICAL_FORMAT:
+        if self.combat.format_id not in (TACTICAL_FORMAT, TACTICAL_STRUCTURED_FORMAT):
             raise ValueError("Combat head must use target-aware tactical format")
         if (self.strategy.dimension, self.strategy.hidden) != (
             self.combat.dimension, self.combat.hidden
