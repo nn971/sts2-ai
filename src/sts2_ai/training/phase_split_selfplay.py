@@ -19,26 +19,35 @@ import random
 import tempfile
 import time
 from collections.abc import Callable
+from contextlib import ExitStack
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from sts2_ai.emulator import EmulatorBackend, InformationPolicy, JsonlEmulatorBackend, Observation
+from sts2_ai.emulator import EmulatorBackend, JsonlEmulatorBackend, Observation
 from sts2_ai.emulator.run_environment import LEGACY, require_environment
 from sts2_ai.models.hashed_linear import (
-    neural_action_features, state_dict, state_features, tactical_action_features,
+    neural_action_features,
+    state_dict,
+    state_features,
+    tactical_action_features,
 )
 from sts2_ai.models.neural import TACTICAL_FORMAT, NeuralPolicyValueModel
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.training.neural import _dense, _export, _forward, _new_params
 from sts2_ai.training.parallel_rollouts import (
-    collect_parallel, episode_actor_seed, open_worker_pool,
+    collect_parallel,
+    episode_actor_seed,
+    open_worker_pool,
 )
 from sts2_ai.training.selfplay import (
-    Episode, PublicDecision, _bounded_return, _curriculum_coefficient,
-    collect_public_episode, temperature_for_round,
+    Episode,
+    PublicDecision,
+    _bounded_return,
+    _curriculum_coefficient,
+    collect_public_episode,
+    temperature_for_round,
 )
-from contextlib import ExitStack
 
 SPLIT_TRAINING_VERSION = "sts2-phase-split-reinforce-v1"
 SPLIT_CHECKPOINT_FORMAT = "sts2-phase-split-training-checkpoint-v1"
