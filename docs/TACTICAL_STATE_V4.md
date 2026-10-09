@@ -68,9 +68,9 @@ overwritten.
 
 For an ablation, run the same command with
 `--tactical-state-encoding legacy`, distinct output/report/checkpoint paths,
-and a distinct seed prefix to avoid accidentally treating the training
-cohorts as the same data. The built-in heldout-evaluation seed prefix is
-identical in both runs; compare **paired** outcomes there.
+and distinct output/report/checkpoint paths. Keep the same sampling seed
+and heldout evaluation seeds for a paired comparison; the changing policy
+naturally leads to different actual trajectories even from common run seeds.
 
 Assess boss entries, Act-1 clears, post-combat HP, potion conservation,
 and progress among complete (uncensored) runs. A larger mean floor is
