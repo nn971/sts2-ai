@@ -9,6 +9,7 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
+from sts2_ai.agents import NeuralGreedyAgent
 from sts2_ai.agents.phase_split_agent import PhaseSplitGreedyAgent
 from sts2_ai.emulator import FAIR_POLICY_ID, InformationPolicy, JsonlEmulatorBackend
 from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH
@@ -117,6 +118,44 @@ def main() -> None:
                 f"act={item.terminal_act} floor={item.terminal_floor} "
                 f"outcome={item.outcome}"
             )
+        baseline_evaluations = []
+        if args.warm_start is not None:
+            raw = json.loads(args.warm_start.read_text())
+            baseline_agent = (
+                PhaseSplitGreedyAgent.load(args.warm_start)
+                if raw.get("format") == "sts2-phase-split-policy-value-v1"
+                else NeuralGreedyAgent.load(args.warm_start)
+            )
+            for index in range(args.eval_seeds):
+                item = play_run(
+                    backend, baseline_agent,
+                    seed=f"phase-split-heldout-v1-{index}",
+                    policy=InformationPolicy(FAIR_POLICY_ID),
+                    max_decisions=args.max_decisions,
+                    environment=NATIVE_OVERGROWTH,
+                )
+                baseline_evaluations.append({
+                    "seed": item.seed,
+                    "outcome": item.outcome,
+                    "act": item.terminal_act,
+                    "floor": item.terminal_floor,
+                    "progress": item.frontier_progress,
+                    "censored": item.censored,
+                    "boss": (
+                        asdict(item.boss_progress)
+                        if item.boss_progress is not None else None
+                    ),
+                })
+                log(
+                    f"[baseline-eval] {index + 1}/{args.eval_seeds} "
+                    f"act={item.terminal_act} floor={item.terminal_floor} "
+                    f"outcome={item.outcome}"
+                )
+        paired = [
+            new["progress"] - old["progress"]
+            for new, old in zip(evaluations, baseline_evaluations, strict=True)
+            if not new["censored"] and not old["censored"]
+        ]
         report = {
             "schema": "sts2-phase-split-experiment-v1",
             "training_version": SPLIT_TRAINING_VERSION,
@@ -125,6 +164,16 @@ def main() -> None:
             "environment": NATIVE_OVERGROWTH,
             "rounds": [asdict(r) for r in rows],
             "heldout": evaluations,
+            "warm_start_heldout": baseline_evaluations,
+            "paired_completed_only": {
+                "pairs": len(paired),
+                "mean_frontier_delta": (
+                    sum(paired) / len(paired) if paired else None
+                ),
+                "improved": sum(x > 0 for x in paired),
+                "worsened": sum(x < 0 for x in paired),
+                "tied": sum(x == 0 for x in paired),
+            },
             "elapsed_seconds": time.perf_counter() - started,
             "boundary_weight": args.boundary_weight,
             "combat_samples_dir": (
