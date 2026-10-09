@@ -489,11 +489,12 @@ def train_phase_split(
                         ) / total
                         loss.backward()
                         losses.append(float(loss.detach()))
-                for phase, terms in phase_terms.items():
-                    for name, values in terms.items():
-                        if values:
+                for phase, phase_components in phase_terms.items():
+                    for name, component_tensors in phase_components.items():
+                        if component_tensors:
                             diagnostic_totals[phase][name] += sum(
-                                float(x.detach()) for x in values
+                                float(tensor.detach())
+                                for tensor in component_tensors
                             )
             phase_diagnostics = {
                 phase: {
