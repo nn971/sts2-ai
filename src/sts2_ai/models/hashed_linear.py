@@ -184,6 +184,76 @@ def neural_action_features(
     )
 
 
+
+def tactical_action_features(
+    state: dict[str, Any], action_kind: str, action_payload_json: str,
+    dimension: int,
+) -> dict[int, float]:
+    """Target-aware combat action embedding with no ephemeral instance ID tokens.
+
+    Same-type enemies with different HP, block or intents must remain
+    distinguishable to a neural policy. Numeric features are deliberately
+    bounded but not replaced entirely by arbitrary discrete bins.
+    """
+    payload = _action_payload(action_payload_json)
+    semantic = _semantic_action_label(state, action_kind, action_payload_json)
+    tokens: list[tuple[str, float]] = [
+        ("tactical:bias", 1.0),
+        (f"tactical:kind={action_kind}", 1.0),
+        (f"tactical:semantic={semantic}", 1.0),
+    ]
+    combat = state.get("combat")
+    if not isinstance(combat, dict):
+        return _hash_features(tokens, dimension)
+    card_instance = _int_field(payload, "CardInstanceId", "card_instance_id")
+    if card_instance is not None:
+        for card in _dict_items(combat.get("hand")):
+            if card.get("instance_id") != card_instance:
+                continue
+            card_id = card.get("card_id")
+            if isinstance(card_id, str):
+                tokens.append((f"tactical:card={card_id}", 1.0))
+            for key in ("cost", "energy_cost", "upgrade_level"):
+                value = card.get(key)
+                if type(value) in (int, float):
+                    tokens.append((f"tactical:card:{key}", math.tanh(float(value) / 4.0)))
+            for key in ("upgraded", "upgrade"):
+                if type(card.get(key)) is bool:
+                    tokens.append((f"tactical:card:{key}={card[key]}", 1.0))
+            break
+    potion_slot = _int_field(payload, "Slot", "slot")
+    if action_kind == "use_potion" and potion_slot is not None:
+        for potion in _dict_items(state.get("potions")):
+            if potion.get("slot") == potion_slot:
+                potion_id = potion.get("potion_id")
+                if isinstance(potion_id, str):
+                    tokens.append((f"tactical:potion={potion_id}", 1.0))
+                break
+    enemy_instance = _int_field(payload, "TargetEnemyId", "target_enemy_id")
+    if enemy_instance is not None:
+        for enemy in _dict_items(combat.get("enemies")):
+            if enemy.get("instance_id") != enemy_instance:
+                continue
+            enemy_id = enemy.get("enemy_id")
+            if isinstance(enemy_id, str):
+                tokens.append((f"tactical:target={enemy_id}", 1.0))
+            hp, max_hp = enemy.get("hp"), enemy.get("max_hp")
+            if type(hp) in (int, float):
+                tokens.append(("tactical:target-hp", math.tanh(float(hp) / 50.0)))
+                if type(max_hp) in (int, float) and max_hp > 0:
+                    ratio = float(hp) / float(max_hp)
+                    tokens.append(("tactical:target-hp-ratio", min(1.0, max(0.0, ratio))))
+                tokens.append((f"tactical:target-hp-bin={max(0, int(hp)) // 5}", 1.0))
+            block = enemy.get("block")
+            if type(block) in (int, float):
+                tokens.append(("tactical:target-block", math.tanh(float(block) / 20.0)))
+            for key in ("intent", "intent_id", "move_id"):
+                value = enemy.get(key)
+                if isinstance(value, str):
+                    tokens.append((f"tactical:target:{key}={value}", 1.0))
+            break
+    return _hash_features(tokens, dimension)
+
 def state_dict(payload_json: str) -> dict[str, Any]:
     return _state_dict(payload_json)
 
