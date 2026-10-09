@@ -30,6 +30,14 @@ emulator.
   and do not yet influence updates. A round's sample collection still
   represents one frozen-policy cohort.
 
+Optional **individual outcome-sample export** during ordinary training:
+`--combat-samples-dir results/combat-samples` produces one JSONL file per
+completed round (e.g. `round-0001.jsonl`), preserving seed, round, sampling
+temperature, emulator revision, and the full public resource vector. The
+trainer logs these exports as they happen. Missing sidecar files after a
+crash are **not** automatically reconstructed from an already-checkpointed
+round. The export callback is observational, not a training signal.
+
 Run focused tests:
 
 ```fish
