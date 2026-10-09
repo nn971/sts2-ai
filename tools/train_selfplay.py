@@ -32,6 +32,7 @@ from sts2_ai.evaluation.selfplay_metrics import (
     compare_completed_pairs,
     summarize_completed_runs,
 )
+from sts2_ai.training.combat_outcomes import CombatOutcome
 from sts2_ai.training.selfplay import SELFPLAY_VERSION, TrainingRound, train_selfplay
 from sts2_ai.training.rollout_failure import PublicRolloutFailure
 from sts2_ai.evaluation.fixed_seed_monitor import FixedSeedMonitor
@@ -213,7 +214,7 @@ def main() -> None:
             f"boss_damage_weight={args.boss_damage_weight:g}"
         )
         def export_combat_samples(
-            round_index: int, temperature: float, samples: tuple[tuple[str, object], ...]
+            round_index: int, temperature: float, samples: tuple[tuple[str, CombatOutcome], ...]
         ) -> None:
             directory = args.combat_samples_dir
             if directory is None:
@@ -421,6 +422,10 @@ def main() -> None:
                 if args.combat_samples_dir is not None else None
             ),
             "resumed": args.resume,
+            "combat_samples_dir": (
+                str(args.combat_samples_dir)
+                if args.combat_samples_dir is not None else None
+            ),
             "training_wall_seconds_current_invocation": training_wall_seconds,
             "rounds": [asdict(row) for row in trained.rounds],
             "train_completed": sum(row.completed for row in trained.rounds),
