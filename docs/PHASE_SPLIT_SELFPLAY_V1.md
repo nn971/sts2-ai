@@ -70,6 +70,12 @@ python -u tools/train_phase_split.py \
   --eval-seeds 64 --build 2>&1 | tee results/phase-split-v1.log
 ```
 
+When `--warm-start` is provided, the CLI evaluates **both** the trained
+split policy and its warm-start baseline on exactly the same held-out seeds.
+The report includes a paired frontier delta (excluding censored runs), as
+well as per-policy outcomes. This is still a small sample in the CI smoke;
+run at least 64–256 independent seeds for actual performance comparisons.
+
 Use matching hidden/dimension values for the warm-start model, or
 omit `--warm-start` to initialize both heads from scratch. For the uploaded
 `combat-samples-smoke-model.json` the dimension is 128 and hidden is 16.
