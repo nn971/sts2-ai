@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "sts2-combat-empirical-distribution-v1"
+SCHEMA = "sts2-combat-empirical-distribution-v2-abstaining"
 
 
 def _key(outcome: dict[str, Any]) -> str:
@@ -41,6 +41,7 @@ class OutcomePoint:
     exit_hp: int | None
     exit_potions: tuple[str, ...]
     entry_hp: int | None
+    entry_max_hp: int | None
 
     @classmethod
     def parse(cls, outcome: dict[str, Any]) -> OutcomePoint:
@@ -51,6 +52,10 @@ class OutcomePoint:
             exit_hp=exit_["hp"] if type(exit_["hp"]) is int else None,
             exit_potions=tuple(sorted(str(x) for x in exit_["potions"])),
             entry_hp=entry["hp"] if type(entry["hp"]) is int else None,
+            entry_max_hp=(
+                entry["max_hp"]
+                if type(entry["max_hp"]) is int and entry["max_hp"] > 0 else None
+            ),
         )
 
 
@@ -74,11 +79,11 @@ def load_combat_samples(paths: list[Path]) -> list[dict[str, Any]]:
 
 
 class EmpiricalCombatDistribution:
-    """Discrete empirical joint exit-resource distribution with fallback.
+    """A transparent on-policy descriptive baseline, NEVER a dynamics oracle.
 
-    Small strata fall back to the full dataset. Outputs are descriptive
-    on-policy frequencies, NOT calibrated forecasts for a new tactical
-    policy or counterfactual actions.
+    Unseen or undersampled contexts ABSTAIN instead of implicitly substituting
+    fights against unrelated enemies. Dataset-wide outcomes can be inspected
+    explicitly with dataset_summary(), but may mix HP, decks and potions.
     """
 
     def __init__(
@@ -96,31 +101,29 @@ class EmpiricalCombatDistribution:
             self.groups[_key(outcome)].append(point)
             self.all_points.append(point)
 
-    def estimate(self, entry_and_encounter: dict[str, Any]) -> dict[str, Any]:
-        key = _key(entry_and_encounter)
-        group = self.groups.get(key, [])
-        selected = group if len(group) >= self.min_group_size else self.all_points
-        wins = sum(point.win for point in selected)
-        hp = [point.exit_hp for point in selected if point.exit_hp is not None]
+    @staticmethod
+    def _summary(points: list[OutcomePoint]) -> dict[str, Any]:
+        if not points:
+            raise ValueError("Cannot summarize empty combat samples")
+        hp = [point.exit_hp for point in points if point.exit_hp is not None]
+        ratios = [
+            point.exit_hp / point.entry_max_hp
+            for point in points
+            if point.exit_hp is not None and point.entry_max_hp is not None
+        ]
+        ratio_mean = sum(ratios) / len(ratios) if ratios else None
         exit_states: dict[tuple[int | None, tuple[str, ...]], int] = {}
-        for point in selected:
+        for point in points:
             state = (point.exit_hp, point.exit_potions)
             exit_states[state] = exit_states.get(state, 0) + 1
-        n = len(selected)
         return {
-            "schema": SCHEMA,
-            "matched_context": len(group) >= self.min_group_size,
-            "matched_sample_count": len(group),
-            "sample_count": n,
-            "observed_win_probability": wins / n,
+            "sample_count": len(points),
+            "observed_win_probability": sum(point.win for point in points) / len(points),
             "exit_hp_mean": sum(hp) / len(hp) if hp else None,
+            "exit_hp_fraction_mean": ratio_mean,
             "exit_hp_normalized_variance": (
-                sum((x - sum(hp) / len(hp)) ** 2 for x in hp)
-                / (len(hp) * max(
-                    1.0,
-                    float(entry_and_encounter["entry"].get("max_hp") or 1),
-                ) ** 2)
-                if hp else None
+                sum((ratio - ratio_mean) ** 2 for ratio in ratios) / len(ratios)
+                if ratio_mean is not None else None
             ),
             "joint_exit_outcomes": [
                 {"hp": state[0], "potions": list(state[1]), "count": count}
@@ -129,4 +132,47 @@ class EmpiricalCombatDistribution:
                     key=lambda item: (item[0][0] is None, item[0][0] or 0, item[0][1]),
                 )
             ],
+        }
+
+    def dataset_summary(self) -> dict[str, Any]:
+        """Unconditional, mixed-context diagnostics: not a policy forecast."""
+        return {
+            "schema": SCHEMA,
+            "scope": "unconditional_mixed_contexts",
+            "usable_as_conditional_forecast": False,
+            "context_count": len(self.groups),
+            **self._summary(self.all_points),
+        }
+
+    def estimate(self, entry_and_encounter: dict[str, Any]) -> dict[str, Any]:
+        """Return a conditional empirical estimate, or explicit abstention.
+
+        Even a non-abstaining estimate is not a calibrated counterfactual:
+        opponent RNG and policy/deck/relic variation remain uncontrolled.
+        """
+        group = self.groups.get(_key(entry_and_encounter), [])
+        sufficient = len(group) >= self.min_group_size
+        if not sufficient:
+            return {
+                "schema": SCHEMA,
+                "scope": "conditional_context",
+                "status": "insufficient_data",
+                "matched_context": False,
+                "matched_sample_count": len(group),
+                "required_sample_count": self.min_group_size,
+                "sample_count": 0,
+                "observed_win_probability": None,
+                "exit_hp_mean": None,
+                "exit_hp_fraction_mean": None,
+                "exit_hp_normalized_variance": None,
+                "joint_exit_outcomes": [],
+            }
+        return {
+            "schema": SCHEMA,
+            "scope": "conditional_context",
+            "status": "observed",
+            "matched_context": True,
+            "matched_sample_count": len(group),
+            "required_sample_count": self.min_group_size,
+            **self._summary(group),
         }
