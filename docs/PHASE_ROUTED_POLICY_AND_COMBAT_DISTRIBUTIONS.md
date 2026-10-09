@@ -14,10 +14,11 @@ This follows `docs/HIERARCHICAL_COMBAT_STRATEGY_PLAN.md`.
   produced by `--combat-samples-dir`. It retains probabilities of
   victory, normalized HP variance, and discrete joint exit outcomes,
   not just expected HP. Its conditional grouping is a deliberately
-  conservative, low-dimensional baseline and falls back to the whole
-  sample set when a subgroup is too small.
+  conservative, low-dimensional baseline and now **abstains** when a
+  subgroup is too small. An unconditional mixed-context summary is
+  available separately and is explicitly not a conditional forecast.
 - Focused deterministic tests exercise phase dispatch, sample loading,
-  potion/HP correlations and sparse subgroup fallback.
+  potion/HP correlations and sparse subgroup abstention.
 
 These components are independent of `sts2-emulator`; there is no new
 game-mechanics implementation.
@@ -31,6 +32,12 @@ The distribution estimator is descriptive **on-policy** statistics,
 not a learned conditional dynamics model and not a counterfactual
 model of what would happen if a different card were played. A handful
 of combats is not sufficient to estimate useful conditional tails.
+A per-context threshold does not establish calibration: the grouping omits
+decks, relic effects, some combat-specific inputs, and policy variation.
+Only use the unconditional summary for descriptive dataset analysis.
+The v2 estimator intentionally returns null predictions when a context is
+undersampled; future policy code must handle abstention rather than treating
+null as a probability or a low-value estimate.
 
 ## Commands
 
