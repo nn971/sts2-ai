@@ -40,6 +40,7 @@ def main() -> None:
     p.add_argument("--seed", type=int, default=19)
     p.add_argument("--warm-start", type=Path)
     p.add_argument("--checkpoint", type=Path)
+    p.add_argument("--combat-samples-dir", type=Path)
     p.add_argument("--resume", action="store_true")
     p.add_argument("--build", action="store_true")
     p.add_argument("--output", type=Path, required=True)
@@ -84,6 +85,7 @@ def main() -> None:
             max_decisions=args.max_decisions,
             seed=args.seed, warm_start=args.warm_start,
             checkpoint=args.checkpoint, resume=args.resume,
+            combat_samples_dir=args.combat_samples_dir,
             environment=NATIVE_OVERGROWTH, progress=progress,
         )
         model.save(args.output)
@@ -125,6 +127,10 @@ def main() -> None:
             "heldout": evaluations,
             "elapsed_seconds": time.perf_counter() - started,
             "boundary_weight": args.boundary_weight,
+            "combat_samples_dir": (
+                str(args.combat_samples_dir)
+                if args.combat_samples_dir else None
+            ),
             "hp_monotonic_weight": args.hp_monotonic_weight,
             "warm_start": str(args.warm_start) if args.warm_start else None,
         }
