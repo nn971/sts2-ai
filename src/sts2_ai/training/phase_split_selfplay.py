@@ -207,11 +207,11 @@ def train_phase_split(
             warm = PhaseSplitNeuralModel.from_dict(raw)
             sources = {"strategy": warm.strategy, "combat": warm.combat}
         else:
-            # The old semantic-action format can warm-start strategy. Its
-            # action encoder differs from combat-v3; don't transplant its
-            # incompatible combat action weights.
+            # Tactical-v3 extends v2 semantic tokens with target context.
+            # Both heads warm-start approximately: normalization changes with
+            # extra features, so the action distributions are not identical.
             base = NeuralPolicyValueModel.from_dict(raw)
-            sources = {"strategy": base}
+            sources = {"strategy": base, "combat": base}
         for phase, source in sources.items():
             if (source.dimension, source.hidden) != (dimension, hidden):
                 raise ValueError("Warm-start dimensions must match")
