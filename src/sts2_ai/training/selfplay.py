@@ -93,7 +93,7 @@ class TrainingRound:
     boss_defeats: int = 0
     boss_near_kills: int = 0
     mean_boss_damage_fraction_on_defeat: float | None = None
-    boss_defeat_records: tuple[dict[str, str | int | float], ...] = ()
+    boss_defeat_records: tuple[dict[str, object], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -603,7 +603,13 @@ def train_selfplay(
                 and ep.act == 1 and ep.floor == 16
                 and ep.boss_progress is not None
             )
-            boss_losses = [float(r["damage_fraction"]) for r in boss_defeat_records]
+            boss_losses = [
+                ep.boss_progress.damage_fraction
+                for ep in cohort
+                if ep.completed and ep.outcome == "defeat"
+                and ep.act == 1 and ep.floor == 16
+                and ep.boss_progress is not None
+            ]
             cumulative_victories += wins
             metrics.append(TrainingRound(
                 round_index, episodes_per_round, completed, censored, wins,
