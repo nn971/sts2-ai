@@ -116,7 +116,10 @@ class EmpiricalCombatDistribution:
             "exit_hp_mean": sum(hp) / len(hp) if hp else None,
             "exit_hp_normalized_variance": (
                 sum((x - sum(hp) / len(hp)) ** 2 for x in hp)
-                / (len(hp) * max(1.0, float(max(hp) if hp else 1)) ** 2)
+                / (len(hp) * max(
+                    1.0,
+                    float(entry_and_encounter["entry"].get("max_hp") or 1),
+                ) ** 2)
                 if hp else None
             ),
             "joint_exit_outcomes": [
