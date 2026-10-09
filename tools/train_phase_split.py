@@ -15,7 +15,10 @@ from sts2_ai.emulator import FAIR_POLICY_ID, InformationPolicy, JsonlEmulatorBac
 from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH
 from sts2_ai.evaluation import play_run
 from sts2_ai.training.phase_split_selfplay import (
-    SPLIT_TRAINING_VERSION, PhaseSplitRound, train_phase_split,
+    BALANCED_TRAINING_VERSION,
+    SPLIT_TRAINING_VERSION,
+    PhaseSplitRound,
+    train_phase_split,
 )
 
 
@@ -31,6 +34,12 @@ def main() -> None:
     p.add_argument("--dimension", type=int, default=128)
     p.add_argument("--hidden", type=int, default=32)
     p.add_argument("--learning-rate", type=float, default=0.003)
+    p.add_argument(
+        "--loss-normalization",
+        choices=("phase_mean", "legacy_episode_sum"),
+        default="phase_mean",
+        help="Balance the strategy/combat gradient by decisions; legacy reproduces v4",
+    )
     p.add_argument("--boundary-weight", type=float, default=0.25)
     p.add_argument("--hp-monotonic-weight", type=float, default=0.2)
     p.add_argument(
@@ -67,6 +76,7 @@ def main() -> None:
             f"boundary_target={row.mean_combat_boundary_target} "
             f"hp_pairs={row.hp_monotonic_pairs} "
             f"run_target={row.mean_run_return} loss={row.mean_loss} "
+            f"phase_diagnostics={row.phase_loss_diagnostics} "
             f"updates={row.optimization_steps} "
             f"rollouts={row.rollout_seconds:.1f}s "
             f"optimizer={row.optimizer_seconds:.1f}s "
@@ -77,6 +87,7 @@ def main() -> None:
         f"[split] start | rounds={args.rounds} episodes={args.episodes} "
         f"workers={args.workers} boundary_weight={args.boundary_weight} "
         f"tactical_state_encoding={args.tactical_state_encoding} "
+        f"loss_normalization={args.loss_normalization} "
         f"resume={args.resume} warm_start={args.warm_start or 'none'}"
     )
     with JsonlEmulatorBackend(build=args.build) as backend:
@@ -87,6 +98,7 @@ def main() -> None:
             boundary_weight=args.boundary_weight,
             hp_monotonic_weight=args.hp_monotonic_weight,
             tactical_state_encoding=args.tactical_state_encoding,
+            loss_normalization=args.loss_normalization,
             temperature_start=args.temperature_start,
             temperature_end=args.temperature_end,
             temperature_decay_rounds=args.temperature_decay_rounds,
@@ -168,7 +180,11 @@ def main() -> None:
         )
         report = {
             "schema": "sts2-phase-split-experiment-v1",
-            "training_version": SPLIT_TRAINING_VERSION,
+            "training_version": (
+                BALANCED_TRAINING_VERSION if args.loss_normalization == "phase_mean"
+                else SPLIT_TRAINING_VERSION
+            ),
+            "loss_normalization": args.loss_normalization,
             "model_id": model.model_id,
             "emulator_revision": backend.emulator_revision,
             "environment": NATIVE_OVERGROWTH,
