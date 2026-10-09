@@ -49,7 +49,7 @@ from sts2_ai.training.selfplay import (
     temperature_for_round,
 )
 
-SPLIT_TRAINING_VERSION = "sts2-phase-split-reinforce-v1"
+SPLIT_TRAINING_VERSION = "sts2-phase-split-reinforce-v2-hp-monotonicity"
 SPLIT_CHECKPOINT_FORMAT = "sts2-phase-split-training-checkpoint-v1"
 
 
@@ -70,6 +70,31 @@ class PhaseSplitRound:
     mean_loss: float | None
     rollout_seconds: float
     optimizer_seconds: float
+    hp_monotonic_pairs: int = 0
+
+
+def _higher_hp_public_pair(public_json: str, step: int = 5) -> tuple[dict[str, Any], dict[str, Any], float] | None:
+    """Critic-only weak HP dominance pair; inventory and every other field fixed.
+
+    This is not a feasible simulator transition, not a teacher move, and never
+    reaches the policy as an observation. Low-HP relic thresholds may create
+    exceptions, so monotonicity is a *soft* auxiliary constraint.
+    """
+    state = json.loads(public_json)
+    if not isinstance(state, dict):
+        raise ValueError("Malformed post-combat public observation")
+    hp = state.get("hp")
+    max_hp = state.get("max_hp")
+    if (
+        not isinstance(hp, int) or isinstance(hp, bool)
+        or not isinstance(max_hp, int) or isinstance(max_hp, bool)
+        or max_hp <= 0 or hp <= 0 or hp >= max_hp
+    ):
+        return None
+    higher_hp = min(max_hp, hp + step)
+    higher = dict(state)
+    higher["hp"] = higher_hp
+    return state, higher, (higher_hp - hp) / max_hp
 
 
 def _forward_decision(
@@ -172,6 +197,7 @@ def train_phase_split(
     dimension: int = 128, hidden: int = 32, learning_rate: float = 0.003,
     entropy_weight: float = 0.002, value_weight: float = 0.5,
     auxiliary_weight: float = 0.4, boundary_weight: float = 0.25,
+    hp_monotonic_weight: float = 0.2,
     win_anneal_threshold: int = 16, max_decisions: int = 4096,
     temperature_start: float = 0.05, temperature_end: float = 0.035,
     temperature_decay_rounds: int = 20,
@@ -185,6 +211,8 @@ def train_phase_split(
         raise ValueError("Expected positive sizes and worker count")
     if not 0.0 <= boundary_weight <= 1.0:
         raise ValueError("Boundary bootstrapping weight must lie in [0, 1]")
+    if not 0.0 <= hp_monotonic_weight <= 1.0:
+        raise ValueError("HP monotonicity regularization must lie in [0, 1]")
     if not (0.0 <= entropy_weight <= 1.0 and 0.0 <= value_weight <= 10.0):
         raise ValueError("Invalid loss coefficients")
     if not 0 < learning_rate < 1:
@@ -237,6 +265,7 @@ def train_phase_split(
         "learning_rate": learning_rate, "entropy_weight": entropy_weight,
         "value_weight": value_weight, "auxiliary_weight": auxiliary_weight,
         "boundary_weight": boundary_weight,
+        "hp_monotonic_weight": hp_monotonic_weight,
         "win_anneal_threshold": win_anneal_threshold,
         "max_decisions": max_decisions, "temperature_start": temperature_start,
         "temperature_end": temperature_end,
@@ -366,6 +395,38 @@ def train_phase_split(
                     ) / max(1, len(run_targets))
                     loss.backward()
                     losses.append(float(loss.detach()))
+            # Direct combat-boundary feedback to the strategic continuation
+            # critic: for otherwise identical future resources, slightly more
+            # HP is normally preferable. This does NOT fix a potion/HP rate.
+            monotonic_terms = []
+            for ep, _ in run_targets:
+                for segment in ep.combat_outcomes:
+                    if segment.result != "victory" or not segment.exit_public_json:
+                        continue
+                    pair = _higher_hp_public_pair(segment.exit_public_json)
+                    if pair is None:
+                        continue
+                    lower, higher, delta = pair
+                    low_x = torch.tensor(
+                        _dense(state_features(lower, dimension), dimension),
+                        dtype=torch.float32,
+                    )
+                    high_x = torch.tensor(
+                        _dense(state_features(higher, dimension), dimension),
+                        dtype=torch.float32,
+                    )
+                    low_value, _ = _forward(
+                        params["strategy"], low_x, None, torch,
+                    )
+                    high_value, _ = _forward(
+                        params["strategy"], high_x, None, torch,
+                    )
+                    monotonic_terms.append(torch.relu(
+                        low_value - high_value + 0.04 * delta
+                    ))
+            if monotonic_terms and hp_monotonic_weight:
+                (hp_monotonic_weight * torch.stack(monotonic_terms).mean()).backward()
+
             steps = 0
             if strategic_count or tactical_count:
                 for phase, count in (
@@ -403,6 +464,7 @@ def train_phase_split(
                 mean_loss=sum(losses) if losses else None,
                 rollout_seconds=rollout_seconds,
                 optimizer_seconds=time.perf_counter() - optimizer_started,
+                hp_monotonic_pairs=len(monotonic_terms),
             )
             rows.append(row)
             if checkpoint is not None:
