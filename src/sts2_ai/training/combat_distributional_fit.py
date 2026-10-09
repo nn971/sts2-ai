@@ -19,6 +19,10 @@ from sts2_ai.training.combat_distributional_predictor import (
     DistributionalCombatOutcomePredictor,
     hp_bin,
 )
+from sts2_ai.training.combat_entry_features import (
+    FEATURE_SCHEMA,
+    combat_entry_features,
+)
 from sts2_ai.training.combat_predictor import OutcomeExample, _dense
 
 
@@ -28,18 +32,26 @@ def fit_distributional_predictor(
     hidden: int = 64,
     epochs: int = 30,
     learning_rate: float = 0.003,
-    seed: int = 41,
+    seed: int = 41, feature_schema: str = FEATURE_SCHEMA,
     progress: Callable[[int, float], None] | None = None,
 ) -> DistributionalCombatOutcomePredictor:
     if not examples or min(dimension, hidden, epochs) <= 0:
         raise ValueError("Need examples and positive model sizes/epochs")
     if not 0 < learning_rate < 1:
         raise ValueError("Invalid learning rate")
+    if feature_schema not in ("legacy-hashed-v1", FEATURE_SCHEMA):
+        raise ValueError("Unsupported combat feature encoder")
+    if feature_schema == FEATURE_SCHEMA and dimension <= 24:
+        raise ValueError("Structured encoder requires dimension >24")
+    feature_fn = (
+        combat_entry_features if feature_schema == FEATURE_SCHEMA
+        else state_features
+    )
     torch: Any = importlib.import_module("torch")
     torch.manual_seed(seed)
     torch.set_num_threads(1)
     xs = torch.tensor([
-        _dense(state_features(state_dict(example.entry_public_json), dimension),
+        _dense(feature_fn(state_dict(example.entry_public_json), dimension),
                dimension) for example in examples
     ], dtype=torch.float32)
     survival = torch.tensor([
@@ -92,7 +104,9 @@ def fit_distributional_predictor(
             survival_bias=float(survive_head.bias[0]),
             hp_bin_weight=hp_head.weight.tolist(),
             hp_bin_bias=hp_head.bias.tolist(),
-            model_id=f"combat-distribution-v1-seed{seed}-epochs{epochs}",
+            model_id=(f"combat-distribution-v2-{feature_schema}-"
+                      f"seed{seed}-epochs{epochs}"),
+            feature_schema=feature_schema,
         )
 
 

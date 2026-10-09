@@ -12,6 +12,7 @@ import json
 import sys
 from pathlib import Path
 
+from sts2_ai.training.combat_entry_features import FEATURE_SCHEMA
 from sts2_ai.training.combat_distributional_fit import (
     constant_distributional_baseline,
     distributional_metrics,
@@ -31,6 +32,10 @@ def main() -> None:
     p.add_argument("--epochs", type=int, default=30)
     p.add_argument("--learning-rate", type=float, default=0.003)
     p.add_argument("--seed", type=int, default=41)
+    p.add_argument(
+        "--features", choices=("structured", "legacy"), default="structured",
+        help="Structured combat quantities (default) or original hashed features",
+    )
     args = p.parse_args()
     examples = load_outcome_samples(args.samples)
     training, heldout = split_by_run_seed(examples)
@@ -59,12 +64,16 @@ def main() -> None:
         training,
         dimension=args.dimension, hidden=args.hidden,
         epochs=args.epochs, learning_rate=args.learning_rate,
-        seed=args.seed, progress=progress,
+        seed=args.seed,
+        feature_schema=(FEATURE_SCHEMA if args.features == "structured"
+                        else "legacy-hashed-v1"),
+        progress=progress,
     )
     model.save(args.output)
     report = {
         "schema": "sts2-combat-distributional-training-report-v1",
         "model_id": model.model_id,
+        "feature_schema": model.feature_schema,
         "train_samples": len(training),
         "heldout_samples": len(heldout),
         "train_runs": sorted({x.seed for x in training}),
