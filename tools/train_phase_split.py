@@ -151,11 +151,14 @@ def main() -> None:
                     f"act={item.terminal_act} floor={item.terminal_floor} "
                     f"outcome={item.outcome}"
                 )
-        paired = [
-            new["progress"] - old["progress"]
-            for new, old in zip(evaluations, baseline_evaluations, strict=True)
-            if not new["censored"] and not old["censored"]
-        ]
+        paired = (
+            [
+                new["progress"] - old["progress"]
+                for new, old in zip(evaluations, baseline_evaluations, strict=True)
+                if not new["censored"] and not old["censored"]
+            ]
+            if baseline_evaluations else []
+        )
         report = {
             "schema": "sts2-phase-split-experiment-v1",
             "training_version": SPLIT_TRAINING_VERSION,
