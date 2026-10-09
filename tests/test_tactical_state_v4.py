@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+from test_phase_split_selfplay import TwoPhaseToy
 
 from sts2_ai.emulator import Observation
 from sts2_ai.models.neural import (
@@ -20,8 +21,6 @@ from sts2_ai.models.tactical_state import (
     tactical_state_features,
 )
 from sts2_ai.training.phase_split_selfplay import train_phase_split
-
-from test_phase_split_selfplay import TwoPhaseToy
 
 
 def frame(hp: int = 40) -> dict:
