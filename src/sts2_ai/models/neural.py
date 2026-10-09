@@ -21,10 +21,12 @@ from .hashed_linear import (
     policy_features,
     state_dict,
     state_features,
+    tactical_action_features,
 )
 from .protocol import PolicyValueEstimate
 
 NEURAL_FORMAT = "sts2-neural-policy-value-v2-semantic-action"
+TACTICAL_FORMAT = "sts2-neural-policy-value-v3-target-aware-combat"
 LEGACY_NEURAL_FORMAT = "sts2-neural-policy-value-v1"
 
 
@@ -83,7 +85,7 @@ class NeuralPolicyValueModel:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> NeuralPolicyValueModel:
-        if raw.get("format") not in {NEURAL_FORMAT, LEGACY_NEURAL_FORMAT}:
+        if raw.get("format") not in {NEURAL_FORMAT, TACTICAL_FORMAT, LEGACY_NEURAL_FORMAT}:
             raise ValueError("Unsupported neural model format")
         dimension, hidden = raw.get("dimension"), raw.get("hidden")
         if (
@@ -159,8 +161,10 @@ class NeuralPolicyValueModel:
         logits = []
         for action in legal_actions:
             feature_fn = (
-                neural_action_features
-                if self.format_id == NEURAL_FORMAT else policy_features
+                (tactical_action_features if self.format_id == TACTICAL_FORMAT
+                 else neural_action_features)
+                if self.format_id in (NEURAL_FORMAT, TACTICAL_FORMAT)
+                else policy_features
             )
             action_vector = feature_fn(
                 state, action.kind, action.payload_json, self.dimension

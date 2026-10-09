@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from sts2_ai.emulator import JsonlEmulatorBackend
 from sts2_ai.models.neural import NeuralPolicyValueModel
+from sts2_ai.models.phase_split import PhaseSplitNeuralModel, load_public_model
 
 if TYPE_CHECKING:
     from sts2_ai.training.selfplay import Episode
@@ -66,7 +67,7 @@ def _worker_collect(request: EpisodeRequest) -> Episode:
         raise RuntimeError("Rollout worker has no private emulator instance")
     return collect_public_episode(
         backend,
-        NeuralPolicyValueModel.from_dict(request.model_payload),
+        load_public_model(request.model_payload),
         seed=request.seed,
         actor_rng=random.Random(request.actor_seed),
         max_decisions=request.max_decisions,
@@ -93,7 +94,7 @@ def open_worker_pool(backend: JsonlEmulatorBackend, workers: int) -> ProcessPool
 
 def collect_parallel(
     pool: ProcessPoolExecutor,
-    model: NeuralPolicyValueModel,
+    model: NeuralPolicyValueModel | PhaseSplitNeuralModel,
     run_seeds: Sequence[str],
     *,
     base_seed: int,

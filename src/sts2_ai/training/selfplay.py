@@ -35,6 +35,7 @@ from sts2_ai.emulator.run_environment import (
 from sts2_ai.evaluation.boss_progress import BossProgress, BossProgressTracker
 from sts2_ai.models.hashed_linear import neural_action_features, state_dict, state_features
 from sts2_ai.models.neural import NEURAL_FORMAT, NeuralPolicyValueModel
+from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.training.combat_outcomes import CombatOutcome, CombatOutcomeRecorder
 from sts2_ai.training.neural import _dense, _export, _forward, _new_params
 from sts2_ai.training.parallel_rollouts import (
@@ -134,7 +135,7 @@ def temperature_for_round(
 
 
 def sample_public_action(
-    model: NeuralPolicyValueModel,
+    model: NeuralPolicyValueModel | PhaseSplitNeuralModel,
     observation: Observation,
     actions: Sequence[LegalAction],
     *,
@@ -180,7 +181,7 @@ def _public_metrics(observation: Observation) -> tuple[int | None, int | None, f
 
 def collect_public_episode(
     backend: EmulatorBackend,
-    model: NeuralPolicyValueModel,
+    model: NeuralPolicyValueModel | PhaseSplitNeuralModel,
     *,
     seed: str,
     actor_rng: random.Random,
