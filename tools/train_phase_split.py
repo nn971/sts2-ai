@@ -33,6 +33,11 @@ def main() -> None:
     p.add_argument("--learning-rate", type=float, default=0.003)
     p.add_argument("--boundary-weight", type=float, default=0.25)
     p.add_argument("--hp-monotonic-weight", type=float, default=0.2)
+    p.add_argument(
+        "--tactical-state-encoding", choices=("legacy", "structured"),
+        default="structured",
+        help="v4 structured tactical observation features, or legacy v3 for ablation",
+    )
     p.add_argument("--temperature-start", type=float, default=0.05)
     p.add_argument("--temperature-end", type=float, default=0.035)
     p.add_argument("--temperature-decay-rounds", type=int, default=20)
@@ -71,6 +76,7 @@ def main() -> None:
     log(
         f"[split] start | rounds={args.rounds} episodes={args.episodes} "
         f"workers={args.workers} boundary_weight={args.boundary_weight} "
+        f"tactical_state_encoding={args.tactical_state_encoding} "
         f"resume={args.resume} warm_start={args.warm_start or 'none'}"
     )
     with JsonlEmulatorBackend(build=args.build) as backend:
@@ -80,6 +86,7 @@ def main() -> None:
             learning_rate=args.learning_rate,
             boundary_weight=args.boundary_weight,
             hp_monotonic_weight=args.hp_monotonic_weight,
+            tactical_state_encoding=args.tactical_state_encoding,
             temperature_start=args.temperature_start,
             temperature_end=args.temperature_end,
             temperature_decay_rounds=args.temperature_decay_rounds,
@@ -184,6 +191,7 @@ def main() -> None:
                 if args.combat_samples_dir else None
             ),
             "hp_monotonic_weight": args.hp_monotonic_weight,
+            "tactical_state_encoding": args.tactical_state_encoding,
             "warm_start": str(args.warm_start) if args.warm_start else None,
         }
         args.report.parent.mkdir(parents=True, exist_ok=True)
