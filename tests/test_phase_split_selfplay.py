@@ -30,7 +30,10 @@ from sts2_ai.training.combat_predictor_fit import (
     fit_outcome_predictor,
     split_by_run_seed,
 )
-from sts2_ai.training.phase_split_selfplay import train_phase_split
+from sts2_ai.training.phase_split_selfplay import (
+    _higher_hp_public_pair,
+    train_phase_split,
+)
 
 POLICY = "prototype-fair-v0"
 
@@ -159,6 +162,25 @@ class TwoPhaseToy:
         for state in states:
             self.states.pop(state)
         return len(states)
+
+
+def test_hp_dominance_is_critic_only_and_preserves_named_potions() -> None:
+    original = {
+        "hp": 31, "max_hp": 70,
+        "potions": [{"slot": 0, "potion_id": "strength"}],
+        "relics": [{"relic_id": "ring"}],
+        "combat": None, "map": [{"floor": 16}],
+    }
+    pair = _higher_hp_public_pair(json.dumps(original), step=5)
+    assert pair is not None
+    lower, higher, hp_delta = pair
+    assert lower == original
+    assert higher["hp"] == 36
+    assert hp_delta == pytest.approx(5 / 70)
+    higher["hp"] = original["hp"]
+    assert higher == original
+    assert _higher_hp_public_pair(json.dumps({**original, "hp": 70})) is None
+    assert _higher_hp_public_pair(json.dumps({**original, "hp": 0})) is None
 
 
 def test_split_trainer_updates_both_phases_and_resumes(
