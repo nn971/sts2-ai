@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import tempfile
 import time
 from statistics import fmean
 from dataclasses import asdict
@@ -161,6 +163,11 @@ def main() -> None:
         "--monitor-file", type=Path,
         help="Progress JSONL file (default: --report stem plus .monitor.jsonl)",
     )
+    parser.add_argument(
+        "--combat-samples-dir", type=Path,
+        help="Optional per-round JSONL of individual public combat outcomes; "
+             "does not change the learning objective",
+    )
     parser.add_argument("--build", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
@@ -205,6 +212,48 @@ def main() -> None:
             f"over {args.temperature_decay_rounds} rounds | "
             f"boss_damage_weight={args.boss_damage_weight:g}"
         )
+        def export_combat_samples(
+            round_index: int, temperature: float, samples: tuple[tuple[str, object], ...]
+        ) -> None:
+            directory = args.combat_samples_dir
+            if directory is None:
+                return
+            directory.mkdir(parents=True, exist_ok=True)
+            target = directory / f"round-{round_index + 1:04d}.jsonl"
+            rows = [
+                json.dumps({
+                    "schema": "sts2-public-combat-sample-v1",
+                    "round": round_index + 1,
+                    "seed": seed,
+                    "policy_snapshot": f"selfplay-actor-before-round-{round_index}",
+                    "sampling_temperature": temperature,
+                    "emulator_revision": backend.emulator_revision,
+                    "environment": args.environment,
+                    "outcome": asdict(sample),
+                }, sort_keys=True)
+                for seed, sample in samples
+            ]
+            # One immutable file per round; atomic replacement makes an
+            # interrupted export less likely to leave corrupted JSONL.
+            temporary: Path | None = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", dir=directory, encoding="utf-8",
+                    prefix=f".{target.name}.", suffix=".pending", delete=False,
+                ) as handle:
+                    temporary = Path(handle.name)
+                    handle.write("\n".join(rows) + ("\n" if rows else ""))
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temporary, target)
+            finally:
+                if temporary is not None:
+                    temporary.unlink(missing_ok=True)
+            _progress(
+                f"[combat] round {round_index + 1}: {len(rows)} "
+                f"completed combat samples -> {target}"
+            )
+
         try:
             trained = train_selfplay(
                 backend,
@@ -228,6 +277,10 @@ def main() -> None:
                 on_round_start=progress.start,
                 on_round_complete=progress.complete,
                 on_model_snapshot=monitor,
+                on_combat_samples=(
+                    export_combat_samples if args.combat_samples_dir is not None
+                    else None
+                ),
             )
         except PublicRolloutFailure as failure:
             # Broken emulator transitions are not valid censored episodes.
@@ -363,6 +416,10 @@ def main() -> None:
             "monitor_file": str(monitor_path) if monitor is not None else None,
             "periodic_heldout_evaluation": monitor.records if monitor is not None else [],
             "checkpoint_path": str(args.checkpoint) if args.checkpoint is not None else None,
+            "combat_samples_dir": (
+                str(args.combat_samples_dir)
+                if args.combat_samples_dir is not None else None
+            ),
             "resumed": args.resume,
             "training_wall_seconds_current_invocation": training_wall_seconds,
             "rounds": [asdict(row) for row in trained.rounds],
