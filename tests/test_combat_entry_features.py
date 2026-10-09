@@ -5,9 +5,6 @@ import json
 
 import pytest
 
-from sts2_ai.training.combat_entry_features import (
-    FEATURE_SCHEMA, NUMERIC_FEATURES, combat_entry_features,
-)
 from sts2_ai.training.combat_distributional_predictor import (
     DISTRIBUTIONAL_FORMAT,
     DISTRIBUTIONAL_FORMAT_V2,
@@ -16,6 +13,11 @@ from sts2_ai.training.combat_distributional_predictor import (
 )
 from sts2_ai.training.combat_distributional_fit import (
     fit_distributional_predictor,
+)
+from sts2_ai.training.combat_entry_features import (
+    FEATURE_SCHEMA,
+    NUMERIC_FEATURES,
+    combat_entry_features,
 )
 from sts2_ai.training.combat_predictor import OutcomeExample
 
