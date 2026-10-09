@@ -73,7 +73,9 @@ class PhaseSplitRound:
     hp_monotonic_pairs: int = 0
 
 
-def _higher_hp_public_pair(public_json: str, step: int = 5) -> tuple[dict[str, Any], dict[str, Any], float] | None:
+def _higher_hp_public_pair(
+    public_json: str, step: int = 5,
+) -> tuple[dict[str, Any], dict[str, Any], float] | None:
     """Critic-only weak HP dominance pair; inventory and every other field fixed.
 
     This is not a feasible simulator transition, not a teacher move, and never
