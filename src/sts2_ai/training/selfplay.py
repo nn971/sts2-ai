@@ -35,6 +35,7 @@ from sts2_ai.emulator.run_environment import (
 from sts2_ai.evaluation.boss_progress import BossProgress, BossProgressTracker
 from sts2_ai.models.hashed_linear import neural_action_features, state_dict, state_features
 from sts2_ai.models.neural import NEURAL_FORMAT, NeuralPolicyValueModel
+from sts2_ai.training.combat_outcomes import CombatOutcome, CombatOutcomeRecorder
 from sts2_ai.training.neural import _dense, _export, _forward, _new_params
 from sts2_ai.training.parallel_rollouts import (
     collect_parallel,
@@ -53,6 +54,7 @@ class PublicDecision:
     observation: Observation
     legal_actions: tuple[LegalAction, ...]
     chosen_index: int
+    phase: str = "strategy"
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +68,7 @@ class Episode:
     completed: bool
     environment: str = LEGACY
     boss_progress: BossProgress | None = None
+    combat_outcomes: tuple[CombatOutcome, ...] = ()
 
     @property
     def won(self) -> bool:
@@ -94,6 +97,10 @@ class TrainingRound:
     boss_near_kills: int = 0
     mean_boss_damage_fraction_on_defeat: float | None = None
     boss_defeat_records: tuple[dict[str, object], ...] = ()
+    combat_victories: int = 0
+    combat_defeats: int = 0
+    mean_combat_hp_decreases_on_win: float | None = None
+    potions_used_in_combat: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,6 +203,7 @@ def collect_public_episode(
     state = reset_training_run(backend, seed, environment)
     history: list[PublicDecision] = []
     boss_tracker = BossProgressTracker(environment)
+    combat_recorder = CombatOutcomeRecorder()
     try:
         while True:
             frame = backend.observe(state, policy)
@@ -203,6 +211,7 @@ def collect_public_episode(
             if not isinstance(raw_frame, dict):
                 raise ValueError('Public observation must be a JSON object')
             boss_tracker.observe(raw_frame)
+            combat_recorder.observe(raw_frame, len(history))
             if backend.is_terminal(state):
                 act, floor, hp_ratio = _public_metrics(frame)
                 obj = json.loads(frame.payload_json)
@@ -215,12 +224,14 @@ def collect_public_episode(
                     environment, boss_tracker.result(
                         act1_cleared=outcome == "victory" or (act or 1) > 1,
                     ),
+                    combat_recorder.outcomes,
                 )
             if len(history) >= max_decisions:
                 act, floor, hp_ratio = _public_metrics(frame)
                 return Episode(
                     seed, tuple(history), "truncated", act, floor, hp_ratio, False,
                     environment, boss_tracker.result(),
+                    combat_recorder.outcomes,
                 )
 
             actions = tuple(backend.legal_actions(state))
@@ -228,7 +239,9 @@ def collect_public_episode(
                 model, frame, actions, rng=actor_rng, temperature=temperature
             )
             # Record *only* public inputs and the sampled legal index.
-            history.append(PublicDecision(frame, actions, index))
+            phase = "combat" if isinstance(raw_frame.get("combat"), dict) else "strategy"
+            history.append(PublicDecision(frame, actions, index, phase))
+            combat_recorder.selected_action(actions[index])
             try:
                 next_state = backend.step(state, actions[index]).child
             except Exception as exc:
@@ -359,6 +372,9 @@ def train_selfplay(
     on_round_start: Callable[[int, int, float], None] | None = None,
     on_round_complete: Callable[[TrainingRound], None] | None = None,
     on_model_snapshot: Callable[[TrainingRound, NeuralPolicyValueModel], None] | None = None,
+    on_combat_samples: (
+        Callable[[int, float, tuple[tuple[str, CombatOutcome], ...]], None] | None
+    ) = None,
 ) -> SelfPlayResult:
     """Run genuine full-game episodes and optimize an on-policy neural actor.
 
@@ -610,6 +626,14 @@ def train_selfplay(
                 and ep.act == 1 and ep.floor == 16
                 and ep.boss_progress is not None
             ]
+            # Descriptive combat metrics only: these samples are not yet used
+            # as a shaped reward, so historical learner semantics are intact.
+            combat_samples = tuple(
+                segment for ep in cohort for segment in ep.combat_outcomes
+            )
+            won_combats = tuple(
+                segment for segment in combat_samples if segment.result == "victory"
+            )
             cumulative_victories += wins
             metrics.append(TrainingRound(
                 round_index, episodes_per_round, completed, censored, wins,
@@ -627,12 +651,26 @@ def train_selfplay(
                 sum(x >= 0.8 for x in boss_losses),
                 sum(boss_losses) / len(boss_losses) if boss_losses else None,
                 boss_defeat_records,
+                len(won_combats),
+                sum(x.result == "defeat" for x in combat_samples),
+                (sum(x.hp_decreases for x in won_combats) / len(won_combats)
+                 if won_combats else None),
+                sum(len(x.potions_used) for x in combat_samples),
             ))
             if checkpoint_path is not None:
                 save_checkpoint(
                     checkpoint_path, torch=torch, params=params, optimizer=optimizer,
                     config=config, revision=revision, initial_model=initial_model,
                     metrics=metrics,
+                )
+            # Purely observational sample export, after the optimizer and
+            # checkpoint. A round preserves the individual (correlated) outcomes;
+            # they are not reduced to scalar expected rewards.
+            if on_combat_samples is not None:
+                on_combat_samples(
+                    round_index, sampling_temperature,
+                    tuple((ep.seed, sample) for ep in cohort
+                          for sample in ep.combat_outcomes),
                 )
             # The callback is intentionally outside the trainer's reproducibility
             # fingerprint: observers cannot alter the optimizer, seeds or returns.

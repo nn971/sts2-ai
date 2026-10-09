@@ -123,6 +123,66 @@ def test_collector_records_only_public_frames_and_marks_truncation() -> None:
         sample_public_action(model, truncated.decisions[0].observation, (), rng=rng)
 
 
+def test_collector_marks_combat_and_strategy_and_resolves_boundary() -> None:
+    class CombatThenReward(ToyFullRunBackend):
+        def reset(self, seed: str, ascension: int = 0) -> str:
+            return self._put("combat")
+
+        def observe(self, state: str, policy: InformationPolicy) -> Observation:
+            phase = self._states[state]
+            if phase == "combat":
+                obj = {
+                    "act": 1, "floor": 1, "phase": 3,
+                    "hp": 20, "max_hp": 20, "potions": [],
+                    "combat": {"turn": 1, "enemies": [{"enemy_id": "slime"}]},
+                }
+            elif phase == "reward":
+                obj = {
+                    "act": 1, "floor": 1, "phase": 5,
+                    "hp": 17, "max_hp": 20, "potions": [],
+                    "combat": None,
+                }
+            else:
+                obj = {
+                    "act": 1, "floor": 2, "phase": 10,
+                    "hp": 17, "max_hp": 20, "potions": [],
+                    "combat": None, "terminal_outcome": "victory",
+                }
+            import json
+
+            payload = json.dumps(obj)
+            return Observation(POLICY, payload, payload)
+
+        def is_terminal(self, state: str) -> bool:
+            return self._states[state] == "win"
+
+        def legal_actions(self, state: str) -> Sequence[LegalAction]:
+            if self._states[state] == "combat":
+                return (LegalAction("finish", "play_card"),)
+            return (LegalAction("leave", "leave_reward"),)
+
+        def step(self, state: str, action: LegalAction) -> Transition:
+            next_phase = "reward" if self._states[state] == "combat" else "win"
+            child = self._put(next_phase)
+            return Transition(state, action, child, next_phase == "win")
+
+    backend = CombatThenReward()
+    episode = collect_public_episode(
+        backend, zero_model(), seed="combat-test", actor_rng=random.Random(1),
+    )
+    assert episode.completed and episode.outcome == "victory"
+    assert [decision.phase for decision in episode.decisions] == [
+        "combat", "strategy",
+    ]
+    assert len(episode.combat_outcomes) == 1
+    (sample,) = episode.combat_outcomes
+    assert (sample.start_decision, sample.end_decision) == (0, 1)
+    assert sample.result == "victory"
+    assert (sample.entry.hp, sample.exit.hp, sample.hp_decreases) == (20, 17, 3)
+    assert backend.exact_state_calls == 0
+    assert not backend._states
+
+
 def test_censored_episode_is_never_given_a_monte_carlo_win_loss() -> None:
     episode = Episode("s", (), "truncated", 1, 3, 0.8, False)
     with pytest.raises(ValueError, match="Truncated"):
