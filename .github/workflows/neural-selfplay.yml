@@ -70,10 +70,11 @@ jobs:
             --temperature-start 0.2 --temperature-end 0.2 \
             --max-decisions 2048 --eval-seeds 1 \
             --checkpoint /tmp/sts2-phase-split-checkpoint.pt \
+            --combat-samples-dir /tmp/sts2-phase-split-samples \
             --output /tmp/sts2-phase-split-model.json \
             --report /tmp/sts2-phase-split-report.json
           python tools/train_combat_outcome.py \
-            --samples /tmp/sts2-native-combat-samples \
+            --samples /tmp/sts2-phase-split-samples \
             --dimension 32 --hidden 8 --epochs 3 \
             --output /tmp/sts2-combat-outcome-predictor.json \
             --report /tmp/sts2-combat-outcome-holdout.json
