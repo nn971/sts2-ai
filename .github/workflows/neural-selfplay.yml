@@ -57,9 +57,27 @@ jobs:
             --max-decisions 2048 --dimension 64 --hidden 8 \
             --evaluate-seeds 1 --seed 23 \
             --checkpoint /tmp/sts2-native-train-checkpoint.pt \
+            --combat-samples-dir /tmp/sts2-native-combat-samples \
             --output /tmp/sts2-native-train-model.json \
             --report /tmp/sts2-native-train-report.json
           python -c 'import json; from pathlib import Path; r=json.loads(Path("/tmp/sts2-native-train-report.json").read_text()); assert r["training_environment"]=="native-overgrowth"; assert r["gradient_updates"]>0; assert r["gradient_decision_samples"]>0; assert r["train_completed"]>0'
+      - name: Phase-split tactical/strategy training and combat outcome predictor smoke
+        run: |
+          python tools/train_phase_split.py \
+            --rounds 1 --episodes 2 --workers 2 \
+            --dimension 64 --hidden 8 \
+            --warm-start /tmp/sts2-native-train-model.json \
+            --temperature-start 0.2 --temperature-end 0.2 \
+            --max-decisions 2048 --eval-seeds 1 \
+            --checkpoint /tmp/sts2-phase-split-checkpoint.pt \
+            --output /tmp/sts2-phase-split-model.json \
+            --report /tmp/sts2-phase-split-report.json
+          python tools/train_combat_outcome.py \
+            --samples /tmp/sts2-native-combat-samples \
+            --dimension 32 --hidden 8 --epochs 3 \
+            --output /tmp/sts2-combat-outcome-predictor.json \
+            --report /tmp/sts2-combat-outcome-holdout.json
+          python -c 'import json; from pathlib import Path; p=Path("/tmp/sts2-phase-split-model.json"); m=json.loads(p.read_text()); r=json.loads(Path("/tmp/sts2-phase-split-report.json").read_text()); o=json.loads(Path("/tmp/sts2-combat-outcome-holdout.json").read_text()); assert m["format"]=="sts2-phase-split-policy-value-v1"; assert m["combat"]["format"]=="sts2-neural-policy-value-v3-target-aware-combat"; assert r["rounds"][0]["tactical_decisions"]>0 and r["rounds"][0]["strategic_decisions"]>0; assert r["rounds"][0]["optimization_steps"]==2; assert o["heldout_runs"]>0; assert Path("/tmp/sts2-phase-split-checkpoint.pt").is_file()'
       - name: Paired temperature and floor-16 public diagnostic smoke
         run: |
           python tools/diagnose_neural_policy.py \
@@ -97,6 +115,11 @@ jobs:
             /tmp/sts2-native-train-report.json
             /tmp/sts2-native-train-model.json
             /tmp/sts2-native-train-checkpoint.pt
+            /tmp/sts2-phase-split-checkpoint.pt
+            /tmp/sts2-phase-split-model.json
+            /tmp/sts2-phase-split-report.json
+            /tmp/sts2-combat-outcome-predictor.json
+            /tmp/sts2-combat-outcome-holdout.json
             /tmp/sts2-native-temperature-diagnostics.json
             /tmp/sts2-native-tempered-report.json
             /tmp/sts2-native-tempered-report.monitor.jsonl
