@@ -10,7 +10,9 @@ from typing import Any
 
 from sts2_ai.models.hashed_linear import state_dict, state_features
 from sts2_ai.training.combat_predictor import (
-    CombatOutcomePredictor, OutcomeExample, _dense,
+    CombatOutcomePredictor,
+    OutcomeExample,
+    _dense,
 )
 
 
