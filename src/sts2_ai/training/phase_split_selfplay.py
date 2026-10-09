@@ -32,7 +32,12 @@ from sts2_ai.models.hashed_linear import (
     state_features,
     tactical_action_features,
 )
-from sts2_ai.models.neural import TACTICAL_FORMAT, NeuralPolicyValueModel
+from sts2_ai.models.neural import (
+    TACTICAL_FORMAT,
+    TACTICAL_STRUCTURED_FORMAT,
+    NeuralPolicyValueModel,
+)
+from sts2_ai.models.tactical_state import tactical_state_features
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.training.neural import _dense, _export, _forward, _new_params
 from sts2_ai.training.parallel_rollouts import (
@@ -101,11 +106,17 @@ def _higher_hp_public_pair(
 
 def _forward_decision(
     decision: PublicDecision, params: dict[str, Any],
-    dimension: int, torch: Any,
+    dimension: int, torch: Any, *,
+    tactical_state_encoding: str = "legacy",
 ) -> tuple[Any, Any]:
     state = state_dict(decision.observation.payload_json)
+    feature_fn_state = (
+        tactical_state_features
+        if decision.phase == "combat" and tactical_state_encoding == "structured"
+        else state_features
+    )
     state_x = torch.tensor(
-        _dense(state_features(state, dimension), dimension),
+        _dense(feature_fn_state(state, dimension), dimension),
         dtype=torch.float32,
     )
     feature_fn = (
@@ -122,6 +133,7 @@ def _forward_decision(
 def _export_split(
     strategy_params: dict[str, Any], combat_params: dict[str, Any],
     dimension: int, hidden: int, *, model_id: str, trained: bool,
+    tactical_state_encoding: str = "legacy",
 ) -> PhaseSplitNeuralModel:
     return PhaseSplitNeuralModel(
         strategy=_export(
@@ -131,7 +143,10 @@ def _export_split(
         combat=_export(
             combat_params, dimension, hidden,
             model_id=model_id + "-combat", value_head_trained=trained,
-            format_id=TACTICAL_FORMAT,
+            format_id=(
+                TACTICAL_STRUCTURED_FORMAT
+                if tactical_state_encoding == "structured" else TACTICAL_FORMAT
+            ),
         ),
         model_id=model_id,
     )
@@ -200,6 +215,7 @@ def train_phase_split(
     entropy_weight: float = 0.002, value_weight: float = 0.5,
     auxiliary_weight: float = 0.4, boundary_weight: float = 0.25,
     hp_monotonic_weight: float = 0.2,
+    tactical_state_encoding: str = "legacy",
     win_anneal_threshold: int = 16, max_decisions: int = 4096,
     temperature_start: float = 0.05, temperature_end: float = 0.035,
     temperature_decay_rounds: int = 20,
@@ -212,6 +228,10 @@ def train_phase_split(
 ) -> tuple[PhaseSplitNeuralModel, tuple[PhaseSplitRound, ...]]:
     if min(rounds, episodes_per_round, dimension, hidden, max_decisions, workers) <= 0:
         raise ValueError("Expected positive sizes and worker count")
+    if tactical_state_encoding not in ("legacy", "structured"):
+        raise ValueError("Tactical state encoding must be legacy or structured")
+    if tactical_state_encoding == "structured" and dimension <= 32:
+        raise ValueError("Structured tactical state requires dimension > 32")
     if not 0.0 <= boundary_weight <= 1.0:
         raise ValueError("Boundary bootstrapping weight must lie in [0, 1]")
     if not 0.0 <= hp_monotonic_weight <= 1.0:
@@ -252,11 +272,26 @@ def train_phase_split(
             # extra features, so the action distributions are not identical.
             base = NeuralPolicyValueModel.from_dict(raw)
             sources = {"strategy": base, "combat": base}
+        expected_tactical_format = (
+            TACTICAL_STRUCTURED_FORMAT
+            if tactical_state_encoding == "structured" else TACTICAL_FORMAT
+        )
         for phase, source in sources.items():
             if (source.dimension, source.hidden) != (dimension, hidden):
                 raise ValueError("Warm-start dimensions must match")
+            # The old state projection weights refer to DIFFERENT input
+            # coordinates. Reusing them would silently corrupt the tactical
+            # policy. Retain compatible action/policy parameters, but reset
+            # state and value projections across a format migration.
+            migrating_tactical = (
+                phase == "combat" and source.format_id != expected_tactical_format
+            )
             with torch.no_grad():
                 for name, weight in params[phase].items():
+                    if migrating_tactical and name in (
+                        "state_weight", "state_bias", "value_weight", "value_bias"
+                    ):
+                        continue
                     weight.copy_(torch.tensor(
                         getattr(source, name), dtype=weight.dtype
                     ))
@@ -276,6 +311,9 @@ def train_phase_split(
         "seed": seed, "seed_prefix": seed_prefix, "environment": environment,
         "warm_sha": warm_sha,
     }
+    # Legacy fingerprints remain compatible with earlier checkpoints.
+    if tactical_state_encoding != "legacy":
+        config["tactical_state_encoding"] = tactical_state_encoding
     fingerprint = hashlib.sha256(
         json.dumps(config, sort_keys=True).encode()
     ).hexdigest()
@@ -322,6 +360,7 @@ def train_phase_split(
             model = _export_split(
                 params["strategy"], params["combat"], dimension, hidden,
                 model_id=f"phase-split-before-round-{index}", trained=index > 0,
+                tactical_state_encoding=tactical_state_encoding,
             )
             seeds = [
                 f"{seed_prefix}-{index}-{j}" for j in range(episodes_per_round)
@@ -379,6 +418,7 @@ def train_phase_split(
                         strategic_count += 1
                     value, logits = _forward_decision(
                         decision, params[phase], dimension, torch,
+                        tactical_state_encoding=tactical_state_encoding,
                     )
                     log_probs = torch.nn.functional.log_softmax(
                         logits / temperature, dim=0,
@@ -512,4 +552,5 @@ def train_phase_split(
         params["strategy"], params["combat"], dimension, hidden,
         model_id=f"phase-split-v1-{fingerprint[:12]}-{rounds}",
         trained=bool(rows and any(x.optimization_steps for x in rows)),
+        tactical_state_encoding=tactical_state_encoding,
     ), tuple(rows)
