@@ -372,6 +372,9 @@ def train_selfplay(
     on_round_start: Callable[[int, int, float], None] | None = None,
     on_round_complete: Callable[[TrainingRound], None] | None = None,
     on_model_snapshot: Callable[[TrainingRound, NeuralPolicyValueModel], None] | None = None,
+    on_combat_samples: (
+        Callable[[int, float, tuple[tuple[str, CombatOutcome], ...]], None] | None
+    ) = None,
 ) -> SelfPlayResult:
     """Run genuine full-game episodes and optimize an on-policy neural actor.
 
@@ -659,6 +662,15 @@ def train_selfplay(
                     checkpoint_path, torch=torch, params=params, optimizer=optimizer,
                     config=config, revision=revision, initial_model=initial_model,
                     metrics=metrics,
+                )
+            # Purely observational sample export, after the optimizer and
+            # checkpoint. A round preserves the individual (correlated) outcomes;
+            # they are not reduced to scalar expected rewards.
+            if on_combat_samples is not None:
+                on_combat_samples(
+                    round_index, sampling_temperature,
+                    tuple((ep.seed, sample) for ep in cohort
+                          for sample in ep.combat_outcomes),
                 )
             # The callback is intentionally outside the trainer's reproducibility
             # fingerprint: observers cannot alter the optimizer, seeds or returns.
