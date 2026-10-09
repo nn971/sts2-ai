@@ -108,4 +108,4 @@ def test_boss_progress_rejects_invalid_negative_hp_inputs() -> None:
     assert track.result() is not None
     assert track.result().damage_fraction == 0  # type: ignore[union-attr]
     with pytest.raises(ValueError, match="positive"):
-        BossProgress(None, 0, 0).damage_fraction
+        assert BossProgress(None, 0, 0).damage_fraction == 0
