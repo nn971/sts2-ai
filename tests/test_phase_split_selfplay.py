@@ -189,12 +189,23 @@ def test_split_trainer_updates_both_phases_and_resumes(
     pytest.importorskip("torch")
     backend = TwoPhaseToy()
     path = tmp_path / "ckpt.pt"
+    samples_dir = tmp_path / "combat-samples"
     model, rows = train_phase_split(
         backend, rounds=2, episodes_per_round=12,
         dimension=32, hidden=4, max_decisions=8,
         seed=3, workers=1, boundary_weight=0.3,
         checkpoint=path, temperature_start=1.0,
-        temperature_end=1.0,
+        temperature_end=1.0, combat_samples_dir=samples_dir,
+    )
+    collected = [
+        json.loads(line)
+        for line in (samples_dir / "round-0001.jsonl").read_text().splitlines()
+    ]
+    assert len(collected) == 12
+    assert all(
+        sample["outcome"]["entry_public_json"]
+        and sample["outcome"]["exit_public_json"]
+        for sample in collected
     )
     assert len(rows) == 2 and all(x.optimization_steps == 2 for x in rows)
     assert all(x.tactical_decisions == 12 and x.strategic_decisions == 12 for x in rows)
