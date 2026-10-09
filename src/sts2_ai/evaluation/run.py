@@ -19,6 +19,7 @@ from sts2_ai.emulator.run_environment import (
     cumulative_floor_progress,
     reset_training_run,
 )
+from sts2_ai.evaluation.boss_progress import BossProgress, BossProgressTracker
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +41,7 @@ class RunSummary:
     censored: bool = False
     episode_goal_version: str = "prototype-three-act-v0"
     environment: str = LEGACY
+    boss_progress: BossProgress | None = None
 
     @property
     def won(self) -> bool:
@@ -83,6 +85,7 @@ def play_run(
     agent_compute_seconds = 0.0
     final_state: dict[str, Any] = {}
     preterminal_state: dict[str, Any] | None = None
+    boss_tracker = BossProgressTracker(environment)
 
     try:
         while True:
@@ -90,6 +93,7 @@ def play_run(
             raw = json.loads(observation.payload_json)
             current = cast(dict[str, Any], raw if isinstance(raw, dict) else {})
             final_state = current
+            boss_tracker.observe(current)
             hp = current.get("hp")
             if isinstance(hp, int):
                 hp_trajectory.append(hp)
@@ -159,6 +163,12 @@ def play_run(
             ),
             censored=outcome not in ("victory", "defeat"),
             environment=environment,
+            boss_progress=boss_tracker.result(
+                act1_cleared=(
+                    outcome == "victory"
+                    or (isinstance(act, int) and act >= 2)
+                ),
+            ),
         )
     finally:
         backend.release_many([state])

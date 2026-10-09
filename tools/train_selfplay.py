@@ -24,6 +24,7 @@ from sts2_ai.emulator.run_environment import (
     NATIVE_OVERGROWTH,
     require_environment,
 )
+from sts2_ai.evaluation.boss_progress import summarize_boss_runs
 from sts2_ai.evaluation import RunSummary, play_run
 from sts2_ai.evaluation.selfplay_metrics import (
     compare_completed_pairs,
@@ -88,7 +89,10 @@ class _TrainingProgress:
         _progress(
             f"[train] round {row.round_index + 1}/{self.total_rounds} complete | "
             f"completed={row.completed}/{row.played} censored={row.censored} "
-            f"wins={row.wins} new_wins={self.wins_this_invocation} | "
+            f"wins={row.wins} new_wins={self.wins_this_invocation} "
+            f"boss_entries={row.boss_entries} boss_losses={row.boss_defeats} "
+            f"boss_damage={row.mean_boss_damage_fraction_on_defeat} "
+            f"near_kills={row.boss_near_kills} | "
             f"progress={progress}{moving} loss={loss} "
             f"updates={row.update_steps} decisions={row.decision_samples} | "
             f"rollouts={row.rollout_wall_seconds:.1f}s "
@@ -120,6 +124,10 @@ def main() -> None:
              "the optimizer and all training metrics start fresh",
     )
     parser.add_argument("--auxiliary-weight", type=float, default=0.4)
+    parser.add_argument(
+        "--boss-damage-weight", type=float, default=0.0,
+        help="Act-1 boss-loss floor interpolation strength [0,1]; 0=no shaping",
+    )
     parser.add_argument(
         "--win-anneal-threshold", type=int, default=16,
         help="Completed training victories required to anneal auxiliary return to zero",
@@ -156,6 +164,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.evaluate_seeds < 1:
         parser.error("--evaluate-seeds must be positive")
+    if not 0.0 <= args.boss_damage_weight <= 1.0:
+        parser.error("--boss-damage-weight must be in [0,1]")
     if args.monitor_every < 0 or args.monitor_seeds < 1:
         parser.error("--monitor-every must be nonnegative; --monitor-seeds positive")
     _progress(
@@ -189,7 +199,8 @@ def main() -> None:
         _progress(
             f"[train] emulator ready: revision={backend.emulator_revision} | "
             f"temperature={args.temperature_start:g}->{args.temperature_end:g} "
-            f"over {args.temperature_decay_rounds} rounds"
+            f"over {args.temperature_decay_rounds} rounds | "
+            f"boss_damage_weight={args.boss_damage_weight:g}"
         )
         try:
             trained = train_selfplay(
@@ -204,6 +215,7 @@ def main() -> None:
                 temperature_decay_rounds=args.temperature_decay_rounds,
                 initialize_from_model=args.initialize_from_model,
                 auxiliary_weight=args.auxiliary_weight,
+                boss_damage_weight=args.boss_damage_weight,
                 win_anneal_threshold=args.win_anneal_threshold,
                 seed=args.seed,
                 workers=args.workers,
@@ -291,7 +303,14 @@ def main() -> None:
                     "act": episode.terminal_act,
                     "floor": episode.terminal_floor,
                     "frontier_progress": episode.frontier_progress,
+                    "boss_progress": (
+                        asdict(episode.boss_progress)
+                        if episode.boss_progress is not None else None
+                    ),
                 })
+        boss_summaries = {
+            name: summarize_boss_runs(runs) for name, runs in raw_runs.items()
+        }
         completed_summaries = {
             name: summarize_completed_runs(runs)
             for name, runs in raw_runs.items()
@@ -300,7 +319,10 @@ def main() -> None:
             _progress(
                 f"[eval] {name}: completed={row['completed']} "
                 f"censored={row['censored']} wins={row['wins']} "
-                f"mean_frontier={row['mean_frontier_progress_completed_only']}"
+                f"mean_frontier={row['mean_frontier_progress_completed_only']} "
+                f"boss_entries={boss_summaries[name]['boss_entries']} "
+                f"boss_defeats={boss_summaries[name]['boss_defeats']} "
+                f"boss_damage={boss_summaries[name]['mean_boss_damage_fraction_on_defeat']}"
             )
         paired_diagnostics = {
             f"neural_greedy_vs_{name}": compare_completed_pairs(
@@ -327,6 +349,7 @@ def main() -> None:
             "sampling_temperature_end": args.temperature_end,
             "temperature_decay_rounds": args.temperature_decay_rounds,
             "entropy_weight": args.entropy_weight,
+            "boss_damage_weight": args.boss_damage_weight,
             "initialized_from_model": (
                 str(args.initialize_from_model)
                 if args.initialize_from_model is not None else None
@@ -346,6 +369,7 @@ def main() -> None:
             "gradient_decision_samples": sum(row.decision_samples for row in trained.rounds),
             "heldout_evaluation": evaluations,
             "heldout_completed_only": completed_summaries,
+            "heldout_boss_health_completed_only": boss_summaries,
             "paired_completed_only": paired_diagnostics,
         }
     args.report.parent.mkdir(parents=True, exist_ok=True)

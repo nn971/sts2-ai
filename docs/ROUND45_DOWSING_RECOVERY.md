@@ -1,5 +1,11 @@
 # Recover the round-45 native self-play run after Dowsing autoplay
 
+> **Current recommendation (boss learning):** Run the paired 50-round
+> experiment in [BOSS_HEALTH_ABLATION.md](BOSS_HEALTH_ABLATION.md) before
+> continuing the historical 169-round training command below. It compares
+> boss-damage shaping against an identical unshaped control.
+
+
 ## What failed
 
 The 300-round run stopped at zero-based **round 45**, episode

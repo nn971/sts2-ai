@@ -8,12 +8,14 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 from sts2_ai.agents import NeuralGreedyAgent
 from sts2_ai.emulator import FAIR_POLICY_ID, EmulatorBackend, InformationPolicy
 from sts2_ai.evaluation import RunSummary, play_run
+from sts2_ai.evaluation.boss_progress import summarize_boss_runs
 from sts2_ai.evaluation.selfplay_metrics import summarize_completed_runs
 from sts2_ai.models.neural import NeuralPolicyValueModel
 from sts2_ai.training.selfplay import TrainingRound
@@ -76,6 +78,7 @@ class FixedSeedMonitor:
                 )
 
         summary = summarize_completed_runs(runs)
+        boss_summary = summarize_boss_runs(runs)
         valid = [run for run in runs if not run.censored]
         floor16 = sum(
             (run.terminal_act or 1) > 1
@@ -92,6 +95,7 @@ class FixedSeedMonitor:
             "seed_count": self.seeds,
             "sampling_temperature": row.sampling_temperature,
             "greedy_completed_only": summary,
+            "boss_health_completed_only": boss_summary,
             "act1_floor16_reached": floor16,
             "act1_clears": cleared,
             "per_seed": [
@@ -103,6 +107,10 @@ class FixedSeedMonitor:
                     "act": run.terminal_act,
                     "floor": run.terminal_floor,
                     "act1_cleared": run.act1_cleared,
+                    "boss_progress": (
+                        asdict(run.boss_progress) if run.boss_progress is not None
+                        else None
+                    ),
                 }
                 for run in runs
             ],
@@ -125,6 +133,10 @@ class FixedSeedMonitor:
             f"[monitor] round {number} greedy | "
             f"mean_frontier={summary['mean_frontier_progress_completed_only']} "
             f"completed={summary['completed']}/{self.seeds} "
-            f"wins={summary['wins']} floor16={floor16} act1_clears={cleared} | "
+            f"wins={summary['wins']} floor16={floor16} act1_clears={cleared} "
+            f"boss_entries={boss_summary['boss_entries']} "
+            f"boss_defeats={boss_summary['boss_defeats']} "
+            f"boss_damage={boss_summary['mean_boss_damage_fraction_on_defeat']} "
+            f"near_kills={boss_summary['boss_near_kills_on_defeat_80pct']} | "
             f"saved={self.path}"
         )
