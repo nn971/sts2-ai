@@ -8,8 +8,9 @@ initial-roster damage proxy, NOT guaranteed phase-aware native boss HP.
 from __future__ import annotations
 
 import statistics
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol, Sequence
+from typing import Any, Protocol
 
 from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH
 
