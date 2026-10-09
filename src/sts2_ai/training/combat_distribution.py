@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-
 SCHEMA = "sts2-combat-empirical-distribution-v1"
 
 
