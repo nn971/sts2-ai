@@ -93,6 +93,7 @@ class TrainingRound:
     boss_defeats: int = 0
     boss_near_kills: int = 0
     mean_boss_damage_fraction_on_defeat: float | None = None
+    boss_defeat_records: tuple[dict[str, str | int | float], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -589,13 +590,20 @@ def train_selfplay(
 
             optimization_seconds = time.perf_counter() - optimization_started
             boss_entries = sum(ep.boss_progress is not None for ep in cohort if ep.completed)
-            boss_losses = [
-                ep.boss_progress.damage_fraction
+            boss_defeat_records = tuple(
+                {
+                    "seed": ep.seed,
+                    "encounter_id": ep.boss_progress.encounter_id or "",
+                    "initial_hp": ep.boss_progress.initial_hp,
+                    "remaining_hp": ep.boss_progress.remaining_hp,
+                    "damage_fraction": ep.boss_progress.damage_fraction,
+                }
                 for ep in cohort
                 if ep.completed and ep.outcome == "defeat"
                 and ep.act == 1 and ep.floor == 16
                 and ep.boss_progress is not None
-            ]
+            )
+            boss_losses = [float(r["damage_fraction"]) for r in boss_defeat_records]
             cumulative_victories += wins
             metrics.append(TrainingRound(
                 round_index, episodes_per_round, completed, censored, wins,
@@ -612,6 +620,7 @@ def train_selfplay(
                 len(boss_losses),
                 sum(x >= 0.8 for x in boss_losses),
                 sum(boss_losses) / len(boss_losses) if boss_losses else None,
+                boss_defeat_records,
             ))
             if checkpoint_path is not None:
                 save_checkpoint(
