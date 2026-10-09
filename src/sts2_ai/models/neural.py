@@ -169,14 +169,12 @@ class NeuralPolicyValueModel:
         )
         logits = []
         for action in legal_actions:
-            feature_fn = (
-                (tactical_action_features if self.format_id in (TACTICAL_FORMAT, TACTICAL_STRUCTURED_FORMAT)
-                 else neural_action_features)
-                if self.format_id in (
-                    NEURAL_FORMAT, TACTICAL_FORMAT, TACTICAL_STRUCTURED_FORMAT
-                )
-                else policy_features
-            )
+            if self.format_id in (TACTICAL_FORMAT, TACTICAL_STRUCTURED_FORMAT):
+                feature_fn = tactical_action_features
+            elif self.format_id == NEURAL_FORMAT:
+                feature_fn = neural_action_features
+            else:
+                feature_fn = policy_features
             action_vector = feature_fn(
                 state, action.kind, action.payload_json, self.dimension
             )
