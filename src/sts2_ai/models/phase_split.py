@@ -7,10 +7,10 @@ emulator. This model is a portable wrapper, not a joint training algorithm.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from collections.abc import Sequence
 
 from sts2_ai.emulator import LegalAction, Observation
 from sts2_ai.models.neural import NEURAL_FORMAT, TACTICAL_FORMAT, NeuralPolicyValueModel
