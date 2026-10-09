@@ -64,6 +64,7 @@ python -u tools/train_phase_split.py \
   --warm-start results/native-boss-fresh-shaped-50-model.json \
   --boundary-weight 0.25 \
   --checkpoint results/phase-split-v1-checkpoint.pt \
+  --combat-samples-dir results/phase-split-v1-samples \
   --output results/phase-split-v1-model.json \
   --report results/phase-split-v1-report.json \
   --eval-seeds 64 --build 2>&1 | tee results/phase-split-v1.log
@@ -77,6 +78,19 @@ Resume the *same* experiment (keep the same hyperparameters) with
 and enforces configuration/bridge-revision consistency; round count can grow.
 
 ## Pilot: short-horizon outcome predictor
+
+The phase-split experiment above already emits combat outcomes, so **no
+second set of game runs is required**. Fit the outcome model directly:
+
+```fish
+python -u tools/train_combat_outcome.py \
+  --samples results/phase-split-v1-samples --epochs 40 \
+  --output results/combat-outcome-v1-predictor.json \
+  --report results/combat-outcome-v1-holdout.json
+```
+
+For a controlled baseline from the *old* learner, the following is an
+independent sample-collection option.
 
 The previous four-run upload contains a **model and report only**, not the
 `round-0001.jsonl` combat samples. And the older sample layout has no
