@@ -216,7 +216,7 @@ def tactical_action_features(
                 tokens.append((f"tactical:card={card_id}", 1.0))
             for key in ("cost", "energy_cost", "upgrade_level"):
                 value = card.get(key)
-                if type(value) in (int, float):
+                if isinstance(value, int | float) and not isinstance(value, bool):
                     tokens.append((f"tactical:card:{key}", math.tanh(float(value) / 4.0)))
             for key in ("upgraded", "upgrade"):
                 if type(card.get(key)) is bool:
@@ -239,14 +239,14 @@ def tactical_action_features(
             if isinstance(enemy_id, str):
                 tokens.append((f"tactical:target={enemy_id}", 1.0))
             hp, max_hp = enemy.get("hp"), enemy.get("max_hp")
-            if type(hp) in (int, float):
+            if isinstance(hp, int | float) and not isinstance(hp, bool):
                 tokens.append(("tactical:target-hp", math.tanh(float(hp) / 50.0)))
-                if type(max_hp) in (int, float) and max_hp > 0:
+                if isinstance(max_hp, int | float) and not isinstance(max_hp, bool) and max_hp > 0:
                     ratio = float(hp) / float(max_hp)
                     tokens.append(("tactical:target-hp-ratio", min(1.0, max(0.0, ratio))))
                 tokens.append((f"tactical:target-hp-bin={max(0, int(hp)) // 5}", 1.0))
             block = enemy.get("block")
-            if type(block) in (int, float):
+            if isinstance(block, int | float) and not isinstance(block, bool):
                 tokens.append(("tactical:target-block", math.tanh(float(block) / 20.0)))
             for key in ("intent", "intent_id", "move_id"):
                 value = enemy.get(key)
