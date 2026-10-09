@@ -207,6 +207,7 @@ def train_phase_split(
     workers: int = 1, environment: str = LEGACY,
     warm_start: Path | None = None,
     checkpoint: Path | None = None, resume: bool = False,
+    combat_samples_dir: Path | None = None,
     progress: Callable[[PhaseSplitRound], None] | None = None,
 ) -> tuple[PhaseSplitNeuralModel, tuple[PhaseSplitRound, ...]]:
     if min(rounds, episodes_per_round, dimension, hidden, max_decisions, workers) <= 0:
@@ -475,6 +476,36 @@ def train_phase_split(
                     optimizers=optimizers, fingerprint=fingerprint,
                     revision=revision, rows=rows,
                 )
+            if combat_samples_dir is not None:
+                combat_samples_dir.mkdir(parents=True, exist_ok=True)
+                target = combat_samples_dir / f"round-{index + 1:04d}.jsonl"
+                lines = [
+                    json.dumps({
+                        "schema": "sts2-public-combat-sample-v1",
+                        "seed": ep.seed,
+                        "round": index + 1,
+                        "policy_snapshot": model.model_id,
+                        "sampling_temperature": temperature,
+                        "emulator_revision": revision,
+                        "environment": environment,
+                        "outcome": asdict(segment),
+                    }, sort_keys=True)
+                    for ep in cohort for segment in ep.combat_outcomes
+                ]
+                temporary: Path | None = None
+                try:
+                    with tempfile.NamedTemporaryFile(
+                        mode="w", encoding="utf-8", dir=combat_samples_dir,
+                        suffix=".pending", delete=False,
+                    ) as output:
+                        temporary = Path(output.name)
+                        output.write("\n".join(lines) + ("\n" if lines else ""))
+                        output.flush()
+                        os.fsync(output.fileno())
+                    os.replace(temporary, target)
+                finally:
+                    if temporary is not None:
+                        temporary.unlink(missing_ok=True)
             if progress is not None:
                 progress(row)
     return _export_split(
