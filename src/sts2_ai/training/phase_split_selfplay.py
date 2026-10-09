@@ -37,8 +37,8 @@ from sts2_ai.models.neural import (
     TACTICAL_STRUCTURED_FORMAT,
     NeuralPolicyValueModel,
 )
-from sts2_ai.models.tactical_state import tactical_state_features
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
+from sts2_ai.models.tactical_state import tactical_state_features
 from sts2_ai.training.neural import _dense, _export, _forward, _new_params
 from sts2_ai.training.parallel_rollouts import (
     collect_parallel,
