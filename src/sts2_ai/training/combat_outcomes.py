@@ -75,6 +75,8 @@ class CombatOutcome:
     hp_decreases: int
     hp_increases: int
     potions_used: tuple[str, ...]
+    entry_public_json: str = ""
+    exit_public_json: str = ""
 
     @property
     def decisions(self) -> int:
@@ -89,6 +91,7 @@ class _ActiveCombat:
     start_decision: int
     turn_count: int | None
     entry: RunResources
+    entry_public_json: str
     last_hp: int | None
     potion_slots: dict[int, str] = field(default_factory=dict)
     hp_decreases: int = 0
@@ -149,6 +152,7 @@ class CombatOutcomeRecorder:
                     start_decision=decision_index,
                     turn_count=turn,
                     entry=resources,
+                    entry_public_json=json.dumps(state, sort_keys=True),
                     last_hp=resources.hp,
                     potion_slots=self._potion_slots(state),
                 )
@@ -167,16 +171,17 @@ class CombatOutcomeRecorder:
             # frame. Explicit terminal outcomes still resolve that combat.
             terminal = state.get("terminal_outcome")
             if terminal in ("victory", "defeat"):
-                self._finish(resources, decision_index, terminal)
+                self._finish(resources, decision_index, terminal, state)
             return
 
         if self._active is not None:
             # A combat-to-noncombat transition denotes a cleared encounter,
             # except when the public terminal outcome explicitly says defeat.
-            self._finish(resources, decision_index, state.get("terminal_outcome"))
+            self._finish(resources, decision_index, state.get("terminal_outcome"), state)
 
     def _finish(
-        self, resources: RunResources, decision_index: int, terminal: object
+        self, resources: RunResources, decision_index: int, terminal: object,
+        state: dict[str, Any],
     ) -> None:
         active = self._active
         if active is None:
@@ -198,6 +203,8 @@ class CombatOutcomeRecorder:
             hp_decreases=active.hp_decreases,
             hp_increases=active.hp_increases,
             potions_used=tuple(active.potions_used),
+            entry_public_json=active.entry_public_json,
+            exit_public_json=json.dumps(state, sort_keys=True),
         ))
         self._active = None
 
