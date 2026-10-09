@@ -294,8 +294,6 @@ def _curriculum_coefficient(
         raise ValueError("Auxiliary weight must be in [0, 1]")
     if type(completed_victories) is not int or completed_victories < 0:
         raise ValueError("Completed victories must be nonnegative")
-    if not math.isfinite(boss_damage_weight) or not 0 <= boss_damage_weight <= 1:
-        raise ValueError("boss_damage_weight must be a finite number within [0, 1]")
     if type(win_anneal_threshold) is not int or win_anneal_threshold <= 0:
         raise ValueError("win_anneal_threshold must be positive")
     return base_weight * (1.0 - min(1.0, completed_victories / win_anneal_threshold))
@@ -387,6 +385,8 @@ def train_selfplay(
     )
     if type(win_anneal_threshold) is not int or win_anneal_threshold <= 0:
         raise ValueError("win_anneal_threshold must be positive")
+    if not math.isfinite(boss_damage_weight) or not 0 <= boss_damage_weight <= 1:
+        raise ValueError("boss_damage_weight must be a finite number within [0, 1]")
     if type(workers) is not int or workers <= 0:
         raise ValueError("workers must be a positive integer")
     if resume and checkpoint_path is None:
