@@ -62,7 +62,9 @@ def test_sparse_matching_context_abstains_without_relabeling_other_fights() -> N
 def test_normalized_variance_uses_each_record_maximum_hp() -> None:
     a = sample(35, [])
     b = sample(70, [])
+    a["entry"]["hp"] = 35
     a["entry"]["max_hp"] = 35
+    b["entry"]["hp"] = 70
     b["entry"]["max_hp"] = 70
     distribution = EmpiricalCombatDistribution([a, b], min_group_size=1)
     summary = distribution.dataset_summary()
