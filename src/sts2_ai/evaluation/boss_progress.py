@@ -10,9 +10,12 @@ from __future__ import annotations
 import statistics
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH
+
+if TYPE_CHECKING:
+    from sts2_ai.evaluation.run import RunSummary
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,14 +85,7 @@ class BossProgressTracker:
         return BossProgress(self._encounter_id, start, remaining)
 
 
-class BossRun(Protocol):
-    censored: bool
-    outcome: str
-    boss_progress: BossProgress | None
-    act1_cleared: bool | None
-
-
-def summarize_boss_runs(runs: Sequence[BossRun]) -> dict[str, Any]:
+def summarize_boss_runs(runs: Sequence[RunSummary]) -> dict[str, Any]:
     """Boss diagnostics never label capped or failed emulator runs as defeats."""
     valid = [r for r in runs if not r.censored]
     entered = [r for r in valid if r.boss_progress is not None]
