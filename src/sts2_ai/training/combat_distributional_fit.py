@@ -14,13 +14,14 @@ from statistics import fmean
 from typing import Any
 
 from sts2_ai.models.hashed_linear import state_dict, state_features
-from sts2_ai.training.combat_entry_features import (
-    FEATURE_SCHEMA, combat_entry_features,
-)
 from sts2_ai.training.combat_distributional_predictor import (
     HP_BINS,
     DistributionalCombatOutcomePredictor,
     hp_bin,
+)
+from sts2_ai.training.combat_entry_features import (
+    FEATURE_SCHEMA,
+    combat_entry_features,
 )
 from sts2_ai.training.combat_predictor import OutcomeExample, _dense
 
