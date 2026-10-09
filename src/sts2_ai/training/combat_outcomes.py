@@ -163,16 +163,25 @@ class CombatOutcomeRecorder:
                         max(active.turn_count, turn)
                         if active.turn_count is not None else turn
                     )
+            # Some bridge versions retain the combat payload in the terminal
+            # frame. Explicit terminal outcomes still resolve that combat.
+            terminal = state.get("terminal_outcome")
+            if terminal in ("victory", "defeat"):
+                self._finish(resources, decision_index, terminal)
             return
 
+        if self._active is not None:
+            # A combat-to-noncombat transition denotes a cleared encounter,
+            # except when the public terminal outcome explicitly says defeat.
+            self._finish(resources, decision_index, state.get("terminal_outcome"))
+
+    def _finish(
+        self, resources: RunResources, decision_index: int, terminal: object
+    ) -> None:
         active = self._active
         if active is None:
             return
-
         self._apply_hp_change(active, resources.hp)
-        # A combat-to-noncombat transition is a resolved combat. Terminal
-        # defeat distinguishes losing the fight from a reward/next-room state.
-        terminal = state.get("terminal_outcome")
         if terminal not in (None, "victory", "defeat"):
             raise ValueError("Unsupported public terminal combat outcome")
         result: CombatResult = "defeat" if terminal == "defeat" else "victory"
