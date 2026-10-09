@@ -31,6 +31,13 @@ ablation. All new training and inference are explicitly opt-in.
 5. The combat recorder now stores exact player-visible entry and exit
    observations alongside resource vectors. Old exported samples without
    these fields cannot be upgraded reliably and must be recollected.
+6. A **soft HP monotonicity regularizer** trains the strategic critic on
+   pairs of post-combat public frames differing only in HP. The potion
+   inventory, map, boss and every other field remain identical. This gives
+   direct boundary-level feedback that higher remaining HP is *usually*
+   preferable **all else equal**; it does not price potion consumption.
+   Low-HP-triggered card/relic interactions can create exceptions, so this
+   is weak regularization, not a hard constraint.
 
 The new experiment is **REINFORCE**, not PPO/GAE. In the tactical policy
 target, `boundary_weight=0.25` is initially conservative: 75% full-run
