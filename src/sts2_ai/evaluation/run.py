@@ -14,12 +14,12 @@ from sts2_ai.emulator import (
     Observation,
     StateHandle,
 )
-from sts2_ai.evaluation.boss_progress import BossProgress, BossProgressTracker
 from sts2_ai.emulator.run_environment import (
     LEGACY,
     cumulative_floor_progress,
     reset_training_run,
 )
+from sts2_ai.evaluation.boss_progress import BossProgress, BossProgressTracker
 
 
 @dataclass(frozen=True, slots=True)
