@@ -32,6 +32,7 @@ from sts2_ai.emulator.run_environment import (
     require_environment,
     reset_training_run,
 )
+from sts2_ai.evaluation.boss_progress import BossProgress, BossProgressTracker
 from sts2_ai.models.hashed_linear import neural_action_features, state_dict, state_features
 from sts2_ai.models.neural import NEURAL_FORMAT, NeuralPolicyValueModel
 from sts2_ai.training.neural import _dense, _export, _forward, _new_params
@@ -44,7 +45,7 @@ from sts2_ai.training.rollout_failure import SCHEMA as FAILURE_SCHEMA
 from sts2_ai.training.rollout_failure import PublicRolloutFailure
 from sts2_ai.training.selfplay_checkpoint import load_checkpoint, save_checkpoint
 
-SELFPLAY_VERSION = "public-onpolicy-reinforce-actor-critic-v4-temperature-warmstart"
+SELFPLAY_VERSION = "public-onpolicy-reinforce-actor-critic-v5-boss-shaping"
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +65,7 @@ class Episode:
     hp_ratio: float
     completed: bool
     environment: str = LEGACY
+    boss_progress: BossProgress | None = None
 
     @property
     def won(self) -> bool:
@@ -87,6 +89,10 @@ class TrainingRound:
     # Observational timing must NOT affect deterministic round equality.
     rollout_wall_seconds: float = field(default=0.0, compare=False)
     optimization_wall_seconds: float = field(default=0.0, compare=False)
+    boss_entries: int = 0
+    boss_defeats: int = 0
+    boss_near_kills: int = 0
+    mean_boss_damage_fraction_on_defeat: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,9 +194,14 @@ def collect_public_episode(
     policy = InformationPolicy(policy_id)
     state = reset_training_run(backend, seed, environment)
     history: list[PublicDecision] = []
+    boss_tracker = BossProgressTracker(environment)
     try:
         while True:
             frame = backend.observe(state, policy)
+            raw_frame = json.loads(frame.payload_json)
+            if not isinstance(raw_frame, dict):
+                raise ValueError('Public observation must be a JSON object')
+            boss_tracker.observe(raw_frame)
             if backend.is_terminal(state):
                 act, floor, hp_ratio = _public_metrics(frame)
                 obj = json.loads(frame.payload_json)
@@ -199,12 +210,16 @@ def collect_public_episode(
                 if outcome not in ("victory", "defeat"):
                     raise ValueError("Terminal episode lacks a certified victory/defeat")
                 return Episode(
-                    seed, tuple(history), outcome, act, floor, hp_ratio, True, environment
+                    seed, tuple(history), outcome, act, floor, hp_ratio, True,
+                    environment, boss_tracker.result(
+                        act1_cleared=outcome == "victory" or (act or 1) > 1,
+                    ),
                 )
             if len(history) >= max_decisions:
                 act, floor, hp_ratio = _public_metrics(frame)
                 return Episode(
-                    seed, tuple(history), "truncated", act, floor, hp_ratio, False, environment
+                    seed, tuple(history), "truncated", act, floor, hp_ratio, False,
+                    environment, boss_tracker.result(),
                 )
 
             actions = tuple(backend.legal_actions(state))
@@ -248,11 +263,26 @@ def collect_public_episode(
         backend.release_many((state,))
 
 
-def _normalized_progress(episode: Episode) -> float:
-    """Normalize using the geometry of the episode's actual run mode."""
+def _normalized_progress(
+    episode: Episode, *, boss_damage_weight: float = 0.0
+) -> float:
+    """Progress, optionally interpolating within an Act-1 boss-loss floor.
+
+    At 16/28 for reaching the boss, a death at zero boss damage is
+    interpolated toward 15/28; a near-kill approaches 16/28. Boss clear
+    (Act 2) always ranks above an unfinished boss battle. No duplicate
+    floor bonus and no incentive to lose at low remaining boss HP.
+    """
     current, maximum = cumulative_floor_progress(
         episode.act, episode.floor, episode.environment
     )
+    boss = episode.boss_progress
+    if (
+        episode.completed and episode.outcome == "defeat"
+        and episode.environment != LEGACY and episode.act == 1
+        and episode.floor == 16 and boss is not None
+    ):
+        current -= boss_damage_weight * (1.0 - boss.damage_fraction)
     return current / maximum
 
 
@@ -264,17 +294,23 @@ def _curriculum_coefficient(
         raise ValueError("Auxiliary weight must be in [0, 1]")
     if type(completed_victories) is not int or completed_victories < 0:
         raise ValueError("Completed victories must be nonnegative")
+    if not math.isfinite(boss_damage_weight) or not 0 <= boss_damage_weight <= 1:
+        raise ValueError("boss_damage_weight must be a finite number within [0, 1]")
     if type(win_anneal_threshold) is not int or win_anneal_threshold <= 0:
         raise ValueError("win_anneal_threshold must be positive")
     return base_weight * (1.0 - min(1.0, completed_victories / win_anneal_threshold))
 
 
-def _bounded_return(episode: Episode, aux_coefficient: float) -> float:
+def _bounded_return(
+    episode: Episode, aux_coefficient: float, *, boss_damage_weight: float = 0.0
+) -> float:
     if not episode.completed:
         raise ValueError("Truncated episodes cannot receive a Monte Carlo target")
     if not 0.0 <= aux_coefficient <= 1.0:
         raise ValueError("Auxiliary coefficient must be within [0,1]")
-    auxiliary = 0.7 * _normalized_progress(episode) + 0.3 * episode.hp_ratio
+    auxiliary = 0.7 * _normalized_progress(
+        episode, boss_damage_weight=boss_damage_weight
+    ) + 0.3 * episode.hp_ratio
     # A genuine victory is always worth 1. Auxiliary signals only distinguish
     # completed defeats until the curriculum has observed enough victories.
     # This prevents an early low-HP victory from being worth less than a defeat.
@@ -305,6 +341,7 @@ def train_selfplay(
     hidden: int = 16,
     learning_rate: float = 0.003,
     auxiliary_weight: float = 0.4,
+    boss_damage_weight: float = 0.0,
     win_anneal_threshold: int = 16,
     value_weight: float = 0.5,
     entropy_weight: float = 0.01,
@@ -402,6 +439,7 @@ def train_selfplay(
         "hidden": hidden,
         "learning_rate": learning_rate,
         "auxiliary_weight": auxiliary_weight,
+        "boss_damage_weight": boss_damage_weight,
         "win_anneal_threshold": win_anneal_threshold,
         "value_weight": value_weight,
         "entropy_weight": entropy_weight,
@@ -483,7 +521,11 @@ def train_selfplay(
                     continue
                 completed += 1
                 wins += int(episode.won)
-                completed_episodes.append((episode, _bounded_return(episode, alpha)))
+                completed_episodes.append((
+                    episode, _bounded_return(
+                        episode, alpha, boss_damage_weight=boss_damage_weight,
+                    ),
+                ))
 
             decisions_seen = sum(len(ep.decisions) for ep, _ in completed_episodes)
             optimization_started = time.perf_counter()
@@ -546,6 +588,14 @@ def train_selfplay(
                 updates = 1
 
             optimization_seconds = time.perf_counter() - optimization_started
+            boss_entries = sum(ep.boss_progress is not None for ep in cohort if ep.completed)
+            boss_losses = [
+                ep.boss_progress.damage_fraction
+                for ep in cohort
+                if ep.completed and ep.outcome == "defeat"
+                and ep.act == 1 and ep.floor == 16
+                and ep.boss_progress is not None
+            ]
             cumulative_victories += wins
             metrics.append(TrainingRound(
                 round_index, episodes_per_round, completed, censored, wins,
@@ -558,6 +608,10 @@ def train_selfplay(
                 sampling_temperature,
                 rollout_seconds,
                 optimization_seconds,
+                boss_entries,
+                len(boss_losses),
+                sum(x >= 0.8 for x in boss_losses),
+                sum(boss_losses) / len(boss_losses) if boss_losses else None,
             ))
             if checkpoint_path is not None:
                 save_checkpoint(
@@ -587,7 +641,7 @@ def train_selfplay(
             f"{SELFPLAY_VERSION}:{seed}:{rounds}:{episodes_per_round}:"
             f"{dimension}:{hidden}:{learning_rate}:{run_seed_prefix}:"
             f"{sampling_temperature_start}:{sampling_temperature_end}:"
-            f"{temperature_decay_rounds}:{warm_start_sha256}"
+            f"{temperature_decay_rounds}:{warm_start_sha256}:{boss_damage_weight}"
         ).encode()
     ).hexdigest()[:12]
     final = _export(
