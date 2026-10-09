@@ -20,7 +20,7 @@ def sample(hp: int, potions: list[str], *, victory: bool = True) -> dict:
     }
 
 
-def test_joint_potion_hp_distribution_and_context_fallback() -> None:
+def test_joint_potion_hp_distribution_and_sparse_abstention() -> None:
     outcomes = [
         sample(60, ["power", "weak"]),
         sample(55, ["weak"]),
@@ -35,9 +35,42 @@ def test_joint_potion_hp_distribution_and_context_fallback() -> None:
     assert matched["exit_hp_normalized_variance"] > 0
     unmatched = sample(45, ["power"])
     unmatched["enemy_ids"] = ["other"]
-    fallback = distribution.estimate(unmatched)
-    assert not fallback["matched_context"]
-    assert fallback["sample_count"] == 3
+    abstention = distribution.estimate(unmatched)
+    assert abstention["status"] == "insufficient_data"
+    assert not abstention["matched_context"]
+    assert abstention["sample_count"] == 0
+    assert abstention["observed_win_probability"] is None
+    assert abstention["exit_hp_mean"] is None
+    assert abstention["joint_exit_outcomes"] == []
+    summary = distribution.dataset_summary()
+    assert summary["scope"] == "unconditional_mixed_contexts"
+    assert not summary["usable_as_conditional_forecast"]
+    assert summary["sample_count"] == 3
+    assert summary["observed_win_probability"] == pytest.approx(2 / 3)
+
+
+def test_sparse_matching_context_abstains_without_relabeling_other_fights() -> None:
+    outcomes = [sample(55, ["power"]), sample(0, [], victory=False)]
+    model = EmpiricalCombatDistribution(outcomes, min_group_size=3)
+    estimate = model.estimate(outcomes[0])
+    assert estimate["matched_sample_count"] == 2
+    assert estimate["required_sample_count"] == 3
+    assert estimate["status"] == "insufficient_data"
+    assert estimate["observed_win_probability"] is None
+
+
+def test_normalized_variance_uses_each_record_maximum_hp() -> None:
+    a = sample(35, [])
+    b = sample(70, [])
+    a["entry"]["hp"] = 35
+    a["entry"]["max_hp"] = 35
+    b["entry"]["hp"] = 70
+    b["entry"]["max_hp"] = 70
+    distribution = EmpiricalCombatDistribution([a, b], min_group_size=1)
+    summary = distribution.dataset_summary()
+    assert summary["exit_hp_mean"] == pytest.approx(52.5)
+    assert summary["exit_hp_fraction_mean"] == pytest.approx(1.0)
+    assert summary["exit_hp_normalized_variance"] == pytest.approx(0.0)
 
 
 def test_loader_rejects_unknown_schemas(tmp_path) -> None:

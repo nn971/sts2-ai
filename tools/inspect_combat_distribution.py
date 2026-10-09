@@ -11,7 +11,8 @@ import json
 from pathlib import Path
 
 from sts2_ai.training.combat_distribution import (
-    EmpiricalCombatDistribution, load_combat_samples,
+    EmpiricalCombatDistribution,
+    load_combat_samples,
 )
 
 
@@ -26,20 +27,32 @@ def main() -> None:
     distribution = EmpiricalCombatDistribution(
         outcomes, min_group_size=args.min_group_size
     )
+    qualified_contexts = sum(
+        len(group) >= args.min_group_size
+        for group in distribution.groups.values()
+    )
     report = {
+        "schema": "sts2-combat-distribution-diagnostic-v2",
         "samples": len(outcomes),
         "groups": len(distribution.groups),
+        "min_group_size": args.min_group_size,
+        "qualified_contexts": qualified_contexts,
+        "unconditional_dataset_summary": distribution.dataset_summary(),
         "examples": [
             {
                 "entry": outcome["entry"],
                 "enemies": outcome["enemy_ids"],
+                "actual_result": outcome["result"],
+                "actual_exit_resources": outcome["exit"],
                 "distribution": distribution.estimate(outcome),
             }
             for outcome in outcomes[:args.example_count]
         ],
         "limitations": (
             "These are empirical on-policy frequencies from observed runs, "
-            "not calibrated predictions for new strategies or unseen fights."
+            "not calibrated predictions for new strategies or unseen fights. "
+            "Sparse context estimates explicitly abstain; the unconditional "
+            "dataset summary must not be treated as an encounter forecast."
         ),
     }
     payload = json.dumps(report, indent=2, sort_keys=True)
