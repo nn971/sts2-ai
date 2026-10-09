@@ -24,9 +24,11 @@ from .hashed_linear import (
     tactical_action_features,
 )
 from .protocol import PolicyValueEstimate
+from .tactical_state import tactical_state_features
 
 NEURAL_FORMAT = "sts2-neural-policy-value-v2-semantic-action"
 TACTICAL_FORMAT = "sts2-neural-policy-value-v3-target-aware-combat"
+TACTICAL_STRUCTURED_FORMAT = "sts2-neural-policy-value-v4-structured-tactical"
 LEGACY_NEURAL_FORMAT = "sts2-neural-policy-value-v1"
 
 
@@ -85,7 +87,10 @@ class NeuralPolicyValueModel:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> NeuralPolicyValueModel:
-        if raw.get("format") not in {NEURAL_FORMAT, TACTICAL_FORMAT, LEGACY_NEURAL_FORMAT}:
+        if raw.get("format") not in {
+            NEURAL_FORMAT, TACTICAL_FORMAT, TACTICAL_STRUCTURED_FORMAT,
+            LEGACY_NEURAL_FORMAT,
+        }:
             raise ValueError("Unsupported neural model format")
         dimension, hidden = raw.get("dimension"), raw.get("hidden")
         if (
@@ -153,7 +158,11 @@ class NeuralPolicyValueModel:
         legal_actions: Sequence[LegalAction],
     ) -> PolicyValueEstimate:
         state = state_dict(observation.payload_json)
-        features = state_features(state, self.dimension)
+        features = (
+            tactical_state_features(state, self.dimension)
+            if self.format_id == TACTICAL_STRUCTURED_FORMAT
+            else state_features(state, self.dimension)
+        )
         hidden = _relu(_sparse_matvec(self.state_weight, features, self.state_bias))
         value_raw = self.value_bias + sum(
             a * b for a, b in zip(self.value_weight, hidden, strict=True)
@@ -161,9 +170,11 @@ class NeuralPolicyValueModel:
         logits = []
         for action in legal_actions:
             feature_fn = (
-                (tactical_action_features if self.format_id == TACTICAL_FORMAT
+                (tactical_action_features if self.format_id in (TACTICAL_FORMAT, TACTICAL_STRUCTURED_FORMAT)
                  else neural_action_features)
-                if self.format_id in (NEURAL_FORMAT, TACTICAL_FORMAT)
+                if self.format_id in (
+                    NEURAL_FORMAT, TACTICAL_FORMAT, TACTICAL_STRUCTURED_FORMAT
+                )
                 else policy_features
             )
             action_vector = feature_fn(
