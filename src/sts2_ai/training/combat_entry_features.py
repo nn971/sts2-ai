@@ -21,7 +21,7 @@ NUMERIC_FEATURES = 24
 
 
 def _number(value: object) -> float:
-    if type(value) in (int, float):
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
         result = float(value)
         if math.isfinite(result):
             return result
