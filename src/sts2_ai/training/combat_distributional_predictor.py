@@ -18,8 +18,13 @@ from pathlib import Path
 from typing import Any
 
 from sts2_ai.models.hashed_linear import state_dict, state_features
+from sts2_ai.training.combat_entry_features import (
+    FEATURE_SCHEMA,
+    combat_entry_features,
+)
 
 DISTRIBUTIONAL_FORMAT = "sts2-combat-outcome-distribution-v1"
+DISTRIBUTIONAL_FORMAT_V2 = "sts2-combat-outcome-distribution-v2-structured"
 HP_BINS = 10
 
 
@@ -86,10 +91,15 @@ class DistributionalCombatOutcomePredictor:
     hp_bin_weight: list[list[float]]
     hp_bin_bias: list[float]
     model_id: str
+    feature_schema: str = "legacy-hashed-v1"
 
     def __post_init__(self) -> None:
         if self.dimension <= 0 or self.hidden <= 0 or not self.model_id:
             raise ValueError("Invalid distributional predictor architecture")
+        if self.feature_schema not in ("legacy-hashed-v1", FEATURE_SCHEMA):
+            raise ValueError("Unsupported combat feature schema")
+        if self.feature_schema == FEATURE_SCHEMA and self.dimension <= 24:
+            raise ValueError("Structured encoder requires more than 24 features")
         if len(self.state_weight) != self.hidden or any(
             len(row) != self.dimension for row in self.state_weight
         ):
@@ -115,7 +125,11 @@ class DistributionalCombatOutcomePredictor:
         state = state_dict(public_entry_json)
         if not isinstance(state.get("combat"), dict):
             raise ValueError("Expected public combat-entry observation")
-        features = state_features(state, self.dimension)
+        features = (
+            combat_entry_features(state, self.dimension)
+            if self.feature_schema == FEATURE_SCHEMA else
+            state_features(state, self.dimension)
+        )
         representation = [
             max(0.0, self.state_bias[j] + sum(
                 self.state_weight[j][i] * x for i, x in features.items()
@@ -151,7 +165,11 @@ class DistributionalCombatOutcomePredictor:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "format": DISTRIBUTIONAL_FORMAT,
+            "format": (
+                DISTRIBUTIONAL_FORMAT_V2 if self.feature_schema == FEATURE_SCHEMA
+                else DISTRIBUTIONAL_FORMAT
+            ),
+            "feature_schema": self.feature_schema,
             "dimension": self.dimension,
             "hidden": self.hidden,
             "state_weight": self.state_weight,
@@ -165,8 +183,17 @@ class DistributionalCombatOutcomePredictor:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> DistributionalCombatOutcomePredictor:
-        if raw.get("format") != DISTRIBUTIONAL_FORMAT:
+        if raw.get("format") not in (
+            DISTRIBUTIONAL_FORMAT, DISTRIBUTIONAL_FORMAT_V2
+        ):
             raise ValueError("Incompatible combat distribution model format")
+        schema = raw.get("feature_schema", "legacy-hashed-v1")
+        expected = (
+            FEATURE_SCHEMA if raw["format"] == DISTRIBUTIONAL_FORMAT_V2
+            else "legacy-hashed-v1"
+        )
+        if schema != expected:
+            raise ValueError("Incompatible distribution feature schema")
         return cls(
             dimension=int(raw["dimension"]),
             hidden=int(raw["hidden"]),
@@ -179,6 +206,7 @@ class DistributionalCombatOutcomePredictor:
             ],
             hp_bin_bias=[float(x) for x in raw["hp_bin_bias"]],
             model_id=str(raw["model_id"]),
+            feature_schema=schema,
         )
 
     def save(self, path: Path) -> None:
