@@ -10,18 +10,24 @@ import pytest
 
 from sts2_ai.emulator import InformationPolicy, LegalAction, Observation, Transition
 from sts2_ai.models.hashed_linear import (
-    neural_action_features, tactical_action_features,
+    neural_action_features,
+    tactical_action_features,
 )
 from sts2_ai.models.neural import NEURAL_FORMAT, TACTICAL_FORMAT, NeuralPolicyValueModel
 from sts2_ai.models.phase_split import (
-    PhaseSplitNeuralModel, load_public_model, observation_phase,
+    PhaseSplitNeuralModel,
+    load_public_model,
+    observation_phase,
 )
 from sts2_ai.training.combat_outcomes import CombatOutcomeRecorder
 from sts2_ai.training.combat_predictor import (
-    CombatOutcomePredictor, load_outcome_samples,
+    CombatOutcomePredictor,
+    load_outcome_samples,
 )
 from sts2_ai.training.combat_predictor_fit import (
-    constant_baseline_metrics, evaluation_metrics, fit_outcome_predictor,
+    constant_baseline_metrics,
+    evaluation_metrics,
+    fit_outcome_predictor,
     split_by_run_seed,
 )
 from sts2_ai.training.phase_split_selfplay import train_phase_split
