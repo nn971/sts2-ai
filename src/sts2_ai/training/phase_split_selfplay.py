@@ -31,6 +31,7 @@ from sts2_ai.models.hashed_linear import (
     state_dict,
     state_features,
     tactical_action_features,
+    public_resources_tactical_action_features,
 )
 from sts2_ai.models.neural import (
     TACTICAL_DAMAGE_FORMAT,
@@ -142,7 +143,9 @@ def _forward_decision(
         dtype=torch.float32,
     )
     feature_fn = (
-        tactical_action_features if decision.phase == "combat"
+        public_resources_tactical_action_features
+        if decision.phase == "combat" and tactical_state_encoding == "public_resources"
+        else tactical_action_features if decision.phase == "combat"
         else neural_action_features
     )
     actions_x = torch.tensor([
