@@ -111,3 +111,50 @@ def test_ppo_rejects_unused_baselines_and_unimplemented_regularization() -> None
             optimizer_method="ppo", hp_monotonic_weight=0,
             ppo_clip_epsilon=2,
         )
+
+def test_ppo_explicit_seed_exclusion_preserves_existing_checkpoint(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A known unsupported episode can be excluded without relabeling failure."""
+    pytest.importorskip("torch")
+    checkpoint = tmp_path / "ppo.pt"
+    kwargs = dict(
+        episodes_per_round=2, dimension=128, hidden=4,
+        max_decisions=8, workers=1, seed=22,
+        seed_prefix="explicit-exclusion",
+        tactical_state_encoding="relational_damage",
+        optimizer_method="ppo", ppo_epochs=1, ppo_batch_size=2,
+        ppo_sample_limit=16,
+        combat_objective="hp_preservation",
+        combat_advantage_baseline="critic",
+        loss_normalization="phase_mean",
+        hp_monotonic_weight=0.0,
+        checkpoint=checkpoint,
+    )
+    _, first = train_phase_split(TwoPhaseToy(), rounds=1, **kwargs)
+    assert first[0].played == 2
+    assert first[0].censored == 0
+
+    _, resumed = train_phase_split(
+        TwoPhaseToy(), rounds=2, resume=True,
+        excluded_training_seeds=frozenset({"explicit-exclusion-1-1"}),
+        **kwargs,
+    )
+    assert resumed[0] == first[0]
+    assert resumed[1].played == 1
+    assert resumed[1].completed == 1
+    assert resumed[1].censored == 0
+    output = capsys.readouterr().out
+    assert "[split-excluded] round 2" in output
+    assert "explicit-exclusion-1-1" in output
+
+
+def test_ppo_excluding_whole_cohort_is_rejected() -> None:
+    pytest.importorskip("torch")
+    with pytest.raises(ValueError, match="Every training seed excluded"):
+        train_phase_split(
+            TwoPhaseToy(), rounds=1, episodes_per_round=1,
+            dimension=128, hidden=4, max_decisions=8,
+            seed_prefix="all-skipped",
+            excluded_training_seeds=frozenset({"all-skipped-0-0"}),
+        )
