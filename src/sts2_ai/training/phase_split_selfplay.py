@@ -82,6 +82,7 @@ class PhaseSplitRound:
     phase_loss_diagnostics: dict[str, dict[str, float]] | None = None
     mean_victory_exit_hp_fraction: float | None = None
     mean_potions_used_per_combat: float | None = None
+    mean_victory_hp_lost_fraction: float | None = None
 
 
 def _higher_hp_public_pair(
@@ -176,6 +177,56 @@ def _hp_first_combat_target(segment: CombatOutcome) -> float:
     return 0.5 + 0.5 * min(1.0, max(0.0, hp / max_hp))
 
 
+def _hp_preservation_target(segment: CombatOutcome) -> float:
+    """Survival + *within-combat* net HP preservation, no potion penalty.
+
+    Unlike hp_first, the reward does not favor encounters that happen to
+    start with more HP. Healing counts as preservation, capped at no net
+    loss. Defeat remains strictly worse than any victorious exit.
+    """
+    if segment.result == "defeat":
+        return 0.0
+    entry, exit_hp = segment.entry.hp, segment.exit.hp
+    max_hp = segment.exit.max_hp or segment.entry.max_hp
+    if entry is None or exit_hp is None or max_hp is None or max_hp <= 0:
+        raise ValueError("HP preservation requires public entry/exit HP and max HP")
+    lost_fraction = min(1.0, max(0.0, (entry - exit_hp) / max_hp))
+    return 1.0 - 0.5 * lost_fraction
+
+
+def _other_run_combat_baselines(
+    samples: list[list[tuple[CombatOutcome, float]]],
+) -> list[list[float]]:
+    """Encounter-matched mean from OTHER runs; 0.5 if no match exists.
+
+    Excluding the entire current run, rather than merely one combat,
+    ensures its actions cannot influence the baseline through future
+    combats on the same trajectory. A victory earns at least 0.5 and
+    a defeat zero, so the data-independent fallback is meaningful.
+    """
+    from collections import defaultdict
+
+    grouped: dict[tuple[str, ...], list[float]] = defaultdict(list)
+    for group in samples:
+        for combat, reward in group:
+            grouped[tuple(sorted(combat.enemy_ids))].append(reward)
+    baselines: list[list[float]] = []
+    for group in samples:
+        own: dict[tuple[str, ...], list[float]] = defaultdict(list)
+        for combat, reward in group:
+            own[tuple(sorted(combat.enemy_ids))].append(reward)
+        values: list[float] = []
+        for combat, _ in group:
+            key = tuple(sorted(combat.enemy_ids))
+            n_other = len(grouped[key]) - len(own[key])
+            values.append(
+                (sum(grouped[key]) - sum(own[key])) / n_other
+                if n_other > 0 else 0.5
+            )
+        baselines.append(values)
+    return baselines
+
+
 def _combat_boundary_target(
     episode: Episode, segment_index: int, model: PhaseSplitNeuralModel,
     run_return: float, *, boundary_weight: float,
@@ -242,6 +293,7 @@ def train_phase_split(
     tactical_state_encoding: str = "legacy",
     loss_normalization: str = "legacy_episode_sum",
     combat_objective: str = "continuation",
+    combat_advantage_baseline: str = "critic",
     win_anneal_threshold: int = 16, max_decisions: int = 4096,
     temperature_start: float = 0.05, temperature_end: float = 0.035,
     temperature_decay_rounds: int = 20,
@@ -254,8 +306,14 @@ def train_phase_split(
 ) -> tuple[PhaseSplitNeuralModel, tuple[PhaseSplitRound, ...]]:
     if min(rounds, episodes_per_round, dimension, hidden, max_decisions, workers) <= 0:
         raise ValueError("Expected positive sizes and worker count")
-    if combat_objective not in ("continuation", "hp_first"):
-        raise ValueError("Combat objective must be continuation or hp_first")
+    if combat_objective not in ("continuation", "hp_first", "hp_preservation"):
+        raise ValueError("Unknown combat objective")
+    if combat_advantage_baseline not in ("critic", "leave_one_run_out"):
+        raise ValueError("Unknown combat advantage baseline")
+    if combat_advantage_baseline == "leave_one_run_out" and (
+        combat_objective == "continuation"
+    ):
+        raise ValueError("Leave-one-run-out requires an HP-based combat objective")
     if loss_normalization not in ("legacy_episode_sum", "phase_mean"):
         raise ValueError("Loss normalization must be legacy_episode_sum or phase_mean")
     if tactical_state_encoding not in ("legacy", "structured"):
@@ -360,6 +418,8 @@ def train_phase_split(
         config["tactical_state_encoding"] = tactical_state_encoding
     if combat_objective != "continuation":
         config["combat_objective"] = combat_objective
+    if combat_advantage_baseline != "critic":
+        config["combat_advantage_baseline"] = combat_advantage_baseline
     fingerprint = hashlib.sha256(
         json.dumps(config, sort_keys=True).encode()
     ).hexdigest()
@@ -432,6 +492,28 @@ def train_phase_split(
                 auxiliary_weight, victories, win_anneal_threshold
             )
             run_targets = [(ep, _bounded_return(ep, alpha)) for ep in completed]
+            local_targets: list[list[tuple[CombatOutcome, float]]] = []
+            for episode, run_target in run_targets:
+                local_targets.append([
+                    (
+                        segment,
+                        (
+                            _hp_preservation_target(segment)
+                            if combat_objective == "hp_preservation"
+                            else _hp_first_combat_target(segment)
+                            if combat_objective == "hp_first"
+                            else _combat_boundary_target(
+                                episode, j, model, run_target,
+                                boundary_weight=boundary_weight,
+                            )
+                        ),
+                    )
+                    for j, segment in enumerate(episode.combat_outcomes)
+                ])
+            other_run_baselines = (
+                _other_run_combat_baselines(local_targets)
+                if combat_advantage_baseline == "leave_one_run_out" else None
+            )
             optimizer_started = time.perf_counter()
             for optimizer in optimizers.values():
                 optimizer.zero_grad()
@@ -449,28 +531,27 @@ def train_phase_split(
                 phase: {"policy": 0.0, "value_mse": 0.0, "entropy": 0.0}
                 for phase in phase_counts
             }
-            for episode, run_target in run_targets:
-                # All targets/advantages use the same frozen cohort snapshot.
+            for episode_index, (episode, run_target) in enumerate(run_targets):
+                # Every target uses outcomes observed under the frozen cohort policy.
                 targets = [run_target] * len(episode.decisions)
-                for j, segment in enumerate(episode.combat_outcomes):
-                    local_target = (
-                        _hp_first_combat_target(segment)
-                        if combat_objective == "hp_first"
-                        else _combat_boundary_target(
-                            episode, j, model, run_target,
-                            boundary_weight=boundary_weight,
-                        )
-                    )
+                tactical_baselines: dict[int, float] = {}
+                for j, (segment, local_target) in enumerate(
+                    local_targets[episode_index]
+                ):
                     combat_targets.append(local_target)
                     for d in range(segment.start_decision, segment.end_decision):
                         if episode.decisions[d].phase != "combat":
                             raise ValueError("Combat segment includes a strategy decision")
                         targets[d] = local_target
+                        if other_run_baselines is not None:
+                            tactical_baselines[d] = other_run_baselines[episode_index][j]
                 phase_terms: dict[str, dict[str, list[Any]]] = {
                     phase: {"policy": [], "value_mse": [], "entropy": []}
                     for phase in phase_counts
                 }
-                for decision, target in zip(episode.decisions, targets, strict=True):
+                for decision_index, (decision, target) in enumerate(
+                    zip(episode.decisions, targets, strict=True)
+                ):
                     phase = decision.phase
                     if phase not in params:
                         raise ValueError("Unknown decision phase")
@@ -487,7 +568,12 @@ def train_phase_split(
                     )
                     probs = log_probs.exp()
                     target_tensor = torch.tensor(target, dtype=torch.float32)
-                    advantage = target_tensor - value.detach()
+                    if phase == "combat" and other_run_baselines is not None:
+                        if decision_index not in tactical_baselines:
+                            raise ValueError("Combat action lacks a resolved combat outcome")
+                        advantage = target_tensor - tactical_baselines[decision_index]
+                    else:
+                        advantage = target_tensor - value.detach()
                     phase_terms[phase]["policy"].append(
                         -log_probs[decision.chosen_index] * advantage
                     )
@@ -629,6 +715,23 @@ def train_phase_split(
                         for ep in cohort for o in ep.combat_outcomes
                     ) if any(
                         o.result == "victory" and o.exit.hp is not None
+                        for ep in cohort for o in ep.combat_outcomes
+                    ) else None
+                ),
+                mean_victory_hp_lost_fraction=(
+                    sum(
+                        (o.entry.hp - o.exit.hp) /
+                        max(1, o.exit.max_hp or o.entry.max_hp or 1)
+                        for ep in cohort for o in ep.combat_outcomes
+                        if o.result == "victory"
+                        and o.entry.hp is not None and o.exit.hp is not None
+                    ) / sum(
+                        o.result == "victory"
+                        and o.entry.hp is not None and o.exit.hp is not None
+                        for ep in cohort for o in ep.combat_outcomes
+                    ) if any(
+                        o.result == "victory"
+                        and o.entry.hp is not None and o.exit.hp is not None
                         for ep in cohort for o in ep.combat_outcomes
                     ) else None
                 ),
