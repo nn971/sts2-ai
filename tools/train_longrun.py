@@ -75,6 +75,8 @@ def main() -> None:
     p.add_argument("--temperature-start", type=float, default=0.85)
     p.add_argument("--temperature-end", type=float, default=0.5)
     p.add_argument("--temperature-decay-rounds", type=int, default=200)
+    p.add_argument("--ppo-backend", choices=("reference", "batched"), default="batched",
+                   help="PPO execution backend; reference preserves historical runs")
     p.add_argument("--ppo-epochs", type=int, default=3)
     p.add_argument("--ppo-batch-size", type=int, default=128)
     p.add_argument("--ppo-sample-limit", type=int, default=4096)
@@ -127,6 +129,7 @@ def main() -> None:
                     != args.win_anneal_threshold
                 or len(existing["rounds"]) != target_round
                 or existing["optimizer_method"] != "ppo"
+                or existing.get("ppo_backend", "reference") != args.ppo_backend
             ):
                 raise SystemExit(f"Existing stage report mismatch: {report}")
             summary = summarize(existing)
@@ -143,6 +146,7 @@ def main() -> None:
             "--hidden", str(args.hidden),
             "--learning-rate", str(args.learning_rate),
             "--optimizer-method", "ppo",
+            "--ppo-backend", args.ppo_backend,
             "--ppo-epochs", str(args.ppo_epochs),
             "--ppo-batch-size", str(args.ppo_batch_size),
             "--ppo-sample-limit", str(args.ppo_sample_limit),
@@ -197,6 +201,7 @@ def main() -> None:
             )
         record = json.loads(report.read_text())
         if (record["emulator_revision"] != PINNED_EMULATOR or
+                record.get("ppo_backend", "reference") != args.ppo_backend or
                 record.get("episode_goal_version", PROTOTYPE_THREE_ACT_GOAL)
                 != args.episode_goal or
                 record.get("win_anneal_threshold", 16)
