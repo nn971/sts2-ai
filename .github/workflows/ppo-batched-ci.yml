@@ -38,3 +38,9 @@ jobs:
             tests/test_phase_split_ppo_batch.py \
             tests/test_phase_split_ppo.py \
             tests/test_enemy_instances_v8.py
+      - name: PPO CPU hot-path benchmark
+        run: |
+          python -u tools/benchmark_ppo_backends.py \
+            --encoding enemy_instances --decisions 512 --epochs 2 --batch-size 64
+          python -u tools/benchmark_ppo_backends.py \
+            --encoding public_resources --decisions 512 --epochs 2 --batch-size 64
