@@ -26,6 +26,12 @@ from sts2_ai.emulator import (
     LegalAction,
     Observation,
 )
+from sts2_ai.emulator.episode_goal import (
+    NATIVE_ACT1_BOSS_GOAL,
+    PROTOTYPE_THREE_ACT_GOAL,
+    certified_native_act1_clear,
+    require_episode_goal,
+)
 from sts2_ai.emulator.run_environment import (
     LEGACY,
     cumulative_floor_progress,
@@ -189,6 +195,7 @@ def collect_public_episode(
     policy_id: str = "prototype-fair-v0",
     environment: str = LEGACY,
     temperature: float = 1.0,
+    episode_goal_version: str = PROTOTYPE_THREE_ACT_GOAL,
 ) -> Episode:
     """Run the actual emulator; never give hidden handles to the actor.
 
@@ -200,6 +207,7 @@ def collect_public_episode(
         raise ValueError("max_decisions must be positive")
     if not math.isfinite(temperature) or temperature <= 0:
         raise ValueError("Sampling temperature must be positive and finite")
+    require_episode_goal(episode_goal_version, environment)
     policy = InformationPolicy(policy_id)
     state = reset_training_run(backend, seed, environment)
     history: list[PublicDecision] = []
@@ -213,13 +221,31 @@ def collect_public_episode(
                 raise ValueError('Public observation must be a JSON object')
             boss_tracker.observe(raw_frame)
             combat_recorder.observe(raw_frame, len(history))
-            if backend.is_terminal(state):
+            terminal = backend.is_terminal(state)
+            if (
+                episode_goal_version == NATIVE_ACT1_BOSS_GOAL
+                and not terminal and certified_native_act1_clear(raw_frame)
+            ):
+                act, floor, hp_ratio = _public_metrics(frame)
+                return Episode(
+                    seed, tuple(history), "victory", act, floor, hp_ratio, True,
+                    environment, boss_tracker.result(act1_cleared=True),
+                    combat_recorder.outcomes,
+                )
+            if terminal:
                 act, floor, hp_ratio = _public_metrics(frame)
                 obj = json.loads(frame.payload_json)
                 assert isinstance(obj, dict)
                 outcome = obj.get("terminal_outcome")
                 if outcome not in ("victory", "defeat"):
                     raise ValueError("Terminal episode lacks a certified victory/defeat")
+                if episode_goal_version == NATIVE_ACT1_BOSS_GOAL and (
+                    act != 1 or outcome == "victory"
+                ):
+                    raise ValueError(
+                        "Act-1 goal reached an emulator terminal without certified "
+                        "Act-1 boss completion"
+                    )
                 return Episode(
                     seed, tuple(history), outcome, act, floor, hp_ratio, True,
                     environment, boss_tracker.result(
