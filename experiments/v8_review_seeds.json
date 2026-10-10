@@ -1,0 +1,47 @@
+{
+  "schema": "sts2-public-run-review-selection-v1",
+  "source": "ppo-v8-batched-40/reports/stage-0020.json and stage-0040.json",
+  "seed_prefix": "ppo-v7-v8-slyfix-eval",
+  "selections": [
+    {
+      "index": 44,
+      "reason": "The Kin: round-20 died on floor 8; round-40 beats the boss. Review the new targeting and route."
+    },
+    {
+      "index": 89,
+      "reason": "The Kin: a round-40 victory where both warm-start and round-20 failed at the boss."
+    },
+    {
+      "index": 54,
+      "reason": "The Kin regression: warm-start and round-20 won; round-40 dies with only 10.7% boss HP left."
+    },
+    {
+      "index": 1,
+      "reason": "The Kin regression: round-20 victory becomes a round-40 loss, with 28.8% boss HP remaining."
+    },
+    {
+      "index": 100,
+      "reason": "Ceremonial Beast near miss: round-40 leaves only 5.6% boss HP; examine the last turns."
+    },
+    {
+      "index": 125,
+      "reason": "Vantom near miss: round-40 leaves 11.0% boss HP; look for attack/defense tradeoffs."
+    },
+    {
+      "index": 45,
+      "reason": "Vantom turnaround: both earlier policies lost, round-40 achieves an Act-1 clear."
+    },
+    {
+      "index": 69,
+      "reason": "Early regression: round-20 reached the boss floor, round-40 dies on floor 6."
+    },
+    {
+      "index": 118,
+      "reason": "Mid-act regression: warm-start and round-20 cleared Act 1, round-40 dies on floor 13."
+    },
+    {
+      "index": 95,
+      "reason": "The Kin: round-40 win after warm-start and round-20 boss losses; compare target choices."
+    }
+  ]
+}
