@@ -85,7 +85,7 @@ def main() -> None:
     p.add_argument("--ppo-gae-lambda", type=float, default=0.98)
     p.add_argument("--warm-start", type=Path, required=True)
     p.add_argument(
-        "--tactical-state-encoding", choices=("enemy_instances", "public_resources", "relational_damage"),
+        "--tactical-state-encoding", choices=("enemy_instances", "enemy_attention", "public_resources", "relational_damage"),
         default="enemy_instances",
         help="v8 separate enemy instances with species and target pointers",
     )
