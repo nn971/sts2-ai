@@ -223,3 +223,69 @@ def test_v8_ppo_smoke_and_checkpoint_goal(tmp_path) -> None:
     assert len(history) == 2
     assert history[0] == rows[0]
     assert resumed.combat.format_id == TACTICAL_INSTANCES_FORMAT
+
+
+def test_status_and_species_changes_affect_the_correct_target_only() -> None:
+    state = combat_frame()
+    model = build_model()
+    # Disable pooled context to test that target references themselves do not
+    # accidentally move another enemy's modifiers into the chosen action.
+    model.enemy_context_weight = [0.0] * HIDDEN
+    baseline_vectors = enemy_instance_vectors(state, DIM)
+    changed = copy.deepcopy(state)
+    changed["combat"]["enemies"][2]["statuses"]["poison"] = 90
+    changed_vectors = enemy_instance_vectors(changed, DIM)
+    different = next(
+        i for i in changed_vectors[3]
+        if i >= 16 and changed_vectors[3].get(i) != baseline_vectors[3].get(i)
+    )
+    model.enemy_weight[0] = [0.0] * DIM
+    model.enemy_weight[0][different] = 10.0
+
+    actions = (targeted(1), targeted(2), targeted(3))
+    before = model.evaluate(observation(state), actions).action_logits
+    after = model.evaluate(observation(changed), actions).action_logits
+    assert before[0] == pytest.approx(after[0])
+    assert before[1] == pytest.approx(after[1])
+    assert before[2] != pytest.approx(after[2])
+
+    changed_species = copy.deepcopy(state)
+    changed_species["combat"]["enemies"][2]["enemy_id"] = "proto.enemy.other"
+    species_vectors = enemy_instance_vectors(changed_species, DIM)
+    assert species_vectors[3] != baseline_vectors[3]
+    assert species_vectors[1] == baseline_vectors[1]
+
+
+def test_checkpoint_rejects_switching_from_v8_to_v7(tmp_path) -> None:
+    pytest.importorskip("torch")
+    from test_act1_episode_goal import NativeScriptedBackend
+    from sts2_ai.emulator.episode_goal import NATIVE_ACT1_BOSS_GOAL
+    from sts2_ai.training.phase_split_selfplay import train_phase_split
+
+    class Fixture(NativeScriptedBackend):
+        def __init__(self) -> None:
+            super().__init__()
+            for frame in self.frames:
+                if isinstance(frame.get("combat"), dict):
+                    for index, enemy in enumerate(frame["combat"]["enemies"]):
+                        enemy.setdefault("formation_position", index)
+                        enemy.setdefault("statuses", {})
+                        enemy.setdefault("powers", [])
+                        enemy.setdefault("block", 0)
+                        enemy.setdefault("move_id", "slash")
+
+    kwargs = dict(
+        rounds=1, episodes_per_round=2, dimension=DIM, hidden=HIDDEN,
+        max_decisions=8, workers=1, environment="native-overgrowth",
+        seed=13, optimizer_method="ppo", ppo_epochs=1,
+        ppo_batch_size=2, ppo_sample_limit=16,
+        hp_monotonic_weight=0.0, combat_objective="hp_preservation",
+        episode_goal_version=NATIVE_ACT1_BOSS_GOAL,
+        checkpoint=tmp_path / "v8-guard.pt",
+    )
+    train_phase_split(Fixture(), tactical_state_encoding="enemy_instances", **kwargs)
+    with pytest.raises(ValueError, match="mismatch"):
+        train_phase_split(
+            Fixture(), tactical_state_encoding="public_resources",
+            resume=True, **{**kwargs, "rounds": 2},
+        )
