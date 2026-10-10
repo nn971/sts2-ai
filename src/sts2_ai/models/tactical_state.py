@@ -126,13 +126,16 @@ def tactical_state_features(
             raw_damage = enemy.get("intent_damage")
             raw_hits = enemy.get("intent_hits")
             if (
-                type(raw_damage) not in (int, float)
+                not isinstance(raw_damage, (int, float))
+                or isinstance(raw_damage, bool)
                 or not math.isfinite(raw_damage)
                 or raw_damage < 0
             ):
                 continue
             hits = (
-                float(raw_hits) if type(raw_hits) is int and 1 <= raw_hits <= 100
+                float(raw_hits)
+                if isinstance(raw_hits, int) and not isinstance(raw_hits, bool)
+                and 1 <= raw_hits <= 100
                 else 1.0
             )
             public_attacks.append((float(raw_damage), hits))
