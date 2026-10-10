@@ -41,6 +41,11 @@ def main() -> None:
         help="Balance the strategy/combat gradient by decisions; legacy reproduces v4",
     )
     p.add_argument("--boundary-weight", type=float, default=0.25)
+    p.add_argument(
+        "--combat-objective", choices=("hp_first", "continuation"),
+        default="hp_first",
+        help="Temporary combat target: survival and HP, no potion price",
+    )
     p.add_argument("--hp-monotonic-weight", type=float, default=0.2)
     p.add_argument(
         "--tactical-state-encoding", choices=("legacy", "structured"),
@@ -75,6 +80,8 @@ def main() -> None:
             f"combat:{row.tactical_decisions} "
             f"boundary_target={row.mean_combat_boundary_target} "
             f"hp_pairs={row.hp_monotonic_pairs} "
+            f"victory_exit_hp_fraction={row.mean_victory_exit_hp_fraction} "
+            f"potions_used_per_combat={row.mean_potions_used_per_combat} "
             f"run_target={row.mean_run_return} loss={row.mean_loss} "
             f"phase_diagnostics={row.phase_loss_diagnostics} "
             f"updates={row.optimization_steps} "
@@ -88,6 +95,7 @@ def main() -> None:
         f"workers={args.workers} boundary_weight={args.boundary_weight} "
         f"tactical_state_encoding={args.tactical_state_encoding} "
         f"loss_normalization={args.loss_normalization} "
+        f"combat_objective={args.combat_objective} "
         f"resume={args.resume} warm_start={args.warm_start or 'none'}"
     )
     with JsonlEmulatorBackend(build=args.build) as backend:
@@ -99,6 +107,7 @@ def main() -> None:
             hp_monotonic_weight=args.hp_monotonic_weight,
             tactical_state_encoding=args.tactical_state_encoding,
             loss_normalization=args.loss_normalization,
+            combat_objective=args.combat_objective,
             temperature_start=args.temperature_start,
             temperature_end=args.temperature_end,
             temperature_decay_rounds=args.temperature_decay_rounds,
@@ -185,6 +194,7 @@ def main() -> None:
                 else SPLIT_TRAINING_VERSION
             ),
             "loss_normalization": args.loss_normalization,
+            "combat_objective": args.combat_objective,
             "model_id": model.model_id,
             "emulator_revision": backend.emulator_revision,
             "environment": NATIVE_OVERGROWTH,
