@@ -52,9 +52,10 @@ def main() -> None:
     )
     p.add_argument("--hp-monotonic-weight", type=float, default=0.2)
     p.add_argument(
-        "--tactical-state-encoding", choices=("legacy", "structured"),
-        default="structured",
-        help="v4 structured tactical observation features, or legacy v3 for ablation",
+        "--tactical-state-encoding",
+        choices=("legacy", "structured", "relational"),
+        default="relational",
+        help="v5 enemy/intent relational features; v4 structured or legacy for ablation",
     )
     p.add_argument("--temperature-start", type=float, default=0.05)
     p.add_argument("--temperature-end", type=float, default=0.035)
