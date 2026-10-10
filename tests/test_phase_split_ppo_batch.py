@@ -71,7 +71,7 @@ def test_batched_forward_and_gradients_match_reference(encoding: str) -> None:
     for i, (v, single_logits) in enumerate(
         zip(old_values, old_logits, strict=True)
     ):
-        assert float(values[i]) == pytest.approx(float(v), abs=2e-5)
+        assert values[i].detach().item() == pytest.approx(v.detach().item(), abs=2e-5)
         assert logits[i, :len(single_logits)].detach().tolist() == pytest.approx(
             single_logits.detach().tolist(), abs=2e-5,
         )
@@ -110,7 +110,7 @@ def test_strategy_legal_menu_padding_and_gradient_parity() -> None:
                      for dec in cases], torch)
     values, logits = forward_batch(batch, params, torch)
     for index, (value, choices_logits) in enumerate(individual):
-        assert float(values[index]) == pytest.approx(float(value), abs=2e-5)
+        assert values[index].detach().item() == pytest.approx(value.detach().item(), abs=2e-5)
         assert logits[index, :len(choices_logits)].detach().tolist() == pytest.approx(
             choices_logits.detach().tolist(), abs=2e-5,
         )
