@@ -18,6 +18,7 @@ from sts2_ai.models.neural import (
     TACTICAL_DAMAGE_FORMAT,
     TACTICAL_RESOURCES_FORMAT,
     TACTICAL_INSTANCES_FORMAT,
+    TACTICAL_ATTENTION_FORMAT,
     TACTICAL_FORMAT,
     TACTICAL_RELATIONAL_FORMAT,
     TACTICAL_STRUCTURED_FORMAT,
@@ -53,6 +54,7 @@ class PhaseSplitNeuralModel:
             TACTICAL_FORMAT, TACTICAL_STRUCTURED_FORMAT, TACTICAL_RELATIONAL_FORMAT,
             TACTICAL_DAMAGE_FORMAT, TACTICAL_RESOURCES_FORMAT,
             TACTICAL_INSTANCES_FORMAT,
+            TACTICAL_ATTENTION_FORMAT,
         ):
             raise ValueError("Combat head must use target-aware tactical format")
         if (self.strategy.dimension, self.strategy.hidden) != (
