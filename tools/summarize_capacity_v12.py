@@ -72,6 +72,26 @@ def summarize_comparison(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+
+def validate_model_widths(identity: dict[str, Any]) -> None:
+    """Prevent mislabeled checkpoints from contaminating the width experiment."""
+    import hashlib
+
+    for name, spec in identity["model_specs"].items():
+        path = Path(spec["path"])
+        data = path.read_bytes()
+        if hashlib.sha256(data).hexdigest() != spec["sha256"]:
+            raise ValueError(f"Checkpoint SHA256 changed after evaluation: {name}")
+        model = json.loads(data)
+        expected = int(name.split("-", 1)[0][1:])
+        if (
+            model.get("strategy", {}).get("hidden") != expected
+            or model.get("combat", {}).get("hidden") != expected
+            or model.get("combat_value_objective") != "hp_preservation"
+        ):
+            raise ValueError(f"Wrong model width or objective for label: {name}")
+
+
 def training_times(root: Path) -> dict[str, dict[str, float | int]]:
     rows: dict[str, dict[str, float | int]] = {}
     for replica in range(1, 4):
@@ -96,7 +116,7 @@ def format_markdown(summary: dict[str, Any]) -> str:
         "# Width 32 vs 64: paired capacity comparison",
         "",
         f"Fresh held-out seeds: **{summary['cohort_size']}**, "
-        f"prefix: \`{summary['cohort_seed_prefix']}\`.",
+        f"prefix: `{summary['cohort_seed_prefix']}`.",
         "",
         "| Training seed pair | Width 32 | Width 64 | Width-64 advantage |",
         "|---|---:|---:|---:|",
@@ -136,6 +156,7 @@ def main() -> None:
     args = p.parse_args()
     report = json.loads(args.comparison.read_text(encoding="utf-8"))
     summary = summarize_comparison(report)
+    validate_model_widths(report["identity"])
     if args.training_root is not None:
         summary["training_cost"] = training_times(args.training_root)
     args.output.parent.mkdir(parents=True, exist_ok=True)
