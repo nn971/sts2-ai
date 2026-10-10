@@ -53,15 +53,19 @@ def main() -> None:
     p.add_argument("--hp-monotonic-weight", type=float, default=0.2)
     p.add_argument(
         "--tactical-state-encoding",
-        choices=("legacy", "structured", "relational"),
+        choices=("legacy", "structured", "relational", "relational_damage"),
         default="relational",
-        help="v5 enemy/intent relational features; v4 structured or legacy for ablation",
+        help="v5 relational or v6 relational_damage with public base/current attack threat",
     )
     p.add_argument("--temperature-start", type=float, default=0.05)
     p.add_argument("--temperature-end", type=float, default=0.035)
     p.add_argument("--temperature-decay-rounds", type=int, default=20)
     p.add_argument("--max-decisions", type=int, default=4096)
     p.add_argument("--eval-seeds", type=int, default=16)
+    p.add_argument(
+        "--eval-seed-prefix", default="phase-split-heldout-v1",
+        help="Stable heldout seed prefix; use a fresh prefix for new experiments",
+    )
     p.add_argument("--seed", type=int, default=19)
     p.add_argument("--warm-start", type=Path)
     p.add_argument("--checkpoint", type=Path)
@@ -73,6 +77,8 @@ def main() -> None:
     args = p.parse_args()
     if args.eval_seeds < 1:
         p.error("--eval-seeds must be positive")
+    if not args.eval_seed_prefix:
+        p.error("--eval-seed-prefix must not be empty")
     started = time.perf_counter()
     combat_baseline = args.combat_advantage_baseline or (
         "leave_one_run_out" if args.combat_objective == "hp_preservation"
@@ -136,7 +142,7 @@ def main() -> None:
         for index in range(args.eval_seeds):
             item = play_run(
                 backend, agent,
-                seed=f"phase-split-heldout-v1-{index}",
+                seed=f"{args.eval_seed_prefix}-{index}",
                 policy=InformationPolicy(FAIR_POLICY_ID),
                 max_decisions=args.max_decisions,
                 environment=NATIVE_OVERGROWTH,
@@ -169,7 +175,7 @@ def main() -> None:
             for index in range(args.eval_seeds):
                 item = play_run(
                     backend, baseline_agent,
-                    seed=f"phase-split-heldout-v1-{index}",
+                    seed=f"{args.eval_seed_prefix}-{index}",
                     policy=InformationPolicy(FAIR_POLICY_ID),
                     max_decisions=args.max_decisions,
                     environment=NATIVE_OVERGROWTH,
@@ -231,6 +237,7 @@ def main() -> None:
             ),
             "hp_monotonic_weight": args.hp_monotonic_weight,
             "tactical_state_encoding": args.tactical_state_encoding,
+            "eval_seed_prefix": args.eval_seed_prefix,
             "warm_start": str(args.warm_start) if args.warm_start else None,
         }
         args.report.parent.mkdir(parents=True, exist_ok=True)
