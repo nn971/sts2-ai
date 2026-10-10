@@ -14,6 +14,9 @@ from sts2_ai.agents.phase_split_agent import PhaseSplitGreedyAgent
 from sts2_ai.emulator import FAIR_POLICY_ID, InformationPolicy, JsonlEmulatorBackend
 from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH
 from sts2_ai.evaluation import play_run
+from sts2_ai.emulator.episode_goal import (
+    EPISODE_GOALS, NATIVE_ACT1_BOSS_GOAL,
+)
 from sts2_ai.training.phase_split_selfplay import (
     BALANCED_TRAINING_VERSION,
     PPO_TRAINING_VERSION,
@@ -75,6 +78,10 @@ def main() -> None:
     p.add_argument("--max-decisions", type=int, default=4096)
     p.add_argument("--eval-seeds", type=int, default=16)
     p.add_argument(
+        "--episode-goal", choices=EPISODE_GOALS, default=NATIVE_ACT1_BOSS_GOAL,
+        help="Certified Act-1 boss clear is terminal victory, or historical prototype goal",
+    )
+    p.add_argument(
         "--eval-seed-prefix", default="phase-split-heldout-v1",
         help="Stable heldout seed prefix; use a fresh prefix for new experiments",
     )
@@ -130,7 +137,8 @@ def main() -> None:
         f"loss_normalization={args.loss_normalization} "
         f"combat_objective={args.combat_objective} "
         f"combat_advantage_baseline={combat_baseline} "
-        f"resume={args.resume} warm_start={args.warm_start or 'none'}"
+        f"resume={args.resume} goal={args.episode_goal} "
+        f"warm_start={args.warm_start or 'none'}"
     )
     with JsonlEmulatorBackend(build=args.build) as backend:
         model, rows = train_phase_split(
@@ -160,6 +168,7 @@ def main() -> None:
             combat_samples_dir=args.combat_samples_dir,
             environment=NATIVE_OVERGROWTH, progress=progress,
             excluded_training_seeds=frozenset(args.exclude_train_seed),
+            episode_goal_version=args.episode_goal,
         )
         model.save(args.output)
         log(f"[split] model exported: {args.output}")
@@ -172,6 +181,7 @@ def main() -> None:
                 policy=InformationPolicy(FAIR_POLICY_ID),
                 max_decisions=args.max_decisions,
                 environment=NATIVE_OVERGROWTH,
+                episode_goal_version=args.episode_goal,
             )
             evaluations.append({
                 "seed": item.seed,
@@ -180,6 +190,9 @@ def main() -> None:
                 "floor": item.terminal_floor,
                 "progress": item.frontier_progress,
                 "censored": item.censored,
+                "act1_cleared": item.act1_cleared,
+                "full_game_victory": item.full_game_victory,
+                "episode_goal_version": item.episode_goal_version,
                 "boss": (
                     asdict(item.boss_progress)
                     if item.boss_progress is not None else None
@@ -205,6 +218,7 @@ def main() -> None:
                     policy=InformationPolicy(FAIR_POLICY_ID),
                     max_decisions=args.max_decisions,
                     environment=NATIVE_OVERGROWTH,
+                    episode_goal_version=args.episode_goal,
                 )
                 baseline_evaluations.append({
                     "seed": item.seed,
@@ -213,6 +227,9 @@ def main() -> None:
                     "floor": item.terminal_floor,
                     "progress": item.frontier_progress,
                     "censored": item.censored,
+                    "act1_cleared": item.act1_cleared,
+                    "full_game_victory": item.full_game_victory,
+                    "episode_goal_version": item.episode_goal_version,
                     "boss": (
                         asdict(item.boss_progress)
                         if item.boss_progress is not None else None
@@ -240,6 +257,7 @@ def main() -> None:
                 else SPLIT_TRAINING_VERSION
             ),
             "optimizer_method": args.optimizer_method,
+            "episode_goal_version": args.episode_goal,
             "train_seed_prefix": args.train_seed_prefix,
             "excluded_training_seeds": sorted(set(args.exclude_train_seed)),
             "ppo_hyperparameters": (
@@ -285,7 +303,7 @@ def main() -> None:
         args.report.write_text(json.dumps(report, indent=2) + "\n")
         log(
             f"[split] done | report={args.report} "
-            f"act1_clears={sum(x['act'] is not None and x['act'] >= 2 for x in evaluations)}"
+            f"act1_clears={sum(x['act1_cleared'] is True for x in evaluations)}"
         )
 
 
