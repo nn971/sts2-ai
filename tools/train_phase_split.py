@@ -75,7 +75,7 @@ def main() -> None:
     p.add_argument("--hp-monotonic-weight", type=float, default=0.2)
     p.add_argument(
         "--tactical-state-encoding",
-        choices=("legacy", "structured", "relational", "relational_damage", "public_resources", "enemy_instances"),
+        choices=("legacy", "structured", "relational", "relational_damage", "public_resources", "enemy_instances", "enemy_attention"),
         default="relational",
         help="v5/v6 relational, v7 resources, or v8 species-aware enemy instances",
     )
