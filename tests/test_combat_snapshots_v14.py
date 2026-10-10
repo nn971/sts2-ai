@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import runpy
 import shutil
 from dataclasses import asdict, replace
+from pathlib import Path
 
 import pytest
 
@@ -304,3 +306,32 @@ def test_multimodel_suite_shares_exact_replay_and_pairs_independent_forks() -> N
         pair_model_suite(suite, "v8", "v8")
     with pytest.raises(ValueError, match="missing"):
         pair_model_suite(suite, "v8", "r4")
+
+
+def test_suite_architecture_summary_preserves_training_replicas() -> None:
+    """Replicate mean must not treat source combat entries as training repeats."""
+    tool_path = Path(__file__).resolve().parents[1] / "tools/compare_combat_snapshots_v14.py"
+    functions = runpy.run_path(str(tool_path))
+    paths = functions["model_paths"](Path("results"))
+    assert len(paths) == 7
+    assert str(paths["attn-r2"]).endswith(
+        "ppo-enemy-attention-v13/r2/attn/models/stage-0080.json"
+    )
+    reports = {}
+    for i, rep in enumerate(("r1", "r2", "r3")):
+        for reference in ("v8", f"h32-{rep}"):
+            key = f"{reference}-vs-attn-{rep}"
+            delta = (i - 1) / 10 if reference == "v8" else (i - 1) / 20
+            reports[key] = {
+                "summary": {"delta_win_rate": delta},
+                "by_tier": {"boss": {"delta_win_rate": delta * 2}},
+                "multi_enemy": {"delta_win_rate": delta / 2},
+            }
+    result = functions["_training_replicate_summary"](reports, attention_only=False)
+    assert result["h32"]["mean_delta_win_rate"] == pytest.approx(0)
+    assert result["h32"]["positive_replica_count"] == 1
+    assert result["v8"]["training_replicates"] == 3
+    assert result["h32"]["mean_boss_delta"] == pytest.approx(0)
+    assert "h32" not in functions["_training_replicate_summary"](
+        reports, attention_only=True,
+    )
