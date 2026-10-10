@@ -244,3 +244,47 @@ def test_act1_ppo_checkpoint_refuses_old_full_game_objective(tmp_path) -> None:
             NativeScriptedBackend(), episode_goal_version=PROTOTYPE_THREE_ACT_GOAL,
             resume=True, **{**options, "rounds": 2},
         )
+
+
+
+def test_goal_rejects_uncertified_late_prototype_terminal() -> None:
+    frames = [
+        _root(),
+        {"act": 3, "floor": 6, "hp": 20, "max_hp": 70,
+         "terminal_outcome": "victory", "combat": None},
+    ]
+    for action in ("train", "eval"):
+        backend = NativeScriptedBackend(frames)
+        with pytest.raises(ValueError, match="without certified"):
+            if action == "train":
+                collect_public_episode(
+                    backend, zero_model(), seed="late-terminal",
+                    actor_rng=random.Random(1), environment="native-overgrowth",
+                    episode_goal_version=NATIVE_ACT1_BOSS_GOAL,
+                )
+            else:
+                play_run(
+                    backend, RandomAgent(seed=1), seed="late-terminal",
+                    policy=POLICY, environment="native-overgrowth",
+                    episode_goal_version=NATIVE_ACT1_BOSS_GOAL,
+                )
+        assert not backend.handles
+
+
+def test_longrun_summary_counts_certified_act1_floor16_victory() -> None:
+    from tools.train_longrun import summarize
+    report = {
+        "rounds": [{"wins": 4, "optimization_steps": 8}],
+        "heldout": [
+            {"outcome": "victory", "act": 1, "floor": 16,
+             "act1_cleared": True, "censored": False, "progress": 16.0,
+             "boss": {"initial_hp": 200, "remaining_hp": 0}},
+            {"outcome": "defeat", "act": 1, "floor": 16,
+             "act1_cleared": False, "censored": False, "progress": 15.2,
+             "boss": {"initial_hp": 200, "remaining_hp": 100}},
+        ],
+    }
+    metrics = summarize(report)
+    assert metrics["act1_clears"] == 1
+    assert metrics["boss_entries"] == 2
+    assert metrics["training_wins"] == 4
