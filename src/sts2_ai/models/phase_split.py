@@ -16,6 +16,7 @@ from sts2_ai.emulator import LegalAction, Observation
 from sts2_ai.models.neural import (
     NEURAL_FORMAT,
     TACTICAL_DAMAGE_FORMAT,
+    TACTICAL_RESOURCES_FORMAT,
     TACTICAL_FORMAT,
     TACTICAL_RELATIONAL_FORMAT,
     TACTICAL_STRUCTURED_FORMAT,
@@ -49,7 +50,7 @@ class PhaseSplitNeuralModel:
             raise ValueError("Strategy head must use the semantic action format")
         if self.combat.format_id not in (
             TACTICAL_FORMAT, TACTICAL_STRUCTURED_FORMAT, TACTICAL_RELATIONAL_FORMAT,
-            TACTICAL_DAMAGE_FORMAT
+            TACTICAL_DAMAGE_FORMAT, TACTICAL_RESOURCES_FORMAT
         ):
             raise ValueError("Combat head must use target-aware tactical format")
         if (self.strategy.dimension, self.strategy.hidden) != (
