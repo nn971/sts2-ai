@@ -21,20 +21,20 @@ from sts2_ai.models.enemy_instances import (
 )
 from sts2_ai.models.hashed_linear import (
     neural_action_features,
+    public_resources_tactical_action_features,
     state_dict,
     state_features,
     tactical_action_features,
-    public_resources_tactical_action_features,
 )
 from sts2_ai.models.tactical_state import (
-    tactical_state_features,
-    relational_tactical_state_features,
     damage_tactical_state_features,
     public_resources_tactical_state_features,
+    relational_tactical_state_features,
+    tactical_state_features,
 )
 from sts2_ai.training.neural import _dense
-from sts2_ai.training.selfplay import Episode, PublicDecision
 from sts2_ai.training.phase_split_ppo import PpoDiagnostics, gae_terminal
+from sts2_ai.training.selfplay import Episode, PublicDecision
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,7 +260,7 @@ def _prepare(
                     old_logprobs[ep_idx][decision_idx] = float(selected_logprob[index])
 
     result: dict[str, list[PreparedSample]] = {"strategy": [], "combat": []}
-    for ep_index, ((episode, run_target), segments) in enumerate(
+    for ep_index, ((_episode, run_target), segments) in enumerate(
         zip(run_targets, local_targets, strict=True)
     ):
         decisions = encoded_episodes[ep_index]
