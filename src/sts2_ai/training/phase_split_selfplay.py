@@ -39,6 +39,7 @@ from sts2_ai.models.hashed_linear import (
 )
 from sts2_ai.models.neural import (
     TACTICAL_INSTANCES_FORMAT,
+    TACTICAL_ATTENTION_FORMAT,
     TACTICAL_DAMAGE_FORMAT,
     TACTICAL_RESOURCES_FORMAT,
     TACTICAL_FORMAT,
@@ -55,6 +56,7 @@ from sts2_ai.models.tactical_state import (
 )
 from sts2_ai.training.combat_outcomes import CombatOutcome
 from sts2_ai.training.instance_combat import add_instance_parameters, instance_forward
+from sts2_ai.training.enemy_attention import add_attention_parameters
 from sts2_ai.training.neural import _dense, _export, _forward, _new_params
 from sts2_ai.training.parallel_rollouts import (
     collect_parallel,
@@ -133,7 +135,7 @@ def _forward_decision(
     tactical_state_encoding: str = "legacy",
 ) -> tuple[Any, Any]:
     state = state_dict(decision.observation.payload_json)
-    if decision.phase == "combat" and tactical_state_encoding == "enemy_instances":
+    if decision.phase == "combat" and tactical_state_encoding in ("enemy_instances", "enemy_attention"):
         return instance_forward(state, decision.legal_actions, params, dimension, torch)
     feature_fn_state = (
         public_resources_tactical_state_features
@@ -178,6 +180,8 @@ def _export_split(
             combat_params, dimension, hidden,
             model_id=model_id + "-combat", value_head_trained=trained,
             format_id=(
+                TACTICAL_ATTENTION_FORMAT
+                if tactical_state_encoding == "enemy_attention" else
                 TACTICAL_INSTANCES_FORMAT
                 if tactical_state_encoding == "enemy_instances" else
                 TACTICAL_RESOURCES_FORMAT
@@ -380,7 +384,7 @@ def train_phase_split(
             raise ValueError("Invalid PPO gamma/lambda")
     if tactical_state_encoding not in (
         "legacy", "structured", "relational", "relational_damage",
-        "public_resources", "enemy_instances",
+        "public_resources", "enemy_instances", "enemy_attention",
     ):
         raise ValueError("Unsupported tactical state encoding")
     if tactical_state_encoding == "structured" and dimension <= 32:
@@ -389,7 +393,7 @@ def train_phase_split(
         raise ValueError("Relational tactical state requires dimension > 36")
     if tactical_state_encoding == "relational_damage" and dimension <= 40:
         raise ValueError("Damage-aware tactical state requires dimension > 40")
-    if tactical_state_encoding == "enemy_instances" and dimension <= 40:
+    if tactical_state_encoding in ("enemy_instances", "enemy_attention") and dimension <= 40:
         raise ValueError("Enemy-instance tactical state requires dimension > 40")
     if tactical_state_encoding == "public_resources" and dimension <= 40:
         raise ValueError("Public-resource tactical state requires dimension > 40")
@@ -413,8 +417,10 @@ def train_phase_split(
         "strategy": _new_params(dimension, hidden, torch),
         "combat": _new_params(dimension, hidden, torch),
     }
-    if tactical_state_encoding == "enemy_instances":
+    if tactical_state_encoding in ("enemy_instances", "enemy_attention"):
         add_instance_parameters(params["combat"], dimension, hidden, torch)
+    if tactical_state_encoding == "enemy_attention":
+        add_attention_parameters(params["combat"], hidden, torch)
     optimizers = {
         phase: torch.optim.AdamW(list(weights.values()), lr=learning_rate)
         for phase, weights in params.items()
@@ -438,6 +444,8 @@ def train_phase_split(
             sources = {"strategy": base, "combat": base}
             previous_combat_objective = "continuation"
         expected_tactical_format = (
+            TACTICAL_ATTENTION_FORMAT
+            if tactical_state_encoding == "enemy_attention" else
             TACTICAL_INSTANCES_FORMAT
             if tactical_state_encoding == "enemy_instances" else
             TACTICAL_RESOURCES_FORMAT
@@ -458,6 +466,8 @@ def train_phase_split(
             # state and value projections across a format migration.
             migrating_tactical = (
                 phase == "combat" and source.format_id != expected_tactical_format
+                and not (source.format_id == TACTICAL_INSTANCES_FORMAT
+                         and expected_tactical_format == TACTICAL_ATTENTION_FORMAT)
             )
             migrating_combat_value = (
                 phase == "combat" and previous_combat_objective != combat_objective
