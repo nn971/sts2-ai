@@ -129,11 +129,11 @@ def test_batched_matches_reference_and_portable_for_mixed_enemy_counts() -> None
     for i, (state, actions) in enumerate(states):
         value, logits = instance_forward(state, actions, params, model.dimension, torch)
         portable = model.evaluate(frame_observation(state), actions)
-        assert float(batched_value[i]) == pytest.approx(float(value), abs=1e-5)
-        assert float(value) == pytest.approx(portable.value, abs=1e-5)
+        assert batched_value[i].detach().item() == pytest.approx(value.detach().item(), abs=1e-5)
+        assert value.detach().item() == pytest.approx(portable.value, abs=1e-5)
         for j, number in enumerate(portable.action_logits):
-            assert float(batched_logits[i, j]) == pytest.approx(float(logits[j]), abs=1e-5)
-            assert float(batched_logits[i, j]) == pytest.approx(number, abs=1e-5)
+            assert batched_logits[i, j].detach().item() == pytest.approx(logits[j].detach().item(), abs=1e-5)
+            assert batched_logits[i, j].detach().item() == pytest.approx(number, abs=1e-5)
         if len(actions) < batch.mask.shape[1]:
             assert (batched_logits[i, len(actions):] < -1e8).all().item()
 
@@ -148,7 +148,7 @@ def test_zero_gate_receives_gradient_and_attention_can_train() -> None:
     loss = value + logits[0] + logits[1]
     loss.backward()
     assert params["attn_gate"].grad is not None
-    assert float(params["attn_gate"].grad.abs().sum()) > 0
+    assert params["attn_gate"].grad.detach().abs().sum().item() > 0
 
 
 def test_default_initialized_gate_is_zero_and_export_format_works() -> None:
