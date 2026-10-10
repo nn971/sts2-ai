@@ -199,8 +199,9 @@ def collect_public_episode(
 ) -> Episode:
     """Run the actual emulator; never give hidden handles to the actor.
 
-    Terminal rewards are observed only after real terminal transitions.
-    Early caps/censorship return a distinct non-training episode.
+    Historical runs end at real emulator terminals; the native Act-1 goal
+    also accepts the public, certified completed-boss transition. No fake
+    emulator terminal is introduced. Decision caps remain censored.
     Every emulator handle is released even on partial failures.
     """
     if max_decisions <= 0:
