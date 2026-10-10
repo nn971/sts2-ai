@@ -11,6 +11,8 @@ on:
       - "src/sts2_ai/training/phase_split_ppo_batch.py"
       - "src/sts2_ai/training/phase_split_selfplay.py"
       - "tests/test_enemy_attention_v13.py"
+      - "tests/test_enemy_attention_v13_summary.py"
+      - "tools/summarize_enemy_attention_v13.py"
       - ".github/workflows/enemy-attention-v13.yml"
   pull_request:
     paths:
@@ -35,6 +37,7 @@ jobs:
         run: |
           python -m pytest -q \
             tests/test_enemy_attention_v13.py \
+            tests/test_enemy_attention_v13_summary.py \
             tests/test_enemy_instances_v8.py \
             tests/test_phase_split_ppo_batch.py \
             tests/test_capacity_width_v12.py
@@ -48,4 +51,6 @@ jobs:
             src/sts2_ai/training/instance_combat.py \
             src/sts2_ai/training/phase_split_ppo_batch.py \
             src/sts2_ai/training/phase_split_selfplay.py \
-            tests/test_enemy_attention_v13.py
+            tests/test_enemy_attention_v13.py \
+            tests/test_enemy_attention_v13_summary.py \
+            tools/summarize_enemy_attention_v13.py
