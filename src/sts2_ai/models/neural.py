@@ -22,6 +22,7 @@ from .hashed_linear import (
     state_dict,
     state_features,
     tactical_action_features,
+    public_resources_tactical_action_features,
 )
 from .protocol import PolicyValueEstimate
 from .tactical_state import (
@@ -185,7 +186,9 @@ class NeuralPolicyValueModel:
         )
         logits = []
         for action in legal_actions:
-            if self.format_id in (TACTICAL_FORMAT, TACTICAL_STRUCTURED_FORMAT,
+            if self.format_id == TACTICAL_RESOURCES_FORMAT:
+                feature_fn = public_resources_tactical_action_features
+            elif self.format_id in (TACTICAL_FORMAT, TACTICAL_STRUCTURED_FORMAT,
                                   TACTICAL_RELATIONAL_FORMAT, TACTICAL_DAMAGE_FORMAT,
                                   TACTICAL_RESOURCES_FORMAT):
                 feature_fn = tactical_action_features
