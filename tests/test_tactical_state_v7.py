@@ -124,3 +124,61 @@ def test_v7_inference_uses_exact_relic_counter() -> None:
     old = model.to_dict()
     old["format"] = TACTICAL_DAMAGE_FORMAT
     assert NeuralPolicyValueModel.from_dict(old).format_id == TACTICAL_DAMAGE_FORMAT
+
+
+def test_v7_training_and_warm_start_migration(tmp_path) -> None:
+    pytest.importorskip("torch")
+    from test_phase_split_selfplay import TwoPhaseToy
+    from sts2_ai.models.phase_split import PhaseSplitNeuralModel
+    from sts2_ai.models.neural import NEURAL_FORMAT
+    from sts2_ai.training.phase_split_selfplay import train_phase_split
+
+    class ResourceToy(TwoPhaseToy):
+        def observe(self, state, policy):
+            original = super().observe(state, policy)
+            obj = json.loads(original.payload_json)
+            if isinstance(obj.get("combat"), dict):
+                obj["combat"].update({
+                    "draw_pile_count": 0, "draw_pile": [],
+                    "relic_counters": [],
+                })
+            return Observation("prototype-fair-v0", json.dumps(obj), "")
+
+    def zero(fmt: str) -> NeuralPolicyValueModel:
+        dimension, hidden = 64, 4
+        return NeuralPolicyValueModel.from_dict({
+            "format": fmt, "dimension": dimension, "hidden": hidden,
+            "model_id": fmt, "state_weight": [[0.0] * dimension for _ in range(hidden)],
+            "state_bias": [0.0] * hidden,
+            "action_weight": [[0.0] * dimension for _ in range(hidden)],
+            "action_bias": [0.0] * hidden,
+            "policy_weight": [0.0] * hidden, "policy_bias": 0.0,
+            "value_weight": [0.0] * hidden, "value_bias": 0.0,
+        })
+
+    warm = tmp_path / "warm-v6.json"
+    PhaseSplitNeuralModel(
+        zero(NEURAL_FORMAT), zero(TACTICAL_DAMAGE_FORMAT),
+        model_id="v6-start", combat_value_objective="hp_preservation",
+    ).save(warm)
+    kwargs = dict(
+        episodes_per_round=2, dimension=64, hidden=4,
+        max_decisions=8, seed=9, workers=1,
+        tactical_state_encoding="public_resources",
+        optimizer_method="ppo", ppo_epochs=1, ppo_batch_size=2,
+        ppo_sample_limit=16, combat_objective="hp_preservation",
+        combat_advantage_baseline="critic",
+        hp_monotonic_weight=0.0, warm_start=warm,
+        checkpoint=tmp_path / "v7-checkpoint.pt",
+    )
+    first, rows = train_phase_split(ResourceToy(), rounds=1, **kwargs)
+    assert first.combat.format_id == TACTICAL_RESOURCES_FORMAT
+    assert rows[0].optimization_steps > 0
+    saved = PhaseSplitNeuralModel.from_dict(first.to_dict())
+    assert saved.to_dict() == first.to_dict()
+    second, continuation = train_phase_split(
+        ResourceToy(), rounds=2, resume=True, **kwargs
+    )
+    assert second.combat.format_id == TACTICAL_RESOURCES_FORMAT
+    assert len(continuation) == 2
+    assert continuation[0] == rows[0]
