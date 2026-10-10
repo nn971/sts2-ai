@@ -82,7 +82,7 @@ def play_run(
         | None
     ) = None,
 ) -> RunSummary:
-    """Drive one complete emulator run while keeping only the live state handle."""
+    """Drive to the versioned goal boundary, never exposing hidden emulator state."""
 
     require_episode_goal(episode_goal_version, environment)
     started = time.perf_counter()
@@ -171,8 +171,8 @@ def play_run(
             frontier_progress=_continuous_progress(frontier_state, environment),
             frontier_enemy_hp=_remaining_enemy_hp(frontier_state),
             hp_trajectory=tuple(hp_trajectory),
-            # Reaching Act 2 certifies an Act-1 clear even if the run
-            # later truncates; an unfinished Act-1 run remains unknown.
+            # The native goal is a certified boss-room completion before Act 2.
+            # Historical full-run mode also recognizes Act-2 progress.
             act1_cleared=(
                 True if certified_goal_victory or (isinstance(act, int) and act >= 2) or outcome == "victory"
                 else False if outcome == "defeat"
