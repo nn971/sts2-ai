@@ -17,7 +17,11 @@ from typing import Any
 
 from sts2_ai.agents.base import Agent, Decision
 from sts2_ai.emulator import (
-    EmulatorBackend, InformationPolicy, LegalAction, Observation, StateHandle,
+    EmulatorBackend,
+    InformationPolicy,
+    LegalAction,
+    Observation,
+    StateHandle,
 )
 from sts2_ai.emulator.jsonl_backend import FAIR_POLICY_ID
 from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH, reset_training_run
