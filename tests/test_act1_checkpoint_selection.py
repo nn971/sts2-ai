@@ -62,7 +62,7 @@ def test_exact_paired_comparison_and_wilson_interval() -> None:
     assert exact_mcnemar(0, 0) == 1
     assert exact_mcnemar(0, 10) == pytest.approx(2 / 1024)
     assert wilson_interval(0, 10)[0] == 0
-    assert wilson_interval(10, 10)[1] == 1
+    assert wilson_interval(10, 10)[1] == pytest.approx(1.0)
     with pytest.raises(ValueError, match="seed mismatch"):
         paired_comparison(first, second[::-1])
 
