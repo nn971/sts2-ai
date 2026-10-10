@@ -46,3 +46,20 @@ jobs:
             --encoding enemy_instances --decisions 512 --epochs 2 --batch-size 64
           python -u tools/benchmark_ppo_backends.py \
             --encoding public_resources --decisions 512 --epochs 2 --batch-size 64
+      - name: Native emulator batched-v8 PPO one-round smoke
+        run: |
+          python -u tools/train_phase_split.py \
+            --build --rounds 1 --episodes 2 --workers 2 \
+            --dimension 128 --hidden 8 \
+            --optimizer-method ppo --ppo-backend batched \
+            --tactical-state-encoding enemy_instances \
+            --combat-objective hp_preservation \
+            --combat-advantage-baseline critic \
+            --hp-monotonic-weight 0 --loss-normalization phase_mean \
+            --temperature-start 0.85 --temperature-end 0.85 \
+            --ppo-epochs 1 --ppo-batch-size 32 --ppo-sample-limit 128 \
+            --max-decisions 2048 --eval-seeds 1 \
+            --checkpoint /tmp/ppo-batched-v8-checkpoint.pt \
+            --output /tmp/ppo-batched-v8-model.json \
+            --report /tmp/ppo-batched-v8-report.json
+          python -c 'import json; from pathlib import Path; r=json.loads(Path("/tmp/ppo-batched-v8-report.json").read_text()); assert r["optimizer_method"]=="ppo"; assert r["ppo_backend"]=="batched"; assert r["rounds"][0]["completed"]>0 and r["rounds"][0]["optimization_steps"]>0; assert len(r["heldout"])==1'
