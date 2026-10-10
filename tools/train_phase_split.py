@@ -14,6 +14,11 @@ from sts2_ai.agents.phase_split_agent import PhaseSplitGreedyAgent
 from sts2_ai.emulator import FAIR_POLICY_ID, InformationPolicy, JsonlEmulatorBackend
 from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH
 from sts2_ai.evaluation import play_run
+from sts2_ai.evaluation.baseline_cache import (
+    baseline_identity,
+    load_cache,
+    save_cache,
+)
 from sts2_ai.emulator.episode_goal import (
     EPISODE_GOALS, NATIVE_ACT1_BOSS_GOAL,
 )
@@ -95,6 +100,10 @@ def main() -> None:
         help="Explicitly omit unsupported run seeds from training; recorded in report",
     )
     p.add_argument("--warm-start", type=Path)
+    p.add_argument(
+        "--baseline-eval-cache", type=Path,
+        help="Reuse the fixed warm-start evaluation only when its identity matches",
+    )
     p.add_argument("--checkpoint", type=Path)
     p.add_argument("--combat-samples-dir", type=Path)
     p.add_argument("--resume", action="store_true")
@@ -214,12 +223,30 @@ def main() -> None:
             )
         baseline_evaluations = []
         if args.warm_start is not None:
-            raw = json.loads(args.warm_start.read_text())
-            baseline_agent = (
-                PhaseSplitGreedyAgent.load(args.warm_start)
-                if raw.get("format") == "sts2-phase-split-policy-value-v1"
-                else NeuralGreedyAgent.load(args.warm_start)
+            baseline_key = baseline_identity(
+                warm_start=args.warm_start,
+                emulator_revision=backend.emulator_revision,
+                seed_prefix=args.eval_seed_prefix,
+                count=args.eval_seeds,
+                episode_goal=args.episode_goal,
+                max_decisions=args.max_decisions,
+                environment=NATIVE_OVERGROWTH,
+                policy_id=FAIR_POLICY_ID,
             )
+            cached = (
+                load_cache(args.baseline_eval_cache, baseline_key)
+                if args.baseline_eval_cache is not None else None
+            )
+            if cached is not None:
+                baseline_evaluations = cached
+                log(f"[baseline-eval] reused {len(cached)} keyed cached results")
+            else:
+                raw = json.loads(args.warm_start.read_text())
+                baseline_agent = (
+                    PhaseSplitGreedyAgent.load(args.warm_start)
+                    if raw.get("format") == "sts2-phase-split-policy-value-v1"
+                    else NeuralGreedyAgent.load(args.warm_start)
+                )
             for index in range(args.eval_seeds):
                 item = play_run(
                     backend, baseline_agent,
@@ -249,6 +276,11 @@ def main() -> None:
                     f"act={item.terminal_act} floor={item.terminal_floor} "
                     f"outcome={item.outcome}"
                 )
+                if args.baseline_eval_cache is not None:
+                    save_cache(
+                        args.baseline_eval_cache, baseline_key, baseline_evaluations,
+                    )
+                    log("[baseline-eval] saved keyed baseline cache")
         paired = (
             [
                 new["progress"] - old["progress"]
