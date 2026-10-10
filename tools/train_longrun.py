@@ -168,6 +168,7 @@ def main() -> None:
             "--eval-seeds", str(args.eval_seeds),
             "--seed", str(args.seed),
             "--warm-start", str(args.warm_start.resolve()),
+            "--baseline-eval-cache", str(output / "warm-start-evaluation-cache.json"),
             "--checkpoint", str(checkpoint),
             "--output", str(model),
             "--report", str(report),
