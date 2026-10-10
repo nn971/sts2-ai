@@ -569,6 +569,9 @@ def train_phase_split(
                 _other_run_combat_baselines(local_targets)
                 if combat_advantage_baseline == "leave_one_run_out" else None
             )
+            combat_targets: list[float]
+            monotonic_terms: list[Any]
+            losses: list[float]
             optimizer_started = time.perf_counter()
             if optimizer_method == "ppo":
                 from sts2_ai.training.phase_split_ppo import ppo_update
@@ -597,7 +600,7 @@ def train_phase_split(
                 tactical_count = ppo.counts["combat"]
                 phase_diagnostics = ppo.phase
                 losses = [ppo.loss] if ppo.loss is not None else []
-                monotonic_terms: list[Any] = []
+                monotonic_terms = []
                 combat_targets = [
                     target for group in local_targets for _, target in group
                 ]
@@ -605,8 +608,8 @@ def train_phase_split(
                 for optimizer in optimizers.values():
                     optimizer.zero_grad()
                 strategic_count = tactical_count = 0
-                combat_targets: list[float] = []
-                losses: list[float] = []
+                combat_targets = []
+                losses = []
                 phase_counts = {
                     phase: sum(
                         dec.phase == phase
