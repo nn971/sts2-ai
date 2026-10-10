@@ -5,18 +5,17 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from test_hp_first_tactical import outcome, resources, small_model
 from test_phase_split_selfplay import TwoPhaseToy
 
+from sts2_ai.models.neural import NEURAL_FORMAT, TACTICAL_FORMAT
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
-from sts2_ai.training.combat_outcomes import CombatOutcome, RunResources
+from sts2_ai.training.combat_outcomes import CombatOutcome
 from sts2_ai.training.phase_split_selfplay import (
     _hp_preservation_target,
     _other_run_combat_baselines,
     train_phase_split,
 )
-
-from test_hp_first_tactical import outcome, resources, small_model
-from sts2_ai.models.neural import NEURAL_FORMAT, TACTICAL_FORMAT
 
 
 def test_hp_preservation_depends_on_health_lost_not_starting_health() -> None:
