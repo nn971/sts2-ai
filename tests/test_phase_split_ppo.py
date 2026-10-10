@@ -1,7 +1,6 @@
 """PPO importance ratios, combat-terminal GAE and checkpoint safeguards."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
