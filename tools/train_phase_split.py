@@ -16,6 +16,7 @@ from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH
 from sts2_ai.evaluation import play_run
 from sts2_ai.training.phase_split_selfplay import (
     BALANCED_TRAINING_VERSION,
+    PPO_TRAINING_VERSION,
     SPLIT_TRAINING_VERSION,
     PhaseSplitRound,
     train_phase_split,
@@ -34,6 +35,17 @@ def main() -> None:
     p.add_argument("--dimension", type=int, default=128)
     p.add_argument("--hidden", type=int, default=32)
     p.add_argument("--learning-rate", type=float, default=0.003)
+    p.add_argument("--optimizer-method", choices=("reinforce", "ppo"), default="reinforce")
+    p.add_argument("--ppo-epochs", type=int, default=3)
+    p.add_argument("--ppo-batch-size", type=int, default=128)
+    p.add_argument("--ppo-sample-limit", type=int, default=4096)
+    p.add_argument("--ppo-clip-epsilon", type=float, default=0.2)
+    p.add_argument("--ppo-gamma", type=float, default=0.995)
+    p.add_argument("--ppo-gae-lambda", type=float, default=0.98)
+    p.add_argument(
+        "--train-seed-prefix", default="phase-split-v1",
+        help="Isolate training seeds from prior experiments; stable across resumes",
+    )
     p.add_argument(
         "--loss-normalization",
         choices=("phase_mean", "legacy_episode_sum"),
@@ -110,6 +122,7 @@ def main() -> None:
         f"[split] start | rounds={args.rounds} episodes={args.episodes} "
         f"workers={args.workers} boundary_weight={args.boundary_weight} "
         f"tactical_state_encoding={args.tactical_state_encoding} "
+        f"optimizer_method={args.optimizer_method} "
         f"loss_normalization={args.loss_normalization} "
         f"combat_objective={args.combat_objective} "
         f"combat_advantage_baseline={combat_baseline} "
@@ -120,6 +133,14 @@ def main() -> None:
             backend, rounds=args.rounds, episodes_per_round=args.episodes,
             workers=args.workers, dimension=args.dimension, hidden=args.hidden,
             learning_rate=args.learning_rate,
+            optimizer_method=args.optimizer_method,
+            ppo_epochs=args.ppo_epochs,
+            ppo_batch_size=args.ppo_batch_size,
+            ppo_sample_limit=args.ppo_sample_limit,
+            ppo_clip_epsilon=args.ppo_clip_epsilon,
+            ppo_gamma=args.ppo_gamma,
+            ppo_gae_lambda=args.ppo_gae_lambda,
+            seed_prefix=args.train_seed_prefix,
             boundary_weight=args.boundary_weight,
             hp_monotonic_weight=args.hp_monotonic_weight,
             tactical_state_encoding=args.tactical_state_encoding,
@@ -208,8 +229,22 @@ def main() -> None:
         report = {
             "schema": "sts2-phase-split-experiment-v1",
             "training_version": (
-                BALANCED_TRAINING_VERSION if args.loss_normalization == "phase_mean"
+                PPO_TRAINING_VERSION if args.optimizer_method == "ppo"
+                else BALANCED_TRAINING_VERSION
+                if args.loss_normalization == "phase_mean"
                 else SPLIT_TRAINING_VERSION
+            ),
+            "optimizer_method": args.optimizer_method,
+            "train_seed_prefix": args.train_seed_prefix,
+            "ppo_hyperparameters": (
+                {
+                    "epochs": args.ppo_epochs,
+                    "batch_size": args.ppo_batch_size,
+                    "sample_limit": args.ppo_sample_limit,
+                    "clip_epsilon": args.ppo_clip_epsilon,
+                    "gamma": args.ppo_gamma,
+                    "gae_lambda": args.ppo_gae_lambda,
+                } if args.optimizer_method == "ppo" else None
             ),
             "loss_normalization": args.loss_normalization,
             "combat_objective": args.combat_objective,
