@@ -457,6 +457,7 @@ def build_report(rows: Sequence[PairedCombatResult], *,
                  baseline_model: str, candidate_model: str) -> dict[str, Any]:
     tiers = sorted({r.tier for r in rows})
     bands = ("early", "middle", "late")
+    compositions = sorted({r.enemy_ids for r in rows})
     summary = _delta(rows)
     summary["cluster_bootstrap_95pct_delta_win_rate"] = _cluster_interval(rows)
     return {
@@ -472,6 +473,18 @@ def build_report(rows: Sequence[PairedCombatResult], *,
         "by_progress": {
             band: _delta([r for r in rows if r.progress == band]) for band in bands
         },
+        "by_progress_and_tier": {
+            band: {
+                tier: _delta([r for r in rows if r.progress == band and r.tier == tier])
+                for tier in tiers
+            }
+            for band in bands
+        },
+        "by_enemy_composition": {
+            " + ".join(comp): _delta([r for r in rows if r.enemy_ids == comp])
+            for comp in compositions
+        },
+        "multi_enemy": _delta([r for r in rows if len(r.enemy_ids) > 1]),
         "rows": [asdict(r) for r in rows],
     }
 
