@@ -35,10 +35,14 @@ from sts2_ai.models.hashed_linear import (
 from sts2_ai.models.neural import (
     TACTICAL_FORMAT,
     TACTICAL_STRUCTURED_FORMAT,
+    TACTICAL_RELATIONAL_FORMAT,
     NeuralPolicyValueModel,
 )
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
-from sts2_ai.models.tactical_state import tactical_state_features
+from sts2_ai.models.tactical_state import (
+    relational_tactical_state_features,
+    tactical_state_features,
+)
 from sts2_ai.training.combat_outcomes import CombatOutcome
 from sts2_ai.training.neural import _dense, _export, _forward, _new_params
 from sts2_ai.training.parallel_rollouts import (
@@ -118,7 +122,9 @@ def _forward_decision(
 ) -> tuple[Any, Any]:
     state = state_dict(decision.observation.payload_json)
     feature_fn_state = (
-        tactical_state_features
+        relational_tactical_state_features
+        if decision.phase == "combat" and tactical_state_encoding == "relational"
+        else tactical_state_features
         if decision.phase == "combat" and tactical_state_encoding == "structured"
         else state_features
     )
@@ -152,6 +158,8 @@ def _export_split(
             combat_params, dimension, hidden,
             model_id=model_id + "-combat", value_head_trained=trained,
             format_id=(
+                TACTICAL_RELATIONAL_FORMAT
+                if tactical_state_encoding == "relational" else
                 TACTICAL_STRUCTURED_FORMAT
                 if tactical_state_encoding == "structured" else TACTICAL_FORMAT
             ),
@@ -316,10 +324,12 @@ def train_phase_split(
         raise ValueError("Leave-one-run-out requires an HP-based combat objective")
     if loss_normalization not in ("legacy_episode_sum", "phase_mean"):
         raise ValueError("Loss normalization must be legacy_episode_sum or phase_mean")
-    if tactical_state_encoding not in ("legacy", "structured"):
+    if tactical_state_encoding not in ("legacy", "structured", "relational"):
         raise ValueError("Tactical state encoding must be legacy or structured")
     if tactical_state_encoding == "structured" and dimension <= 32:
         raise ValueError("Structured tactical state requires dimension > 32")
+    if tactical_state_encoding == "relational" and dimension <= 36:
+        raise ValueError("Relational tactical state requires dimension > 36")
     if not 0.0 <= boundary_weight <= 1.0:
         raise ValueError("Boundary bootstrapping weight must lie in [0, 1]")
     if not 0.0 <= hp_monotonic_weight <= 1.0:
@@ -363,6 +373,8 @@ def train_phase_split(
             sources = {"strategy": base, "combat": base}
             previous_combat_objective = "continuation"
         expected_tactical_format = (
+            TACTICAL_RELATIONAL_FORMAT
+            if tactical_state_encoding == "relational" else
             TACTICAL_STRUCTURED_FORMAT
             if tactical_state_encoding == "structured" else TACTICAL_FORMAT
         )
