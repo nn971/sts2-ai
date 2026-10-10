@@ -68,9 +68,9 @@ def main() -> None:
     p.add_argument("--hp-monotonic-weight", type=float, default=0.2)
     p.add_argument(
         "--tactical-state-encoding",
-        choices=("legacy", "structured", "relational", "relational_damage", "public_resources"),
+        choices=("legacy", "structured", "relational", "relational_damage", "public_resources", "enemy_instances"),
         default="relational",
-        help="v5 relational, v6 damage, or v7 public piles/relic counters/stacks",
+        help="v5/v6 relational, v7 resources, or v8 species-aware enemy instances",
     )
     p.add_argument("--temperature-start", type=float, default=0.05)
     p.add_argument("--temperature-end", type=float, default=0.035)
