@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import sys
 from collections.abc import Sequence
 from dataclasses import asdict
 from pathlib import Path
@@ -103,12 +102,15 @@ def _summary_line(name: str, report: dict[str, Any]) -> str:
     s = report["summary"]
     multi = report["multi_enemy"]
     boss = report["by_tier"].get("boss", {})
+    def fmt(value: float | None, digits: int = 3) -> str:
+        return f"{value:+.{digits}f}" if value is not None else "n/a"
+
     return (
         f"{name:<17} "
-        f"all={s['delta_win_rate']:+.3f} "
-        f"boss={boss.get('delta_win_rate') or 0:+.3f} "
-        f"multi={multi['delta_win_rate']:+.3f} "
-        f"HP={s['delta_exit_hp_all']:+.2f} "
+        f"all={fmt(s['delta_win_rate'])} "
+        f"boss={fmt(boss.get('delta_win_rate'))} "
+        f"multi={fmt(multi['delta_win_rate'])} "
+        f"HP={fmt(s['delta_exit_hp_all'], 2)} "
         f"discordant=+{s['candidate_only_wins']}/-{s['baseline_only_wins']}"
     )
 
