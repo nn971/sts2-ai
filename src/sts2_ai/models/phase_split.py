@@ -41,7 +41,7 @@ class PhaseSplitNeuralModel:
     def __post_init__(self) -> None:
         if not self.model_id:
             raise ValueError("Phase-split model requires a model identifier")
-        if self.combat_value_objective not in ("continuation", "hp_first"):
+        if self.combat_value_objective not in ("continuation", "hp_first", "hp_preservation"):
             raise ValueError("Unsupported combat value objective")
         if self.strategy.format_id != NEURAL_FORMAT:
             raise ValueError("Strategy head must use the semantic action format")
