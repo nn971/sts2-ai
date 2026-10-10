@@ -204,6 +204,9 @@ def test_pairing_replays_exact_entry_and_leaves_models_public_only() -> None:
     )
     assert report["summary"]["delta_win_rate"] == -1
     assert report["by_tier"]["weak"]["baseline_only_wins"] == 1
+    assert report["by_progress_and_tier"]["early"]["weak"]["complete_pairs"] == 1
+    assert report["by_enemy_composition"]["enemy"]["candidate_only_wins"] == 0
+    assert report["multi_enemy"]["scenarios"] == 0
 
 
 def test_replay_mismatch_fails_closed_and_releases_handles() -> None:
