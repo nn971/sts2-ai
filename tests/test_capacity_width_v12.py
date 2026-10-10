@@ -5,12 +5,12 @@ import copy
 import json
 
 import pytest
+from test_enemy_instances_v8 import build_model, combat_frame, targeted
 
 from sts2_ai.emulator import LegalAction, Observation
 from sts2_ai.models.neural import NEURAL_FORMAT, NeuralPolicyValueModel
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.models.width_expansion import widen_neural, widen_phase_split
-from test_enemy_instances_v8 import build_model, combat_frame, targeted
 
 
 def _source() -> PhaseSplitNeuralModel:
