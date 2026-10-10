@@ -247,35 +247,35 @@ def main() -> None:
                     if raw.get("format") == "sts2-phase-split-policy-value-v1"
                     else NeuralGreedyAgent.load(args.warm_start)
                 )
-            for index in range(args.eval_seeds):
-                item = play_run(
-                    backend, baseline_agent,
-                    seed=f"{args.eval_seed_prefix}-{index}",
-                    policy=InformationPolicy(FAIR_POLICY_ID),
-                    max_decisions=args.max_decisions,
-                    environment=NATIVE_OVERGROWTH,
-                    episode_goal_version=args.episode_goal,
-                )
-                baseline_evaluations.append({
-                    "seed": item.seed,
-                    "outcome": item.outcome,
-                    "act": item.terminal_act,
-                    "floor": item.terminal_floor,
-                    "progress": item.frontier_progress,
-                    "censored": item.censored,
-                    "act1_cleared": item.act1_cleared,
-                    "full_game_victory": item.full_game_victory,
-                    "episode_goal_version": item.episode_goal_version,
-                    "boss": (
-                        asdict(item.boss_progress)
-                        if item.boss_progress is not None else None
-                    ),
-                })
-                log(
-                    f"[baseline-eval] {index + 1}/{args.eval_seeds} "
-                    f"act={item.terminal_act} floor={item.terminal_floor} "
-                    f"outcome={item.outcome}"
-                )
+                for index in range(args.eval_seeds):
+                    item = play_run(
+                        backend, baseline_agent,
+                        seed=f"{args.eval_seed_prefix}-{index}",
+                        policy=InformationPolicy(FAIR_POLICY_ID),
+                        max_decisions=args.max_decisions,
+                        environment=NATIVE_OVERGROWTH,
+                        episode_goal_version=args.episode_goal,
+                    )
+                    baseline_evaluations.append({
+                        "seed": item.seed,
+                        "outcome": item.outcome,
+                        "act": item.terminal_act,
+                        "floor": item.terminal_floor,
+                        "progress": item.frontier_progress,
+                        "censored": item.censored,
+                        "act1_cleared": item.act1_cleared,
+                        "full_game_victory": item.full_game_victory,
+                        "episode_goal_version": item.episode_goal_version,
+                        "boss": (
+                            asdict(item.boss_progress)
+                            if item.boss_progress is not None else None
+                        ),
+                    })
+                    log(
+                        f"[baseline-eval] {index + 1}/{args.eval_seeds} "
+                        f"act={item.terminal_act} floor={item.terminal_floor} "
+                        f"outcome={item.outcome}"
+                    )
                 if args.baseline_eval_cache is not None:
                     save_cache(
                         args.baseline_eval_cache, baseline_key, baseline_evaluations,
