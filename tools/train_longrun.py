@@ -83,18 +83,18 @@ def main() -> None:
     p.add_argument("--ppo-gae-lambda", type=float, default=0.98)
     p.add_argument("--warm-start", type=Path, required=True)
     p.add_argument(
-        "--tactical-state-encoding", choices=("public_resources", "relational_damage"),
-        default="public_resources",
-        help="v7 public-resource combat features, or v6 control with same emulator",
+        "--tactical-state-encoding", choices=("enemy_instances", "public_resources", "relational_damage"),
+        default="enemy_instances",
+        help="v8 separate enemy instances with species and target pointers",
     )
-    p.add_argument("--output-dir", type=Path, default=Path("results/ppo-public-resources-v7"))
+    p.add_argument("--output-dir", type=Path, default=Path("results/ppo-instance-v8"))
     p.add_argument("--save-combat-samples", action="store_true")
-    p.add_argument("--train-seed-prefix", default="ppo-public-resources-v7-train")
+    p.add_argument("--train-seed-prefix", default="ppo-instance-v8-train")
     p.add_argument(
         "--exclude-train-seed", action="append", default=[],
         help="Explicitly omit an unsupported training episode seed (repeatable; logged)",
     )
-    p.add_argument("--eval-seed-prefix", default="ppo-public-resources-v7-eval")
+    p.add_argument("--eval-seed-prefix", default="ppo-instance-v8-eval")
     args = p.parse_args()
 
     if args.win_anneal_threshold < 1:
