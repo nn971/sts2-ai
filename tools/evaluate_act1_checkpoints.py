@@ -12,7 +12,6 @@ import atexit
 import hashlib
 import json
 import os
-import sys
 import tempfile
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict
@@ -25,7 +24,10 @@ from sts2_ai.emulator import FAIR_POLICY_ID, InformationPolicy, JsonlEmulatorBac
 from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH
 from sts2_ai.evaluation import play_run
 from sts2_ai.evaluation.checkpoint_selection import (
-    GOAL, JOURNAL_SCHEMA, REPORT_SCHEMA, analyze,
+    GOAL,
+    JOURNAL_SCHEMA,
+    REPORT_SCHEMA,
+    analyze,
 )
 
 EXPECTED_REVISION = "9117b4af09f0164a19bb1c41b70f688c8948e0e3"
