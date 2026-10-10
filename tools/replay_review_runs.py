@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -65,6 +66,24 @@ def public_trace_entry(
     return entry
 
 
+def recording_observer(
+    entries: list[dict[str, Any]],
+) -> Callable[[Any, Any, Any, Any], None]:
+    """Bind one trace list to one synchronous evaluation run."""
+    def observer(_handle: Any, observation: Any, legal: Any, decision: Any) -> None:
+        entries.append(public_trace_entry(
+            observation.payload_json, decision.action.kind,
+            decision.action.payload_json,
+            decision_index=len(entries), legal_count=len(legal),
+        ))
+
+    return observer
+
+
+def _table_cell(value: Any) -> str:
+    return str(value).replace("|", "/").replace("\\n", " ")[:180]
+
+
 def markdown_review(
     seed: str, note: str, traces: dict[str, list[dict[str, Any]]],
     results: dict[str, dict[str, Any]],
@@ -102,10 +121,9 @@ def markdown_review(
             action = entry["action"]
             action_text = f"{action['kind']} {json.dumps(action['payload'], sort_keys=True)}"
             # Escape pipes in JSON and restrict excessively long spellings.
-            cell = lambda text: str(text).replace("|", "/").replace("\n", " ")[:180]
             lines.append(
                 f"| {entry['decision']} | {entry['floor']}/{entry['combat_turn']} "
-                f"| {entry['hp']} | {cell(enemy_text)} | {cell(action_text)} |"
+                f"| {entry['hp']} | {_table_cell(enemy_text)} | {_table_cell(action_text)} |"
             )
         lines.extend(["", "The companion JSONL retains additional public fields.", ""])
     return "\n".join(lines)
@@ -139,20 +157,13 @@ def run_review(
             for label, agent in agents.items():
                 entries: list[dict[str, Any]] = []
 
-                def observer(_handle: Any, observation: Any, legal: Any, decision: Any) -> None:
-                    entries.append(public_trace_entry(
-                        observation.payload_json, decision.action.kind,
-                        decision.action.payload_json,
-                        decision_index=len(entries), legal_count=len(legal),
-                    ))
-
                 result = play_run(
                     backend, agent, seed=seed,
                     policy=InformationPolicy(FAIR_POLICY_ID),
                     environment=NATIVE_OVERGROWTH,
                     episode_goal_version=NATIVE_ACT1_BOSS_GOAL,
                     max_decisions=max_decisions,
-                    decision_observer=observer,
+                    decision_observer=recording_observer(entries),
                 )
                 row = asdict(result)
                 traces[label] = entries
