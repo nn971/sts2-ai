@@ -369,6 +369,8 @@ def train_phase_split(
         raise ValueError("Relational tactical state requires dimension > 36")
     if tactical_state_encoding == "relational_damage" and dimension <= 40:
         raise ValueError("Damage-aware tactical state requires dimension > 40")
+    if tactical_state_encoding == "public_resources" and dimension <= 40:
+        raise ValueError("Public-resource tactical state requires dimension > 40")
     if not 0.0 <= boundary_weight <= 1.0:
         raise ValueError("Boundary bootstrapping weight must lie in [0, 1]")
     if not 0.0 <= hp_monotonic_weight <= 1.0:
