@@ -23,6 +23,11 @@ jobs:
       - run: python -m ruff check src tests tools/benchmark_coupled_belief.py
       - run: python -m mypy src/sts2_ai
       - run: python -m pytest
+      - name: Native Overgrowth committed-intent AI smoke
+        run: |
+          python tools/smoke_native_overgrowth.py \
+            --build --runs 4 --max-decisions 4096 \
+            --report /tmp/committed-intents-native-smoke.json
       - name: Reproducible coupled belief survival benchmark
         run: |
           python tools/benchmark_coupled_belief.py \

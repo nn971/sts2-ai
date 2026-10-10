@@ -205,6 +205,13 @@ class JsonlEmulatorBackend:
             self._terminate()
             raise JsonlBridgeError("Unrecognized native Overgrowth reset capability")
 
+        self._public_enemy_intent_schema = hello.get("publicEnemyIntentId")
+        if self._public_enemy_intent_schema not in (
+            None, "prototype-committed-public-enemy-intents-v1"
+        ):
+            self._terminate()
+            raise JsonlBridgeError("Unrecognized committed enemy-intent capability")
+
         self._factorized_initial_stream_schema = hello.get("factorizedInitialStreamsId")
         if self._factorized_initial_stream_schema not in (
             None, "prototype-independent-initial-streams-v1"
@@ -231,6 +238,11 @@ class JsonlEmulatorBackend:
     @property
     def emulator_revision(self) -> str:
         return self._emulator_revision
+
+    @property
+    def public_enemy_intent_schema(self) -> str | None:
+        """Optional, public-only committed-intent wire capability."""
+        return self._public_enemy_intent_schema
 
     @property
     def capability_manifest(self) -> Mapping[str, Any]:
