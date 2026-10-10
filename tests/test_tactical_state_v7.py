@@ -7,6 +7,7 @@ import json
 import pytest
 
 from sts2_ai.emulator import Observation
+from sts2_ai.models.hashed_linear import public_resources_tactical_action_features
 from sts2_ai.models.neural import (
     TACTICAL_DAMAGE_FORMAT,
     TACTICAL_RESOURCES_FORMAT,
@@ -182,3 +183,27 @@ def test_v7_training_and_warm_start_migration(tmp_path) -> None:
     assert second.combat.format_id == TACTICAL_RESOURCES_FORMAT
     assert len(continuation) == 2
     assert continuation[0] == rows[0]
+
+
+def test_v7_targets_same_kind_enemies_by_their_visible_effects() -> None:
+    state = frame()
+    one = state["combat"]["enemies"][0]
+    second = copy.deepcopy(one)
+    one["instance_id"] = 1
+    second["instance_id"] = 2
+    second["statuses"]["poison"] = 30
+    state["combat"]["enemies"].append(second)
+    a = public_resources_tactical_action_features(
+        state, "play_card", '{"CardInstanceId":11,"TargetEnemyId":1}', 512,
+    )
+    b = public_resources_tactical_action_features(
+        state, "play_card", '{"CardInstanceId":11,"TargetEnemyId":2}', 512,
+    )
+    assert a != b
+    # Ephemeral IDs are used for lookup but never hashed as features.
+    one["instance_id"] = 100
+    second["instance_id"] = 200
+    after = public_resources_tactical_action_features(
+        state, "play_card", '{"CardInstanceId":11,"TargetEnemyId":200}', 512,
+    )
+    assert after == b
