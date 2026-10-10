@@ -13,7 +13,7 @@ from sts2_ai.emulator.episode_goal import (
     EPISODE_GOALS, NATIVE_ACT1_BOSS_GOAL, PROTOTYPE_THREE_ACT_GOAL,
 )
 
-PINNED_EMULATOR = "670c188b936da5886cf137d19ceaec36e35627d1"
+PINNED_EMULATOR = "f9fcf270111cb13bf67159a61c32789435bc2b43"
 
 
 def _git(root: Path, *args: str) -> str:
