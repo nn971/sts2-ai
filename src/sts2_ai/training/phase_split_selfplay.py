@@ -32,18 +32,18 @@ from sts2_ai.emulator.episode_goal import (
 from sts2_ai.emulator.run_environment import LEGACY, require_environment
 from sts2_ai.models.hashed_linear import (
     neural_action_features,
+    public_resources_tactical_action_features,
     state_dict,
     state_features,
     tactical_action_features,
-    public_resources_tactical_action_features,
 )
 from sts2_ai.models.neural import (
-    TACTICAL_INSTANCES_FORMAT,
     TACTICAL_ATTENTION_FORMAT,
     TACTICAL_DAMAGE_FORMAT,
-    TACTICAL_RESOURCES_FORMAT,
     TACTICAL_FORMAT,
+    TACTICAL_INSTANCES_FORMAT,
     TACTICAL_RELATIONAL_FORMAT,
+    TACTICAL_RESOURCES_FORMAT,
     TACTICAL_STRUCTURED_FORMAT,
     NeuralPolicyValueModel,
 )
@@ -55,8 +55,8 @@ from sts2_ai.models.tactical_state import (
     tactical_state_features,
 )
 from sts2_ai.training.combat_outcomes import CombatOutcome
-from sts2_ai.training.instance_combat import add_instance_parameters, instance_forward
 from sts2_ai.training.enemy_attention import add_attention_parameters
+from sts2_ai.training.instance_combat import add_instance_parameters, instance_forward
 from sts2_ai.training.neural import _dense, _export, _forward, _new_params
 from sts2_ai.training.parallel_rollouts import (
     collect_parallel,
@@ -135,7 +135,8 @@ def _forward_decision(
     tactical_state_encoding: str = "legacy",
 ) -> tuple[Any, Any]:
     state = state_dict(decision.observation.payload_json)
-    if decision.phase == "combat" and tactical_state_encoding in ("enemy_instances", "enemy_attention"):
+    if (decision.phase == "combat" and
+            tactical_state_encoding in ("enemy_instances", "enemy_attention")):
         return instance_forward(state, decision.legal_actions, params, dimension, torch)
     feature_fn_state = (
         public_resources_tactical_state_features
