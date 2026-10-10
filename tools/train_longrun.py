@@ -9,6 +9,10 @@ import sys
 from pathlib import Path
 from statistics import fmean
 
+from sts2_ai.emulator.episode_goal import (
+    EPISODE_GOALS, NATIVE_ACT1_BOSS_GOAL, PROTOTYPE_THREE_ACT_GOAL,
+)
+
 PINNED_EMULATOR = "6328a62989014f080abed06684e4b5f7ea1f0af6"
 
 
@@ -35,7 +39,10 @@ def summarize(report: dict) -> dict[str, int | float | None]:
     return {
         "evaluated": len(completed),
         "act1_clears": sum(
-            r.get("act") is not None and r["act"] >= 2 for r in completed
+            r.get("act1_cleared") is True or (
+                "act1_cleared" not in r
+                and r.get("act") is not None and r["act"] >= 2
+            ) for r in completed
         ),
         "mean_frontier": fmean(r["progress"] for r in completed)
         if completed else None,
@@ -57,6 +64,9 @@ def main() -> None:
     p.add_argument("--episodes", type=int, default=64)
     p.add_argument("--workers", type=int, default=15)
     p.add_argument("--eval-seeds", type=int, default=128)
+    p.add_argument(
+        "--episode-goal", choices=EPISODE_GOALS, default=NATIVE_ACT1_BOSS_GOAL,
+    )
     p.add_argument("--seed", type=int, default=19)
     p.add_argument("--dimension", type=int, default=128)
     p.add_argument("--hidden", type=int, default=32)
@@ -108,6 +118,8 @@ def main() -> None:
             existing = json.loads(report.read_text())
             if (
                 existing["emulator_revision"] != PINNED_EMULATOR
+                or existing.get("episode_goal_version", PROTOTYPE_THREE_ACT_GOAL)
+                    != args.episode_goal
                 or len(existing["rounds"]) != target_round
                 or existing["optimizer_method"] != "ppo"
             ):
@@ -141,6 +153,7 @@ def main() -> None:
             "--temperature-end", str(args.temperature_end),
             "--temperature-decay-rounds", str(args.temperature_decay_rounds),
             "--train-seed-prefix", args.train_seed_prefix,
+            "--episode-goal", args.episode_goal,
             "--eval-seed-prefix", args.eval_seed_prefix,
             "--eval-seeds", str(args.eval_seeds),
             "--seed", str(args.seed),
@@ -177,7 +190,9 @@ def main() -> None:
                 f"checkpoint is reusable. Inspect {log_file}"
             )
         record = json.loads(report.read_text())
-        if record["emulator_revision"] != PINNED_EMULATOR:
+        if (record["emulator_revision"] != PINNED_EMULATOR or
+                record.get("episode_goal_version", PROTOTYPE_THREE_ACT_GOAL)
+                != args.episode_goal):
             raise SystemExit("Unexpected emulator revision in completed training report")
         summary = summarize(record)
         history.append({"stage": target_round, **summary})
