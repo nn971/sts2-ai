@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 from dataclasses import asdict, replace
 
 import pytest
@@ -227,3 +228,33 @@ def test_replay_mismatch_fails_closed_and_releases_handles() -> None:
             backend, [replace(wrong, emulator_revision="different")],
             SimpleAgent("attack"), SimpleAgent("attack"),
         )
+
+
+@pytest.mark.skipif(shutil.which("dotnet") is None, reason=".NET SDK unavailable")
+def test_native_pin_snapshot_smoke() -> None:
+    """Pin-specific live bridge contract, real map and deterministic combat forks."""
+    from sts2_ai.agents import HeuristicAgent
+    from sts2_ai.emulator import JsonlEmulatorBackend
+    from sts2_ai.emulator.episode_goal import NATIVE_ACT1_BOSS_GOAL
+    from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH
+    from sts2_ai.evaluation import play_run
+
+    with JsonlEmulatorBackend(build=True) as backend:
+        agent = HeuristicAgent()
+        collector = SnapshotCollector(
+            backend, seed="snapshot-v14-native-smoke", source_policy=agent.policy_id,
+        )
+        play_run(
+            backend, agent, seed="snapshot-v14-native-smoke", policy=FAIR,
+            environment=NATIVE_OVERGROWTH,
+            episode_goal_version=NATIVE_ACT1_BOSS_GOAL,
+            max_decisions=64,
+            decision_observer=collector.on_decision,
+        )
+        assert collector.recipes, "Expected to enter an Act-1 combat"
+        first = collector.recipes[0]
+        assert first.tier == "weak" and first.progress == "early"
+        paired = evaluate_recipes(
+            backend, [first], agent, agent, max_combat_decisions=512,
+        )
+        assert paired[0].baseline == paired[0].candidate
