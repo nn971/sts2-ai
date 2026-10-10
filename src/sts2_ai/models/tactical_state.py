@@ -16,6 +16,8 @@ TACTICAL_STATE_SCHEMA = "sts2-tactical-public-state-v4"
 NUMERIC_COORDINATES = 32
 RELATIONAL_NUMERIC_COORDINATES = 36
 RELATIONAL_TACTICAL_STATE_SCHEMA = "sts2-tactical-public-state-v5-relational"
+DAMAGE_NUMERIC_COORDINATES = 40
+DAMAGE_TACTICAL_STATE_SCHEMA = "sts2-tactical-public-state-v6-base-and-modified-damage"
 
 
 def _number(value: object) -> float:
@@ -46,6 +48,7 @@ def _add_tokens(
 def tactical_state_features(
     state: dict[str, Any], dimension: int, *,
     relational: bool = False,
+    damage_aware: bool = False,
 ) -> dict[int, float]:
     """Encode visible tactical state, optionally preserving enemy/intent binding.
 
@@ -53,7 +56,10 @@ def tactical_state_features(
     relational enemy tokens and optional player-visible damage/hit numerics.
     Nothing is inferred from game content, private RNG, or future moves.
     """
+    if damage_aware and not relational:
+        raise ValueError("Damage-aware tactical features require relational encoding")
     reserved = (
+        DAMAGE_NUMERIC_COORDINATES if damage_aware else
         RELATIONAL_NUMERIC_COORDINATES if relational else NUMERIC_COORDINATES
     )
     if dimension <= reserved:
@@ -120,6 +126,7 @@ def tactical_state_features(
         # intent_damage denotes visible per-hit damage; intent_hits denotes
         # visible hit count, with a single hit as the fallback.
         public_attacks: list[tuple[float, float]] = []
+        base_attacks: list[tuple[float, float, float]] = []
         for enemy in enemies:
             if not isinstance(enemy.get("move_id"), str):
                 continue  # A hidden/unknown intent must stay hidden.
@@ -132,6 +139,12 @@ def tactical_state_features(
                 or raw_damage < 0
             ):
                 continue
+            valid_hits = (
+                isinstance(raw_hits, int) and not isinstance(raw_hits, bool)
+                and 1 <= raw_hits <= 100
+            )
+            if damage_aware and not valid_hits:
+                continue  # v6 does not infer a missing or invalid hit count.
             hits = (
                 float(raw_hits)
                 if isinstance(raw_hits, int) and not isinstance(raw_hits, bool)
@@ -139,12 +152,30 @@ def tactical_state_features(
                 else 1.0
             )
             public_attacks.append((float(raw_damage), hits))
+            if damage_aware:
+                raw_base = enemy.get("intent_base_damage")
+                if (
+                    isinstance(raw_base, (int, float))
+                    and not isinstance(raw_base, bool)
+                    and math.isfinite(raw_base)
+                    and raw_base >= 0
+                ):
+                    base_attacks.append((float(raw_base), float(raw_damage), hits))
         values.extend([
             sum(d * h for d, h in public_attacks) / 100.0,
             max((d * h for d, h in public_attacks), default=0.0) / 100.0,
             sum(h for _, h in public_attacks) / 10.0,
             len(public_attacks) / 5.0,
         ])
+        if damage_aware:
+            values.extend([
+                sum(base * hits for base, _, hits in base_attacks) / 100.0,
+                max((base * hits for base, _, hits in base_attacks), default=0.0)
+                / 100.0,
+                sum((modified - base) * hits for base, modified, hits in base_attacks)
+                / 100.0,
+                len(base_attacks) / 5.0,
+            ])
     features = {
         i: min(8.0, max(-8.0, value))
         for i, value in enumerate(values) if value != 0.0
@@ -183,6 +214,28 @@ def tactical_state_features(
             block_value = _number(enemy.get("block"))
             tokens[f"relation:{prefix}|hp10={max(0, int(hp_value)) // 10}"] += 1
             tokens[f"relation:{prefix}|block10={max(0, int(block_value)) // 10}"] += 1
+            if damage_aware and isinstance(move_id, str) and move_id:
+                raw_base = enemy.get("intent_base_damage")
+                modified = enemy.get("intent_damage")
+                relation_hits = enemy.get("intent_hits")
+                if (
+                    isinstance(raw_base, (int, float))
+                    and not isinstance(raw_base, bool)
+                    and math.isfinite(raw_base) and raw_base >= 0
+                    and isinstance(modified, (int, float))
+                    and not isinstance(modified, bool)
+                    and math.isfinite(modified) and modified >= 0
+                    and isinstance(relation_hits, int)
+                    and not isinstance(relation_hits, bool)
+                    and 1 <= relation_hits <= 100
+                ):
+                    # Bind the *same enemy* to both threat values and hit
+                    # count; a global sum would lose attack attribution.
+                    threat = (
+                        f"base5={int(raw_base) // 5}|modified5={int(modified) // 5}"
+                        f"|hits={relation_hits}"
+                    )
+                    tokens[f"relation:{prefix}|{threat}"] += 1
             # Powers/statuses must remain associated with their owner.
             for power in _objects(enemy.get("powers")):
                 power_id = power.get("power_id")
@@ -199,7 +252,8 @@ def tactical_state_features(
         tokens[f"boss:{boss}"] += 1
     for token, count in tokens.items():
         digest = hashlib.sha256(
-            (("tactical-state-v5:" if relational else "tactical-state-v4:")
+            (("tactical-state-v6:" if damage_aware else
+              "tactical-state-v5:" if relational else "tactical-state-v4:")
              + token).encode("utf-8")
         ).digest()
         index = reserved + (
@@ -216,3 +270,12 @@ def relational_tactical_state_features(
 ) -> dict[int, float]:
     """v5 public-only features retaining each enemy's announced move."""
     return tactical_state_features(state, dimension, relational=True)
+
+
+def damage_tactical_state_features(
+    state: dict[str, Any], dimension: int,
+) -> dict[int, float]:
+    """v6 relational enemy intents with displayed base and current damage."""
+    return tactical_state_features(
+        state, dimension, relational=True, damage_aware=True
+    )
