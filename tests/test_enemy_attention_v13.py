@@ -6,6 +6,7 @@ import json
 import random
 
 import pytest
+from test_enemy_instances_v8 import build_model, combat_frame, targeted
 
 from sts2_ai.emulator import LegalAction, Observation
 from sts2_ai.models.neural import TACTICAL_ATTENTION_FORMAT, NeuralPolicyValueModel
@@ -18,7 +19,6 @@ from sts2_ai.training.phase_split_ppo_batch import (
     forward_batch,
 )
 from sts2_ai.training.selfplay import PublicDecision
-from test_enemy_instances_v8 import build_model, combat_frame, targeted
 
 
 def attention_model(gate: float = 0.0) -> NeuralPolicyValueModel:
