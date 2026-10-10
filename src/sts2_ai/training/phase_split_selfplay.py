@@ -327,6 +327,7 @@ def train_phase_split(
     tactical_state_encoding: str = "legacy",
     loss_normalization: str = "legacy_episode_sum",
     optimizer_method: str = "reinforce",
+    ppo_backend: str = "reference",
     ppo_epochs: int = 3,
     ppo_batch_size: int = 128,
     ppo_sample_limit: int = 4096,
@@ -362,6 +363,10 @@ def train_phase_split(
         raise ValueError("Loss normalization must be legacy_episode_sum or phase_mean")
     if optimizer_method not in ("reinforce", "ppo"):
         raise ValueError("Unknown phase-split optimizer")
+    if ppo_backend not in ("reference", "batched"):
+        raise ValueError("PPO backend must be reference or batched")
+    if optimizer_method != "ppo" and ppo_backend != "reference":
+        raise ValueError("Batched backend requires PPO")
     if optimizer_method == "ppo":
         if combat_advantage_baseline != "critic":
             raise ValueError("PPO uses its own GAE critic baseline, not leave-one-run-out")
@@ -499,6 +504,8 @@ def train_phase_split(
     if episode_goal_version != PROTOTYPE_THREE_ACT_GOAL:
         config["episode_goal_version"] = episode_goal_version
     if optimizer_method == "ppo":
+        if ppo_backend != "reference":
+            config["ppo_backend"] = ppo_backend
         config.update({
             "optimizer_method": optimizer_method,
             "ppo_epochs": ppo_epochs,
@@ -626,7 +633,12 @@ def train_phase_split(
             losses: list[float]
             optimizer_started = time.perf_counter()
             if optimizer_method == "ppo":
-                from sts2_ai.training.phase_split_ppo import ppo_update
+                if ppo_backend == "batched":
+                    from sts2_ai.training.phase_split_ppo_batch import ( 
+                        ppo_update_batched as ppo_update,
+                    )
+                else:
+                    from sts2_ai.training.phase_split_ppo import ppo_update
 
                 ppo = ppo_update(
                     torch=torch,
