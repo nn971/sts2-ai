@@ -89,7 +89,11 @@ for encoding in relational relational_damage
         --combat-samples-dir "results/intent-$encoding-samples" \
         --output "results/intent-$encoding-model.json" \
         --report "results/intent-$encoding-report.json" \
-        --build
+        --build 2>&1 | tee "results/intent-$encoding.log"
+    if test $pipestatus[1] -ne 0
+        echo "Training failed for $encoding" >&2
+        break
+    end
 end
 ```
 
