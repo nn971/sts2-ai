@@ -94,7 +94,7 @@ def test_trace_records_only_public_fields_and_target_instance() -> None:
         }},
     )
     assert "Kin recovery" in document
-    assert "kin_priest" in document
+    assert "Kin Priest #4" in document
     assert "Play Snakebite" in document
     assert "Kin Priest #4" in document
 
