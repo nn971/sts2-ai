@@ -325,6 +325,7 @@ def train_phase_split(
     checkpoint: Path | None = None, resume: bool = False,
     combat_samples_dir: Path | None = None,
     progress: Callable[[PhaseSplitRound], None] | None = None,
+    excluded_training_seeds: frozenset[str] = frozenset(),
 ) -> tuple[PhaseSplitNeuralModel, tuple[PhaseSplitRound, ...]]:
     if min(rounds, episodes_per_round, dimension, hidden, max_decisions, workers) <= 0:
         raise ValueError("Expected positive sizes and worker count")
@@ -524,9 +525,20 @@ def train_phase_split(
                 tactical_state_encoding=tactical_state_encoding,
                 combat_objective=combat_objective,
             )
-            seeds = [
+            planned_seeds = [
                 f"{seed_prefix}-{index}-{j}" for j in range(episodes_per_round)
             ]
+            excluded = [s for s in planned_seeds if s in excluded_training_seeds]
+            seeds = [s for s in planned_seeds if s not in excluded_training_seeds]
+            if not seeds:
+                raise ValueError(f"Every training seed excluded in round {index + 1}")
+            if excluded:
+                print(
+                    f"[split-excluded] round {index + 1}: explicitly excluded "
+                    f"{len(excluded)} unsupported emulator seed(s): "
+                    f"{', '.join(excluded)}; no rollout, loss, or reward recorded",
+                    flush=True,
+                )
             start = time.perf_counter()
             if pool is None:
                 cohort = tuple(collect_public_episode(
@@ -768,9 +780,9 @@ def train_phase_split(
                             steps += 1
             victories += sum(ep.won for ep in completed)
             row = PhaseSplitRound(
-                round_index=index, played=episodes_per_round,
+                round_index=index, played=len(cohort),
                 completed=len(completed),
-                censored=episodes_per_round - len(completed),
+                censored=len(cohort) - len(completed),
                 wins=sum(ep.won for ep in completed),
                 combat_victories=sum(
                     o.result == "victory" for ep in cohort for o in ep.combat_outcomes
