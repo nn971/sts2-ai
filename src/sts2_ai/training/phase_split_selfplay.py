@@ -34,6 +34,7 @@ from sts2_ai.models.hashed_linear import (
 )
 from sts2_ai.models.neural import (
     TACTICAL_DAMAGE_FORMAT,
+    TACTICAL_RESOURCES_FORMAT,
     TACTICAL_FORMAT,
     TACTICAL_RELATIONAL_FORMAT,
     TACTICAL_STRUCTURED_FORMAT,
@@ -42,6 +43,7 @@ from sts2_ai.models.neural import (
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.models.tactical_state import (
     damage_tactical_state_features,
+    public_resources_tactical_state_features,
     relational_tactical_state_features,
     tactical_state_features,
 )
@@ -125,7 +127,9 @@ def _forward_decision(
 ) -> tuple[Any, Any]:
     state = state_dict(decision.observation.payload_json)
     feature_fn_state = (
-        damage_tactical_state_features
+        public_resources_tactical_state_features
+        if decision.phase == "combat" and tactical_state_encoding == "public_resources"
+        else damage_tactical_state_features
         if decision.phase == "combat" and tactical_state_encoding == "relational_damage"
         else relational_tactical_state_features
         if decision.phase == "combat" and tactical_state_encoding == "relational"
@@ -163,6 +167,8 @@ def _export_split(
             combat_params, dimension, hidden,
             model_id=model_id + "-combat", value_head_trained=trained,
             format_id=(
+                TACTICAL_RESOURCES_FORMAT
+                if tactical_state_encoding == "public_resources" else
                 TACTICAL_DAMAGE_FORMAT
                 if tactical_state_encoding == "relational_damage" else
                 TACTICAL_RELATIONAL_FORMAT
@@ -353,7 +359,8 @@ def train_phase_split(
         if not 0 < ppo_gamma <= 1 or not 0 <= ppo_gae_lambda <= 1:
             raise ValueError("Invalid PPO gamma/lambda")
     if tactical_state_encoding not in (
-        "legacy", "structured", "relational", "relational_damage"
+        "legacy", "structured", "relational", "relational_damage",
+        "public_resources",
     ):
         raise ValueError("Unsupported tactical state encoding")
     if tactical_state_encoding == "structured" and dimension <= 32:
@@ -405,6 +412,8 @@ def train_phase_split(
             sources = {"strategy": base, "combat": base}
             previous_combat_objective = "continuation"
         expected_tactical_format = (
+            TACTICAL_RESOURCES_FORMAT
+            if tactical_state_encoding == "public_resources" else
             TACTICAL_DAMAGE_FORMAT
             if tactical_state_encoding == "relational_damage" else
             TACTICAL_RELATIONAL_FORMAT
