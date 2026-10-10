@@ -279,3 +279,135 @@ def damage_tactical_state_features(
     return tactical_state_features(
         state, dimension, relational=True, damage_aware=True
     )
+
+
+# v7 adds player-visible inventories and exact modifier quantities. Legacy v4-v6
+# hash schemas remain bit-for-bit unchanged for existing trained models.
+PUBLIC_RESOURCES_TACTICAL_STATE_SCHEMA = "sts2-tactical-public-state-v7-resources"
+
+
+def _visible_resource_tokens(
+    result: Counter[str], prefix: str, value: object, *, depth: int = 0,
+) -> None:
+    """Flatten public item-local metadata, never transient instance identifiers."""
+    if depth > 3:
+        return
+    if isinstance(value, dict):
+        for key in sorted(value):
+            if key in ("instance_id", "persistent_card_instance_id"):
+                continue
+            _visible_resource_tokens(
+                result, f"{prefix}|{key}", value[key], depth=depth + 1,
+            )
+    elif isinstance(value, list):
+        result[f"{prefix}|length={len(value)}"] += 1
+        for item in value:
+            _visible_resource_tokens(result, prefix + "|item", item, depth=depth + 1)
+    elif isinstance(value, bool):
+        result[f"{prefix}|value={str(value).lower()}"] += 1
+    elif isinstance(value, str):
+        result[f"{prefix}|value={value}"] += 1
+    elif isinstance(value, (int, float)) and math.isfinite(float(value)):
+        result[f"{prefix}|number={value}"] += 1
+
+
+def public_resources_tactical_state_features(
+    state: dict[str, Any], dimension: int,
+) -> dict[int, float]:
+    """v7: use public unordered draw pile, relic progress and exact power stacks.
+
+    The base v6 coordinates remain defined but categorical features are
+    deliberately extended under a distinct model format. Do not reuse v6
+    state weights under this format without an explicit migration.
+    """
+    features = damage_tactical_state_features(state, dimension)
+    combat = state.get("combat")
+    if not isinstance(combat, dict):
+        raise ValueError("Resource encoder requires a public combat frame")
+    draw_pile = combat.get("draw_pile")
+    relic_counters = combat.get("relic_counters")
+    if not isinstance(draw_pile, list) or not isinstance(relic_counters, list):
+        raise ValueError("Resource encoder requires visible draw_pile and relic_counters")
+    visible_count = combat.get("draw_pile_count")
+    if (
+        isinstance(visible_count, int) and not isinstance(visible_count, bool)
+        and len(draw_pile) != visible_count
+    ):
+        raise ValueError("Draw-pile count disagrees with public draw-pile contents")
+
+    tokens: Counter[str] = Counter()
+
+    # Multisets are invariant under rearrangement of the observed arrays.
+    for zone in ("draw_pile", "discard_pile", "exhaust_pile", "hand"):
+        for card in _objects(combat.get(zone)):
+            card_id = card.get("card_id")
+            if not isinstance(card_id, str) or not card_id:
+                continue
+            prefix = f"zone={zone}|card={card_id}"
+            tokens[prefix] += 1
+            level = card.get("upgrade_level", 0)
+            if isinstance(level, int) and not isinstance(level, bool):
+                tokens[f"{prefix}|upgrade={level}"] += 1
+            if card.get("is_temporary") is True:
+                tokens[f"{prefix}|temporary"] += 1
+            for field in ("affliction", "state"):
+                metadata = card.get(field)
+                if metadata is not None:
+                    _visible_resource_tokens(tokens, f"{prefix}|{field}", metadata)
+
+    for relic in _objects(state.get("relics")):
+        relic_id = relic.get("relic_id")
+        if isinstance(relic_id, str) and relic_id:
+            _visible_resource_tokens(
+                tokens, f"relic={relic_id}|state", relic.get("state"),
+            )
+
+    def stacks(prefix: str, amount: object) -> None:
+        if not isinstance(amount, (int, float)) or isinstance(amount, bool):
+            return
+        if not math.isfinite(amount):
+            return
+        # Exact tokens distinguish stack counts; named magnitude features
+        # also generalize between nearby values and beyond training ranges.
+        tokens[f"{prefix}|stacks={amount}"] += 1
+        tokens[f"{prefix}|magnitude"] += max(-8.0, min(8.0, float(amount) / 5.0))
+
+    for power in _objects(combat.get("player_powers")):
+        power_id = power.get("power_id")
+        if isinstance(power_id, str):
+            stacks(f"player|power={power_id}", power.get("stacks"))
+
+    for enemy in _objects(combat.get("enemies")):
+        enemy_id = enemy.get("enemy_id")
+        if not isinstance(enemy_id, str):
+            continue
+        owner = f"enemy={enemy_id}"
+        # Match status/power magnitude to the specific enemy.
+        for power in _objects(enemy.get("powers")):
+            power_id = power.get("power_id")
+            if isinstance(power_id, str):
+                stacks(f"{owner}|power={power_id}", power.get("stacks"))
+        statuses = enemy.get("statuses")
+        if isinstance(statuses, dict):
+            for status_id, count in statuses.items():
+                if isinstance(status_id, str):
+                    stacks(f"{owner}|status={status_id}", count)
+
+    for relic_counter in _objects(relic_counters):
+        relic_id = relic_counter.get("relic_id")
+        counts = relic_counter.get("trigger_counts")
+        if not isinstance(relic_id, str) or not isinstance(counts, list):
+            raise ValueError("Malformed public relic counter")
+        for trigger_index, value in enumerate(counts):
+            stacks(f"relic={relic_id}|trigger={trigger_index}", value)
+
+    # The v7-specific tokens occupy only the existing categorical region;
+    # scalar v6 coordinates (health, energy, visible attack damage) survive.
+    reserved = DAMAGE_NUMERIC_COORDINATES
+    for token, weight in sorted(tokens.items()):
+        digest = hashlib.sha256(("tactical-state-v7:" + token).encode()).digest()
+        index = reserved + int.from_bytes(digest[:8], "big") % (dimension - reserved)
+        features[index] = max(
+            -8.0, min(8.0, features.get(index, 0.0) + max(-8.0, min(8.0, weight / 8.0)))
+        )
+    return features
