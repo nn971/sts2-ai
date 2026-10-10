@@ -190,9 +190,9 @@ def tactical_state_features(
                     tokens[f"relation:{prefix}|power={name}"] += 1
             statuses = enemy.get("statuses")
             if isinstance(statuses, dict):
-                for name, stacks in statuses.items():
-                    if isinstance(name, str) and _number(stacks) > 0:
-                        tokens[f"relation:{prefix}|status={name}"] += 1
+                for status_id, stacks in statuses.items():
+                    if isinstance(status_id, str) and _number(stacks) > 0:
+                        tokens[f"relation:{prefix}|status={status_id}"] += 1
 
     boss = state.get("act_one_boss_encounter_id")
     if isinstance(boss, str) and boss:
