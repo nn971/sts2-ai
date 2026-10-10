@@ -64,6 +64,7 @@ def main() -> None:
     p.add_argument("--episodes", type=int, default=64)
     p.add_argument("--workers", type=int, default=15)
     p.add_argument("--eval-seeds", type=int, default=128)
+    p.add_argument("--win-anneal-threshold", type=int, default=16)
     p.add_argument(
         "--episode-goal", choices=EPISODE_GOALS, default=NATIVE_ACT1_BOSS_GOAL,
     )
@@ -96,6 +97,8 @@ def main() -> None:
     p.add_argument("--eval-seed-prefix", default="ppo-public-resources-v7-eval")
     args = p.parse_args()
 
+    if args.win_anneal_threshold < 1:
+        p.error("--win-anneal-threshold must be positive")
     if min(args.rounds, args.stage_size, args.episodes, args.workers) <= 0:
         p.error("rounds/stage/episodes/workers must be positive")
     if args.rounds % args.stage_size:
@@ -154,6 +157,7 @@ def main() -> None:
             "--temperature-decay-rounds", str(args.temperature_decay_rounds),
             "--train-seed-prefix", args.train_seed_prefix,
             "--episode-goal", args.episode_goal,
+            "--win-anneal-threshold", str(args.win_anneal_threshold),
             "--eval-seed-prefix", args.eval_seed_prefix,
             "--eval-seeds", str(args.eval_seeds),
             "--seed", str(args.seed),
