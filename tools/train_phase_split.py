@@ -76,6 +76,8 @@ def main() -> None:
     p.add_argument("--temperature-end", type=float, default=0.035)
     p.add_argument("--temperature-decay-rounds", type=int, default=20)
     p.add_argument("--max-decisions", type=int, default=4096)
+    p.add_argument("--win-anneal-threshold", type=int, default=16,
+                   help="Number of training victories before auxiliary shaping vanishes")
     p.add_argument("--eval-seeds", type=int, default=16)
     p.add_argument(
         "--episode-goal", choices=EPISODE_GOALS, default=NATIVE_ACT1_BOSS_GOAL,
@@ -98,6 +100,8 @@ def main() -> None:
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--report", type=Path, required=True)
     args = p.parse_args()
+    if args.win_anneal_threshold < 1:
+        p.error("--win-anneal-threshold must be positive")
     if args.eval_seeds < 1:
         p.error("--eval-seeds must be positive")
     if not args.eval_seed_prefix:
@@ -138,6 +142,7 @@ def main() -> None:
         f"combat_objective={args.combat_objective} "
         f"combat_advantage_baseline={combat_baseline} "
         f"resume={args.resume} goal={args.episode_goal} "
+        f"win_anneal_threshold={args.win_anneal_threshold} "
         f"warm_start={args.warm_start or 'none'}"
     )
     with JsonlEmulatorBackend(build=args.build) as backend:
@@ -169,6 +174,7 @@ def main() -> None:
             environment=NATIVE_OVERGROWTH, progress=progress,
             excluded_training_seeds=frozenset(args.exclude_train_seed),
             episode_goal_version=args.episode_goal,
+            win_anneal_threshold=args.win_anneal_threshold,
         )
         model.save(args.output)
         log(f"[split] model exported: {args.output}")
@@ -258,6 +264,7 @@ def main() -> None:
             ),
             "optimizer_method": args.optimizer_method,
             "episode_goal_version": args.episode_goal,
+            "win_anneal_threshold": args.win_anneal_threshold,
             "train_seed_prefix": args.train_seed_prefix,
             "excluded_training_seeds": sorted(set(args.exclude_train_seed)),
             "ppo_hyperparameters": (
