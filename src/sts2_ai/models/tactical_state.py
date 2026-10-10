@@ -14,6 +14,8 @@ from typing import Any
 
 TACTICAL_STATE_SCHEMA = "sts2-tactical-public-state-v4"
 NUMERIC_COORDINATES = 32
+RELATIONAL_NUMERIC_COORDINATES = 36
+RELATIONAL_TACTICAL_STATE_SCHEMA = "sts2-tactical-public-state-v5-relational"
 
 
 def _number(value: object) -> float:
@@ -42,15 +44,22 @@ def _add_tokens(
 
 
 def tactical_state_features(
-    state: dict[str, Any], dimension: int,
+    state: dict[str, Any], dimension: int, *,
+    relational: bool = False,
 ) -> dict[int, float]:
-    """Encode a visible tactical frame without map-node/instance noise.
+    """Encode visible tactical state, optionally preserving enemy/intent binding.
 
-    Critical HP, attack pressure, block, energy, hand and consumable counts
-    have collision-free numeric coordinates. Names are stable-hashed separately.
+    The default is the unmodified v4 feature schema for old models. v5 adds
+    relational enemy tokens and optional player-visible damage/hit numerics.
+    Nothing is inferred from game content, private RNG, or future moves.
     """
-    if dimension <= NUMERIC_COORDINATES:
-        raise ValueError("Tactical state dimension must exceed 32")
+    reserved = (
+        RELATIONAL_NUMERIC_COORDINATES if relational else NUMERIC_COORDINATES
+    )
+    if dimension <= reserved:
+        raise ValueError(
+            f"Tactical state dimension must exceed {reserved}"
+        )
     combat = state.get("combat")
     if not isinstance(combat, dict):
         raise ValueError("Tactical state encoder requires a public combat frame")
@@ -104,6 +113,38 @@ def tactical_state_features(
         float(len(hand) == 0),
         float(combat.get("pending_choice_id") is not None),
     ]
+    if relational:
+        # These fields are OPTIONAL. Current native emulator observations
+        # expose move_id but not intent_damage/intent_hits. Never reconstruct
+        # missing threat values from the private enemy move definitions.
+        # intent_damage denotes visible per-hit damage; intent_hits denotes
+        # visible hit count, with a single hit as the fallback.
+        public_attacks: list[tuple[float, float]] = []
+        for enemy in enemies:
+            if not isinstance(enemy.get("move_id"), str):
+                continue  # A hidden/unknown intent must stay hidden.
+            raw_damage = enemy.get("intent_damage")
+            raw_hits = enemy.get("intent_hits")
+            if (
+                not isinstance(raw_damage, (int, float))
+                or isinstance(raw_damage, bool)
+                or not math.isfinite(raw_damage)
+                or raw_damage < 0
+            ):
+                continue
+            hits = (
+                float(raw_hits)
+                if isinstance(raw_hits, int) and not isinstance(raw_hits, bool)
+                and 1 <= raw_hits <= 100
+                else 1.0
+            )
+            public_attacks.append((float(raw_damage), hits))
+        values.extend([
+            sum(d * h for d, h in public_attacks) / 100.0,
+            max((d * h for d, h in public_attacks), default=0.0) / 100.0,
+            sum(h for _, h in public_attacks) / 10.0,
+            len(public_attacks) / 5.0,
+        ])
     features = {
         i: min(8.0, max(-8.0, value))
         for i, value in enumerate(values) if value != 0.0
@@ -126,17 +167,52 @@ def tactical_state_features(
         powers = _objects(enemy.get("powers"))
         _add_tokens(tokens, "enemy-power", powers, "power_id")
 
+    if relational:
+        for enemy in enemies:
+            enemy_id = enemy.get("enemy_id")
+            if not isinstance(enemy_id, str) or not enemy_id:
+                continue
+            # The announced move belongs to THIS enemy, not to a global bag
+            # of announced moves. Including it in the same token is crucial
+            # for untargeted Defend, draw, and potion actions.
+            move_id = enemy.get("move_id")
+            move = move_id if isinstance(move_id, str) and move_id else "unknown"
+            prefix = f"enemy={enemy_id}|move={move}"
+            tokens[f"relation:{prefix}"] += 1
+            hp_value = _number(enemy.get("hp"))
+            block_value = _number(enemy.get("block"))
+            tokens[f"relation:{prefix}|hp10={max(0, int(hp_value)) // 10}"] += 1
+            tokens[f"relation:{prefix}|block10={max(0, int(block_value)) // 10}"] += 1
+            # Powers/statuses must remain associated with their owner.
+            for power in _objects(enemy.get("powers")):
+                power_id = power.get("power_id")
+                if isinstance(power_id, str) and power_id:
+                    tokens[f"relation:{prefix}|power={power_id}"] += 1
+            statuses = enemy.get("statuses")
+            if isinstance(statuses, dict):
+                for status_id, stacks in statuses.items():
+                    if isinstance(status_id, str) and _number(stacks) > 0:
+                        tokens[f"relation:{prefix}|status={status_id}"] += 1
+
     boss = state.get("act_one_boss_encounter_id")
     if isinstance(boss, str) and boss:
         tokens[f"boss:{boss}"] += 1
     for token, count in tokens.items():
         digest = hashlib.sha256(
-            ("tactical-state-v4:" + token).encode("utf-8")
+            (("tactical-state-v5:" if relational else "tactical-state-v4:")
+             + token).encode("utf-8")
         ).digest()
-        index = NUMERIC_COORDINATES + (
-            int.from_bytes(digest[:8], "big") % (dimension - NUMERIC_COORDINATES)
+        index = reserved + (
+            int.from_bytes(digest[:8], "big") % (dimension - reserved)
         )
         features[index] = min(
             8.0, features.get(index, 0.0) + min(count, 8) / 8.0
         )
     return features
+
+
+def relational_tactical_state_features(
+    state: dict[str, Any], dimension: int,
+) -> dict[int, float]:
+    """v5 public-only features retaining each enemy's announced move."""
+    return tactical_state_features(state, dimension, relational=True)
