@@ -196,6 +196,10 @@ def test_v8_ppo_smoke_and_checkpoint_goal(tmp_path) -> None:
                     for i, enemy in enumerate(frame["combat"]["enemies"]):
                         enemy["formation_position"] = i
                         enemy["last_move_id"] = None
+                        enemy.setdefault("block", 0)
+                        enemy.setdefault("statuses", {})
+                        enemy.setdefault("powers", [])
+                        enemy.setdefault("move_id", "visible_attack")
 
     options = dict(
         rounds=1, episodes_per_round=2, dimension=DIM, hidden=HIDDEN,
