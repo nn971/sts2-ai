@@ -25,6 +25,10 @@ from pathlib import Path
 from typing import Any
 
 from sts2_ai.emulator import EmulatorBackend, JsonlEmulatorBackend, Observation
+from sts2_ai.emulator.episode_goal import (
+    PROTOTYPE_THREE_ACT_GOAL,
+    require_episode_goal,
+)
 from sts2_ai.emulator.run_environment import LEGACY, require_environment
 from sts2_ai.models.hashed_linear import (
     neural_action_features,
@@ -335,7 +339,9 @@ def train_phase_split(
     combat_samples_dir: Path | None = None,
     progress: Callable[[PhaseSplitRound], None] | None = None,
     excluded_training_seeds: frozenset[str] = frozenset(),
+    episode_goal_version: str = PROTOTYPE_THREE_ACT_GOAL,
 ) -> tuple[PhaseSplitNeuralModel, tuple[PhaseSplitRound, ...]]:
+    require_episode_goal(episode_goal_version, environment)
     if min(rounds, episodes_per_round, dimension, hidden, max_decisions, workers) <= 0:
         raise ValueError("Expected positive sizes and worker count")
     if combat_objective not in ("continuation", "hp_first", "hp_preservation"):
@@ -474,6 +480,10 @@ def train_phase_split(
         "warm_sha": warm_sha,
     }
     # Legacy fingerprints remain compatible with earlier checkpoints.
+    # The new goal deliberately changes which episodes count as victories,
+    # so it MUST have a distinct checkpoint fingerprint.
+    if episode_goal_version != PROTOTYPE_THREE_ACT_GOAL:
+        config["episode_goal_version"] = episode_goal_version
     if optimizer_method == "ppo":
         config.update({
             "optimizer_method": optimizer_method,
@@ -560,12 +570,14 @@ def train_phase_split(
                     actor_rng=random.Random(episode_actor_seed(seed, run_seed)),
                     max_decisions=max_decisions, environment=environment,
                     temperature=temperature,
+                    episode_goal_version=episode_goal_version,
                 ) for run_seed in seeds)
             else:
                 cohort = collect_parallel(
                     pool, model, seeds, base_seed=seed,
                     max_decisions=max_decisions, policy_id="prototype-fair-v0",
                     environment=environment, temperature=temperature,
+                    episode_goal_version=episode_goal_version,
                 )
             rollout_seconds = time.perf_counter() - start
             completed = [ep for ep in cohort if ep.completed]
