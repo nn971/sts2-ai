@@ -34,8 +34,8 @@ from sts2_ai.models.hashed_linear import (
 )
 from sts2_ai.models.neural import (
     TACTICAL_FORMAT,
-    TACTICAL_STRUCTURED_FORMAT,
     TACTICAL_RELATIONAL_FORMAT,
+    TACTICAL_STRUCTURED_FORMAT,
     NeuralPolicyValueModel,
 )
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
