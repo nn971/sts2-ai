@@ -14,6 +14,12 @@ from sts2_ai.emulator import (
     Observation,
     StateHandle,
 )
+from sts2_ai.emulator.episode_goal import (
+    NATIVE_ACT1_BOSS_GOAL,
+    PROTOTYPE_THREE_ACT_GOAL,
+    certified_native_act1_clear,
+    require_episode_goal,
+)
 from sts2_ai.emulator.run_environment import (
     LEGACY,
     cumulative_floor_progress,
@@ -39,7 +45,7 @@ class RunSummary:
     act1_cleared: bool | None = None
     full_game_victory: bool | None = None
     censored: bool = False
-    episode_goal_version: str = "prototype-three-act-v0"
+    episode_goal_version: str = PROTOTYPE_THREE_ACT_GOAL
     environment: str = LEGACY
     boss_progress: BossProgress | None = None
 
@@ -70,6 +76,7 @@ def play_run(
     ascension: int = 0,
     max_decisions: int | None = None,
     environment: str = LEGACY,
+    episode_goal_version: str = PROTOTYPE_THREE_ACT_GOAL,
     decision_observer: (
         Callable[[StateHandle, Observation, tuple[LegalAction, ...], Decision], None]
         | None
@@ -77,6 +84,7 @@ def play_run(
 ) -> RunSummary:
     """Drive one complete emulator run while keeping only the live state handle."""
 
+    require_episode_goal(episode_goal_version, environment)
     started = time.perf_counter()
     state = reset_training_run(backend, seed, environment, ascension)
     hp_trajectory: list[int] = []
@@ -86,6 +94,7 @@ def play_run(
     final_state: dict[str, Any] = {}
     preterminal_state: dict[str, Any] | None = None
     boss_tracker = BossProgressTracker(environment)
+    certified_goal_victory = False
 
     try:
         while True:
@@ -98,7 +107,14 @@ def play_run(
             if isinstance(hp, int):
                 hp_trajectory.append(hp)
 
-            if backend.is_terminal(state):
+            terminal = backend.is_terminal(state)
+            if (
+                episode_goal_version == NATIVE_ACT1_BOSS_GOAL
+                and not terminal and certified_native_act1_clear(current)
+            ):
+                certified_goal_victory = True
+                break
+            if terminal:
                 break
             if max_decisions is not None and decisions >= max_decisions:
                 break
@@ -126,10 +142,16 @@ def play_run(
         terminal = backend.is_terminal(state)
         outcome_raw = final_state.get("terminal_outcome")
         outcome = (
-            "truncated"
-            if not terminal
+            "victory" if certified_goal_victory
+            else "truncated" if not terminal
             else (str(outcome_raw) if isinstance(outcome_raw, str) else "unknown")
         )
+        if (episode_goal_version == NATIVE_ACT1_BOSS_GOAL
+                and terminal and not certified_goal_victory
+                and (final_state.get("act") != 1 or outcome == "victory")):
+            raise ValueError(
+                "Act-1 evaluation terminated without certified boss completion"
+            )
         act = final_state.get("act")
         floor = final_state.get("floor")
         frontier_state = (
@@ -152,20 +174,22 @@ def play_run(
             # Reaching Act 2 certifies an Act-1 clear even if the run
             # later truncates; an unfinished Act-1 run remains unknown.
             act1_cleared=(
-                True if (isinstance(act, int) and act >= 2) or outcome == "victory"
+                True if certified_goal_victory or (isinstance(act, int) and act >= 2) or outcome == "victory"
                 else False if outcome == "defeat"
                 else None
             ),
             full_game_victory=(
-                True if outcome == "victory"
+                None if certified_goal_victory
+                else True if outcome == "victory"
                 else False if outcome == "defeat"
                 else None
             ),
             censored=outcome not in ("victory", "defeat"),
+            episode_goal_version=episode_goal_version,
             environment=environment,
             boss_progress=boss_tracker.result(
                 act1_cleared=(
-                    outcome == "victory"
+                    certified_goal_victory or outcome == "victory"
                     or (isinstance(act, int) and act >= 2)
                 ),
             ),
