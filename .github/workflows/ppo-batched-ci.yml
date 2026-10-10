@@ -6,12 +6,14 @@ on:
       - "src/sts2_ai/training/phase_split_ppo_batch.py"
       - "src/sts2_ai/training/phase_split_selfplay.py"
       - "tests/test_phase_split_ppo_batch.py"
+      - "tools/benchmark_ppo_backends.py"
       - ".github/workflows/ppo-batched-ci.yml"
   pull_request:
     paths:
       - "src/sts2_ai/training/phase_split_ppo_batch.py"
       - "src/sts2_ai/training/phase_split_selfplay.py"
       - "tests/test_phase_split_ppo_batch.py"
+      - "tools/benchmark_ppo_backends.py"
       - ".github/workflows/ppo-batched-ci.yml"
   workflow_dispatch:
 
