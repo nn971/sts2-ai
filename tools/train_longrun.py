@@ -123,6 +123,8 @@ def main() -> None:
                 existing["emulator_revision"] != PINNED_EMULATOR
                 or existing.get("episode_goal_version", PROTOTYPE_THREE_ACT_GOAL)
                     != args.episode_goal
+                or existing.get("win_anneal_threshold", 16)
+                    != args.win_anneal_threshold
                 or len(existing["rounds"]) != target_round
                 or existing["optimizer_method"] != "ppo"
             ):
@@ -196,7 +198,9 @@ def main() -> None:
         record = json.loads(report.read_text())
         if (record["emulator_revision"] != PINNED_EMULATOR or
                 record.get("episode_goal_version", PROTOTYPE_THREE_ACT_GOAL)
-                != args.episode_goal):
+                != args.episode_goal or
+                record.get("win_anneal_threshold", 16)
+                != args.win_anneal_threshold):
             raise SystemExit("Unexpected emulator revision in completed training report")
         summary = summarize(record)
         history.append({"stage": target_round, **summary})
