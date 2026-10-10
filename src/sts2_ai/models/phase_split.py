@@ -15,8 +15,8 @@ from typing import Any
 from sts2_ai.emulator import LegalAction, Observation
 from sts2_ai.models.neural import (
     NEURAL_FORMAT,
-    TACTICAL_FORMAT,
     TACTICAL_DAMAGE_FORMAT,
+    TACTICAL_FORMAT,
     TACTICAL_RELATIONAL_FORMAT,
     TACTICAL_STRUCTURED_FORMAT,
     NeuralPolicyValueModel,
