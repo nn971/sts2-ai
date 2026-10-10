@@ -34,7 +34,7 @@ def fixture(count: int) -> list[PublicDecision]:
                        "instance_id": 101, "upgrade_level": 0}],
             "draw_pile": [], "draw_pile_count": 0,
             "discard_pile": [], "exhaust_pile": [],
-            "player_powers": [],
+            "player_powers": [], "relic_counters": [],
             "enemies": [
                 {
                     "instance_id": i + 1,
