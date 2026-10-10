@@ -11,7 +11,10 @@ from sts2_ai.agents.base import Decision
 from sts2_ai.emulator import InformationPolicy, LegalAction, Observation, Transition
 from sts2_ai.emulator.run_environment import NATIVE_MAP_PROFILE, NATIVE_RESET_SCHEMA
 from sts2_ai.evaluation.combat_snapshots import (
-    CombatSnapshotRecipe, SnapshotCollector, build_report, evaluate_recipes,
+    CombatSnapshotRecipe,
+    SnapshotCollector,
+    build_report,
+    evaluate_recipes,
     progress_band,
 )
 
