@@ -25,6 +25,7 @@ from .hashed_linear import (
 )
 from .protocol import PolicyValueEstimate
 from .tactical_state import (
+    damage_tactical_state_features,
     relational_tactical_state_features,
     tactical_state_features,
 )
@@ -33,6 +34,7 @@ NEURAL_FORMAT = "sts2-neural-policy-value-v2-semantic-action"
 TACTICAL_FORMAT = "sts2-neural-policy-value-v3-target-aware-combat"
 TACTICAL_STRUCTURED_FORMAT = "sts2-neural-policy-value-v4-structured-tactical"
 TACTICAL_RELATIONAL_FORMAT = "sts2-neural-policy-value-v5-relational-tactical"
+TACTICAL_DAMAGE_FORMAT = "sts2-neural-policy-value-v6-relational-damage-tactical"
 LEGACY_NEURAL_FORMAT = "sts2-neural-policy-value-v1"
 
 
@@ -93,7 +95,7 @@ class NeuralPolicyValueModel:
     def from_dict(cls, raw: dict[str, Any]) -> NeuralPolicyValueModel:
         if raw.get("format") not in {
             NEURAL_FORMAT, TACTICAL_FORMAT, TACTICAL_STRUCTURED_FORMAT,
-            TACTICAL_RELATIONAL_FORMAT,
+            TACTICAL_RELATIONAL_FORMAT, TACTICAL_DAMAGE_FORMAT,
             LEGACY_NEURAL_FORMAT,
         }:
             raise ValueError("Unsupported neural model format")
@@ -164,7 +166,9 @@ class NeuralPolicyValueModel:
     ) -> PolicyValueEstimate:
         state = state_dict(observation.payload_json)
         features = (
-            relational_tactical_state_features(state, self.dimension)
+            damage_tactical_state_features(state, self.dimension)
+            if self.format_id == TACTICAL_DAMAGE_FORMAT
+            else relational_tactical_state_features(state, self.dimension)
             if self.format_id == TACTICAL_RELATIONAL_FORMAT
             else tactical_state_features(state, self.dimension)
             if self.format_id == TACTICAL_STRUCTURED_FORMAT
@@ -177,7 +181,7 @@ class NeuralPolicyValueModel:
         logits = []
         for action in legal_actions:
             if self.format_id in (TACTICAL_FORMAT, TACTICAL_STRUCTURED_FORMAT,
-                                  TACTICAL_RELATIONAL_FORMAT):
+                                  TACTICAL_RELATIONAL_FORMAT, TACTICAL_DAMAGE_FORMAT):
                 feature_fn = tactical_action_features
             elif self.format_id == NEURAL_FORMAT:
                 feature_fn = neural_action_features
