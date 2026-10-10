@@ -12,6 +12,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import asdict
 from pathlib import Path
+from statistics import fmean
 from typing import Any
 
 from sts2_ai.agents.phase_split_agent import PhaseSplitGreedyAgent
@@ -74,6 +75,8 @@ def preflight(
     agents = {label: PhaseSplitGreedyAgent.load(path) for label, path in paths.items()}
     for label, agent in agents.items():
         is_attention = agent._model.combat.format_id == TACTICAL_ATTENTION_FORMAT
+        if agent._model.combat.hidden != 32:
+            raise ValueError(f"{label}: expected hidden width 32")
         if is_attention != label.startswith("attn-"):
             raise ValueError(
                 f"{label}: checkpoint's tactical format does not match its intended architecture"
@@ -113,6 +116,36 @@ def _summary_line(name: str, report: dict[str, Any]) -> str:
         f"HP={fmt(s['delta_exit_hp_all'], 2)} "
         f"discordant=+{s['candidate_only_wins']}/-{s['baseline_only_wins']}"
     )
+
+
+def _training_replicate_summary(
+    comparisons: dict[str, dict[str, Any]], *, attention_only: bool,
+) -> dict[str, Any]:
+    """Three training seeds, not 739 independent architecture replicates."""
+    families = ["v8"] if attention_only else ["v8", "h32"]
+    result: dict[str, Any] = {}
+    for family in families:
+        keys = [
+            (f"v8-vs-attn-{rep}" if family == "v8"
+             else f"h32-{rep}-vs-attn-{rep}")
+            for rep in REPLICAS
+        ]
+        values = [comparisons[key]["summary"]["delta_win_rate"] for key in keys]
+        boss = [comparisons[key]["by_tier"]["boss"]["delta_win_rate"] for key in keys]
+        multi = [comparisons[key]["multi_enemy"]["delta_win_rate"] for key in keys]
+        if any(value is None for value in values):
+            raise ValueError("Cannot summarize a fully censored model comparison")
+        result[family] = {
+            "training_replicates": 3,
+            "delta_win_rate_by_replica": dict(zip(REPLICAS, values, strict=True)),
+            "mean_delta_win_rate": fmean(values),
+            "positive_replica_count": sum(value > 0 for value in values),
+            "mean_boss_delta": fmean(x for x in boss if x is not None)
+                if any(x is not None for x in boss) else None,
+            "mean_multi_enemy_delta": fmean(x for x in multi if x is not None)
+                if any(x is not None for x in multi) else None,
+        }
+    return result
 
 
 def run(args: argparse.Namespace) -> None:
@@ -188,6 +221,9 @@ def run(args: argparse.Namespace) -> None:
         "emulator_revision": revision,
         "corpus_sha256": corpus_hash,
         "replicas": list(REPLICAS),
+        "training_replicate_summary": _training_replicate_summary(
+            comparisons, attention_only=args.attention_only,
+        ),
         "note": (
             "One authentic v8-sourced corpus; each checkpoint evaluated on "
             "identical exact entry states. Replicas are separate training runs."
