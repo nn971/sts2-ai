@@ -119,3 +119,48 @@ def test_comparison_mode_does_not_select_a_lucky_individual() -> None:
         reference_label="h32-r1", selection_sha256=None,
     )
     assert manifest["mode"] == "comparison"
+
+
+def test_capacity_summary_treats_training_seeds_as_replication_units() -> None:
+    from tools.summarize_capacity_v12 import format_markdown, summarize_comparison
+
+    labels = [f"h{width}-r{rep}" for rep in (1, 2, 3) for width in (32, 64)]
+    rows = []
+    for i in range(2):
+        seed = f"fresh-seed-{i}"
+        models = {}
+        for label in labels:
+            # Each wide model wins the first seed, and both widths win the second.
+            won = (i == 1) or label.startswith("h64")
+            models[label] = {
+                "seed": seed,
+                "outcome": "victory" if won else "defeat",
+                "episode_goal_version": "native-act1-boss-v1",
+                "act1_cleared": won,
+                "censored": False,
+                "frontier_progress": 16.0,
+                "boss_progress": None,
+            }
+        rows.append({"index": i, "seed": seed, "models": models})
+    report = {
+        "schema": "sts2-certified-act1-checkpoint-evaluation-v1",
+        "mode": "comparison",
+        "identity": {
+            "seed_prefix": "fresh-seed", "seeds": 2,
+            "goal": "native-act1-boss-v1",
+            "model_specs": {label: {} for label in labels},
+        },
+        "analysis": {"selected_label": None},
+        "runs": rows,
+    }
+    stats = summarize_comparison(report)
+    assert stats["replicas_favoring_h64"] == 3
+    assert stats["mean_h32_rate"] == pytest.approx(0.5)
+    assert stats["mean_h64_rate"] == pytest.approx(1.0)
+    assert stats["mean_paired_width_advantage"] == pytest.approx(0.5)
+    assert len(stats["per_training_replica"]) == 3
+    assert "50.0%" in format_markdown(stats)
+    with pytest.raises(ValueError, match="Individual checkpoint"):
+        summarize_comparison({
+            **report, "analysis": {"selected_label": "h64-r1"},
+        })
