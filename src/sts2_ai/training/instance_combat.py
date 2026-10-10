@@ -5,7 +5,8 @@ identical operations, with no Torch dependency at deployment.
 """
 from __future__ import annotations
 
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from sts2_ai.emulator import LegalAction
 from sts2_ai.models.enemy_instances import (
@@ -14,8 +15,8 @@ from sts2_ai.models.enemy_instances import (
     instance_action_features,
     instance_global_features,
 )
-from sts2_ai.training.neural import _dense
 from sts2_ai.training.enemy_attention import contextualize_torch
+from sts2_ai.training.neural import _dense
 
 
 def instance_forward(
