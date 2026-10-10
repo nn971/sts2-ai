@@ -15,6 +15,7 @@ from sts2_ai.models.enemy_instances import (
     instance_global_features,
 )
 from sts2_ai.training.neural import _dense
+from sts2_ai.training.enemy_attention import contextualize_torch
 
 
 def instance_forward(
@@ -32,6 +33,10 @@ def instance_forward(
         enemy_hidden = relu(linear(
             enemy_input, params["enemy_weight"], params["enemy_bias"],
         ))
+        enemy_hidden = contextualize_torch(
+            enemy_hidden.unsqueeze(0),
+            torch.ones((1, len(ids)), dtype=torch.bool), params, torch,
+        ).squeeze(0)
         pooled = enemy_hidden.mean(dim=0)
         by_id = {eid: i for i, eid in enumerate(ids)}
     else:
