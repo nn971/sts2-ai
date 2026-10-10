@@ -11,6 +11,7 @@ from statistics import fmean
 
 from sts2_ai.agents.phase_split_agent import PhaseSplitGreedyAgent
 from sts2_ai.emulator import FAIR_POLICY_ID, InformationPolicy, JsonlEmulatorBackend
+from sts2_ai.emulator.episode_goal import EPISODE_GOALS, NATIVE_ACT1_BOSS_GOAL
 from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH
 from sts2_ai.evaluation import play_run
 
@@ -22,6 +23,10 @@ def main() -> None:
     parser.add_argument("--seed-prefix", default="ppo-pr51-final-unseen-v1")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--max-decisions", type=int, default=4096)
+    parser.add_argument(
+        "--episode-goal", choices=EPISODE_GOALS, default=NATIVE_ACT1_BOSS_GOAL,
+        help="Explicit native Act-1 certified boss clear (default) or historical full-run mode",
+    )
     parser.add_argument("--build", action="store_true")
     args = parser.parse_args()
     if args.runs < 1 or not args.seed_prefix:
@@ -35,6 +40,7 @@ def main() -> None:
                 backend, agent, seed=seed,
                 policy=InformationPolicy(FAIR_POLICY_ID),
                 max_decisions=args.max_decisions, environment=NATIVE_OVERGROWTH,
+                episode_goal_version=args.episode_goal,
             )
             rows.append(result)
             print(
@@ -47,10 +53,7 @@ def main() -> None:
         summary = {
             "completed": len(completed),
             "censored": len(rows) - len(completed),
-            "act1_clears": sum(
-                r.terminal_act is not None and r.terminal_act >= 2
-                for r in completed
-            ),
+            "act1_clears": sum(r.act1_cleared is True for r in completed),
             "mean_frontier_progress": fmean(
                 r.frontier_progress for r in completed
             ) if completed else None,
@@ -64,6 +67,7 @@ def main() -> None:
             "model": str(args.model),
             "emulator_revision": backend.emulator_revision,
             "environment": NATIVE_OVERGROWTH,
+            "episode_goal_version": args.episode_goal,
             "seed_prefix": args.seed_prefix,
             "summary": summary,
             "runs": [asdict(r) for r in rows],
