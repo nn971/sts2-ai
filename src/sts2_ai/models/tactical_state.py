@@ -217,7 +217,7 @@ def tactical_state_features(
             if damage_aware and isinstance(move_id, str) and move_id:
                 raw_base = enemy.get("intent_base_damage")
                 modified = enemy.get("intent_damage")
-                hits = enemy.get("intent_hits")
+                relation_hits = enemy.get("intent_hits")
                 if (
                     isinstance(raw_base, (int, float))
                     and not isinstance(raw_base, bool)
@@ -225,14 +225,15 @@ def tactical_state_features(
                     and isinstance(modified, (int, float))
                     and not isinstance(modified, bool)
                     and math.isfinite(modified) and modified >= 0
-                    and isinstance(hits, int) and not isinstance(hits, bool)
-                    and 1 <= hits <= 100
+                    and isinstance(relation_hits, int)
+                    and not isinstance(relation_hits, bool)
+                    and 1 <= relation_hits <= 100
                 ):
                     # Bind the *same enemy* to both threat values and hit
                     # count; a global sum would lose attack attribution.
                     threat = (
                         f"base5={int(raw_base) // 5}|modified5={int(modified) // 5}"
-                        f"|hits={hits}"
+                        f"|hits={relation_hits}"
                     )
                     tokens[f"relation:{prefix}|{threat}"] += 1
             # Powers/statuses must remain associated with their owner.
