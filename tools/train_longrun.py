@@ -74,6 +74,10 @@ def main() -> None:
     p.add_argument("--output-dir", type=Path, default=Path("results/ppo-pr51-large"))
     p.add_argument("--save-combat-samples", action="store_true")
     p.add_argument("--train-seed-prefix", default="ppo-pr51-train-v1")
+    p.add_argument(
+        "--exclude-train-seed", action="append", default=[],
+        help="Explicitly omit an unsupported training episode seed (repeatable; logged)",
+    )
     p.add_argument("--eval-seed-prefix", default="ppo-pr51-dev-v1")
     args = p.parse_args()
 
@@ -144,6 +148,8 @@ def main() -> None:
             cmd.append("--resume")
         else:
             cmd.append("--build")
+        for excluded_seed in sorted(set(args.exclude_train_seed)):
+            cmd.extend(["--exclude-train-seed", excluded_seed])
         if args.save_combat_samples:
             cmd.extend(["--combat-samples-dir", str(output / "combat-samples")])
         print(
