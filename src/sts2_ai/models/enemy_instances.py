@@ -135,3 +135,23 @@ def action_target_instance(action_payload_json: str, instances: dict[int, Any]) 
     if type(target) is not int or target not in instances:
         raise ValueError("Action target does not reference a visible enemy instance")
     return target
+
+
+def instance_action_features(
+    state: dict[str, Any], action_kind: str, payload_json: str, dimension: int,
+) -> dict[int, float]:
+    """Encode action/card identity only; the target is supplied as its own node."""
+    from .hashed_linear import tactical_action_features
+    try:
+        payload = json.loads(payload_json)
+    except json.JSONDecodeError as exc:
+        raise ValueError("Malformed action payload") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("Malformed action payload")
+    untargeted = {
+        key: value for key, value in payload.items()
+        if key not in ("TargetEnemyId", "target_enemy_id")
+    }
+    return tactical_action_features(
+        state, action_kind, json.dumps(untargeted, sort_keys=True), dimension,
+    )
