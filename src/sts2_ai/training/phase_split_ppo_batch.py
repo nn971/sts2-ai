@@ -32,8 +32,8 @@ from sts2_ai.models.tactical_state import (
     relational_tactical_state_features,
     tactical_state_features,
 )
-from sts2_ai.training.neural import _dense
 from sts2_ai.training.enemy_attention import contextualize_torch
+from sts2_ai.training.neural import _dense
 from sts2_ai.training.phase_split_ppo import PpoDiagnostics, gae_terminal
 from sts2_ai.training.selfplay import Episode, PublicDecision
 
