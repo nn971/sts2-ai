@@ -7,12 +7,14 @@ import json
 import pytest
 
 from sts2_ai.emulator import LegalAction, Observation
-from sts2_ai.training.neural import _new_params
 from sts2_ai.training.instance_combat import add_instance_parameters
-from sts2_ai.training.phase_split_selfplay import _forward_decision, train_phase_split
+from sts2_ai.training.neural import _new_params
 from sts2_ai.training.phase_split_ppo_batch import (
-    collate, encode_decision, forward_batch,
+    collate,
+    encode_decision,
+    forward_batch,
 )
+from sts2_ai.training.phase_split_selfplay import _forward_decision, train_phase_split
 from sts2_ai.training.selfplay import PublicDecision
 from test_enemy_instances_v8 import combat_frame, targeted
 from test_phase_split_selfplay import TwoPhaseToy
@@ -66,12 +68,14 @@ def test_batched_forward_and_gradients_match_reference(encoding: str) -> None:
     encoded = [encode_decision(dec, dimension, encoding, torch) for dec in cases]
     batched = collate(encoded, torch)
     values, logits = forward_batch(batched, params, torch)
-    for i, (v, l) in enumerate(zip(old_values, old_logits, strict=True)):
+    for i, (v, single_logits) in enumerate(
+        zip(old_values, old_logits, strict=True)
+    ):
         assert float(values[i]) == pytest.approx(float(v), abs=2e-5)
-        assert logits[i, :len(l)].detach().tolist() == pytest.approx(
-            l.detach().tolist(), abs=2e-5,
+        assert logits[i, :len(single_logits)].detach().tolist() == pytest.approx(
+            single_logits.detach().tolist(), abs=2e-5,
         )
-        assert (logits[i, len(l):] < -1e8).all()
+        assert (logits[i, len(single_logits):] < -1e8).all()
     selected = torch.nn.functional.log_softmax(logits / 0.85, dim=1)[:, 0]
     new_loss = (values + logits[:, 0] + 0.1 * selected).sum()
     new_grads = torch.autograd.grad(new_loss, tuple(params.values()))
