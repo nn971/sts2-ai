@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from sts2_ai.emulator import JsonlEmulatorBackend
+from sts2_ai.emulator.episode_goal import PROTOTYPE_THREE_ACT_GOAL
 from sts2_ai.models.neural import NeuralPolicyValueModel
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel, load_public_model
 
@@ -35,6 +36,7 @@ class EpisodeRequest:
     policy_id: str
     environment: str
     temperature: float = 1.0
+    episode_goal_version: str = PROTOTYPE_THREE_ACT_GOAL
 
 
 def episode_actor_seed(base_seed: int, run_seed: str) -> int:
@@ -74,6 +76,7 @@ def _worker_collect(request: EpisodeRequest) -> Episode:
         policy_id=request.policy_id,
         environment=request.environment,
         temperature=request.temperature,
+        episode_goal_version=request.episode_goal_version,
     )
 
 
@@ -102,6 +105,7 @@ def collect_parallel(
     policy_id: str,
     environment: str,
     temperature: float = 1.0,
+    episode_goal_version: str = PROTOTYPE_THREE_ACT_GOAL,
 ) -> tuple[Episode, ...]:
     if not run_seeds:
         return ()
@@ -112,6 +116,7 @@ def collect_parallel(
         EpisodeRequest(
             payload, seed, episode_actor_seed(base_seed, seed),
             max_decisions, policy_id, environment, temperature,
+            episode_goal_version,
         )
         for seed in run_seeds
     ]
