@@ -108,7 +108,7 @@ def test_v7_inference_uses_exact_relic_counter() -> None:
             [1.0 if i == different else 0.0 for i in range(dim)],
             *[[0.0] * dim for _ in range(hidden - 1)],
         ],
-        "state_bias": [0.0] * hidden,
+        "state_bias": [2.0, 0.0, 0.0, 0.0],
         "action_weight": [[0.0] * dim for _ in range(hidden)],
         "action_bias": [0.0] * hidden,
         "policy_weight": [0.0] * hidden,
