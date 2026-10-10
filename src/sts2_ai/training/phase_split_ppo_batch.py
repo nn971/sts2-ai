@@ -33,6 +33,7 @@ from sts2_ai.models.tactical_state import (
     tactical_state_features,
 )
 from sts2_ai.training.neural import _dense
+from sts2_ai.training.enemy_attention import contextualize_torch
 from sts2_ai.training.phase_split_ppo import PpoDiagnostics, gae_terminal
 from sts2_ai.training.selfplay import Episode, PublicDecision
 
@@ -86,11 +87,12 @@ def encode_decision(
             "relational_damage": damage_tactical_state_features,
             "public_resources": public_resources_tactical_state_features,
             "enemy_instances": instance_global_features,
+            "enemy_attention": instance_global_features,
         }.get(encoding)
         if state_fn is None:
             raise ValueError("Unknown tactical feature schema")
         action_fn = (
-            instance_action_features if encoding == "enemy_instances"
+            instance_action_features if encoding in ("enemy_instances", "enemy_attention")
             else public_resources_tactical_action_features
             if encoding == "public_resources" else tactical_action_features
         )
@@ -104,7 +106,7 @@ def encode_decision(
         _dense(action_fn(state, action.kind, action.payload_json, dimension), dimension)
         for action in decision.legal_actions
     ], dtype=torch.float32)
-    if decision.phase != "combat" or encoding != "enemy_instances":
+    if decision.phase != "combat" or encoding not in ("enemy_instances", "enemy_attention"):
         return EncodedDecision(
             decision.phase, state_tensor, action_tensor, decision.chosen_index,
         )
@@ -188,6 +190,7 @@ def forward_batch(
         enemy_hidden = relu(linear(
             batch.enemies, params["enemy_weight"], params["enemy_bias"],
         ))
+        enemy_hidden = contextualize_torch(enemy_hidden, batch.enemy_mask, params, torch)
         mask = batch.enemy_mask.unsqueeze(-1)
         pooled = (enemy_hidden * mask).sum(dim=1) / (
             batch.enemy_mask.sum(dim=1, keepdim=True).clamp(min=1)
