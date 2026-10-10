@@ -97,8 +97,10 @@ checkpoint in your results before running. `--build` is optional on the
 second invocation if the pinned .NET bridge is already built.
 
 The JSON report includes paired win/loss counts, uncensored tactical win-rate
-differences, exit HP and potion deltas, metrics by **both encounter tier and
-build-progress band**, and a 95% run-seed cluster bootstrap interval. Exit-HP
+differences, exit HP and potion deltas, metrics by encounter tier,
+build-progress band, their **progress × tier cross-tabulation**,
+enemy composition, a multi-enemy subset, and a 95% run-seed cluster bootstrap
+interval. Exit-HP
 deltas are shown both overall and for both-win pairs to make selection effects
 visible. The interval quantifies empirical sampling variation across
 collector runs; it cannot remove bias from the chosen source strategy policy.
