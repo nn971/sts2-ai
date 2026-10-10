@@ -120,3 +120,31 @@ The 512-seed fresh test should remain unseen until choosing a candidate.
 Before a Transformer, compare continued hidden-32 v8 against a hidden-64
 control using independent seeds and identical interaction budgets, then
 evaluate a single small attention layer under the same procedure.
+
+
+## Human-readable card replay update
+
+The original Markdown reports showed raw `play_card` JSON payloads, such as
+`CardInstanceId: 9`, without resolving the name. This was difficult to audit.
+The exporter now resolves the chosen card from the **current public hand**,
+displays its player-facing name (e.g. `Play Neutralize`), and resolves
+`TargetEnemyId` to species, instance and HP (e.g. `Kin Follower #1`).
+It also annotates the trace JSONL with:
+
+- `action_label`: human-readable action/card label;
+- `played_card_id`: exact card prototype ID (or null if not a card play);
+- `target_label`: per-instance enemy name and visible HP/block;
+- `observed_change_before_next_decision`: public enemy HP/status changes
+  between decisions within the same floor and combat turn.
+
+The rebuilt reports show the entire boss combat when available, otherwise
+the final combat, instead of repeating long enemy JSON dumps. This is only
+postprocessing of public observations and **does not alter policy actions or
+training**. Other choices such as `take_reward_card` may still show an option
+index where the old trace omitted its reward menu. Future capture can
+explicitly include visible reward card names.
+
+For old archives, the historical JSONL already contains the hand snapshots,
+so card names can be recovered without replaying the emulator. The
+regenerated HTML archive delivered alongside this fix includes navigable
+combat floors and per-turn grouping.
