@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import random
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from statistics import fmean
@@ -319,15 +319,34 @@ def _verify(backend: EmulatorBackend, state: StateHandle,
         raise ValueError("Snapshot replay diverged from recorded combat entry")
 
 
-def evaluate_recipes(
-    backend: EmulatorBackend, recipes: Sequence[CombatSnapshotRecipe],
-    baseline: Agent, candidate: Agent, *, max_combat_decisions: int = 256,
-) -> list[PairedCombatResult]:
-    """Replay each collector run ONCE; fork exact entry for two fair policies.
+@dataclass(frozen=True, slots=True)
+class MultiCombatResult:
+    """Same authentic entry, independently replayed under named fair policies."""
 
-    Recipes from one seed must form prefixes of one deterministic collector run.
-    Neither model can inspect the full exact state or the stored RNG.
+    seed: str
+    floor: int
+    tier: str
+    progress: str
+    enemy_ids: tuple[str, ...]
+    outcomes: dict[str, CombatResult]
+
+
+def evaluate_model_suite(
+    backend: EmulatorBackend,
+    recipes: Sequence[CombatSnapshotRecipe],
+    models: Mapping[str, Agent],
+    *,
+    max_combat_decisions: int = 256,
+    on_run_complete: Callable[[str, int], None] | None = None,
+) -> list[MultiCombatResult]:
+    """Replay each source prefix once, then fork once per model.
+
+    The exact emulator handle never crosses the Agent interface. Each policy
+    receives its own fork with the SAME exact starting state/RNG. Running a
+    model twice under different labels is permitted for self-consistency tests.
     """
+    if len(models) < 2 or any(not name.strip() for name in models):
+        raise ValueError("A suite requires at least two nonempty model labels")
     groups: dict[tuple[str, int, str], list[CombatSnapshotRecipe]] = defaultdict(list)
     for recipe in recipes:
         recipe.validate()
@@ -335,9 +354,9 @@ def evaluate_recipes(
             raise ValueError("Snapshot emulator revision mismatch")
         groups[(recipe.seed, recipe.ascension, recipe.source_policy)].append(recipe)
 
-    results: list[PairedCombatResult] = []
+    results: list[MultiCombatResult] = []
     for (seed, ascension, _source), items in sorted(groups.items()):
-        items.sort(key=lambda x: len(x.action_ids))
+        items.sort(key=lambda recipe: len(recipe.action_ids))
         handle = reset_training_run(backend, seed, NATIVE_OVERGROWTH, ascension)
         prefix: tuple[str, ...] = ()
         try:
@@ -346,38 +365,60 @@ def evaluate_recipes(
                     len(recipe.action_ids) <= len(prefix) and prefix
                 ):
                     raise ValueError("Recipes from one run have inconsistent prefixes")
-                next_handle = _advance(
+                handle = _advance(
                     backend, handle, recipe.action_ids[len(prefix):],
                 )
-                handle = next_handle
                 prefix = recipe.action_ids
                 _verify(backend, handle, recipe)
-                fork_a = backend.fork(handle)
-                try:
-                    a = play_combat(
-                        backend, fork_a, baseline, max_decisions=max_combat_decisions,
+                outcomes = {
+                    label: play_combat(
+                        backend,
+                        backend.fork(handle),
+                        agent,
+                        max_decisions=max_combat_decisions,
                     )
-                finally:
-                    # play_combat owns the fork, including on failure.
-                    pass
-                fork_b = backend.fork(handle)
-                b = play_combat(
-                    backend, fork_b, candidate, max_decisions=max_combat_decisions,
-                )
-                results.append(PairedCombatResult(
+                    for label, agent in models.items()
+                }
+                results.append(MultiCombatResult(
                     seed=seed, floor=recipe.floor, tier=recipe.tier,
                     progress=recipe.progress, enemy_ids=recipe.enemy_ids,
-                    baseline=a, candidate=b,
+                    outcomes=outcomes,
                 ))
         finally:
-            # _advance takes ownership of the handle on failure.
-            # Its error path already releases its input.
-            if handle is not None:
-                try:
-                    backend.release_many([handle])
-                except Exception:
-                    pass
+            backend.release_many([handle])
+        if on_run_complete is not None:
+            on_run_complete(seed, len(items))
     return results
+
+
+def pair_model_suite(
+    rows: Sequence[MultiCombatResult], baseline: str, candidate: str,
+) -> list[PairedCombatResult]:
+    """Convert already-computed policy results to existing paired report format."""
+    if baseline == candidate:
+        raise ValueError("Pair requires two distinct model labels")
+    result: list[PairedCombatResult] = []
+    for row in rows:
+        if baseline not in row.outcomes or candidate not in row.outcomes:
+            raise ValueError("Model suite is missing a requested policy")
+        result.append(PairedCombatResult(
+            seed=row.seed, floor=row.floor, tier=row.tier,
+            progress=row.progress, enemy_ids=row.enemy_ids,
+            baseline=row.outcomes[baseline], candidate=row.outcomes[candidate],
+        ))
+    return result
+
+
+def evaluate_recipes(
+    backend: EmulatorBackend, recipes: Sequence[CombatSnapshotRecipe],
+    baseline: Agent, candidate: Agent, *, max_combat_decisions: int = 256,
+) -> list[PairedCombatResult]:
+    """Two-model compatibility interface; replay/validation shared with suite."""
+    results = evaluate_model_suite(
+        backend, recipes, {"baseline": baseline, "candidate": candidate},
+        max_combat_decisions=max_combat_decisions,
+    )
+    return pair_model_suite(results, "baseline", "candidate")
 
 
 def _delta(rows: Sequence[PairedCombatResult]) -> dict[str, Any]:
