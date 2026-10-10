@@ -79,6 +79,10 @@ def main() -> None:
         help="Stable heldout seed prefix; use a fresh prefix for new experiments",
     )
     p.add_argument("--seed", type=int, default=19)
+    p.add_argument(
+        "--exclude-train-seed", action="append", default=[],
+        help="Explicitly omit unsupported run seeds from training; recorded in report",
+    )
     p.add_argument("--warm-start", type=Path)
     p.add_argument("--checkpoint", type=Path)
     p.add_argument("--combat-samples-dir", type=Path)
@@ -155,6 +159,7 @@ def main() -> None:
             checkpoint=args.checkpoint, resume=args.resume,
             combat_samples_dir=args.combat_samples_dir,
             environment=NATIVE_OVERGROWTH, progress=progress,
+            excluded_training_seeds=frozenset(args.exclude_train_seed),
         )
         model.save(args.output)
         log(f"[split] model exported: {args.output}")
@@ -236,6 +241,7 @@ def main() -> None:
             ),
             "optimizer_method": args.optimizer_method,
             "train_seed_prefix": args.train_seed_prefix,
+            "excluded_training_seeds": sorted(set(args.exclude_train_seed)),
             "ppo_hyperparameters": (
                 {
                     "epochs": args.ppo_epochs,
