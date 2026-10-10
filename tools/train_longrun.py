@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from statistics import fmean
 
-PINNED_EMULATOR = "39e1ec1e0b064ddd918f0fc12bc003978d3a443c"
+PINNED_EMULATOR = "5fd80d4288db825ce09e0357de42df976d713577"
 
 
 def _git(root: Path, *args: str) -> str:
@@ -71,14 +71,19 @@ def main() -> None:
     p.add_argument("--ppo-gamma", type=float, default=0.995)
     p.add_argument("--ppo-gae-lambda", type=float, default=0.98)
     p.add_argument("--warm-start", type=Path, required=True)
-    p.add_argument("--output-dir", type=Path, default=Path("results/ppo-pr51-large"))
+    p.add_argument(
+        "--tactical-state-encoding", choices=("public_resources", "relational_damage"),
+        default="public_resources",
+        help="v7 public-resource combat features, or v6 control with same emulator",
+    )
+    p.add_argument("--output-dir", type=Path, default=Path("results/ppo-public-resources-v7"))
     p.add_argument("--save-combat-samples", action="store_true")
-    p.add_argument("--train-seed-prefix", default="ppo-pr51-train-v1")
+    p.add_argument("--train-seed-prefix", default="ppo-public-resources-v7-train")
     p.add_argument(
         "--exclude-train-seed", action="append", default=[],
         help="Explicitly omit an unsupported training episode seed (repeatable; logged)",
     )
-    p.add_argument("--eval-seed-prefix", default="ppo-pr51-dev-v1")
+    p.add_argument("--eval-seed-prefix", default="ppo-public-resources-v7-eval")
     args = p.parse_args()
 
     if min(args.rounds, args.stage_size, args.episodes, args.workers) <= 0:
@@ -127,7 +132,7 @@ def main() -> None:
             "--ppo-clip-epsilon", str(args.ppo_clip_epsilon),
             "--ppo-gamma", str(args.ppo_gamma),
             "--ppo-gae-lambda", str(args.ppo_gae_lambda),
-            "--tactical-state-encoding", "relational_damage",
+            "--tactical-state-encoding", args.tactical_state_encoding,
             "--combat-objective", "hp_preservation",
             "--combat-advantage-baseline", "critic",
             "--hp-monotonic-weight", "0",
