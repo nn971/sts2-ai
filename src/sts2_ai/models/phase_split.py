@@ -36,10 +36,13 @@ class PhaseSplitNeuralModel:
     strategy: NeuralPolicyValueModel
     combat: NeuralPolicyValueModel
     model_id: str
+    combat_value_objective: str = "continuation"
 
     def __post_init__(self) -> None:
         if not self.model_id:
             raise ValueError("Phase-split model requires a model identifier")
+        if self.combat_value_objective not in ("continuation", "hp_first"):
+            raise ValueError("Unsupported combat value objective")
         if self.strategy.format_id != NEURAL_FORMAT:
             raise ValueError("Strategy head must use the semantic action format")
         if self.combat.format_id not in (TACTICAL_FORMAT, TACTICAL_STRUCTURED_FORMAT):
@@ -56,12 +59,16 @@ class PhaseSplitNeuralModel:
         return model.evaluate(observation, legal_actions)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "format": PHASE_SPLIT_FORMAT,
             "model_id": self.model_id,
             "strategy": self.strategy.to_dict(),
             "combat": self.combat.to_dict(),
         }
+        # Preserve the exact original serialization for old checkpoints.
+        if self.combat_value_objective != "continuation":
+            payload["combat_value_objective"] = self.combat_value_objective
+        return payload
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> PhaseSplitNeuralModel:
@@ -76,6 +83,7 @@ class PhaseSplitNeuralModel:
             NeuralPolicyValueModel.from_dict(raw["strategy"]),
             NeuralPolicyValueModel.from_dict(raw["combat"]),
             model_id,
+            combat_value_objective=str(raw.get("combat_value_objective", "continuation")),
         )
 
     def save(self, path: Path) -> None:
