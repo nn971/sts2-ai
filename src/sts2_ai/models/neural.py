@@ -16,18 +16,20 @@ from typing import Any
 
 from sts2_ai.emulator import LegalAction, Observation
 
+from .enemy_attention import ATTENTION_FIELDS, contextualize_python
+from .enemy_instances import (
+    action_target_instance,
+    enemy_instance_vectors,
+    instance_action_features,
+    instance_global_features,
+)
 from .hashed_linear import (
     neural_action_features,
     policy_features,
+    public_resources_tactical_action_features,
     state_dict,
     state_features,
     tactical_action_features,
-    public_resources_tactical_action_features,
-)
-from .enemy_attention import ATTENTION_FIELDS, contextualize_python
-from .enemy_instances import (
-    action_target_instance, enemy_instance_vectors,
-    instance_action_features, instance_global_features,
 )
 from .protocol import PolicyValueEstimate
 from .tactical_state import (
