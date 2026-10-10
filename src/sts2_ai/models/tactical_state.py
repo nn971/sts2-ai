@@ -381,8 +381,14 @@ def public_resources_tactical_state_features(
         enemy_id = enemy.get("enemy_id")
         if not isinstance(enemy_id, str):
             continue
-        owner = f"enemy={enemy_id}"
-        # Match status/power magnitude to the specific enemy.
+        move = enemy.get("move_id")
+        hp_bin = max(0, int(_number(enemy.get("hp")))) // 10
+        block_bin = max(0, int(_number(enemy.get("block")))) // 10
+        owner = (
+            f"enemy={enemy_id}|move={move if isinstance(move, str) else 'unknown'}"
+            f"|hp10={hp_bin}|block10={block_bin}"
+        )
+        # Associate stacks with their specific enemy state, not a global bag.
         for power in _objects(enemy.get("powers")):
             power_id = power.get("power_id")
             if isinstance(power_id, str):
