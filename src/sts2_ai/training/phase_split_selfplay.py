@@ -63,6 +63,7 @@ from sts2_ai.training.selfplay import (
 
 SPLIT_TRAINING_VERSION = "sts2-phase-split-reinforce-v2-hp-monotonicity"
 BALANCED_TRAINING_VERSION = "sts2-phase-split-reinforce-v3-phase-mean"
+PPO_TRAINING_VERSION = "sts2-phase-split-tactical-gae-strategy-mc-ppo-v1"
 SPLIT_CHECKPOINT_FORMAT = "sts2-phase-split-training-checkpoint-v1"
 HP_FIRST_TACTICAL_OBJECTIVE = "hp_first"
 
@@ -306,6 +307,13 @@ def train_phase_split(
     hp_monotonic_weight: float = 0.2,
     tactical_state_encoding: str = "legacy",
     loss_normalization: str = "legacy_episode_sum",
+    optimizer_method: str = "reinforce",
+    ppo_epochs: int = 3,
+    ppo_batch_size: int = 128,
+    ppo_sample_limit: int = 4096,
+    ppo_clip_epsilon: float = 0.2,
+    ppo_gamma: float = 0.995,
+    ppo_gae_lambda: float = 0.98,
     combat_objective: str = "continuation",
     combat_advantage_baseline: str = "critic",
     win_anneal_threshold: int = 16, max_decisions: int = 4096,
@@ -330,6 +338,19 @@ def train_phase_split(
         raise ValueError("Leave-one-run-out requires an HP-based combat objective")
     if loss_normalization not in ("legacy_episode_sum", "phase_mean"):
         raise ValueError("Loss normalization must be legacy_episode_sum or phase_mean")
+    if optimizer_method not in ("reinforce", "ppo"):
+        raise ValueError("Unknown phase-split optimizer")
+    if optimizer_method == "ppo":
+        if combat_advantage_baseline != "critic":
+            raise ValueError("PPO uses its own GAE critic baseline, not leave-one-run-out")
+        if hp_monotonic_weight:
+            raise ValueError("PPO currently requires hp_monotonic_weight=0")
+        if min(ppo_epochs, ppo_batch_size, ppo_sample_limit) <= 0:
+            raise ValueError("PPO epoch/batch/sample sizes must be positive")
+        if not 0 < ppo_clip_epsilon < 1:
+            raise ValueError("Invalid PPO clipping")
+        if not 0 < ppo_gamma <= 1 or not 0 <= ppo_gae_lambda <= 1:
+            raise ValueError("Invalid PPO gamma/lambda")
     if tactical_state_encoding not in (
         "legacy", "structured", "relational", "relational_damage"
     ):
@@ -438,6 +459,16 @@ def train_phase_split(
         "warm_sha": warm_sha,
     }
     # Legacy fingerprints remain compatible with earlier checkpoints.
+    if optimizer_method == "ppo":
+        config.update({
+            "optimizer_method": optimizer_method,
+            "ppo_epochs": ppo_epochs,
+            "ppo_batch_size": ppo_batch_size,
+            "ppo_sample_limit": ppo_sample_limit,
+            "ppo_clip_epsilon": ppo_clip_epsilon,
+            "ppo_gamma": ppo_gamma,
+            "ppo_gae_lambda": ppo_gae_lambda,
+        })
     if tactical_state_encoding != "legacy":
         config["tactical_state_encoding"] = tactical_state_encoding
     if combat_objective != "continuation":
@@ -539,167 +570,199 @@ def train_phase_split(
                 if combat_advantage_baseline == "leave_one_run_out" else None
             )
             optimizer_started = time.perf_counter()
-            for optimizer in optimizers.values():
-                optimizer.zero_grad()
-            strategic_count = tactical_count = 0
-            combat_targets: list[float] = []
-            losses: list[float] = []
-            phase_counts = {
-                phase: sum(
-                    dec.phase == phase
-                    for episode, _ in run_targets for dec in episode.decisions
+            if optimizer_method == "ppo":
+                from sts2_ai.training.phase_split_ppo import ppo_update
+
+                ppo = ppo_update(
+                    torch=torch,
+                    run_targets=run_targets,
+                    local_targets=local_targets,
+                    params=params,
+                    optimizers=optimizers,
+                    dimension=dimension,
+                    encoding=tactical_state_encoding,
+                    temperature=temperature,
+                    gamma=ppo_gamma,
+                    gae_lambda=ppo_gae_lambda,
+                    epochs=ppo_epochs,
+                    batch_size=ppo_batch_size,
+                    sample_limit=ppo_sample_limit,
+                    clip_epsilon=ppo_clip_epsilon,
+                    value_weight=value_weight,
+                    entropy_weight=entropy_weight,
+                    seed=seed + index * 1000003,
                 )
-                for phase in ("strategy", "combat")
-            }
-            diagnostic_totals = {
-                phase: {"policy": 0.0, "value_mse": 0.0, "entropy": 0.0}
-                for phase in phase_counts
-            }
-            for episode_index, (episode, run_target) in enumerate(run_targets):
-                # Every target uses outcomes observed under the frozen cohort policy.
-                targets = [run_target] * len(episode.decisions)
-                tactical_baselines: dict[int, float] = {}
-                for j, (segment, local_target) in enumerate(
-                    local_targets[episode_index]
-                ):
-                    combat_targets.append(local_target)
-                    for d in range(segment.start_decision, segment.end_decision):
-                        if episode.decisions[d].phase != "combat":
-                            raise ValueError("Combat segment includes a strategy decision")
-                        targets[d] = local_target
-                        if other_run_baselines is not None:
-                            tactical_baselines[d] = other_run_baselines[episode_index][j]
-                phase_terms: dict[str, dict[str, list[Any]]] = {
-                    phase: {"policy": [], "value_mse": [], "entropy": []}
+                steps = ppo.steps
+                strategic_count = ppo.counts["strategy"]
+                tactical_count = ppo.counts["combat"]
+                phase_diagnostics = ppo.phase
+                losses = [ppo.loss] if ppo.loss is not None else []
+                monotonic_terms: list[Any] = []
+                combat_targets = [
+                    target for group in local_targets for _, target in group
+                ]
+            else:
+                for optimizer in optimizers.values():
+                    optimizer.zero_grad()
+                strategic_count = tactical_count = 0
+                combat_targets: list[float] = []
+                losses: list[float] = []
+                phase_counts = {
+                    phase: sum(
+                        dec.phase == phase
+                        for episode, _ in run_targets for dec in episode.decisions
+                    )
+                    for phase in ("strategy", "combat")
+                }
+                diagnostic_totals = {
+                    phase: {"policy": 0.0, "value_mse": 0.0, "entropy": 0.0}
                     for phase in phase_counts
                 }
-                for decision_index, (decision, target) in enumerate(
-                    zip(episode.decisions, targets, strict=True)
-                ):
-                    phase = decision.phase
-                    if phase not in params:
-                        raise ValueError("Unknown decision phase")
-                    if phase == "combat":
-                        tactical_count += 1
-                    else:
-                        strategic_count += 1
-                    value, logits = _forward_decision(
-                        decision, params[phase], dimension, torch,
-                        tactical_state_encoding=tactical_state_encoding,
-                    )
-                    log_probs = torch.nn.functional.log_softmax(
-                        logits / temperature, dim=0,
-                    )
-                    probs = log_probs.exp()
-                    target_tensor = torch.tensor(target, dtype=torch.float32)
-                    if phase == "combat" and other_run_baselines is not None:
-                        if decision_index not in tactical_baselines:
-                            raise ValueError("Combat action lacks a resolved combat outcome")
-                        advantage = target_tensor - tactical_baselines[decision_index]
-                    else:
-                        advantage = target_tensor - value.detach()
-                    phase_terms[phase]["policy"].append(
-                        -log_probs[decision.chosen_index] * advantage
-                    )
-                    phase_terms[phase]["value_mse"].append(
-                        (value - target_tensor).square()
-                    )
-                    phase_terms[phase]["entropy"].append(
-                        -(probs * log_probs).sum()
-                    )
-                if loss_normalization == "legacy_episode_sum":
-                    # Preserve old behavior exactly for reproducibility.
-                    policy_terms = [
-                        x for phase in phase_counts for x in phase_terms[phase]["policy"]
-                    ]
-                    value_terms = [
-                        x for phase in phase_counts for x in phase_terms[phase]["value_mse"]
-                    ]
-                    entropy_terms = [
-                        x for phase in phase_counts for x in phase_terms[phase]["entropy"]
-                    ]
-                    if policy_terms:
-                        loss = (
-                            torch.stack(policy_terms).sum()
-                            + value_weight * torch.stack(value_terms).mean()
-                            - entropy_weight * torch.stack(entropy_terms).mean()
-                        ) / max(1, len(run_targets))
-                        loss.backward()
-                        losses.append(float(loss.detach()))
-                else:
-                    # Each phase has the SAME overall weight regardless of how
-                    # many card plays or map choices occur in a cohort.
-                    # Mean reduction also makes entropy/value coefficients
-                    # meaningful relative to the policy gradient.
-                    for phase, total in phase_counts.items():
-                        if not total or not phase_terms[phase]["policy"]:
-                            continue
-                        terms = phase_terms[phase]
-                        loss = (
-                            torch.stack(terms["policy"]).sum()
-                            + value_weight * torch.stack(terms["value_mse"]).sum()
-                            - entropy_weight * torch.stack(terms["entropy"]).sum()
-                        ) / total
-                        loss.backward()
-                        losses.append(float(loss.detach()))
-                for phase, phase_components in phase_terms.items():
-                    for name, component_tensors in phase_components.items():
-                        if component_tensors:
-                            diagnostic_totals[phase][name] += sum(
-                                float(tensor.detach())
-                                for tensor in component_tensors
-                            )
-            phase_diagnostics = {
-                phase: {
-                    key: total / phase_counts[phase]
-                    for key, total in terms.items()
-                }
-                for phase, terms in diagnostic_totals.items()
-                if phase_counts[phase]
-            }
-            # Direct combat-boundary feedback to the strategic continuation
-            # critic: for otherwise identical future resources, slightly more
-            # HP is normally preferable. This does NOT fix a potion/HP rate.
-            monotonic_terms = []
-            for ep, _ in run_targets:
-                for segment in ep.combat_outcomes:
-                    if segment.result != "victory" or not segment.exit_public_json:
-                        continue
-                    pair = _higher_hp_public_pair(segment.exit_public_json)
-                    if pair is None:
-                        continue
-                    lower, higher, delta = pair
-                    low_x = torch.tensor(
-                        _dense(state_features(lower, dimension), dimension),
-                        dtype=torch.float32,
-                    )
-                    high_x = torch.tensor(
-                        _dense(state_features(higher, dimension), dimension),
-                        dtype=torch.float32,
-                    )
-                    low_value, _ = _forward(
-                        params["strategy"], low_x, None, torch,
-                    )
-                    high_value, _ = _forward(
-                        params["strategy"], high_x, None, torch,
-                    )
-                    monotonic_terms.append(torch.relu(
-                        low_value - high_value + 0.04 * delta
-                    ))
-            if monotonic_terms and hp_monotonic_weight:
-                (hp_monotonic_weight * torch.stack(monotonic_terms).mean()).backward()
-
-            steps = 0
-            if strategic_count or tactical_count:
-                for phase, count in (
-                    ("strategy", strategic_count), ("combat", tactical_count)
-                ):
-                    if count:
-                        torch.nn.utils.clip_grad_norm_(
-                            list(params[phase].values()), max_norm=5.0
+                for episode_index, (episode, run_target) in enumerate(run_targets):
+                    # Every target uses outcomes observed under the frozen cohort policy.
+                    targets = [run_target] * len(episode.decisions)
+                    tactical_baselines: dict[int, float] = {}
+                    for j, (segment, local_target) in enumerate(
+                        local_targets[episode_index]
+                    ):
+                        combat_targets.append(local_target)
+                        for d in range(segment.start_decision, segment.end_decision):
+                            if episode.decisions[d].phase != "combat":
+                                raise ValueError("Combat segment includes a strategy decision")
+                            targets[d] = local_target
+                            if other_run_baselines is not None:
+                                tactical_baselines[d] = other_run_baselines[episode_index][j]
+                    phase_terms: dict[str, dict[str, list[Any]]] = {
+                        phase: {"policy": [], "value_mse": [], "entropy": []}
+                        for phase in phase_counts
+                    }
+                    for decision_index, (decision, target) in enumerate(
+                        zip(episode.decisions, targets, strict=True)
+                    ):
+                        phase = decision.phase
+                        if phase not in params:
+                            raise ValueError("Unknown decision phase")
+                        if phase == "combat":
+                            tactical_count += 1
+                        else:
+                            strategic_count += 1
+                        value, logits = _forward_decision(
+                            decision, params[phase], dimension, torch,
+                            tactical_state_encoding=tactical_state_encoding,
                         )
-                        optimizers[phase].step()
-                        steps += 1
+                        log_probs = torch.nn.functional.log_softmax(
+                            logits / temperature, dim=0,
+                        )
+                        probs = log_probs.exp()
+                        target_tensor = torch.tensor(target, dtype=torch.float32)
+                        if phase == "combat" and other_run_baselines is not None:
+                            if decision_index not in tactical_baselines:
+                                raise ValueError("Combat action lacks a resolved combat outcome")
+                            advantage = target_tensor - tactical_baselines[decision_index]
+                        else:
+                            advantage = target_tensor - value.detach()
+                        phase_terms[phase]["policy"].append(
+                            -log_probs[decision.chosen_index] * advantage
+                        )
+                        phase_terms[phase]["value_mse"].append(
+                            (value - target_tensor).square()
+                        )
+                        phase_terms[phase]["entropy"].append(
+                            -(probs * log_probs).sum()
+                        )
+                    if loss_normalization == "legacy_episode_sum":
+                        # Preserve old behavior exactly for reproducibility.
+                        policy_terms = [
+                            x for phase in phase_counts for x in phase_terms[phase]["policy"]
+                        ]
+                        value_terms = [
+                            x for phase in phase_counts for x in phase_terms[phase]["value_mse"]
+                        ]
+                        entropy_terms = [
+                            x for phase in phase_counts for x in phase_terms[phase]["entropy"]
+                        ]
+                        if policy_terms:
+                            loss = (
+                                torch.stack(policy_terms).sum()
+                                + value_weight * torch.stack(value_terms).mean()
+                                - entropy_weight * torch.stack(entropy_terms).mean()
+                            ) / max(1, len(run_targets))
+                            loss.backward()
+                            losses.append(float(loss.detach()))
+                    else:
+                        # Each phase has the SAME overall weight regardless of how
+                        # many card plays or map choices occur in a cohort.
+                        # Mean reduction also makes entropy/value coefficients
+                        # meaningful relative to the policy gradient.
+                        for phase, total in phase_counts.items():
+                            if not total or not phase_terms[phase]["policy"]:
+                                continue
+                            terms = phase_terms[phase]
+                            loss = (
+                                torch.stack(terms["policy"]).sum()
+                                + value_weight * torch.stack(terms["value_mse"]).sum()
+                                - entropy_weight * torch.stack(terms["entropy"]).sum()
+                            ) / total
+                            loss.backward()
+                            losses.append(float(loss.detach()))
+                    for phase, phase_components in phase_terms.items():
+                        for name, component_tensors in phase_components.items():
+                            if component_tensors:
+                                diagnostic_totals[phase][name] += sum(
+                                    float(tensor.detach())
+                                    for tensor in component_tensors
+                                )
+                phase_diagnostics = {
+                    phase: {
+                        key: total / phase_counts[phase]
+                        for key, total in terms.items()
+                    }
+                    for phase, terms in diagnostic_totals.items()
+                    if phase_counts[phase]
+                }
+                # Direct combat-boundary feedback to the strategic continuation
+                # critic: for otherwise identical future resources, slightly more
+                # HP is normally preferable. This does NOT fix a potion/HP rate.
+                monotonic_terms = []
+                for ep, _ in run_targets:
+                    for segment in ep.combat_outcomes:
+                        if segment.result != "victory" or not segment.exit_public_json:
+                            continue
+                        pair = _higher_hp_public_pair(segment.exit_public_json)
+                        if pair is None:
+                            continue
+                        lower, higher, delta = pair
+                        low_x = torch.tensor(
+                            _dense(state_features(lower, dimension), dimension),
+                            dtype=torch.float32,
+                        )
+                        high_x = torch.tensor(
+                            _dense(state_features(higher, dimension), dimension),
+                            dtype=torch.float32,
+                        )
+                        low_value, _ = _forward(
+                            params["strategy"], low_x, None, torch,
+                        )
+                        high_value, _ = _forward(
+                            params["strategy"], high_x, None, torch,
+                        )
+                        monotonic_terms.append(torch.relu(
+                            low_value - high_value + 0.04 * delta
+                        ))
+                if monotonic_terms and hp_monotonic_weight:
+                    (hp_monotonic_weight * torch.stack(monotonic_terms).mean()).backward()
+
+                steps = 0
+                if strategic_count or tactical_count:
+                    for phase, count in (
+                        ("strategy", strategic_count), ("combat", tactical_count)
+                    ):
+                        if count:
+                            torch.nn.utils.clip_grad_norm_(
+                                list(params[phase].values()), max_norm=5.0
+                            )
+                            optimizers[phase].step()
+                            steps += 1
             victories += sum(ep.won for ep in completed)
             row = PhaseSplitRound(
                 round_index=index, played=episodes_per_round,
