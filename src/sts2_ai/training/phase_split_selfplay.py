@@ -33,8 +33,8 @@ from sts2_ai.models.hashed_linear import (
     tactical_action_features,
 )
 from sts2_ai.models.neural import (
-    TACTICAL_FORMAT,
     TACTICAL_DAMAGE_FORMAT,
+    TACTICAL_FORMAT,
     TACTICAL_RELATIONAL_FORMAT,
     TACTICAL_STRUCTURED_FORMAT,
     NeuralPolicyValueModel,
