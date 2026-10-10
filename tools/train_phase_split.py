@@ -39,6 +39,8 @@ def main() -> None:
     p.add_argument("--hidden", type=int, default=32)
     p.add_argument("--learning-rate", type=float, default=0.003)
     p.add_argument("--optimizer-method", choices=("reinforce", "ppo"), default="reinforce")
+    p.add_argument("--ppo-backend", choices=("reference", "batched"), default="reference",
+                   help="Reference per-decision PPO or cached batched PPO")
     p.add_argument("--ppo-epochs", type=int, default=3)
     p.add_argument("--ppo-batch-size", type=int, default=128)
     p.add_argument("--ppo-sample-limit", type=int, default=4096)
@@ -137,7 +139,7 @@ def main() -> None:
         f"[split] start | rounds={args.rounds} episodes={args.episodes} "
         f"workers={args.workers} boundary_weight={args.boundary_weight} "
         f"tactical_state_encoding={args.tactical_state_encoding} "
-        f"optimizer_method={args.optimizer_method} "
+        f"optimizer_method={args.optimizer_method} ppo_backend={args.ppo_backend} "
         f"loss_normalization={args.loss_normalization} "
         f"combat_objective={args.combat_objective} "
         f"combat_advantage_baseline={combat_baseline} "
@@ -151,6 +153,7 @@ def main() -> None:
             workers=args.workers, dimension=args.dimension, hidden=args.hidden,
             learning_rate=args.learning_rate,
             optimizer_method=args.optimizer_method,
+            ppo_backend=args.ppo_backend,
             ppo_epochs=args.ppo_epochs,
             ppo_batch_size=args.ppo_batch_size,
             ppo_sample_limit=args.ppo_sample_limit,
