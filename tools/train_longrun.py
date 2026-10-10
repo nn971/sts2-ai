@@ -19,8 +19,7 @@ def _git(root: Path, *args: str) -> str:
 
 
 def _check_revision(root: Path) -> None:
-    line = _git(root, "ls-tree", "HEAD", "emulator")
-    pin = line.split()[-1]
+    pin = _git(root, "rev-parse", "HEAD:emulator")
     actual = _git(root / "emulator", "rev-parse", "HEAD")
     if pin != PINNED_EMULATOR or actual != pin:
         raise SystemExit(
