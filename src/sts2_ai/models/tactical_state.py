@@ -145,7 +145,12 @@ def tactical_state_features(
             )
             if damage_aware and not valid_hits:
                 continue  # v6 does not infer a missing or invalid hit count.
-            hits = float(raw_hits) if valid_hits else 1.0
+            hits = (
+                float(raw_hits)
+                if isinstance(raw_hits, int) and not isinstance(raw_hits, bool)
+                and 1 <= raw_hits <= 100
+                else 1.0
+            )
             public_attacks.append((float(raw_damage), hits))
             if damage_aware:
                 raw_base = enemy.get("intent_base_damage")
@@ -210,13 +215,13 @@ def tactical_state_features(
             tokens[f"relation:{prefix}|hp10={max(0, int(hp_value)) // 10}"] += 1
             tokens[f"relation:{prefix}|block10={max(0, int(block_value)) // 10}"] += 1
             if damage_aware and isinstance(move_id, str) and move_id:
-                base = enemy.get("intent_base_damage")
+                raw_base = enemy.get("intent_base_damage")
                 modified = enemy.get("intent_damage")
                 hits = enemy.get("intent_hits")
                 if (
-                    isinstance(base, (int, float))
-                    and not isinstance(base, bool)
-                    and math.isfinite(base) and base >= 0
+                    isinstance(raw_base, (int, float))
+                    and not isinstance(raw_base, bool)
+                    and math.isfinite(raw_base) and raw_base >= 0
                     and isinstance(modified, (int, float))
                     and not isinstance(modified, bool)
                     and math.isfinite(modified) and modified >= 0
@@ -226,7 +231,7 @@ def tactical_state_features(
                     # Bind the *same enemy* to both threat values and hit
                     # count; a global sum would lose attack attribution.
                     threat = (
-                        f"base5={int(base) // 5}|modified5={int(modified) // 5}"
+                        f"base5={int(raw_base) // 5}|modified5={int(modified) // 5}"
                         f"|hits={hits}"
                     )
                     tokens[f"relation:{prefix}|{threat}"] += 1
