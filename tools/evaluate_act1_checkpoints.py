@@ -64,7 +64,7 @@ def identity_for(
     n: int, max_decisions: int, emulator_revision: str,
     reference_label: str, selection_sha256: str | None,
 ) -> dict[str, Any]:
-    if mode not in ("selection", "final"):
+    if mode not in ("selection", "comparison", "final"):
         raise ValueError("Invalid checkpoint evaluation mode")
     if n <= 0 or max_decisions <= 0 or not prefix:
         raise ValueError("Invalid evaluation cohort")
@@ -250,7 +250,7 @@ def evaluate(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=("selection", "final"), required=True)
+    parser.add_argument("--mode", choices=("selection", "comparison", "final"), required=True)
     parser.add_argument("--model", action="append", default=[],
                         help="For selection only: LABEL=checkpoint.json; repeat")
     parser.add_argument("--selection-report", type=Path,
@@ -266,9 +266,9 @@ def main() -> None:
 
     if args.max_decisions != 4096:
         parser.error("The fixed evaluation worker requires --max-decisions 4096")
-    if args.mode == "selection":
+    if args.mode in ("selection", "comparison"):
         if args.selection_report is not None or not args.model:
-            parser.error("Selection requires --model entries, not --selection-report")
+            parser.error("Selection/comparison requires --model entries, not --selection-report")
         paths: dict[str, Path] = {}
         for item in args.model:
             name, sep, path = item.partition("=")
@@ -276,7 +276,7 @@ def main() -> None:
                 parser.error("Each --model must be a unique LABEL=path")
             paths[name] = Path(path)
         if args.reference_label not in paths or len(paths) < 2:
-            parser.error("Selection needs round40 plus at least one competitor")
+            parser.error("Selection/comparison requires a reference plus at least one competitor")
         specs = model_specs(paths)
         selection_sha = None
     else:
