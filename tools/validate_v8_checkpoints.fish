@@ -10,29 +10,37 @@ for stage in 0040 0060 0100 0120
     end
 end
 
-if not python -u tools/evaluate_act1_checkpoints.py \
-    --mode selection \
-    --model round40=$base/stage-0040.json \
-    --model round60=$base/stage-0060.json \
-    --model round100=$base/stage-0100.json \
-    --model round120=$base/stage-0120.json \
-    --seed-prefix ppo-v8-fresh-selection-v11 \
-    --seeds 256 \
-    --workers 12 \
-    --output $out/selection-256.json
-    exit 1
+if test -f $out/selection-256.json
+    echo "[selection] Reusing completed report: $out/selection-256.json"
+else
+    if not python -u tools/evaluate_act1_checkpoints.py \
+        --mode selection \
+        --model round40=$base/stage-0040.json \
+        --model round60=$base/stage-0060.json \
+        --model round100=$base/stage-0100.json \
+        --model round120=$base/stage-0120.json \
+        --seed-prefix ppo-v8-fresh-selection-v11 \
+        --seeds 256 \
+        --workers 12 \
+        --output $out/selection-256.json
+        exit 1
+    end
 end
 
 # Final model is already locked by the selection report.
 # Only the winner and round-40 control are evaluated here.
-if not python -u tools/evaluate_act1_checkpoints.py \
-    --mode final \
-    --selection-report $out/selection-256.json \
-    --seed-prefix ppo-v8-fresh-confirmation-v11 \
-    --seeds 512 \
-    --workers 12 \
-    --output $out/confirmation-512.json
-    exit 1
+if test -f $out/confirmation-512.json
+    echo "[confirmation] Reusing completed report: $out/confirmation-512.json"
+else
+    if not python -u tools/evaluate_act1_checkpoints.py \
+        --mode final \
+        --selection-report $out/selection-256.json \
+        --seed-prefix ppo-v8-fresh-confirmation-v11 \
+        --seeds 512 \
+        --workers 12 \
+        --output $out/confirmation-512.json
+        exit 1
+    end
 end
 
 echo "Completed checkpoint selection and independent confirmation:"
