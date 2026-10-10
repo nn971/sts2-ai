@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from statistics import fmean
 
-PINNED_EMULATOR = "a8341f127048be2b4ea7d654e4b2de1fb2e92bc3"
+PINNED_EMULATOR = "6328a62989014f080abed06684e4b5f7ea1f0af6"
 
 
 def _git(root: Path, *args: str) -> str:
