@@ -105,6 +105,51 @@ deltas are shown both overall and for both-win pairs to make selection effects
 visible. The interval quantifies empirical sampling variation across
 collector runs; it cannot remove bias from the chosen source strategy policy.
 
+## Matched seven-model evaluation (preferred)
+
+Use the **same saved corpus** to evaluate v8, three v12 width-32
+continuations and three v13 attention continuations. The suite replays
+the collector prefix **once per combat entry**, then forks the same exact
+entry independently for all seven fair agents. This avoids repeating
+run-prefix reconstruction six times. It performs no additional training.
+
+The v13 checkpoints were trained for 80 more PPO rounds starting at v8.
+Therefore **v8 versus v13** measures change since the original champion,
+but **v12 width-32 versus v13** is the better architecture-controlled
+comparison (same continuation rounds and matched training replicas).
+
+Required frozen files:
+- `results/ppo-v8-batched-40/models/stage-0120.json`
+- `results/ppo-capacity-v12/r{1,2,3}/h32/models/stage-0080.json`
+- `results/ppo-enemy-attention-v13/r{1,2,3}/attn/models/stage-0080.json`
+
+Run from the repository root in WSL/Fish:
+
+```fish
+python tools/compare_combat_snapshots_v14.py --dry-run
+
+python -u tools/compare_combat_snapshots_v14.py --build
+```
+
+The preflight checks **all model files and their architecture formats**
+before launching the .NET bridge. Model and corpus SHA-256 fingerprints are
+included in `results/combat-snapshots-v14/v14-model-suite/suite.json`.
+Six detailed paired JSON reports and one compact `summary.json` appear
+alongside it. Upload `summary.json` and `suite.json` for analysis;
+the latter permits regrouping by encounter and diagnosing regressions.
+
+If the three v12 control checkpoints are genuinely unavailable, add
+`--attention-only`, which evaluates four checkpoints and produces
+only v8→v13 comparisons. Do **not** interpret that shortcut as an isolated
+test of the attention architecture.
+
+Each report includes a source-run-cluster bootstrap interval. These
+intervals describe uncertainty across **source-run seeds**; they are not
+independent confirmations over attention training seeds. The three
+matched training replicas should be reported separately before drawing
+architecture-level conclusions. In particular, do not select the best
+replica using this fixed benchmark.
+
 ## Important limitations and v15 extension
 
 1. **Selection effects:** naturally reached snapshots depend on the frozen
