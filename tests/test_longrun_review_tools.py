@@ -10,7 +10,12 @@ from sts2_ai.evaluation.baseline_cache import (
     load_cache,
     save_cache,
 )
-from tools.replay_review_runs import (\n    annotate_public_trace,\n    describe_public_action,\n    markdown_review,\n    public_trace_entry,\n)
+from tools.replay_review_runs import (
+    annotate_public_trace,
+    describe_public_action,
+    markdown_review,
+    public_trace_entry,
+)
 
 
 def test_baseline_cache_reuses_only_exact_model_emulator_and_seed_set(tmp_path) -> None:
