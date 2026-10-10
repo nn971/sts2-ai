@@ -73,6 +73,20 @@ This small reproducible synthetic workload measures CPU *feature encoding
 and forward/backward*, excluding emulator rollouts. A microbenchmark
 speedup is **not** a claim of whole-training speedup.
 
+First successful GitHub Actions CPU-runner measurement
+(512 decisions, 2 epochs, minibatch 64; single run, not statistical samples):
+
+| Encoding | Reference | Cache + batched | Measured hot-path speedup |
+|---|---:|---:|---:|
+| v8 `enemy_instances` | 1.041 s | 0.284 s | **3.67x** |
+| v7 `public_resources` | 0.741 s | 0.221 s | **3.36x** |
+
+The v8 batch time includes 0.252 s feature encoding and 0.032 s
+batched forward/backward. The relatively high feature-encoding cost
+motivates further optimization/caching if needed. These numbers are
+from GitHub's CPU runner, **not** the user's Ryzen 9700X, and are
+not a measurement of PPO rollouts or game wins.
+
 For an end-to-end comparison, launch two *fresh* runs with the same
 emulator, warm start and seeds; do not reuse an incompatible checkpoint:
 
