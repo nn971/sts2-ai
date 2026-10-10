@@ -15,7 +15,9 @@ from sts2_ai.evaluation.combat_snapshots import (
     CombatSnapshotRecipe,
     SnapshotCollector,
     build_report,
+    evaluate_model_suite,
     evaluate_recipes,
+    pair_model_suite,
     progress_band,
 )
 
@@ -261,3 +263,44 @@ def test_native_pin_snapshot_smoke() -> None:
             backend, [first], agent, agent, max_combat_decisions=512,
         )
         assert paired[0].baseline == paired[0].candidate
+
+
+def test_multimodel_suite_shares_exact_replay_and_pairs_independent_forks() -> None:
+    backend = ToyBackend()
+    root = backend.reset_native_overgrowth("seven-model-suite")
+    collector = SnapshotCollector(
+        backend, seed="seven-model-suite", source_policy="frozen-reference",
+    )
+    start = backend.observe(root, FAIR)
+    go = backend.legal_actions(root)[0]
+    collector.on_decision(root, start, (go,), Decision(go, "frozen-reference"))
+    entry = backend.step(root, go).child
+    attack = backend.legal_actions(entry)[0]
+    collector.on_decision(
+        entry, backend.observe(entry, FAIR), backend.legal_actions(entry),
+        Decision(attack, "frozen-reference"),
+    )
+    backend.release_many([root, entry])
+    assert len(collector.recipes) == 1
+
+    starts_before = backend.next_id
+    suite = evaluate_model_suite(
+        backend, collector.recipes,
+        {"v8": SimpleAgent("attack"),
+         "h32-r1": SimpleAgent("attack"),
+         "attn-r1": SimpleAgent("fumble")},
+    )
+    # 1 initial reset, 1 prefix step, then (fork + step) per policy:
+    assert backend.next_id - starts_before == 2 + 2 * 3
+    assert len(suite) == 1
+    row = suite[0]
+    assert row.outcomes["v8"] == row.outcomes["h32-r1"]
+    assert row.outcomes["attn-r1"].outcome == "defeat"
+    pair = pair_model_suite(suite, "h32-r1", "attn-r1")
+    assert len(pair) == 1 and pair[0].baseline.outcome == "victory"
+    assert pair[0].candidate.outcome == "defeat"
+    assert backend.states == {}
+    with pytest.raises(ValueError, match="distinct"):
+        pair_model_suite(suite, "v8", "v8")
+    with pytest.raises(ValueError, match="missing"):
+        pair_model_suite(suite, "v8", "r4")
