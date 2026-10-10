@@ -35,7 +35,7 @@ jobs:
       - run: python -m pip install -e '.[dev,neural]'
       - name: v13 unit and v8 regression tests
         run: |
-          python -m pytest -q \
+          python -m pytest -q -W error::UserWarning \
             tests/test_enemy_attention_v13.py \
             tests/test_enemy_attention_v13_summary.py \
             tests/test_enemy_instances_v8.py \
