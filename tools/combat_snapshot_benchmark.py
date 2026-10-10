@@ -14,7 +14,11 @@ from sts2_ai.emulator.episode_goal import NATIVE_ACT1_BOSS_GOAL
 from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH
 from sts2_ai.evaluation import play_run
 from sts2_ai.evaluation.combat_snapshots import (
-    SCHEMA, SnapshotCollector, build_report, evaluate_recipes, load_recipes,
+    SCHEMA,
+    SnapshotCollector,
+    build_report,
+    evaluate_recipes,
+    load_recipes,
 )
 
 
