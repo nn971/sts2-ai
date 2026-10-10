@@ -185,9 +185,9 @@ def tactical_state_features(
             tokens[f"relation:{prefix}|block10={max(0, int(block_value)) // 10}"] += 1
             # Powers/statuses must remain associated with their owner.
             for power in _objects(enemy.get("powers")):
-                name = power.get("power_id")
-                if isinstance(name, str) and name:
-                    tokens[f"relation:{prefix}|power={name}"] += 1
+                power_id = power.get("power_id")
+                if isinstance(power_id, str) and power_id:
+                    tokens[f"relation:{prefix}|power={power_id}"] += 1
             statuses = enemy.get("statuses")
             if isinstance(statuses, dict):
                 for status_id, stacks in statuses.items():
