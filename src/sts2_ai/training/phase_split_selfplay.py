@@ -39,6 +39,7 @@ from sts2_ai.models.neural import (
 )
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.models.tactical_state import tactical_state_features
+from sts2_ai.training.combat_outcomes import CombatOutcome
 from sts2_ai.training.neural import _dense, _export, _forward, _new_params
 from sts2_ai.training.parallel_rollouts import (
     collect_parallel,
@@ -57,6 +58,7 @@ from sts2_ai.training.selfplay import (
 SPLIT_TRAINING_VERSION = "sts2-phase-split-reinforce-v2-hp-monotonicity"
 BALANCED_TRAINING_VERSION = "sts2-phase-split-reinforce-v3-phase-mean"
 SPLIT_CHECKPOINT_FORMAT = "sts2-phase-split-training-checkpoint-v1"
+HP_FIRST_TACTICAL_OBJECTIVE = "hp_first"
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +80,8 @@ class PhaseSplitRound:
     optimizer_seconds: float
     hp_monotonic_pairs: int = 0
     phase_loss_diagnostics: dict[str, dict[str, float]] | None = None
+    mean_victory_exit_hp_fraction: float | None = None
+    mean_potions_used_per_combat: float | None = None
 
 
 def _higher_hp_public_pair(
@@ -136,6 +140,7 @@ def _export_split(
     strategy_params: dict[str, Any], combat_params: dict[str, Any],
     dimension: int, hidden: int, *, model_id: str, trained: bool,
     tactical_state_encoding: str = "legacy",
+    combat_objective: str = "continuation",
 ) -> PhaseSplitNeuralModel:
     return PhaseSplitNeuralModel(
         strategy=_export(
@@ -151,7 +156,24 @@ def _export_split(
             ),
         ),
         model_id=model_id,
+        combat_value_objective=combat_objective,
     )
+
+
+def _hp_first_combat_target(segment: CombatOutcome) -> float:
+    """Temporary tactical target: survive and preserve HP; potions cost zero.
+
+    Defeat = 0; victory = 0.5 + 0.5 * (exit HP / exit max HP).
+    Survival always outranks any HP-preservation difference on a victory.
+    No fixed value, sign, or penalty is assigned to named potions.
+    """
+    if segment.result == "defeat":
+        return 0.0
+    hp = segment.exit.hp
+    max_hp = segment.exit.max_hp or segment.entry.max_hp
+    if hp is None or max_hp is None or max_hp <= 0:
+        raise ValueError("HP-first objective requires public victory exit HP/max HP")
+    return 0.5 + 0.5 * min(1.0, max(0.0, hp / max_hp))
 
 
 def _combat_boundary_target(
@@ -219,6 +241,7 @@ def train_phase_split(
     hp_monotonic_weight: float = 0.2,
     tactical_state_encoding: str = "legacy",
     loss_normalization: str = "legacy_episode_sum",
+    combat_objective: str = "continuation",
     win_anneal_threshold: int = 16, max_decisions: int = 4096,
     temperature_start: float = 0.05, temperature_end: float = 0.035,
     temperature_decay_rounds: int = 20,
@@ -231,6 +254,8 @@ def train_phase_split(
 ) -> tuple[PhaseSplitNeuralModel, tuple[PhaseSplitRound, ...]]:
     if min(rounds, episodes_per_round, dimension, hidden, max_decisions, workers) <= 0:
         raise ValueError("Expected positive sizes and worker count")
+    if combat_objective not in ("continuation", "hp_first"):
+        raise ValueError("Combat objective must be continuation or hp_first")
     if loss_normalization not in ("legacy_episode_sum", "phase_mean"):
         raise ValueError("Loss normalization must be legacy_episode_sum or phase_mean")
     if tactical_state_encoding not in ("legacy", "structured"):
@@ -271,12 +296,14 @@ def train_phase_split(
         if raw.get("format") == "sts2-phase-split-policy-value-v1":
             warm = PhaseSplitNeuralModel.from_dict(raw)
             sources = {"strategy": warm.strategy, "combat": warm.combat}
+            previous_combat_objective = warm.combat_value_objective
         else:
             # Tactical-v3 extends v2 semantic tokens with target context.
             # Both heads warm-start approximately: normalization changes with
             # extra features, so the action distributions are not identical.
             base = NeuralPolicyValueModel.from_dict(raw)
             sources = {"strategy": base, "combat": base}
+            previous_combat_objective = "continuation"
         expected_tactical_format = (
             TACTICAL_STRUCTURED_FORMAT
             if tactical_state_encoding == "structured" else TACTICAL_FORMAT
@@ -291,11 +318,20 @@ def train_phase_split(
             migrating_tactical = (
                 phase == "combat" and source.format_id != expected_tactical_format
             )
+            migrating_combat_value = (
+                phase == "combat" and previous_combat_objective != combat_objective
+            )
             with torch.no_grad():
                 for name, weight in params[phase].items():
                     if migrating_tactical and name in (
                         "state_weight", "state_bias", "value_weight", "value_bias"
                     ):
+                        continue
+                    if migrating_combat_value and name in (
+                        "value_weight", "value_bias"
+                    ):
+                        # The prior tactical critic estimates a different
+                        # quantity, so its weights must not be silently reused.
                         continue
                     weight.copy_(torch.tensor(
                         getattr(source, name), dtype=weight.dtype
@@ -322,6 +358,8 @@ def train_phase_split(
     # Legacy fingerprints remain compatible with earlier checkpoints.
     if tactical_state_encoding != "legacy":
         config["tactical_state_encoding"] = tactical_state_encoding
+    if combat_objective != "continuation":
+        config["combat_objective"] = combat_objective
     fingerprint = hashlib.sha256(
         json.dumps(config, sort_keys=True).encode()
     ).hexdigest()
@@ -369,6 +407,7 @@ def train_phase_split(
                 params["strategy"], params["combat"], dimension, hidden,
                 model_id=f"phase-split-before-round-{index}", trained=index > 0,
                 tactical_state_encoding=tactical_state_encoding,
+                combat_objective=combat_objective,
             )
             seeds = [
                 f"{seed_prefix}-{index}-{j}" for j in range(episodes_per_round)
@@ -414,9 +453,13 @@ def train_phase_split(
                 # All targets/advantages use the same frozen cohort snapshot.
                 targets = [run_target] * len(episode.decisions)
                 for j, segment in enumerate(episode.combat_outcomes):
-                    local_target = _combat_boundary_target(
-                        episode, j, model, run_target,
-                        boundary_weight=boundary_weight,
+                    local_target = (
+                        _hp_first_combat_target(segment)
+                        if combat_objective == "hp_first"
+                        else _combat_boundary_target(
+                            episode, j, model, run_target,
+                            boundary_weight=boundary_weight,
+                        )
                     )
                     combat_targets.append(local_target)
                     for d in range(segment.start_decision, segment.end_decision):
@@ -575,6 +618,25 @@ def train_phase_split(
                 optimizer_seconds=time.perf_counter() - optimizer_started,
                 hp_monotonic_pairs=len(monotonic_terms),
                 phase_loss_diagnostics=phase_diagnostics,
+                mean_victory_exit_hp_fraction=(
+                    sum(
+                        min(1.0, max(0.0, (o.exit.hp or 0) /
+                            max(1, o.exit.max_hp or o.entry.max_hp or 1)))
+                        for ep in cohort for o in ep.combat_outcomes
+                        if o.result == "victory" and o.exit.hp is not None
+                    ) / sum(
+                        o.result == "victory" and o.exit.hp is not None
+                        for ep in cohort for o in ep.combat_outcomes
+                    ) if any(
+                        o.result == "victory" and o.exit.hp is not None
+                        for ep in cohort for o in ep.combat_outcomes
+                    ) else None
+                ),
+                mean_potions_used_per_combat=(
+                    sum(len(o.potions_used) for ep in cohort for o in ep.combat_outcomes)
+                    / sum(len(ep.combat_outcomes) for ep in cohort)
+                    if any(ep.combat_outcomes for ep in cohort) else None
+                ),
             )
             rows.append(row)
             if checkpoint is not None:
@@ -620,4 +682,5 @@ def train_phase_split(
         model_id=f"phase-split-v1-{fingerprint[:12]}-{rounds}",
         trained=bool(rows and any(x.optimization_steps for x in rows)),
         tactical_state_encoding=tactical_state_encoding,
+        combat_objective=combat_objective,
     ), tuple(rows)
