@@ -24,6 +24,7 @@ from .hashed_linear import (
     tactical_action_features,
     public_resources_tactical_action_features,
 )
+from .enemy_attention import ATTENTION_FIELDS, contextualize_python
 from .enemy_instances import (
     action_target_instance, enemy_instance_vectors,
     instance_action_features, instance_global_features,
@@ -43,6 +44,7 @@ TACTICAL_RELATIONAL_FORMAT = "sts2-neural-policy-value-v5-relational-tactical"
 TACTICAL_DAMAGE_FORMAT = "sts2-neural-policy-value-v6-relational-damage-tactical"
 TACTICAL_RESOURCES_FORMAT = "sts2-neural-policy-value-v7-public-resources-tactical"
 TACTICAL_INSTANCES_FORMAT = "sts2-neural-policy-value-v8-instance-species-target"
+TACTICAL_ATTENTION_FORMAT = "sts2-neural-policy-value-v13-enemy-relational-attention"
 LEGACY_NEURAL_FORMAT = "sts2-neural-policy-value-v1"
 
 
@@ -102,6 +104,11 @@ class NeuralPolicyValueModel:
     enemy_bias: list[float] | None = None
     enemy_context_weight: list[float] | None = None
     enemy_target_weight: list[float] | None = None
+    attn_query: list[list[float]] | None = None
+    attn_key: list[list[float]] | None = None
+    attn_value: list[list[float]] | None = None
+    attn_output: list[list[float]] | None = None
+    attn_gate: list[float] | None = None
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> NeuralPolicyValueModel:
@@ -109,6 +116,7 @@ class NeuralPolicyValueModel:
             NEURAL_FORMAT, TACTICAL_FORMAT, TACTICAL_STRUCTURED_FORMAT,
             TACTICAL_RELATIONAL_FORMAT, TACTICAL_DAMAGE_FORMAT,
             TACTICAL_RESOURCES_FORMAT, TACTICAL_INSTANCES_FORMAT,
+            TACTICAL_ATTENTION_FORMAT,
             LEGACY_NEURAL_FORMAT,
         }:
             raise ValueError("Unsupported neural model format")
@@ -121,6 +129,8 @@ class NeuralPolicyValueModel:
         model_id = raw.get("model_id")
         if not isinstance(model_id, str) or not model_id:
             raise ValueError("Invalid neural model identifier")
+        if raw["format"] == TACTICAL_ATTENTION_FORMAT and hidden % 4:
+            raise ValueError("Attention hidden size must be divisible by four")
         policy_bias = float(raw["policy_bias"])
         value_bias = float(raw["value_bias"])
         if not math.isfinite(policy_bias) or not math.isfinite(value_bias):
@@ -141,20 +151,31 @@ class NeuralPolicyValueModel:
             value_head_trained=_trained_flag(raw),
             enemy_weight=(
                 _matrix(raw["enemy_weight"], hidden, dimension)
-                if raw["format"] == TACTICAL_INSTANCES_FORMAT else None
+                if raw["format"] in (TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT) else None
             ),
             enemy_bias=(
                 _vector(raw["enemy_bias"], hidden)
-                if raw["format"] == TACTICAL_INSTANCES_FORMAT else None
+                if raw["format"] in (TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT) else None
             ),
             enemy_context_weight=(
                 _vector(raw["enemy_context_weight"], hidden)
-                if raw["format"] == TACTICAL_INSTANCES_FORMAT else None
+                if raw["format"] in (TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT) else None
             ),
             enemy_target_weight=(
                 _vector(raw["enemy_target_weight"], hidden)
-                if raw["format"] == TACTICAL_INSTANCES_FORMAT else None
+                if raw["format"] in (TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT) else None
             ),
+            attn_query=_matrix(raw["attn_query"], hidden, hidden)
+            if raw["format"] == TACTICAL_ATTENTION_FORMAT else None,
+            attn_key=_matrix(raw["attn_key"], hidden, hidden)
+            if raw["format"] == TACTICAL_ATTENTION_FORMAT else None,
+            attn_value=_matrix(raw["attn_value"], hidden, hidden)
+            if raw["format"] == TACTICAL_ATTENTION_FORMAT else None,
+            attn_output=_matrix(raw["attn_output"], hidden, hidden)
+            if raw["format"] == TACTICAL_ATTENTION_FORMAT else None,
+            attn_gate=_vector(raw["attn_gate"], hidden)
+            if raw["format"] == TACTICAL_ATTENTION_FORMAT else None,
+            
         )
 
     @classmethod
@@ -180,13 +201,15 @@ class NeuralPolicyValueModel:
             "model_id": self.model_id,
             "value_head_trained": self.value_head_trained,
         }
-        if self.format_id == TACTICAL_INSTANCES_FORMAT:
+        if self.format_id in (TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT):
             result.update(
                 enemy_weight=self.enemy_weight,
                 enemy_bias=self.enemy_bias,
                 enemy_context_weight=self.enemy_context_weight,
                 enemy_target_weight=self.enemy_target_weight,
             )
+        if self.format_id == TACTICAL_ATTENTION_FORMAT:
+            result.update({name: getattr(self, name) for name in ATTENTION_FIELDS})
         return result
 
     def save(self, path: Path) -> None:
@@ -202,7 +225,7 @@ class NeuralPolicyValueModel:
         legal_actions: Sequence[LegalAction],
     ) -> PolicyValueEstimate:
         state = state_dict(observation.payload_json)
-        if self.format_id == TACTICAL_INSTANCES_FORMAT:
+        if self.format_id in (TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT):
             return self._evaluate_instances(state, legal_actions)
         features = (
             public_resources_tactical_state_features(state, self.dimension)
@@ -269,6 +292,11 @@ class NeuralPolicyValueModel:
             ))
             for enemy_id, features in instances.items()
         }
+        if self.format_id == TACTICAL_ATTENTION_FORMAT:
+            attention = {name: getattr(self, name) for name in ATTENTION_FIELDS}
+            if any(value is None for value in attention.values()):
+                raise ValueError("v13 model is missing attention parameters")
+            individual = contextualize_python(individual, attention)
         pooled = [
             sum(embedding[i] for embedding in individual.values()) / len(individual)
             if individual else 0.0
