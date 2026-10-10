@@ -24,6 +24,10 @@ from .hashed_linear import (
     tactical_action_features,
     public_resources_tactical_action_features,
 )
+from .enemy_instances import (
+    action_target_instance, enemy_instance_vectors,
+    instance_action_features, instance_global_features,
+)
 from .protocol import PolicyValueEstimate
 from .tactical_state import (
     damage_tactical_state_features,
@@ -38,6 +42,7 @@ TACTICAL_STRUCTURED_FORMAT = "sts2-neural-policy-value-v4-structured-tactical"
 TACTICAL_RELATIONAL_FORMAT = "sts2-neural-policy-value-v5-relational-tactical"
 TACTICAL_DAMAGE_FORMAT = "sts2-neural-policy-value-v6-relational-damage-tactical"
 TACTICAL_RESOURCES_FORMAT = "sts2-neural-policy-value-v7-public-resources-tactical"
+TACTICAL_INSTANCES_FORMAT = "sts2-neural-policy-value-v8-instance-species-target"
 LEGACY_NEURAL_FORMAT = "sts2-neural-policy-value-v1"
 
 
@@ -93,13 +98,17 @@ class NeuralPolicyValueModel:
     model_id: str
     format_id: str = NEURAL_FORMAT
     value_head_trained: bool = True
+    enemy_weight: list[list[float]] | None = None
+    enemy_bias: list[float] | None = None
+    enemy_context_weight: list[float] | None = None
+    enemy_target_weight: list[float] | None = None
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> NeuralPolicyValueModel:
         if raw.get("format") not in {
             NEURAL_FORMAT, TACTICAL_FORMAT, TACTICAL_STRUCTURED_FORMAT,
             TACTICAL_RELATIONAL_FORMAT, TACTICAL_DAMAGE_FORMAT,
-            TACTICAL_RESOURCES_FORMAT,
+            TACTICAL_RESOURCES_FORMAT, TACTICAL_INSTANCES_FORMAT,
             LEGACY_NEURAL_FORMAT,
         }:
             raise ValueError("Unsupported neural model format")
@@ -130,6 +139,22 @@ class NeuralPolicyValueModel:
             model_id=model_id,
             format_id=str(raw["format"]),
             value_head_trained=_trained_flag(raw),
+            enemy_weight=(
+                _matrix(raw["enemy_weight"], hidden, dimension)
+                if raw["format"] == TACTICAL_INSTANCES_FORMAT else None
+            ),
+            enemy_bias=(
+                _vector(raw["enemy_bias"], hidden)
+                if raw["format"] == TACTICAL_INSTANCES_FORMAT else None
+            ),
+            enemy_context_weight=(
+                _vector(raw["enemy_context_weight"], hidden)
+                if raw["format"] == TACTICAL_INSTANCES_FORMAT else None
+            ),
+            enemy_target_weight=(
+                _vector(raw["enemy_target_weight"], hidden)
+                if raw["format"] == TACTICAL_INSTANCES_FORMAT else None
+            ),
         )
 
     @classmethod
@@ -140,7 +165,7 @@ class NeuralPolicyValueModel:
         return cls.from_dict(raw)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "format": self.format_id,
             "dimension": self.dimension,
             "hidden": self.hidden,
@@ -155,6 +180,14 @@ class NeuralPolicyValueModel:
             "model_id": self.model_id,
             "value_head_trained": self.value_head_trained,
         }
+        if self.format_id == TACTICAL_INSTANCES_FORMAT:
+            result.update(
+                enemy_weight=self.enemy_weight,
+                enemy_bias=self.enemy_bias,
+                enemy_context_weight=self.enemy_context_weight,
+                enemy_target_weight=self.enemy_target_weight,
+            )
+        return result
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -169,6 +202,8 @@ class NeuralPolicyValueModel:
         legal_actions: Sequence[LegalAction],
     ) -> PolicyValueEstimate:
         state = state_dict(observation.payload_json)
+        if self.format_id == TACTICAL_INSTANCES_FORMAT:
+            return self._evaluate_instances(state, legal_actions)
         features = (
             public_resources_tactical_state_features(state, self.dimension)
             if self.format_id == TACTICAL_RESOURCES_FORMAT
@@ -212,6 +247,62 @@ class NeuralPolicyValueModel:
                 )
             )
         return PolicyValueEstimate(action_logits=tuple(logits), value=math.tanh(value_raw))
+
+
+    def _evaluate_instances(
+        self, state: dict[str, Any], legal_actions: Sequence[LegalAction],
+    ) -> PolicyValueEstimate:
+        """Inference mirrors the Torch instance-aware forward path exactly."""
+        if any(value is None for value in (
+            self.enemy_weight, self.enemy_bias,
+            self.enemy_context_weight, self.enemy_target_weight,
+        )):
+            raise ValueError("v8 model is missing learned enemy parameters")
+        assert self.enemy_weight is not None
+        assert self.enemy_bias is not None
+        assert self.enemy_context_weight is not None
+        assert self.enemy_target_weight is not None
+        instances = enemy_instance_vectors(state, self.dimension)
+        individual = {
+            enemy_id: _relu(_sparse_matvec(
+                self.enemy_weight, features, self.enemy_bias,
+            ))
+            for enemy_id, features in instances.items()
+        }
+        pooled = [
+            sum(embedding[i] for embedding in individual.values()) / len(individual)
+            if individual else 0.0
+            for i in range(self.hidden)
+        ]
+        global_features = instance_global_features(state, self.dimension)
+        projected_state = _sparse_matvec(
+            self.state_weight, global_features, self.state_bias,
+        )
+        hidden = _relu([
+            projected_state[i] + self.enemy_context_weight[i] * pooled[i]
+            for i in range(self.hidden)
+        ])
+        value = math.tanh(self.value_bias + sum(
+            x * y for x, y in zip(self.value_weight, hidden, strict=True)
+        ))
+        logits = []
+        for action in legal_actions:
+            target_id = action_target_instance(action.payload_json, instances)
+            target = individual.get(target_id, [0.0] * self.hidden)
+            action_features = instance_action_features(
+                state, action.kind, action.payload_json, self.dimension,
+            )
+            projected = _sparse_matvec(
+                self.action_weight, action_features, self.action_bias,
+            )
+            logits.append(self.policy_bias + sum(
+                self.policy_weight[i] * max(
+                    0.0, hidden[i] + projected[i] +
+                    self.enemy_target_weight[i] * target[i],
+                )
+                for i in range(self.hidden)
+            ))
+        return PolicyValueEstimate(action_logits=tuple(logits), value=value)
 
 
 def load_policy_value_model(path: Path) -> NeuralPolicyValueModel:
