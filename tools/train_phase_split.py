@@ -266,6 +266,7 @@ def main() -> None:
                 else SPLIT_TRAINING_VERSION
             ),
             "optimizer_method": args.optimizer_method,
+            "ppo_backend": args.ppo_backend,
             "episode_goal_version": args.episode_goal,
             "win_anneal_threshold": args.win_anneal_threshold,
             "train_seed_prefix": args.train_seed_prefix,
