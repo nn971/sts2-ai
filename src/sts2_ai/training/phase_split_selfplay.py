@@ -634,7 +634,7 @@ def train_phase_split(
             optimizer_started = time.perf_counter()
             if optimizer_method == "ppo":
                 if ppo_backend == "batched":
-                    from sts2_ai.training.phase_split_ppo_batch import ( 
+                    from sts2_ai.training.phase_split_ppo_batch import (
                         ppo_update_batched as ppo_update,
                     )
                 else:
