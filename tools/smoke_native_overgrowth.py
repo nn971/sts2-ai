@@ -30,6 +30,9 @@ def main() -> None:
 
     results: list[dict[str, Any]] = []
     with JsonlEmulatorBackend(build=args.build) as backend:
+        assert backend.public_enemy_intent_schema == (
+            "prototype-committed-public-enemy-intents-v1"
+        ), "Pilot requires a committed-public-intent emulator pin"
         for run_index in range(args.runs):
             counters = {
                 "reward_menus": 0,
