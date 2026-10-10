@@ -66,6 +66,106 @@ def public_trace_entry(
     return entry
 
 
+
+def _readable_id(identifier: Any) -> str:
+    if not isinstance(identifier, str):
+        return "unknown"
+    return identifier.rsplit(".", 1)[-1].replace("_", " ").title()
+
+
+def describe_public_action(entry: dict[str, Any]) -> tuple[str, str, str | None]:
+    """Resolve card and enemy *instance* IDs against this public frame."""
+    action = entry["action"]
+    kind, payload = action["kind"], action["payload"]
+    if not isinstance(payload, dict):
+        payload = {}
+    hand = {
+        card["instance_id"]: card["card_id"]
+        for card in entry.get("hand", [])
+    }
+    enemy = {
+        item["instance_id"]: item for item in entry.get("enemies", [])
+    }
+    target_id = payload.get("TargetEnemyId")
+    if target_id in enemy:
+        target = enemy[target_id]
+        target_label = (
+            f"{_readable_id(target['enemy_id'])} #{target_id} "
+            f"({target['hp']} HP, {target['block']} block)"
+        )
+    elif target_id is not None:
+        target_label = f"Enemy #{target_id}"
+    else:
+        target_label = "—"
+    card_id: str | None = None
+    if kind == "play_card":
+        instance = payload.get("CardInstanceId")
+        card_id = hand.get(instance)
+        return (
+            f"Play {_readable_id(card_id) if card_id else f'card #{instance}'}",
+            target_label, card_id,
+        )
+    if kind == "select_cards":
+        names = [
+            _readable_id(hand[card_id]) if card_id in hand
+            else f"card #{card_id}"
+            for card_id in payload.get("CardInstanceIds", [])
+        ]
+        return "Select " + (", ".join(names) if names else "no cards"), "—", None
+    if kind == "use_potion":
+        return f"Use potion slot {payload.get('Slot', '?')}", target_label, None
+    if kind == "end_turn":
+        return "End turn", "—", None
+    if kind == "choose_map_node":
+        return f"Choose map node {payload.get('NodeId', '?')}", "—", None
+    if kind == "take_reward_card":
+        return f"Take reward card option {payload.get('Index', '?')}", "—", None
+    if kind == "event_choice":
+        return f"Event: {_readable_id(payload.get('ChoiceId'))}", "—", None
+    return _readable_id(kind), "—", None
+
+
+def _observed_changes(
+    before: dict[str, Any], after: dict[str, Any] | None,
+) -> str:
+    """Differences observed before the next decision; not causal attribution."""
+    if (
+        after is None or before.get("floor") != after.get("floor")
+        or before.get("combat_turn") is None
+        or before.get("combat_turn") != after.get("combat_turn")
+    ):
+        return ""
+    next_enemies = {e["instance_id"]: e for e in after["enemies"]}
+    changes = []
+    for old in before["enemies"]:
+        new = next_enemies.get(old["instance_id"])
+        if new is None:
+            continue
+        enemy_name = _readable_id(old["enemy_id"])
+        suffix = f"{enemy_name} #{old['instance_id']}"
+        hp_lost = old["hp"] - new["hp"]
+        if hp_lost > 0:
+            changes.append(f"{suffix} -{hp_lost} HP")
+        old_statuses = old.get("statuses") or {}
+        new_statuses = new.get("statuses") or {}
+        for status in sorted(old_statuses.keys() | new_statuses.keys()):
+            change = (new_statuses.get(status) or 0) - (old_statuses.get(status) or 0)
+            if change:
+                changes.append(f"{suffix} {_readable_id(status)} {change:+}")
+    return "; ".join(changes[:4])
+
+
+def annotate_public_trace(entries: list[dict[str, Any]]) -> None:
+    for index, entry in enumerate(entries):
+        label, target, card_id = describe_public_action(entry)
+        entry["action_label"] = label
+        entry["target_label"] = target
+        entry["played_card_id"] = card_id
+        entry["observed_change_before_next_decision"] = _observed_changes(
+            entry, entries[index + 1] if index + 1 < len(entries) else None,
+        )
+
+
 def recording_observer(
     entries: list[dict[str, Any]],
 ) -> Callable[[Any, Any, Any, Any], None]:
@@ -101,29 +201,34 @@ def markdown_review(
             f"remaining HP: {boss.get('remaining_hp', 'n/a')}",
             "",
         ])
-        important = [
-            entry for entry in entries
-            if entry["act"] == 1 and entry["floor"] == 16
+        # Read the entire boss combat; otherwise review the final combat.
+        combat_rows = [item for item in entries if item["combat_turn"] is not None]
+        boss_rows = [
+            item for item in combat_rows
+            if item["act"] == 1 and item["floor"] == 16
         ]
-        # A few final non-boss decisions help diagnose deaths before the boss.
-        focus = important if important else entries[-18:]
+        if boss_rows:
+            focus = boss_rows
+            heading = "Act 1 boss: card-by-card decisions"
+        elif combat_rows:
+            last_floor = combat_rows[-1]["floor"]
+            focus = [item for item in combat_rows if item["floor"] == last_floor]
+            heading = f"Final combat on floor {last_floor}"
+        else:
+            focus = entries[-18:]
+            heading = "Final non-combat decisions"
         lines.extend([
-            "### Boss decisions (or final 18 decisions if boss not reached)", "",
-            "| # | Floor/turn | Player HP | Enemies | Selected action |",
-            "|---:|---|---:|---|---|",
+            f"### {heading}", "",
+            "| # | Turn | Player HP | Card or action | Target | Observed change |",
+            "|---:|---:|---:|---|---|---|",
         ])
         for entry in focus:
-            enemy_text = ", ".join(
-                f"{e['enemy_id']}#{e['instance_id']}:"
-                f"{e['hp']}HP/{e['block']}B/{e['move_id']}"
-                for e in entry["enemies"]
-            ) or "—"
-            action = entry["action"]
-            action_text = f"{action['kind']} {json.dumps(action['payload'], sort_keys=True)}"
-            # Escape pipes in JSON and restrict excessively long spellings.
+            label, target, _ = describe_public_action(entry)
             lines.append(
-                f"| {entry['decision']} | {entry['floor']}/{entry['combat_turn']} "
-                f"| {entry['hp']} | {_table_cell(enemy_text)} | {_table_cell(action_text)} |"
+                f"| {entry['decision']} | {entry['combat_turn'] or '—'} "
+                f"| {entry['hp']} | {_table_cell(label)} "
+                f"| {_table_cell(target)} | "
+                f"{_table_cell(entry.get('observed_change_before_next_decision') or '—')} |"
             )
         lines.extend(["", "The companion JSONL retains additional public fields.", ""])
     return "\n".join(lines)
@@ -166,6 +271,7 @@ def run_review(
                     decision_observer=recording_observer(entries),
                 )
                 row = asdict(result)
+                annotate_public_trace(entries)
                 traces[label] = entries
                 results[label] = row
                 with (output_dir / f"{seed}-{label}.jsonl").open(
