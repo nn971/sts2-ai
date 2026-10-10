@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import statistics
 from pathlib import Path
@@ -97,6 +98,55 @@ def summarize(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+
+def verify_models_and_diagnostics(
+    specs: dict[str, dict[str, str]],
+) -> dict[str, dict[str, Any]]:
+    """Verify exported weights and quantify whether the attention gate learned."""
+    measurements: dict[str, dict[str, Any]] = {}
+    for label, spec in sorted(specs.items()):
+        path = Path(spec["path"])
+        raw_bytes = path.read_bytes()
+        if hashlib.sha256(raw_bytes).hexdigest() != spec["sha256"]:
+            raise ValueError(f"Evaluation checkpoint bytes changed: {label}")
+        model = json.loads(raw_bytes)
+        expected_width = 32 if label.startswith(("h32-", "attn-")) else 64
+        if (
+            model["strategy"]["hidden"] != expected_width
+            or model["combat"]["hidden"] != expected_width
+            or model.get("combat_value_objective") != "hp_preservation"
+        ):
+            raise ValueError(f"Wrong architecture or objective: {label}")
+        fmt = model["combat"]["format"]
+        if label.startswith("attn-"):
+            if fmt != "sts2-neural-policy-value-v13-enemy-relational-attention":
+                raise ValueError(f"Not an attention combat model: {label}")
+            gate = model["combat"]["attn_gate"]
+            metrics: dict[str, Any] = {
+                "mean_abs_gate": sum(abs(x) for x in gate) / len(gate),
+                "max_abs_gate": max(abs(x) for x in gate),
+                "active_gate_coordinates_1e-5": sum(abs(x) > 1e-5 for x in gate),
+            }
+        else:
+            if fmt != "sts2-neural-policy-value-v8-instance-species-target":
+                raise ValueError(f"Not a v8 control combat model: {label}")
+            metrics = {}
+        training_report = path.parents[1] / "reports" / "stage-0080.json"
+        if training_report.is_file():
+            report = json.loads(training_report.read_text(encoding="utf-8"))
+            rounds = report["rounds"]
+            if len(rounds) != 80:
+                raise ValueError(f"Missing training rounds: {label}")
+            metrics["optimizer_seconds"] = sum(
+                row["optimizer_seconds"] for row in rounds
+            )
+            metrics["rollout_seconds"] = sum(
+                row["rollout_seconds"] for row in rounds
+            )
+        measurements[label] = metrics
+    return measurements
+
+
 def markdown(summary: dict[str, Any]) -> str:
     lines = [
         "# v13 enemy attention versus v8 width controls",
@@ -135,6 +185,9 @@ def main() -> None:
     args = p.parse_args()
     report = json.loads(args.comparison.read_text(encoding="utf-8"))
     result = summarize(report)
+    result["checkpoint_diagnostics"] = verify_models_and_diagnostics(
+        report["identity"]["model_specs"],
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n",
                            encoding="utf-8")
