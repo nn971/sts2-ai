@@ -1,7 +1,6 @@
 """Strict v15q same-target ablation analysis and preflight tests."""
 from __future__ import annotations
 
-import copy
 import json
 import sys
 from pathlib import Path
