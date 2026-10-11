@@ -294,11 +294,13 @@ def play_combat(
 
 def _advance(
     backend: EmulatorBackend, handle: StateHandle, action_ids: Sequence[str],
+    *, on_progress: Callable[[int, int], None] | None = None,
+    progress_every: int = 32,
 ) -> StateHandle:
     """Consume collector-recorded legal actions, releasing consumed handles."""
     current = handle
     try:
-        for action_id in action_ids:
+        for count, action_id in enumerate(action_ids, start=1):
             legal = backend.legal_actions(current)
             chosen = next((a for a in legal if a.action_id == action_id), None)
             if chosen is None:
@@ -306,6 +308,8 @@ def _advance(
             child = backend.step(current, chosen).child
             backend.release_many([current])
             current = child
+            if on_progress is not None and count % progress_every == 0:
+                on_progress(count, len(action_ids))
         return current
     except BaseException:
         backend.release_many([current])
@@ -345,6 +349,7 @@ def evaluate_model_suite(
     on_run_start: Callable[[str, int], None] | None = None,
     on_snapshot_complete: Callable[[str, int, int], None] | None = None,
     on_combat_progress: Callable[[str, int, str, int], None] | None = None,
+    on_replay_progress: Callable[[str, int, int, int], None] | None = None,
     on_run_results: Callable[[str, Sequence[MultiCombatResult]], None] | None = None,
     combat_progress_every: int = 32,
 ) -> list[MultiCombatResult]:
@@ -379,8 +384,15 @@ def evaluate_model_suite(
                     len(recipe.action_ids) <= len(prefix) and prefix
                 ):
                     raise ValueError("Recipes from one run have inconsistent prefixes")
+                segment = recipe.action_ids[len(prefix):]
                 handle = _advance(
-                    backend, handle, recipe.action_ids[len(prefix):],
+                    backend, handle, segment,
+                    on_progress=(
+                        (lambda count, total, run_seed=seed, floor=recipe.floor:
+                         on_replay_progress(run_seed, floor, count, total))
+                        if on_replay_progress is not None else None
+                    ),
+                    progress_every=combat_progress_every,
                 )
                 prefix = recipe.action_ids
                 _verify(backend, handle, recipe)
@@ -441,6 +453,7 @@ def evaluate_recipes(
     on_run_start: Callable[[str, int], None] | None = None,
     on_snapshot_complete: Callable[[str, int, int], None] | None = None,
     on_combat_progress: Callable[[str, int, str, int], None] | None = None,
+    on_replay_progress: Callable[[str, int, int, int], None] | None = None,
     on_run_results: Callable[[str, Sequence[PairedCombatResult]], None] | None = None,
     combat_progress_every: int = 32,
 ) -> list[PairedCombatResult]:
@@ -455,6 +468,7 @@ def evaluate_recipes(
         on_run_start=on_run_start,
         on_snapshot_complete=on_snapshot_complete,
         on_combat_progress=on_combat_progress,
+        on_replay_progress=on_replay_progress,
         on_run_results=deliver if on_run_results is not None else None,
         combat_progress_every=combat_progress_every,
     )
