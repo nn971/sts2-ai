@@ -7,6 +7,9 @@ on:
       - 'src/sts2_ai/models/pooled_objects.py'
       - 'tests/test_object_instances_v15.py'
       - 'tests/test_pooled_objects_v15.py'
+      - 'tests/test_pooled_ppo_v15.py'
+      - 'src/sts2_ai/training/pooled_ppo_v15.py'
+      - 'tools/train_pooled_objects_v15.py'
       - '.github/workflows/object-embeddings-v15.yml'
   pull_request:
     paths:
@@ -15,6 +18,9 @@ on:
       - 'src/sts2_ai/models/pooled_objects.py'
       - 'tests/test_object_instances_v15.py'
       - 'tests/test_pooled_objects_v15.py'
+      - 'tests/test_pooled_ppo_v15.py'
+      - 'src/sts2_ai/training/pooled_ppo_v15.py'
+      - 'tools/train_pooled_objects_v15.py'
       - '.github/workflows/object-embeddings-v15.yml'
   workflow_dispatch:
 
@@ -31,4 +37,4 @@ jobs:
       - name: Install project and tests
         run: python -m pip install -e '.[dev]'
       - name: Test v15 object extraction and embeddings
-        run: python -m pytest -q tests/test_object_instances_v15.py tests/test_pooled_objects_v15.py
+        run: python -m pytest -q tests/test_object_instances_v15.py tests/test_pooled_objects_v15.py tests/test_pooled_ppo_v15.py
