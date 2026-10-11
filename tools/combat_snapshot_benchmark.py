@@ -8,6 +8,8 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
+from snapshot_eval_runtime import evaluate_paired_snapshots
+
 from sts2_ai.agents.phase_split_agent import PhaseSplitGreedyAgent
 from sts2_ai.emulator import FAIR_POLICY_ID, InformationPolicy, JsonlEmulatorBackend
 from sts2_ai.emulator.episode_goal import NATIVE_ACT1_BOSS_GOAL
