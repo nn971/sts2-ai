@@ -1,11 +1,10 @@
-# v15a/b: unified public combat objects and typed embeddings
+# v15a–c: unified combat object representations and PPO continuation
 
 ## Status
 
-This is an **experimental model foundation**, not yet a fully wired PPO combat-training path. Existing
-v8/v12/v13 inference and checkpoint formats are unchanged. The v14 snapshot
-corpus remains frozen and compatible. No attention layer or action scorer has
-been attached to the new encoder yet.
+This is an **opt-in experimental combat policy**, with a standalone PPO continuation.
+Existing v8/v12/v13 inference/checkpoints and the frozen v14 snapshot corpus
+remain unchanged. The model currently uses **pooling, not relational attention**.
 
 ## Object contract
 
@@ -26,7 +25,7 @@ numbers and private RNG/draw ordering are never embedded.
 
 Each token has `kind`, `type_id`, `role`, `owner`, categorical and numerical
 attributes, and `ObjectRef`. The ref resolves the specific instance referenced
-by a legal action. Ownership links will be encoded by v15c's relation layer;
+by a legal action. Ownership links can be encoded by the future v15d relation layer;
 they are not fed as numeric features.
 
 `ObjectVocabulary.from_object_sets` constructs a deterministic vocabulary.
@@ -65,13 +64,12 @@ emulator revision. Continue using the old revision for frozen v14 results.
 1. **v15a:** object extraction, strict pointer and duplicate-instance checks.
 2. **v15b:** independently trainable typed embeddings, with an explicit frozen
    vocabulary.
-3. **v15c (prototype implemented):** an object-pooled control wrapping a
-   frozen v8/v13 tactical head. Two zero-initialized gates preserve the legacy
-   policy/value output exactly; a trainable Torch model can learn residual
-   action and value corrections. Portable no-Torch Python inference and
-   JSON/phase-split checkpoint round-trips are available. **Not yet connected
-   to the existing PPO rollout/optimizer or batched v13 path**. Full v15
-   training is not claimed.
+3. **v15c (implemented):** an attention-free pooled-object combat control
+   wrapping a frozen v8/v13 head, with function-preserving initial gates.
+   Torch training, portable inference and JSON/phase-split checkpoint loading
+   are tested. A **separate combat-only PPO trainer** now supports public
+   self-play, completed-combat GAE, minibatch PPO, frozen strategy and exact
+   save/resume. It does not yet use the v13 *tensorized batched* PPO backend.
 4. **v15d:** add relational self-attention and action cross-attention, with
    width/compute/parameter-matched feedforward controls.
 5. **v16:** independent source policies, synergy-specific snapshots (including
@@ -93,7 +91,7 @@ emulator revision. Continue using the old revision for frozen v14 results.
 Run from the repository root:
 
 ```fish
-python -m pytest -q tests/test_object_instances_v15.py
+python -m pytest -q tests/test_object_instances_v15.py tests/test_pooled_objects_v15.py tests/test_pooled_ppo_v15.py
 ```
 
 
@@ -140,7 +138,98 @@ value, logits = head.forward(frozen_base_combat_model, observation, legal_action
 combat_model = head.export(frozen_base_combat_model)
 ```
 
-Note: this API is a research building block, not yet a fully integrated PPO
-training command. The current v14 benchmark evaluates exported checkpoints
-without changes, but v15c requires further training integration and a frozen
-vocabulary assembled from a representative public-observation corpus.
+The low-level embedding API is also accessible for ablations. The dedicated
+combat-only PPO trainer is described below; it uses its own optimizer rather
+than modifying the legacy PPO checkpoint format.
+
+
+## v15c standalone combat-only PPO
+
+`training/pooled_ppo_v15.py` and `tools/train_pooled_objects_v15.py`
+implement a real on-policy rollout/train/evaluate path. The run's macro
+(strategy) policy and the v8/v13 combat base are **frozen**. The residual
+module is the only optimized component; its parameters have a fresh AdamW
+optimizer. A behavior policy is exported **once per PPO round**, sampled using
+an explicit temperature, and kept fixed for every episode in that round.
+
+For each resolved player-visible combat, compute the same `hp_preservation`
+boundary target as the existing PPO pipeline; propagate sparse terminal reward
+to its actions with the existing `gae_terminal`. Only resolved combat
+segments enter PPO. Censored run prefixes can contribute *completed combats*
+but cannot assign any reward to an unfinished combat. The strategy actions
+and their rewards are excluded from the residual optimizer.
+
+The model supports variable legal menus and exact token/source/target
+references. To limit CPU overhead, parsed public object records, action
+pointers and frozen base logits are cached *once per cohort*. Embeddings are
+recomputed on every training minibatch so their gradients are correct. A
+minibatch aggregates multiple per-decision losses; object embedding is not
+yet tensorized across decisions, so report **optimization time** alongside
+policy strength. Train/checkpoint and portable inference deliberately use
+separate implementations with numerical parity tests.
+
+### Example Fish pilot
+
+From the `sts2-ai` repository root, with the pinned emulator submodule
+checked out and PyTorch installed:
+
+```fish
+set BASE results/ppo-v8-batched-40/models/stage-0120.json
+set OUT results/ppo-pooled-v15c/r1
+python -u tools/train_pooled_objects_v15.py \\
+    --base-model $BASE \\
+    --output-dir $OUT \\
+    --rounds 2 \\
+    --episodes 8 \\
+    --workers 4 \\
+    --seed 29 \\
+    --vocabulary-runs 16 \\
+    --seed-prefix v15c-r1-train
+```
+
+To extend **the same run** (same seed, corpus, vocabulary and hyperparameters):
+
+```fish
+python -u tools/train_pooled_objects_v15.py \\
+    --base-model $BASE \\
+    --output-dir $OUT \\
+    --rounds 10 \\
+    --episodes 8 \\
+    --workers 4 \\
+    --seed 29 \\
+    --vocabulary-runs 16 \\
+    --seed-prefix v15c-r1-train \\
+    --resume
+```
+
+`--resume` fails closed if the model, vocabulary, emulator revision,
+training seeds or PPO settings changed. The checkpoint is written atomically
+after each round. A deterministic **separate vocabulary sampling cohort**
+populates `vocabulary.json`; reuse that file for matched experiments
+with the `--vocabulary` option. Unknown object categories receive reserved
+OOV embeddings.
+
+Model: `$OUT/model.json`. Optimizer: `$OUT/checkpoint.pt`.
+Progress: stdout each round. JSON report: `$OUT/report.json`.
+
+### Evaluate on the frozen v14 snapshots
+
+```fish
+python -u tools/combat_snapshot_benchmark.py evaluate \\
+    --corpus results/combat-snapshots-v14/source-A.jsonl \\
+    --baseline-model $BASE \\
+    --candidate-model $OUT/model.json \\
+    --report $OUT/source-A-v8-vs-v15c.json
+```
+
+Keep a matching v12 width-32 continuation control and the same source run
+clusters when making statistical claims. The v14 739-entry corpus is
+**not** an independent held-out representation dataset if used to choose
+architecture or tune hyperparameters. Use distinct fresh sources and the
+later synergy stress suite for confirmation.
+
+**Not yet done:** native full-length training/evaluation (requires the pinned
+.NET emulator on the user's machine); parameter-/compute-matched follow-up
+controls; faster tensorized batched object encoding; v15d heterogeneous
+attention; player-visible enchantment projections tracked in
+[`sts2-emulator#88`](https://github.com/nn971/sts2-emulator/issues/88).
