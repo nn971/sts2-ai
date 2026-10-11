@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 from test_pooled_ppo_v15 import PublicObjectsToy, frozen_policy
 
-from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.models.object_embeddings import ObjectVocabulary
+from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.training.pooled_ppo_v15 import (
     PooledTrainingRound,
     collect_public_vocabulary,
