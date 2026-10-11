@@ -106,43 +106,101 @@ class TypedObjectEncoder:
     def _id(self, name: str, value: str) -> int:
         return self._maps[name].get(value, 0)
 
-    def encode(self, objects: ObjectSet) -> Any:
-        """Return [N,width] tensor; explicit refs stay out of differentiable data."""
+    def encode_many(self, batches: Sequence[ObjectSet]) -> tuple[Any, ...]:
+        """Encode all visible tokens in one differentiable vectorized pass.
+
+        The previous implementation called Torch operations separately for
+        every token and each numeric field. Flattening across decisions
+        reduces Python/Torch dispatch, while segmented reductions preserve
+        *exact* token multiplicity and all v15 embedding semantics.
+
+        No instance/reference values are converted to neural inputs. This
+        also preserves empty batch members and per-decision boundaries.
+        """
         torch = self.torch
         device = self.module.kinds.weight.device
-        rows: list[Any] = []
-        for token in objects.tokens:
-            kind_id = self._id("kinds", token.kind)
-            def index(value: int) -> Any:
-                return torch.tensor(value, dtype=torch.long, device=device)
-            x = (
-                self.module.kinds(index(kind_id))
-                + self.module.identities(
-                    index(self._id("identities", f"{token.kind}:{token.type_id}"))
-                )
-                + self.module.roles(index(self._id("roles", f"{token.kind}:{token.role}")))
+        dtype = self.module.kinds.weight.dtype
+        lengths = [len(batch.tokens) for batch in batches]
+        tokens = [token for batch in batches for token in batch.tokens]
+        n = len(tokens)
+        if not n:
+            return tuple(
+                self.module.kinds.weight.new_zeros((length, self.width))
+                for length in lengths
             )
-            if token.categorical:
-                idx = torch.tensor([
-                    self._id("categories", f"{token.kind}:{label}")
-                    for label in token.categorical
-                ], dtype=torch.long, device=device)
-                x = x + self.module.categories(idx).mean(dim=0)
-            if token.numeric:
-                ids = torch.tensor([
+
+        def indices(values: list[int]) -> Any:
+            return torch.tensor(values, device=device, dtype=torch.long)
+
+        kind_ids = [self._id("kinds", token.kind) for token in tokens]
+        identity_ids = [
+            self._id("identities", f"{token.kind}:{token.type_id}")
+            for token in tokens
+        ]
+        role_ids = [
+            self._id("roles", f"{token.kind}:{token.role}")
+            for token in tokens
+        ]
+        x = (
+            self.module.kinds(indices(kind_ids))
+            + self.module.identities(indices(identity_ids))
+            + self.module.roles(indices(role_ids))
+        )
+
+        category_rows: list[int] = []
+        category_ids: list[int] = []
+        for row, token in enumerate(tokens):
+            for tag in token.categorical:
+                category_rows.append(row)
+                category_ids.append(self._id("categories", f"{token.kind}:{tag}"))
+        if category_rows:
+            categories = self.module.categories(indices(category_ids))
+            sums = torch.zeros_like(x).index_add(
+                0, indices(category_rows), categories,
+            )
+            counts = torch.tensor(
+                [max(1, len(token.categorical)) for token in tokens],
+                dtype=dtype, device=device,
+            ).unsqueeze(-1)
+            x = x + sums / counts
+
+        # Numeric layers are kind-specific. Batch all scalar fields of the
+        # same kind, then scatter the per-field outputs back to their tokens.
+        numeric_rows: dict[int, list[int]] = {}
+        numeric_ids: dict[int, list[int]] = {}
+        numeric_values: dict[int, list[float]] = {}
+        for row, (kind, token) in enumerate(zip(kind_ids, tokens, strict=True)):
+            for field, value in token.numeric:
+                numeric_rows.setdefault(kind, []).append(row)
+                numeric_ids.setdefault(kind, []).append(
                     self._id("numeric_fields", f"{token.kind}:{field}")
-                    for field, _ in token.numeric
-                ], dtype=torch.long, device=device)
-                values = torch.tensor([
+                )
+                numeric_values.setdefault(kind, []).append(
                     math.copysign(math.log1p(abs(value)), value) / 4.0
-                    for _, value in token.numeric
-                ], dtype=self.module.kinds.weight.dtype, device=device).unsqueeze(-1)
-                numeric = torch.cat((self.module.numeric_fields(ids), values), dim=-1)
-                x = x + self.module.numeric_layers[kind_id](numeric).mean(dim=0)
-            rows.append(self.module.norm(x))
-        if not rows:
-            return self.module.kinds.weight.new_zeros((0, self.width))
-        return torch.stack(rows, dim=0)
+                )
+        if numeric_rows:
+            sums = torch.zeros_like(x)
+            for kind in sorted(numeric_rows):
+                fields = self.module.numeric_fields(indices(numeric_ids[kind]))
+                values = torch.tensor(
+                    numeric_values[kind], dtype=dtype, device=device,
+                ).unsqueeze(-1)
+                projected = self.module.numeric_layers[kind](
+                    torch.cat((fields, values), dim=-1)
+                )
+                sums = sums.index_add(0, indices(numeric_rows[kind]), projected)
+            counts = torch.tensor(
+                [max(1, len(token.numeric)) for token in tokens],
+                dtype=dtype, device=device,
+            ).unsqueeze(-1)
+            x = x + sums / counts
+
+        embeddings = self.module.norm(x)
+        return tuple(torch.split(embeddings, lengths, dim=0))
+
+    def encode(self, objects: ObjectSet) -> Any:
+        """Return [N,width]; refs and their numeric IDs remain outside Torch."""
+        return self.encode_many((objects,))[0]
 
     @staticmethod
     def reference_rows(objects: ObjectSet, refs: Sequence[ObjectRef]) -> tuple[int, ...]:
