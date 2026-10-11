@@ -109,10 +109,11 @@ def test_ppo_samples_cache_topology_and_profile_both_modes() -> None:
     torch.manual_seed(47)
     episode = combat_episode()
     base = frozen_policy()
+    from test_object_instances_v15 import frame
+
     from sts2_ai.models.object_embeddings import ObjectVocabulary
     from sts2_ai.models.object_instances import extract_combat_objects
     from sts2_ai.models.relational_objects import RelationalObjectTorch
-    from test_object_instances_v15 import frame
 
     vocab = ObjectVocabulary.from_object_sets([extract_combat_objects(frame())])
     head = RelationalObjectTorch(vocab, width=16)
