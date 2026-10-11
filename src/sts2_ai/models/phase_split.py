@@ -24,6 +24,7 @@ from sts2_ai.models.neural import (
     TACTICAL_STRUCTURED_FORMAT,
     NeuralPolicyValueModel,
 )
+from sts2_ai.models.pooled_objects import POOLED_OBJECT_FORMAT, PortablePooledObjectModel
 from sts2_ai.models.protocol import PolicyValueEstimate
 
 PHASE_SPLIT_FORMAT = "sts2-phase-split-policy-value-v1"
@@ -39,7 +40,7 @@ def observation_phase(observation: Observation) -> str:
 @dataclass(slots=True)
 class PhaseSplitNeuralModel:
     strategy: NeuralPolicyValueModel
-    combat: NeuralPolicyValueModel
+    combat: NeuralPolicyValueModel | PortablePooledObjectModel
     model_id: str
     combat_value_objective: str = "continuation"
 
@@ -54,7 +55,7 @@ class PhaseSplitNeuralModel:
             TACTICAL_FORMAT, TACTICAL_STRUCTURED_FORMAT, TACTICAL_RELATIONAL_FORMAT,
             TACTICAL_DAMAGE_FORMAT, TACTICAL_RESOURCES_FORMAT,
             TACTICAL_INSTANCES_FORMAT,
-            TACTICAL_ATTENTION_FORMAT,
+            TACTICAL_ATTENTION_FORMAT, POOLED_OBJECT_FORMAT,
         ):
             raise ValueError("Combat head must use target-aware tactical format")
         if (self.strategy.dimension, self.strategy.hidden) != (
@@ -91,7 +92,9 @@ class PhaseSplitNeuralModel:
             raise ValueError("Invalid phase-split model id")
         return cls(
             NeuralPolicyValueModel.from_dict(raw["strategy"]),
-            NeuralPolicyValueModel.from_dict(raw["combat"]),
+            (PortablePooledObjectModel.from_dict(raw["combat"])
+             if raw["combat"].get("format") == POOLED_OBJECT_FORMAT
+             else NeuralPolicyValueModel.from_dict(raw["combat"])),
             model_id,
             combat_value_objective=str(raw.get("combat_value_objective", "continuation")),
         )
