@@ -40,10 +40,11 @@ from sts2_ai.models.object_instances import (
     legal_action_object_refs,
 )
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
-from sts2_ai.models.pooled_objects import PooledObjectTorch
+from sts2_ai.models.pooled_objects import PooledObjectTorch, PortablePooledObjectModel
 from sts2_ai.models.protocol import PolicyValueEstimate
 from sts2_ai.models.relational_objects import (
     RelationalObjectTorch,
+    PortableRelationalObjectModel,
     RelationalTopology,
     _action_tokens,
     prepare_relational_topology,
@@ -516,6 +517,47 @@ def _checkpoint_save(
             temporary.unlink(missing_ok=True)
 
 
+
+def initialize_combat_head(
+    head: PooledObjectTorch | RelationalObjectTorch,
+    base: PhaseSplitNeuralModel, initial: PhaseSplitNeuralModel,
+) -> None:
+    """Warm-start trainable v15 weights from an exact portable public model.
+
+    The base (both frozen heads), vocabulary and architecture must match.
+    Portable weights are copied to fresh Torch parameters; optimizer moments
+    are intentionally reset for a new experiment, never used for --resume.
+    """
+    import torch
+
+    combat = initial.combat
+    if not isinstance(base.combat, NeuralPolicyValueModel):
+        raise ValueError("Initialization requires a frozen legacy combat base")
+    if initial.strategy.to_dict() != base.strategy.to_dict():
+        raise ValueError("Initialization strategy differs from frozen base")
+    if initial.combat_value_objective != base.combat_value_objective:
+        raise ValueError("Initialization combat objective mismatch")
+    if isinstance(head, RelationalObjectTorch):
+        if not isinstance(combat, PortableRelationalObjectModel):
+            raise ValueError("Initialization requires relational v15 weights")
+    elif not isinstance(combat, PortablePooledObjectModel):
+        raise ValueError("Initialization requires pooled v15 weights")
+    if combat.base.to_dict() != base.combat.to_dict():
+        raise ValueError("Initialization combat base mismatch")
+    if combat.width != head.width or combat.vocabulary.to_dict() != head.vocabulary.to_dict():
+        raise ValueError("Initialization width/vocabulary mismatch")
+    reference = head.module.state_dict()
+    if set(combat.weights) != set(reference):
+        raise ValueError("Initialization tensor names mismatch")
+    converted = {}
+    for name, existing in reference.items():
+        tensor = torch.as_tensor(combat.weights[name], dtype=existing.dtype)
+        if tensor.shape != existing.shape or not torch.isfinite(tensor).all():
+            raise ValueError(f"Initialization invalid tensor: {name}")
+        converted[name] = tensor
+    head.module.load_state_dict(converted)
+
+
 def train_pooled_combat_ppo(
     backend: EmulatorBackend, base: PhaseSplitNeuralModel,
     vocabulary: ObjectVocabulary, *,
@@ -537,6 +579,7 @@ def train_pooled_combat_ppo(
     snapshot_every: int = 0,
     snapshot_recipes: Sequence[CombatSnapshotRecipe] | None = None,
     snapshot_sampling: str = "balanced",
+    initialize_from: PhaseSplitNeuralModel | None = None,
     on_round: Callable[
         [tuple[PooledTrainingRound, ...], PhaseSplitNeuralModel | None], None
     ] | None = None,
@@ -595,6 +638,8 @@ def train_pooled_combat_ppo(
         if architecture == "relational"
         else PooledObjectTorch(vocabulary, width=width)
     )
+    if initialize_from is not None:
+        initialize_combat_head(head, base, initialize_from)
     checkpoint_format = (
         RELATIONAL_PPO_CHECKPOINT if architecture == "relational"
         else POOLED_PPO_CHECKPOINT
@@ -618,6 +663,8 @@ def train_pooled_combat_ppo(
     }
     if architecture != "pooled":
         config["architecture"] = architecture
+    if initialize_from is not None:
+        config["initialize_from_sha256"] = _hash_json(initialize_from.to_dict())
     if snapshot_recipes is not None:
         # This changes the fingerprint only for the new opt-in mode.
         # Existing v15l checkpoint fingerprints and resumption remain intact.
