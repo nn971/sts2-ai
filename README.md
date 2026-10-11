@@ -2,6 +2,8 @@
 
 Research infrastructure for building an AI that can make strong **whole-run strategic decisions** in *Slay the Spire 2*.
 
+**Proposed Nature training architecture:** see [Desired Nature Training Implementation](docs/DESIRED_NATURE_TRAINING_IMPLEMENTATION.md), the opt-in plan for Nature-controlled chance-event rollouts, probability-law audits, importance-corrected learning, and separate KL-adversarial training. This is a design proposal, not implemented functionality; current v15 training remains unchanged.
+
 The long-term objective is an agent that reasons jointly about:
 
 - map/path choices;
