@@ -176,29 +176,29 @@ checked out and PyTorch installed:
 ```fish
 set BASE results/ppo-v8-batched-40/models/stage-0120.json
 set OUT results/ppo-pooled-v15c/r1
-python -u tools/train_pooled_objects_v15.py \\
-    --base-model $BASE \\
-    --output-dir $OUT \\
-    --rounds 2 \\
-    --episodes 8 \\
-    --workers 4 \\
-    --seed 29 \\
-    --vocabulary-runs 16 \\
+python -u tools/train_pooled_objects_v15.py \
+    --base-model $BASE \
+    --output-dir $OUT \
+    --rounds 2 \
+    --episodes 8 \
+    --workers 4 \
+    --seed 29 \
+    --vocabulary-runs 16 \
     --seed-prefix v15c-r1-train
 ```
 
 To extend **the same run** (same seed, corpus, vocabulary and hyperparameters):
 
 ```fish
-python -u tools/train_pooled_objects_v15.py \\
-    --base-model $BASE \\
-    --output-dir $OUT \\
-    --rounds 10 \\
-    --episodes 8 \\
-    --workers 4 \\
-    --seed 29 \\
-    --vocabulary-runs 16 \\
-    --seed-prefix v15c-r1-train \\
+python -u tools/train_pooled_objects_v15.py \
+    --base-model $BASE \
+    --output-dir $OUT \
+    --rounds 10 \
+    --episodes 8 \
+    --workers 4 \
+    --seed 29 \
+    --vocabulary-runs 16 \
+    --seed-prefix v15c-r1-train \
     --resume
 ```
 
@@ -215,10 +215,10 @@ Progress: stdout each round. JSON report: `$OUT/report.json`.
 ### Evaluate on the frozen v14 snapshots
 
 ```fish
-python -u tools/combat_snapshot_benchmark.py evaluate \\
-    --corpus results/combat-snapshots-v14/source-A.jsonl \\
-    --baseline-model $BASE \\
-    --candidate-model $OUT/model.json \\
+python -u tools/combat_snapshot_benchmark.py evaluate \
+    --corpus results/combat-snapshots-v14/source-A.jsonl \
+    --baseline-model $BASE \
+    --candidate-model $OUT/model.json \
     --report $OUT/source-A-v8-vs-v15c.json
 ```
 
