@@ -67,6 +67,34 @@ def test_instances_are_never_merged_and_actions_link_exact_instances() -> None:
         legal_action_object_refs("play_card", '{"CardInstanceId":999}', objects)
 
 
+def test_pending_combat_card_selection_preserves_chosen_instance_set() -> None:
+    objects = extract_combat_objects(frame())
+    assert legal_action_object_refs(
+        "select_cards", '{"CardInstanceIds":[11,13]}', objects,
+    ) == (ObjectRef("card", 11), ObjectRef("card", 13))
+    assert legal_action_object_refs(
+        "select_cards", '{"CardInstanceIds":[12,14]}', objects,
+    ) == (ObjectRef("card", 12), ObjectRef("card", 14))
+    assert legal_action_object_refs(
+        "select_cards", '{"CardInstanceIds":[]}', objects,
+    ) == ()
+    assert legal_action_object_refs(
+        "select_cards", '{"card_instance_ids":[14]}', objects,
+    ) == (ObjectRef("card", 14),)
+    with pytest.raises(ValueError, match="Duplicate card"):
+        legal_action_object_refs(
+            "select_cards", '{"CardInstanceIds":[11,11]}', objects,
+        )
+    with pytest.raises(ValueError, match="absent object"):
+        legal_action_object_refs(
+            "select_cards", '{"CardInstanceIds":[999]}', objects,
+        )
+    with pytest.raises(ValueError, match="Missing CardInstanceIds"):
+        legal_action_object_refs("select_cards", "{}", objects)
+    with pytest.raises(ValueError, match="Missing CardInstanceId"):
+        legal_action_object_refs("play_card", "{}", objects)
+
+
 def test_multiple_instanced_powers_on_one_owner_keep_distinct_references() -> None:
     state = frame()
     strangle = "proto.power.strangle"
