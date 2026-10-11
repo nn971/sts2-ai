@@ -270,21 +270,36 @@ def legal_action_object_refs(
     if not isinstance(payload, dict):
         raise ValueError("Malformed legal action payload")
     refs: list[ObjectRef] = []
-    fields = (
-        ("CardInstanceId", "card_instance_id", "card"),
-        ("TargetEnemyId", "target_enemy_id", "enemy"),
-    )
-    for a, b, kind in fields:
-        value = payload.get(a, payload.get(b))
-        if value is not None:
-            if type(value) is not int or value <= 0:
-                raise ValueError(f"Invalid action pointer {a}")
-            refs.append(ObjectRef(kind, value))
-    if action_kind == "use_potion":
-        slot = payload.get("Slot", payload.get("slot"))
-        if type(slot) is not int or slot < 0:
-            raise ValueError("Invalid potion slot")
-        refs.insert(0, ObjectRef("potion", slot))
+    # "select_cards" is a combat decision in the emulator, not a macro
+    # reward choice. Each option contains a combination of card instances.
+    # Without these edges, every combination scores the same residual.
+    if action_kind == "select_cards":
+        choices = payload.get("CardInstanceIds", payload.get("card_instance_ids"))
+        if not isinstance(choices, list):
+            raise ValueError("Missing CardInstanceIds in select_cards action")
+        if any(type(value) is not int or value <= 0 for value in choices):
+            raise ValueError("Invalid card selection instance pointer")
+        if len(set(choices)) != len(choices):
+            raise ValueError("Duplicate card in select_cards action")
+        refs.extend(ObjectRef("card", value) for value in choices)
+    else:
+        card = payload.get("CardInstanceId", payload.get("card_instance_id"))
+        if action_kind == "play_card" and card is None:
+            raise ValueError("Missing CardInstanceId in play_card action")
+        if card is not None:
+            if type(card) is not int or card <= 0:
+                raise ValueError("Invalid action pointer CardInstanceId")
+            refs.append(ObjectRef("card", card))
+        target = payload.get("TargetEnemyId", payload.get("target_enemy_id"))
+        if target is not None:
+            if type(target) is not int or target <= 0:
+                raise ValueError("Invalid action pointer TargetEnemyId")
+            refs.append(ObjectRef("enemy", target))
+        if action_kind == "use_potion":
+            slot = payload.get("Slot", payload.get("slot"))
+            if type(slot) is not int or slot < 0:
+                raise ValueError("Invalid potion slot")
+            refs.insert(0, ObjectRef("potion", slot))
     index = objects.index()
     for ref in refs:
         if ref not in index:
