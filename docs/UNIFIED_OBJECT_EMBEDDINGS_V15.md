@@ -251,3 +251,48 @@ later synergy stress suite for confirmation.
 controls; faster tensorized batched object encoding; v15d heterogeneous
 attention; player-visible enchantment projections tracked in
 [`sts2-emulator#88`](https://github.com/nn971/sts2-emulator/issues/88).
+
+
+## Structural audit after the first v15c snapshot pilot
+
+**Decision:** keep the instance-aware, public-only object representation as
+the architectural baseline. The 739-snapshot replay has already established
+that the current model executes on the entire corpus; further repeated
+win-rate benchmarks are *not* required to justify the input schema.
+
+The remaining concerns are explicit engineering/design work, not reasons to
+return to flattened or globally hashed object representations:
+
+| Concern | Representation layer | Resolution |
+| --- | --- | --- |
+| Two copies of one card/enemy/effect can coexist | Instance tokens and lookup refs correctly preserve cardinality | Keep uniqueness tests and the separate instanced-power path |
+| Combat `select_cards` actions select subsets, not a single card | v15 originally omitted `CardInstanceIds` from legal-action edges | **Fixed:** resolve every candidate card ID, allow empty selection, reject duplicates/missing visible card IDs |
+| Affliction source instance numbers and hidden draw order could leak | Numeric source IDs are excluded; draw pile is a public *unordered* multiset | Keep permutation/relabeling and observation-boundary tests |
+| Enchantments, temporary costs may influence gameplay but are absent from the pinned fair observation | Upstream observation gap, not an embedding issue | [Emulator issue #88](https://github.com/nn971/sts2-emulator/issues/88); use a versioned public projection before enchantment-sensitive training |
+| A frozen vocabulary maps unseen identities/modifiers to OOV | Rare combinations may alias | Build vocabulary using the full implemented content catalog plus public training samples, report OOV rates, and version checkpoints |
+| `owner` edges of enemy/player powers are stored but currently **ignored** by the pooled readout | The temporary pooled control cannot represent all owner-specific interactions | v15d relation-aware aggregation must use owner edges and action source/target roles |
+| Mean pooling weakly captures exact object multiplicities, and action-source/target averaging discards roles | Limitations of the attention-free control, not token extraction | Preserve typed cardinalities, source/target role information and ownership in the relational head |
+| Per-decision Python/Torch token loops are CPU-heavy | Implementation overhead, not an information-theoretic flaw | Vectorize typed embeddings and cache public decoding without embedding hidden IDs |
+
+### Correctness acceptance criteria (without more gameplay benchmarks)
+
+- Deterministic extraction from a pinned **public** observation; private RNG,
+  hidden draw order and opaque instance integer values never enter a tensor.
+- All supported native combat legal action kinds have explicit, validated
+  action/object references (`play_card`, `use_potion`, `end_turn`,
+  `select_cards`). Legacy/toy actions with opaque empty play-card payloads
+  remain supported as a fallback.
+- Duplicate instanced powers remain distinct, and same-type card/enemy
+  instances preserve independently mutable public state.
+- Permuting unordered piles/enemies/power records or consistently renumbering
+  instance IDs cannot change the decision score, once their action pointers
+  are relabeled consistently.
+- Native/public API omissions must be documented rather than silently replaced
+  with exact private engine fields.
+- Structural CI and Torch/portable parity pass. No mandate for additional
+  model-strength experiments is attached to these invariants.
+
+**Interpretation:** the object schema itself is a good foundation. The current
+v15c *pooled head* is not yet a complete relationship-aware network. Moving to
+a typed relation-aware head and eliminating known observation gaps is the
+appropriate next engineering work, independent of any win-rate improvement.
