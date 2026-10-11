@@ -12,7 +12,14 @@ from dataclasses import dataclass
 from typing import Any
 
 OBJECT_SCHEMA = "sts2-public-combat-object-instances-v15a"
-CARD_ZONES = ("hand", "draw_pile", "discard_pile", "exhaust_pile", "play_pile")
+CARD_ZONES = (
+    "hand", "draw_pile", "discard_pile", "exhaust_pile", "play_pile",
+    "choice_pool",
+)
+# The pinned emulator does not yet project its ChoicePool, although its
+# select_cards menu may refer to cards inside it. Placeholder attributes are
+# explicitly unknown, never inferred from an engine card ID.
+UNOBSERVED_CHOICE_TYPE = "<unobserved-choice>"
 # This list is deliberately auditable. Do not recursively tokenize the full observation.
 CARD_DYNAMIC_FIELDS = (
     "state", "affliction", "enchantment", "temporary_energy_cost",
@@ -157,7 +164,10 @@ def extract_combat_objects(state: dict[str, Any]) -> ObjectSet:
 
     seen_cards: set[int] = set()
     for zone in CARD_ZONES:
-        cards = _records(combat.get(zone), "combat." + zone)
+        cards = _records(
+            combat.get(zone, []) if zone == "choice_pool" else combat.get(zone),
+            "combat." + zone,
+        )
         for card in cards:
             instance = _instance(card, "card")
             if instance in seen_cards:
@@ -333,3 +343,60 @@ def legal_action_object_bindings(
         "enemy": "target_enemy",
     }
     return tuple(ActionBinding(roles[ref.kind], ref) for ref in refs)
+
+
+def extract_actionable_combat_objects(
+    state: dict[str, Any],
+    legal_actions: tuple[tuple[str, str], ...] | list[tuple[str, str]],
+) -> ObjectSet:
+    """Resolve *public-menu* selection pointers omitted from older observations.
+
+    The emulator's generated-card ChoicePool is legal-action-visible but is
+    missing from the pinned public observation schema. When and ONLY when the
+    pending choice is select_cards, represent menu-referenced absent cards
+    with explicitly unobserved placeholders. Never fabricate their type,
+    stats or effects, and never treat instance IDs as numeric features.
+
+    Once the emulator exposes combat.choice_pool with actual public card
+    records, normal extraction supplies the real tokens and no placeholder
+    is created. Non-choice actions retain strict pointer validation.
+    """
+    objects = extract_combat_objects(state)
+    combat = state["combat"]
+    assert isinstance(combat, dict)
+    if combat.get("pending_choice_id") != "select_cards":
+        return objects
+    known = objects.index()
+    absent: set[int] = set()
+    for kind, raw in legal_actions:
+        if kind != "select_cards":
+            continue
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError("Malformed legal action JSON") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("Malformed legal action payload")
+        choices = payload.get("CardInstanceIds", payload.get("card_instance_ids"))
+        if not isinstance(choices, list):
+            raise ValueError("Missing CardInstanceIds in select_cards action")
+        if any(type(value) is not int or value <= 0 for value in choices):
+            raise ValueError("Invalid card selection instance pointer")
+        if len(set(choices)) != len(choices):
+            raise ValueError("Duplicate card in select_cards action")
+        for value in choices:
+            if ObjectRef("card", value) not in known:
+                absent.add(value)
+    if not absent:
+        return objects
+    # Sorting provides action-menu-order invariance. IDs are routing keys
+    # only: the neural inputs of every unavailable card are identical.
+    extras = tuple(
+        ObjectToken(
+            "card", UNOBSERVED_CHOICE_TYPE, "unobserved_choice",
+            ObjectRef("card", value), None, (),
+            ("attributes_unavailable",),
+        )
+        for value in sorted(absent)
+    )
+    return ObjectSet(objects.schema, objects.tokens + extras)

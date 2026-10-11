@@ -26,7 +26,7 @@ from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH
 from sts2_ai.models.object_embeddings import ObjectVocabulary
 from sts2_ai.models.object_instances import (
     ObjectSet,
-    extract_combat_objects,
+    extract_actionable_combat_objects,
     legal_action_object_bindings,
 )
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
@@ -66,8 +66,14 @@ def build_corpus(
         state = json.loads(decision.observation.payload_json)
         if not isinstance(state, dict) or not isinstance(state.get("combat"), dict):
             raise ValueError("Noncombat observation in resolved segment")
-        objects.append(extract_combat_objects(state))
+        objects.append(extract_actionable_combat_objects(
+            state, [(a.kind, a.payload_json) for a in decision.legal_actions],
+        ))
     vocabulary = ObjectVocabulary.from_object_sets(objects, manifest=manifest)
+    missing_candidates = sum(
+        token.role == "unobserved_choice"
+        for obj in objects for token in obj.tokens
+    )
     torch.manual_seed(seed)
     head = RelationalObjectTorch(vocabulary, width=16)
     preparation_started = time.perf_counter()
@@ -105,6 +111,7 @@ def build_corpus(
         "manifest": manifest, "records": records,
         "resolved_combats": sum(len(ep.combat_outcomes) for ep in episodes),
         "source_runs": len(episodes),
+        "unobserved_choice_tokens": missing_candidates,
         "target_preparation_seconds": target_preparation_seconds,
     }
     return {**data, "sha256": _digest(data)}
@@ -139,7 +146,10 @@ def prepare_records(records: list[dict[str, Any]]):
         state = json.loads(record["observation"])
         timings["json_decode"] += time.perf_counter() - tick
         tick = time.perf_counter()
-        obj = extract_combat_objects(state)
+        obj = extract_actionable_combat_objects(
+            state,
+            [(a["kind"], a["payload_json"]) for a in record["legal_actions"]],
+        )
         obj.index()
         timings["object_extraction"] += time.perf_counter() - tick
         tick = time.perf_counter()
@@ -340,6 +350,10 @@ def profile_minibatches(
         "resolved_combats": corpus["resolved_combats"],
         "target_preparation_seconds": corpus.get("target_preparation_seconds"),
         "real_combat_decisions": len(records),
+        "unobserved_choice_tokens": sum(
+            token.role == "unobserved_choice"
+            for obj in objects for token in obj.tokens
+        ),
         "sample_preparation_seconds": preparation,
         "sample_preparation_per_decision_ms": {
             key: value * 1000 / len(records)
@@ -427,7 +441,8 @@ def main() -> None:
         )
         print(
             f"[v15g] saved {len(corpus['records'])} real PPO samples "
-            f"to {args.corpus}; collection_s={time.perf_counter()-start:.2f}",
+            f"to {args.corpus}; collection_s={time.perf_counter()-start:.2f} "
+            f"unobserved_choices={corpus['unobserved_choice_tokens']}",
             flush=True,
         )
     else:

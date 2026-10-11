@@ -24,7 +24,7 @@ from .object_embeddings import ObjectVocabulary, TypedObjectEncoder
 from .object_instances import (
     ObjectRef,
     ObjectSet,
-    extract_combat_objects,
+    extract_actionable_combat_objects,
     legal_action_object_refs,
 )
 
@@ -199,7 +199,9 @@ class PooledObjectTorch:
         state = json.loads(observation.payload_json)
         if not isinstance(state, dict):
             raise ValueError("Invalid public combat observation")
-        objects = extract_combat_objects(state)
+        objects = extract_actionable_combat_objects(
+            state, [(a.kind, a.payload_json) for a in actions],
+        )
         action_refs = tuple(
             legal_action_object_refs(action.kind, action.payload_json, objects)
             for action in actions
@@ -328,7 +330,9 @@ class PortablePooledObjectModel:
         state = json.loads(observation.payload_json)
         if not isinstance(state, dict):
             raise ValueError("Invalid public combat observation")
-        objects = extract_combat_objects(state)
+        objects = extract_actionable_combat_objects(
+            state, [(a.kind, a.payload_json) for a in legal_actions],
+        )
         params = {name.removeprefix("encoder."): value
                   for name, value in self.weights.items() if name.startswith("encoder.")}
         rows = PortableTypedEncoder(self.vocabulary, self.width, params).encode(objects)
