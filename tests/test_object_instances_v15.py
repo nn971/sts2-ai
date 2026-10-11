@@ -67,6 +67,54 @@ def test_instances_are_never_merged_and_actions_link_exact_instances() -> None:
         legal_action_object_refs("play_card", '{"CardInstanceId":999}', objects)
 
 
+def test_multiple_instanced_powers_on_one_owner_keep_distinct_references() -> None:
+    state = frame()
+    strangle = "proto.power.strangle"
+    first = state["combat"]["enemies"][0]
+    second = state["combat"]["enemies"][1]
+    first["powers"] = [
+        {"power_id": strangle, "stacks": 1},
+        {"power_id": strangle, "stacks": 3},
+        {"power_id": "proto.power.strength", "stacks": 2},
+    ]
+    second["powers"] = [{"power_id": strangle, "stacks": 4}]
+    state["combat"]["player_powers"].extend([
+        {"power_id": "strength", "stacks": 5},
+        {"power_id": strangle, "stacks": 6},
+        {"power_id": strangle, "stacks": 7},
+    ])
+    objects = extract_combat_objects(state)
+    assert len(objects.index()) == len(objects.tokens)
+    powers = [token for token in objects.tokens if token.kind == "power"]
+    assert len(powers) == 8
+    first_owner = ObjectRef("enemy", 1)
+    same_owner = [
+        token for token in powers
+        if token.owner == first_owner and token.type_id == strangle
+    ]
+    assert len(same_owner) == 2
+    assert len({token.ref for token in same_owner}) == 2
+    assert [dict(token.numeric)["stacks"] for token in same_owner] == [1, 3]
+    assert all(token.owner is not None for token in powers)
+    # Power occurrences are lookup identities, not embeddings. Neither
+    # relabeling enemy IDs nor shuffling same-type powers changes features.
+    changed = copy.deepcopy(state)
+    changed["combat"]["enemies"][0]["powers"].reverse()
+    changed["combat"]["enemies"][0]["instance_id"] += 100
+    changed["combat"]["enemies"][1]["instance_id"] += 200
+    original_features = sorted(
+        (t.kind, t.type_id, t.role, t.numeric, t.categorical)
+        for t in objects.tokens
+    )
+    new_objects = extract_combat_objects(changed)
+    assert len(new_objects.index()) == len(new_objects.tokens)
+    changed_features = sorted(
+        (t.kind, t.type_id, t.role, t.numeric, t.categorical)
+        for t in new_objects.tokens
+    )
+    assert changed_features == original_features
+
+
 def test_mutations_enchantments_and_transforms_reembed_one_instance() -> None:
     state = frame()
     base = extract_combat_objects(state).tokens
