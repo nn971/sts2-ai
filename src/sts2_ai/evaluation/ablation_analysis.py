@@ -156,9 +156,15 @@ def compare_ablation(
         raise ValueError("Target ablation evaluation must be greedy")
     if priority_eval.get("evaluation", {}).get("mode", "greedy") != "greedy":
         raise ValueError("Priority ablation evaluation must be greedy")
-    if (target_eval["candidate_model"] != target_train.get("candidate_model", target_eval["candidate_model"])
-            and target_train.get("candidate_model") is not None):
-        raise ValueError("Target evaluation candidate path mismatch")
+    for arm, training, evaluation in (
+        ("target", target_train, target_eval),
+        ("priority", priority_train, priority_eval),
+    ):
+        expected_candidate = training.get("candidate_model")
+        if expected_candidate is not None and (
+            expected_candidate != evaluation["candidate_model"]
+        ):
+            raise ValueError(f"{arm} evaluation candidate path mismatch")
     comparison = diagnose_reports(
         {0: target_eval, 1: priority_eval},
         bootstrap_samples=samples, seed=seed, min_enemy_count=10,
@@ -171,7 +177,10 @@ def compare_ablation(
             raise ValueError("Training rounds differ from ablation manifest")
         if settings.get("episodes") * settings.get("rounds") != target_training["played"]:
             raise ValueError("Training episode budget differs from manifest")
-        if settings.get("target_balance") != target_train["training_settings"]["snapshot_target_balance"]:
+        if (
+            settings.get("target_balance")
+            != target_train["training_settings"]["snapshot_target_balance"]
+        ):
             raise ValueError("Ablation manifest target distribution mismatch")
     first_rows = target_eval["rows"]
     second_rows = priority_eval["rows"]
