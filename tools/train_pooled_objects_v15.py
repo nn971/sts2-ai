@@ -28,6 +28,10 @@ from sts2_ai.training.pooled_ppo_v15 import (
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-model", type=Path, required=True)
+    parser.add_argument(
+        "--architecture", choices=("pooled", "relational"), default="pooled",
+        help="v15c pooled control or v15d relation-aware attention",
+    )
     parser.add_argument("--output-dir", type=Path,
                         default=Path("results/ppo-pooled-v15c"))
     parser.add_argument("--vocabulary", type=Path,
@@ -122,12 +126,14 @@ def main() -> None:
             clip_epsilon=args.ppo_clip_epsilon,
             gamma=args.ppo_gamma, gae_lambda=args.ppo_gae_lambda,
             checkpoint=checkpoint, resume=args.resume,
+            architecture=args.architecture,
         )
     model_path = output / "model.json"
     report_path = output / "report.json"
     model.save(model_path)
     report_path.write_text(json.dumps({
         "schema": POOLED_PPO_VERSION,
+        "architecture": args.architecture,
         "base_model": str(args.base_model),
         "vocabulary": str(vocab_path),
         "emulator_revision": backend.emulator_revision,
@@ -135,7 +141,7 @@ def main() -> None:
         "rows": [asdict(row) for row in rows],
     }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(
-        f"[v15c] complete: model={model_path} report={report_path} "
+        f"[v15-{args.architecture}] complete: model={model_path} report={report_path} "
         f"checkpoint={checkpoint}", flush=True,
     )
 
