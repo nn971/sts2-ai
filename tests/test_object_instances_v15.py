@@ -128,6 +128,30 @@ def test_fails_closed_on_invalid_public_objects_and_unobserved_enchantment() -> 
     assert all(not t.startswith("enchantment") for t in token.categorical)
 
 
+
+def test_affliction_source_instance_ids_remain_pointers_not_features() -> None:
+    state = frame()
+    card = state["combat"]["hand"][0]
+    card["affliction"] = {
+        "kind": "wounded",
+        "source_enemy_id": "proto.enemy.nibbit",
+        "source_enemy_instance_id": 1,
+        "related_instance_ids": [1, 2],
+        "sourceEnemyInstanceId": 1,
+    }
+    before = extract_combat_objects(state)
+    altered = copy.deepcopy(state)
+    altered_card = altered["combat"]["hand"][0]
+    altered_card["affliction"]["source_enemy_instance_id"] = 2001
+    altered_card["affliction"]["related_instance_ids"] = [201, 202]
+    altered_card["affliction"]["sourceEnemyInstanceId"] = 2001
+    after = extract_combat_objects(altered)
+    i = before.index()[ObjectRef("card", 11)]
+    assert before.tokens[i] == after.tokens[after.index()[ObjectRef("card", 11)]]
+    assert all("instance_id" not in key for key, _ in before.tokens[i].numeric)
+    assert all("InstanceId" not in tag for tag in before.tokens[i].categorical)
+
+
 def test_typed_embeddings_gradients_and_frozen_vocabulary_roundtrip() -> None:
     torch = pytest.importorskip("torch")
     state = frame()
