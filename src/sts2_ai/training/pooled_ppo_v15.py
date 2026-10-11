@@ -36,6 +36,7 @@ from sts2_ai.models.object_instances import (
     ActionBinding,
     ObjectRef,
     ObjectSet,
+    extract_actionable_combat_objects,
     extract_combat_objects,
     legal_action_object_refs,
 )
@@ -155,7 +156,10 @@ def collect_public_vocabulary(
                 state = json.loads(decision.observation.payload_json)
                 if not isinstance(state, dict):
                     raise ValueError("Invalid public observation")
-                observations.append(extract_combat_objects(state))
+                observations.append(extract_actionable_combat_objects(
+                    state,
+                    [(a.kind, a.payload_json) for a in decision.legal_actions],
+                ))
     if not observations:
         raise ValueError("No public combat observations available for vocabulary")
     # The pinned JSONL backend already validates the fair public capability
@@ -174,7 +178,10 @@ def _prepared_decision(
     state = json.loads(decision.observation.payload_json)
     if not isinstance(state, dict):
         raise ValueError("Malformed public combat observation")
-    objects = extract_combat_objects(state)
+    objects = extract_actionable_combat_objects(
+        state,
+        [(a.kind, a.payload_json) for a in decision.legal_actions],
+    )
     refs = tuple(
         legal_action_object_refs(a.kind, a.payload_json, objects)
         for a in decision.legal_actions
