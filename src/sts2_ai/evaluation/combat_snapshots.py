@@ -393,7 +393,7 @@ def evaluate_model_suite(
                         progress_every=combat_progress_every,
                         on_progress=(
                             (lambda decisions, model_name=label, floor=recipe.floor, run_seed=seed:
-                             on_combat_progress(seed, floor, model_name, decisions))
+                             on_combat_progress(run_seed, floor, model_name, decisions))
                             if on_combat_progress is not None else None
                         ),
                     )
