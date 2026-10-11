@@ -239,6 +239,8 @@ def profile_minibatches(
 
                 def mark(label: str) -> None:
                     nonlocal previous
+                    if not instrument:
+                        return
                     sync()
                     now = time.perf_counter()
                     elapsed[label] = now - previous
@@ -250,11 +252,6 @@ def profile_minibatches(
                     selected_obj, selected_menu, selected_base,
                     stage_hook=mark if instrument else None,
                 )
-                if instrument:
-                    # The callback already synchronized at the last forward stage.
-                    pass
-                else:
-                    mark("forward_total")
                 loss = _ppo_loss(
                     torch, values, logits, selected_raw, corpus["temperature"],
                 )
