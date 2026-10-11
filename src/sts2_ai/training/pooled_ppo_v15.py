@@ -699,7 +699,7 @@ def train_pooled_combat_ppo(
                 f"ppo_samples={row.ppo_samples_used} "
                 f"updates={row.optimizer_steps} loss={row.mean_loss!r} "
                 f"policy={row.mean_policy_loss!r} value={row.mean_value_loss!r} "
-                f"entropy={row.mean_entropy!r} 
+                f"entropy={row.mean_entropy!r} "
                 f"rollout_s={row.rollout_seconds:.2f} "
                 f"optimizer_s={row.optimizer_seconds:.2f}",
                 flush=True,
