@@ -605,8 +605,6 @@ def train_pooled_combat_ppo(
     if snapshot_recipes is not None:
         if not snapshot_recipes:
             raise ValueError("Snapshot training requires at least one recipe")
-        if workers != 1:
-            raise ValueError("Snapshot training currently requires workers=1")
         if environment != "native-overgrowth":
             raise ValueError("Snapshots require the native Overgrowth environment")
         if snapshot_sampling not in ("balanced", "natural"):
@@ -615,7 +613,7 @@ def train_pooled_combat_ppo(
             recipe.validate()
             if recipe.emulator_revision != backend.emulator_revision:
                 raise ValueError("Snapshot corpus emulator revision mismatch")
-    elif workers > 1 and not isinstance(backend, JsonlEmulatorBackend):
+    if workers > 1 and not isinstance(backend, JsonlEmulatorBackend):
         raise ValueError("Parallel training requires the JSONL emulator")
     if not isinstance(base.combat, NeuralPolicyValueModel):
         raise ValueError("v15c PPO requires a frozen v8/v13 base combat head")
@@ -701,8 +699,7 @@ def train_pooled_combat_ppo(
     with ExitStack() as scope:
         pool = (
             scope.enter_context(open_worker_pool(backend, workers))
-            if (snapshot_recipes is None and workers > 1
-                and isinstance(backend, JsonlEmulatorBackend))
+            if workers > 1 and isinstance(backend, JsonlEmulatorBackend)
             else None
         )
         for i in range(len(rows), rounds):
@@ -725,7 +722,7 @@ def train_pooled_combat_ppo(
                 cohort = collect_snapshot_cohort(
                     backend, policy, selected,
                     round_index=i, actor_seed=seed, temperature=temperature,
-                    max_decisions=max_decisions,
+                    max_decisions=max_decisions, pool=pool, workers=workers,
                 )
             elif pool is not None:
                 cohort = collect_parallel(
