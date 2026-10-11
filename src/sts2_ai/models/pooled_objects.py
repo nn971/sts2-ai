@@ -274,16 +274,18 @@ class PortablePooledObjectModel:
             })
         if set(self.weights) != set(sizes):
             raise ValueError("Incomplete v15c tensor set")
+        def check(value: Any, shape: tuple[int, ...], name: str) -> None:
+            if not shape:
+                if not isinstance(value, float) or not math.isfinite(value):
+                    raise ValueError("Invalid v15c scalar: " + name)
+                return
+            if not isinstance(value, list) or len(value) != shape[0]:
+                raise ValueError("Incorrect v15c tensor shape: " + name)
+            for entry in value:
+                check(entry, shape[1:], name)
+
         for name, shape in sizes.items():
-            value = self.weights[name]
-            for dim in shape:
-                if not isinstance(value, list) or len(value) != dim:
-                    raise ValueError("Incorrect v15c tensor shape: " + name)
-                if not value and dim:
-                    raise ValueError("Empty v15c tensor: " + name)
-                value = value[0]
-            if shape == () and not isinstance(value, float):
-                raise ValueError("Invalid v15c scalar")
+            check(self.weights[name], shape, name)
 
     def to_dict(self) -> dict[str, Any]:
         return {
