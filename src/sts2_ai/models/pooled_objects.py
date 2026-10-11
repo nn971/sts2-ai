@@ -22,6 +22,7 @@ from sts2_ai.models.protocol import PolicyValueEstimate
 
 from .object_embeddings import ObjectVocabulary, TypedObjectEncoder
 from .object_instances import (
+    ObjectRef,
     ObjectSet,
     extract_combat_objects,
     legal_action_object_refs,
@@ -149,45 +150,62 @@ class PooledObjectTorch:
 
         self.module = Residual(self.embedding.module, width)
 
-    def forward(
-        self, base: NeuralPolicyValueModel, observation: Observation,
-        actions: Sequence[LegalAction],
+    def forward_prepared(
+        self, objects: ObjectSet,
+        action_refs: Sequence[tuple[ObjectRef, ...]],
+        baseline: PolicyValueEstimate,
     ) -> tuple[Any, Any]:
-        """Compute differentiable residuals; base outputs stay frozen."""
+        """Trainable forward with frozen base outputs and parsed references.
+
+        Cache the public object extraction and base predictions once per
+        rollout cohort; *recompute* embeddings every optimizer minibatch.
+        """
         torch = self.torch
-        state = json.loads(observation.payload_json)
-        if not isinstance(state, dict):
-            raise ValueError("Invalid public combat observation")
-        objects = extract_combat_objects(state)
         embedded = self.embedding.encode(objects)
         context = embedded.mean(dim=0)
         shared = self.module.state_proj(context)
         indices = objects.index()
-
-        base_estimate = base.evaluate(observation, actions)
-        value0 = torch.tensor(base_estimate.value, dtype=embedded.dtype,
-                              device=embedded.device)
-        logits0 = torch.tensor(base_estimate.action_logits, dtype=embedded.dtype,
-                               device=embedded.device)
+        value0 = torch.tensor(
+            baseline.value, dtype=embedded.dtype, device=embedded.device,
+        )
+        logits0 = torch.tensor(
+            baseline.action_logits, dtype=embedded.dtype, device=embedded.device,
+        )
         value_delta = self.module.value_readout(torch.tanh(shared)).squeeze()
         value = (
             value0 + torch.tanh(self.module.value_gate) * torch.tanh(value_delta)
             * (1.0 - value0.abs())
         )
-        if not actions:
+        if not action_refs:
             return value, logits0
-        action_vectors = []
-        for action in actions:
-            refs = legal_action_object_refs(action.kind, action.payload_json, objects)
-            if refs:
-                action_vectors.append(embedded[[indices[r] for r in refs]].mean(dim=0))
-            else:
-                action_vectors.append(torch.zeros_like(context))
+        if len(action_refs) != len(baseline.action_logits):
+            raise ValueError("v15c cached action references/logits mismatch")
+        action_vectors = [
+            embedded[[indices[ref] for ref in refs]].mean(dim=0)
+            if refs else torch.zeros_like(context)
+            for refs in action_refs
+        ]
         action_x = torch.stack(action_vectors, dim=0)
         updates = self.module.policy_readout(
             torch.tanh(shared.unsqueeze(0) + self.module.action_proj(action_x))
         ).squeeze(-1)
         return value, logits0 + self.module.policy_gate * updates
+
+    def forward(
+        self, base: NeuralPolicyValueModel, observation: Observation,
+        actions: Sequence[LegalAction],
+    ) -> tuple[Any, Any]:
+        """Compute differentiable residuals; base outputs stay frozen."""
+        state = json.loads(observation.payload_json)
+        if not isinstance(state, dict):
+            raise ValueError("Invalid public combat observation")
+        objects = extract_combat_objects(state)
+        action_refs = tuple(
+            legal_action_object_refs(action.kind, action.payload_json, objects)
+            for action in actions
+        )
+        baseline = base.evaluate(observation, actions)
+        return self.forward_prepared(objects, action_refs, baseline)
 
     def export(self, base: NeuralPolicyValueModel) -> PortablePooledObjectModel:
         weights = {
