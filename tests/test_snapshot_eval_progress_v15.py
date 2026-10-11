@@ -24,6 +24,9 @@ def recipe_for(seed: str):
     battle = backend.step(root, go).child
     recorder = SnapshotCollector(backend, seed=seed, source_policy="collector")
     recorder.on_decision(
+        root, backend.observe(root, FAIR), (go,), Decision(go, "collector"),
+    )
+    recorder.on_decision(
         battle, backend.observe(battle, FAIR), backend.legal_actions(battle),
         Decision(backend.legal_actions(battle)[0], "collector"),
     )
