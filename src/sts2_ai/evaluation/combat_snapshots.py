@@ -234,6 +234,8 @@ class PairedCombatResult:
 def play_combat(
     backend: EmulatorBackend, start: StateHandle, agent: Agent,
     *, max_decisions: int = 256,
+    on_progress: Callable[[int], None] | None = None,
+    progress_every: int = 32,
 ) -> CombatResult:
     """Play one fork until the combat boundary; always release fork/descendants."""
     if max_decisions <= 0:
@@ -284,6 +286,8 @@ def play_combat(
             backend.release_many([handle])
             handle = child
             decisions += 1
+            if on_progress is not None and decisions % progress_every == 0:
+                on_progress(decisions)
     finally:
         backend.release_many([handle])
 
@@ -338,6 +342,10 @@ def evaluate_model_suite(
     *,
     max_combat_decisions: int = 256,
     on_run_complete: Callable[[str, int], None] | None = None,
+    on_run_start: Callable[[str, int], None] | None = None,
+    on_snapshot_complete: Callable[[str, int, int], None] | None = None,
+    on_combat_progress: Callable[[str, int, str, int], None] | None = None,
+    on_run_results: Callable[[str, Sequence[MultiCombatResult]], None] | None = None,
 ) -> list[MultiCombatResult]:
     """Replay each source prefix once, then fork once per model.
 
@@ -357,8 +365,11 @@ def evaluate_model_suite(
     results: list[MultiCombatResult] = []
     for (seed, ascension, _source), items in sorted(groups.items()):
         items.sort(key=lambda recipe: len(recipe.action_ids))
+        if on_run_start is not None:
+            on_run_start(seed, len(items))
         handle = reset_training_run(backend, seed, NATIVE_OVERGROWTH, ascension)
         prefix: tuple[str, ...] = ()
+        run_results: list[MultiCombatResult] = []
         try:
             for recipe in items:
                 if recipe.action_ids[:len(prefix)] != prefix or (
@@ -376,16 +387,27 @@ def evaluate_model_suite(
                         backend.fork(handle),
                         agent,
                         max_decisions=max_combat_decisions,
+                        on_progress=(
+                            (lambda decisions, model_name=label, floor=recipe.floor:
+                             on_combat_progress(seed, floor, model_name, decisions))
+                            if on_combat_progress is not None else None
+                        ),
                     )
                     for label, agent in models.items()
                 }
-                results.append(MultiCombatResult(
+                entry = MultiCombatResult(
                     seed=seed, floor=recipe.floor, tier=recipe.tier,
                     progress=recipe.progress, enemy_ids=recipe.enemy_ids,
                     outcomes=outcomes,
-                ))
+                )
+                results.append(entry)
+                run_results.append(entry)
+                if on_snapshot_complete is not None:
+                    on_snapshot_complete(seed, len(run_results), len(items))
         finally:
             backend.release_many([handle])
+        if on_run_results is not None:
+            on_run_results(seed, tuple(run_results))
         if on_run_complete is not None:
             on_run_complete(seed, len(items))
     return results
@@ -412,11 +434,23 @@ def pair_model_suite(
 def evaluate_recipes(
     backend: EmulatorBackend, recipes: Sequence[CombatSnapshotRecipe],
     baseline: Agent, candidate: Agent, *, max_combat_decisions: int = 256,
+    on_run_start: Callable[[str, int], None] | None = None,
+    on_snapshot_complete: Callable[[str, int, int], None] | None = None,
+    on_combat_progress: Callable[[str, int, str, int], None] | None = None,
+    on_run_results: Callable[[str, Sequence[PairedCombatResult]], None] | None = None,
 ) -> list[PairedCombatResult]:
     """Two-model compatibility interface; replay/validation shared with suite."""
+    def deliver(seed: str, rows: Sequence[MultiCombatResult]) -> None:
+        if on_run_results is not None:
+            on_run_results(seed, pair_model_suite(rows, "baseline", "candidate"))
+
     results = evaluate_model_suite(
         backend, recipes, {"baseline": baseline, "candidate": candidate},
         max_combat_decisions=max_combat_decisions,
+        on_run_start=on_run_start,
+        on_snapshot_complete=on_snapshot_complete,
+        on_combat_progress=on_combat_progress,
+        on_run_results=deliver if on_run_results is not None else None,
     )
     return pair_model_suite(results, "baseline", "candidate")
 
