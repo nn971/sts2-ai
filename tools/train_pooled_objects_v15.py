@@ -92,6 +92,10 @@ def main() -> None:
                         help="Build pinned .NET emulator before starting")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument(
+        "--initialize-from-model", type=Path,
+        help="Fresh experiment warm-start from compatible exported v15 weights",
+    )
+    parser.add_argument(
         "--snapshot-corpus", type=Path,
         help="Opt-in replay-verified combat-only training; use a TRAIN partition",
     )
@@ -115,12 +119,18 @@ def main() -> None:
         parser.error("Snapshot rollout mode currently requires --workers 1")
     if args.snapshot_corpus is not None and not args.snapshot_corpus.is_file():
         parser.error("Snapshot training corpus does not exist")
+    if args.initialize_from_model is not None and not args.initialize_from_model.is_file():
+        parser.error("Initialization model does not exist")
     snapshot_recipes = (
         tuple(load_recipes(args.snapshot_corpus))
         if args.snapshot_corpus is not None else None
     )
 
     base = PhaseSplitNeuralModel.load(args.base_model)
+    initial = (
+        PhaseSplitNeuralModel.load(args.initialize_from_model)
+        if args.initialize_from_model is not None else None
+    )
     if base.combat_value_objective != "hp_preservation":
         parser.error("Base combat critic must estimate hp_preservation")
     output = args.output_dir
@@ -154,6 +164,8 @@ def main() -> None:
         "max_decisions": args.max_decisions,
         "episode_goal": args.episode_goal,
     }
+    if initial is not None:
+        training_settings["initialize_from_model"] = str(args.initialize_from_model)
     if snapshot_recipes is not None:
         training_settings["snapshot_corpus"] = str(args.snapshot_corpus)
         training_settings["snapshot_sampling"] = args.snapshot_sampling
@@ -243,6 +255,7 @@ def main() -> None:
             snapshot_every=args.snapshot_every,
             snapshot_recipes=snapshot_recipes,
             snapshot_sampling=args.snapshot_sampling,
+            initialize_from=initial,
             on_round=publish_round,
         )
         _atomic_model(model_path, model)
