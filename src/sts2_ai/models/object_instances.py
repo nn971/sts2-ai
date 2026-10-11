@@ -144,7 +144,10 @@ def extract_combat_objects(state: dict[str, Any]) -> ObjectSet:
             global_num[k] = _number(combat[k], k)
     if isinstance(state.get("character_id"), str):
         global_cat.append("character=" + state["character_id"])
-    objects.append(_token("global", "player", "combat", ObjectRef("global", "player"), global_num, global_cat))
+    objects.append(_token(
+        "global", "player", "combat", ObjectRef("global", "player"),
+        global_num, global_cat,
+    ))
 
     seen_cards: set[int] = set()
     for zone in CARD_ZONES:
@@ -204,14 +207,20 @@ def extract_combat_objects(state: dict[str, Any]) -> ObjectSet:
         for power in _records(powers, "powers"):
             ident = _identifier(power, "power_id", "power")
             num = {"stacks": _number(power.get("stacks"), "power.stacks")}
-            objects.append(_token("power", ident, "active", ObjectRef("power", (str(owner), ident)), num, [], owner))
+            objects.append(_token(
+                "power", ident, "active", ObjectRef("power", (str(owner), ident)),
+                num, [], owner,
+            ))
         if statuses is not None:
             if not isinstance(statuses, dict):
                 raise ValueError("Enemy statuses must be a mapping")
             for ident, value in sorted(statuses.items()):
                 if not isinstance(ident, str) or not ident:
                     raise ValueError("Invalid status identity")
-                objects.append(_token("status", ident, "active", ObjectRef("status", (str(owner), ident)), {"stacks": _number(value, "status.stacks")}, [], owner))
+                objects.append(_token(
+                    "status", ident, "active", ObjectRef("status", (str(owner), ident)),
+                    {"stacks": _number(value, "status.stacks")}, [], owner,
+                ))
     append_effects(player, combat.get("player_powers"))
 
     for enemy in _records(combat.get("enemies"), "combat.enemies"):
@@ -219,7 +228,10 @@ def extract_combat_objects(state: dict[str, Any]) -> ObjectSet:
         ident = _identifier(enemy, "enemy_id", "enemy")
         num: dict[str, float] = {}
         cat: list[str] = []
-        for k in ("hp", "block", "formation_position", "intent_damage", "intent_hits", "intent_base_damage"):
+        for k in (
+            "hp", "block", "formation_position",
+            "intent_damage", "intent_hits", "intent_base_damage",
+        ):
             if k in enemy and enemy[k] is not None:
                 num[k] = _number(enemy[k], "enemy." + k)
         for k in ("move_id", "last_move_id"):
