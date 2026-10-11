@@ -267,6 +267,7 @@ def profile_minibatches(
             selected_base = [baselines[i] for i in picked]
             selected_raw = [records[i] for i in picked]
             selected_adv = [normalized[i] for i in picked]
+            selected_topologies = [compiled[i] for i in picked]
             for topology_mode in topology_modes:
                 for loss_mode in loss_modes:
                     head = RelationalObjectTorch(vocabulary, width=width)
@@ -296,7 +297,7 @@ def profile_minibatches(
                             selected_obj, selected_menu, selected_base,
                             stage_hook=mark if instrument else None,
                             topologies=(
-                                [compiled[i] for i in picked]
+                                selected_topologies
                                 if topology_mode == "cached" else None
                             ),
                         )
