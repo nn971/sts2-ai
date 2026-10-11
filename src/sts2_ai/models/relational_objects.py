@@ -64,6 +64,48 @@ def _relations(objects: ObjectSet) -> list[list[int]]:
     return out
 
 
+
+@dataclass(frozen=True, slots=True)
+class RelationalTopology:
+    """Immutable, public-only lookup topology for a single PPO decision.
+
+    Compiled once when a sample is prepared. The tuple values contain *row*
+    indices and relation classes, never raw instance IDs as neural features.
+    They hold no Torch tensors, neural values or gradients and are safe to
+    reuse across PPO epochs and device changes.
+    """
+
+    object_count: int
+    global_index: int
+    relations: tuple[tuple[int, ...], ...]
+    kind_ids: tuple[int, ...]
+    action_edges: tuple[tuple[tuple[int, int], ...], ...]
+
+
+def prepare_relational_topology(
+    objects: ObjectSet,
+    actions: Sequence[tuple[str, tuple[ActionBinding, ...]]],
+) -> RelationalTopology:
+    """Validate and cache public ownership/action pointers independently of weights."""
+    index = objects.index()
+    player = index.get(ObjectRef("global", "player"))
+    if player is None:
+        raise ValueError("Missing player/global token")
+    kind_ids: list[int] = []
+    edges: list[tuple[tuple[int, int], ...]] = []
+    for kind, bindings in actions:
+        kind_ids.append(ACTION_KINDS.index(kind) if kind in ACTION_KINDS else 0)
+        edges.append(tuple(
+            (index[binding.ref], ACTION_ROLES.index(binding.role))
+            for binding in bindings
+        ))
+    return RelationalTopology(
+        len(objects.tokens), player,
+        tuple(tuple(row) for row in _relations(objects)),
+        tuple(kind_ids), tuple(edges),
+    )
+
+
 def _action_tokens(
     actions: Sequence[LegalAction], objects: ObjectSet,
 ) -> tuple[tuple[str, tuple[ActionBinding, ...]], ...]:
@@ -223,6 +265,7 @@ class RelationalObjectTorch:
         baselines: Sequence[PolicyValueEstimate],
         *,
         stage_hook: Callable[[str], None] | None = None,
+        topologies: Sequence[RelationalTopology] | None = None,
     ) -> tuple[Any, tuple[Any, ...]]:
         """Batched padded object and action attention, without state leakage.
 
@@ -235,6 +278,8 @@ class RelationalObjectTorch:
         b = len(objects)
         if len(actions) != b or len(baselines) != b:
             raise ValueError("v15f batch objects/actions/baselines mismatch")
+        if topologies is not None and len(topologies) != b:
+            raise ValueError("Cached relational topology batch size mismatch")
         if not b:
             return (
                 self.module.policy_gate.new_zeros((0,)),
@@ -253,20 +298,37 @@ class RelationalObjectTorch:
             sizes, device=device, dtype=torch.long,
         ).unsqueeze(1)
         x = torch.nn.utils.rnn.pad_sequence(embeddings, batch_first=True)
-        relation = torch.zeros((b, nmax, nmax), device=device, dtype=torch.long)
         global_indices: list[int] = []
         indices = []
-        for i, sample in enumerate(objects):
-            index = sample.index()
-            player = index.get(ObjectRef("global", "player"))
-            if player is None:
-                raise ValueError("Missing player/global token")
-            indices.append(index)
-            global_indices.append(player)
-            n = sizes[i]
-            relation[i, :n, :n] = torch.tensor(
-                _relations(sample), device=device, dtype=torch.long,
-            )
+        if topologies is not None:
+            # Construct one padded host matrix, one device transfer.
+            # Crucially: never recompute owner relationships or pointer maps.
+            padded = []
+            zeros = [0] * nmax
+            for i, topology in enumerate(topologies):
+                n = sizes[i]
+                if (topology.object_count != n
+                        or len(topology.kind_ids) != len(actions[i])):
+                    raise ValueError("Cached topology no longer matches sample")
+                global_indices.append(topology.global_index)
+                padded.append(
+                    [list(row) + [0] * (nmax - n) for row in topology.relations]
+                    + [zeros] * (nmax - n)
+                )
+            relation = torch.tensor(padded, device=device, dtype=torch.long)
+        else:
+            relation = torch.zeros((b, nmax, nmax), device=device, dtype=torch.long)
+            for i, sample in enumerate(objects):
+                index = sample.index()
+                player = index.get(ObjectRef("global", "player"))
+                if player is None:
+                    raise ValueError("Missing player/global token")
+                indices.append(index)
+                global_indices.append(player)
+                n = sizes[i]
+                relation[i, :n, :n] = torch.tensor(
+                    _relations(sample), device=device, dtype=torch.long,
+                )
         if stage_hook is not None:
             stage_hook("relation_setup")
         hd = d // HEADS
@@ -319,17 +381,31 @@ class RelationalObjectTorch:
             if len(menu) != len(baseline.action_logits):
                 raise ValueError("v15f action/logit menu mismatch")
             action_lengths.append(len(menu))
-            for (kind, bindings), baseline_logit in zip(
-                menu, baseline.action_logits, strict=True,
-            ):
-                owners.append(i)
-                kind_ids.append(ACTION_KINDS.index(kind) if kind in ACTION_KINDS else 0)
-                action_counts.append(len(bindings))
-                edges.append([
-                    (indices[i][binding.ref], ACTION_ROLES.index(binding.role))
-                    for binding in bindings
-                ])
-                logits0.append(baseline_logit)
+            if topologies is not None:
+                prepared = topologies[i]
+                for kind_idx, edge, baseline_logit in zip(
+                    prepared.kind_ids, prepared.action_edges,
+                    baseline.action_logits, strict=True,
+                ):
+                    owners.append(i)
+                    kind_ids.append(kind_idx)
+                    action_counts.append(len(edge))
+                    edges.append(list(edge))
+                    logits0.append(baseline_logit)
+            else:
+                for (kind, bindings), baseline_logit in zip(
+                    menu, baseline.action_logits, strict=True,
+                ):
+                    owners.append(i)
+                    kind_ids.append(
+                        ACTION_KINDS.index(kind) if kind in ACTION_KINDS else 0
+                    )
+                    action_counts.append(len(bindings))
+                    edges.append([
+                        (indices[i][binding.ref], ACTION_ROLES.index(binding.role))
+                        for binding in bindings
+                    ])
+                    logits0.append(baseline_logit)
         a = len(owners)
         if stage_hook is not None:
             stage_hook("action_metadata")
