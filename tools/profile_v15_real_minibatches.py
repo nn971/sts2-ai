@@ -26,7 +26,7 @@ from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH
 from sts2_ai.models.object_embeddings import ObjectVocabulary
 from sts2_ai.models.object_instances import (
     ObjectSet,
-    extract_combat_objects,
+    extract_actionable_combat_objects,
     legal_action_object_bindings,
 )
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
@@ -66,7 +66,9 @@ def build_corpus(
         state = json.loads(decision.observation.payload_json)
         if not isinstance(state, dict) or not isinstance(state.get("combat"), dict):
             raise ValueError("Noncombat observation in resolved segment")
-        objects.append(extract_combat_objects(state))
+        objects.append(extract_actionable_combat_objects(
+            state, [(a.kind, a.payload_json) for a in decision.legal_actions],
+        ))
     vocabulary = ObjectVocabulary.from_object_sets(objects, manifest=manifest)
     torch.manual_seed(seed)
     head = RelationalObjectTorch(vocabulary, width=16)
@@ -139,7 +141,10 @@ def prepare_records(records: list[dict[str, Any]]):
         state = json.loads(record["observation"])
         timings["json_decode"] += time.perf_counter() - tick
         tick = time.perf_counter()
-        obj = extract_combat_objects(state)
+        obj = extract_actionable_combat_objects(
+            state,
+            [(a["kind"], a["payload_json"]) for a in record["legal_actions"]],
+        )
         obj.index()
         timings["object_extraction"] += time.perf_counter() - tick
         tick = time.perf_counter()
