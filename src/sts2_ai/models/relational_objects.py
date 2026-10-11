@@ -216,6 +216,172 @@ class RelationalObjectTorch:
         delta = torch.stack(action_rows)
         return value, initial_logits + self.module.policy_gate * delta
 
+    def forward_batch_prepared(
+        self,
+        objects: Sequence[ObjectSet],
+        actions: Sequence[Sequence[tuple[str, tuple[ActionBinding, ...]]]],
+        baselines: Sequence[PolicyValueEstimate],
+    ) -> tuple[Any, tuple[Any, ...]]:
+        """Batched padded object and action attention, without state leakage.
+
+        This intentionally shares the v15d module parameters with the
+        per-decision reference path. Padding is excluded from *key* softmax,
+        player/global pooling and action cross-attention. Caller retains
+        individual legal-action menus and their original ordering.
+        """
+        torch = self.torch
+        b = len(objects)
+        if len(actions) != b or len(baselines) != b:
+            raise ValueError("v15f batch objects/actions/baselines mismatch")
+        if not b:
+            return (
+                self.module.policy_gate.new_zeros((0,)),
+                (),
+            )
+        sizes = [len(obj.tokens) for obj in objects]
+        if any(n < 1 for n in sizes):
+            raise ValueError("v15f requires at least the global object")
+        embeddings = self.embedding.encode_many(objects)
+        device, dtype = embeddings[0].device, embeddings[0].dtype
+        nmax, d = max(sizes), self.width
+        ids = torch.arange(nmax, device=device)
+        valid = ids.unsqueeze(0) < torch.tensor(
+            sizes, device=device, dtype=torch.long,
+        ).unsqueeze(1)
+        x = torch.nn.utils.rnn.pad_sequence(embeddings, batch_first=True)
+        relation = torch.zeros((b, nmax, nmax), device=device, dtype=torch.long)
+        global_indices: list[int] = []
+        indices = []
+        for i, sample in enumerate(objects):
+            index = sample.index()
+            player = index.get(ObjectRef("global", "player"))
+            if player is None:
+                raise ValueError("Missing player/global token")
+            indices.append(index)
+            global_indices.append(player)
+            n = sizes[i]
+            relation[i, :n, :n] = torch.tensor(
+                _relations(sample), device=device, dtype=torch.long,
+            )
+        hd = d // HEADS
+        for block in self.module.blocks:
+            q = block.q(x).reshape(b, nmax, HEADS, hd).transpose(1, 2)
+            k = block.k(x).reshape(b, nmax, HEADS, hd).transpose(1, 2)
+            v = block.v(x).reshape(b, nmax, HEADS, hd).transpose(1, 2)
+            scores = torch.matmul(q, k.transpose(-1, -2)) / math.sqrt(hd)
+            bias = block.bias[:, relation].permute(1, 0, 2, 3)
+            scores = (scores + bias).masked_fill(
+                ~valid[:, None, None, :], torch.finfo(dtype).min,
+            )
+            weights = scores.softmax(dim=-1)
+            attended = torch.matmul(weights, v).transpose(1, 2)
+            attended = attended.reshape(b, nmax, d)
+            y = block.norm1(x + block.out(attended))
+            x = block.norm2(
+                y + block.ff2(torch.nn.functional.silu(block.ff1(y)))
+            )
+        lengths = torch.tensor(sizes, device=device, dtype=dtype)
+        context = (
+            (x * valid.unsqueeze(-1)).sum(dim=1) / lengths.unsqueeze(-1)
+            + x[torch.arange(b, device=device), torch.tensor(
+                global_indices, device=device, dtype=torch.long,
+            )]
+        )
+        context = context + lengths.log1p().unsqueeze(-1) * self.module.global_count
+        shared = torch.tanh(self.module.state_proj(context))
+        base_values = torch.tensor(
+            [row.value for row in baselines], device=device, dtype=dtype,
+        )
+        correction = torch.tanh(
+            self.module.value_readout(shared).squeeze(-1)
+        )
+        values = (
+            base_values + torch.tanh(self.module.value_gate) * correction
+            * (1.0 - base_values.abs())
+        )
+        owners: list[int] = []
+        kind_ids: list[int] = []
+        action_counts: list[int] = []
+        edges: list[list[tuple[int, int]]] = []
+        logits0: list[float] = []
+        action_lengths: list[int] = []
+        for i, (menu, baseline) in enumerate(zip(actions, baselines, strict=True)):
+            if len(menu) != len(baseline.action_logits):
+                raise ValueError("v15f action/logit menu mismatch")
+            action_lengths.append(len(menu))
+            for (kind, bindings), baseline_logit in zip(
+                menu, baseline.action_logits, strict=True,
+            ):
+                owners.append(i)
+                kind_ids.append(ACTION_KINDS.index(kind) if kind in ACTION_KINDS else 0)
+                action_counts.append(len(bindings))
+                edges.append([
+                    (indices[i][binding.ref], ACTION_ROLES.index(binding.role))
+                    for binding in bindings
+                ])
+                logits0.append(baseline_logit)
+        a = len(owners)
+        if not a:
+            return values, tuple(values.new_zeros((0,)) for _ in range(b))
+        owner_tensor = torch.tensor(owners, dtype=torch.long, device=device)
+        kinds = self.module.action_kinds(torch.tensor(
+            kind_ids, dtype=torch.long, device=device,
+        ))
+        local_shared = shared[owner_tensor]
+        max_edges = max(action_counts)
+        if max_edges:
+            edge_indices = torch.tensor([
+                [index for index, _ in row] + [0] * (max_edges - len(row))
+                for row in edges
+            ], dtype=torch.long, device=device)
+            edge_roles = torch.tensor([
+                [role for _, role in row] + [0] * (max_edges - len(row))
+                for row in edges
+            ], dtype=torch.long, device=device)
+            edge_valid = (
+                torch.arange(max_edges, device=device).unsqueeze(0)
+                < torch.tensor(action_counts, device=device).unsqueeze(1)
+            )
+            subset = (
+                x[owner_tensor[:, None], edge_indices]
+                + self.module.action_roles(edge_roles)
+            )
+            queries = self.module.cross_q(
+                local_shared + kinds
+            ).reshape(a, HEADS, hd)
+            keys = self.module.cross_k(subset).reshape(
+                a, max_edges, HEADS, hd,
+            ).transpose(1, 2)
+            payload = self.module.cross_v(subset).reshape(
+                a, max_edges, HEADS, hd,
+            ).transpose(1, 2)
+            scores = torch.einsum("ahd,ahmd->ahm", queries, keys) / math.sqrt(hd)
+            scores = scores.masked_fill(
+                ~edge_valid[:, None, :], torch.finfo(dtype).min,
+            )
+            attention = scores.softmax(dim=-1)
+            attended = torch.einsum(
+                "ahm,ahmd->ahd", attention, payload,
+            ).reshape(a, d)
+            cross = self.module.cross_out(attended)
+            cross = torch.where(
+                torch.tensor(
+                    [count > 0 for count in action_counts], device=device,
+                ).unsqueeze(-1),
+                cross, self.module.empty_action.unsqueeze(0),
+            )
+        else:
+            cross = self.module.empty_action.unsqueeze(0).expand(a, -1)
+        counts = torch.tensor(action_counts, dtype=dtype, device=device)
+        merged = torch.tanh(
+            local_shared + kinds + cross
+            + counts.log1p().unsqueeze(-1) * self.module.action_count
+        )
+        updates = self.module.policy_readout(merged).squeeze(-1)
+        base_logits = torch.tensor(logits0, device=device, dtype=dtype)
+        flat_logits = base_logits + self.module.policy_gate * updates
+        return values, flat_logits.split(action_lengths)
+
     def forward(
         self, base: NeuralPolicyValueModel, observation: Observation,
         actions: Sequence[LegalAction],
