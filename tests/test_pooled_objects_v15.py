@@ -17,7 +17,9 @@ from sts2_ai.models.pooled_objects import (
     PooledObjectTorch,
     PortablePooledObjectModel,
 )
-\n\ndef observe(state: dict) -> Observation:
+
+
+def observe(state: dict) -> Observation:
     return Observation("prototype-fair-v0", json.dumps(state, sort_keys=True), "")
 
 
