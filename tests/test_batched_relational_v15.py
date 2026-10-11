@@ -127,7 +127,9 @@ def test_batched_gradients_match_per_decision_reference() -> None:
     )
     params = [
         head.module.encoder.identities.weight,
-        head.module.encoder.numeric_layers[0][0].weight,
+        head.module.encoder.numeric_layers[
+            head.embedding._id("kinds", "card")
+        ][0].weight,
         head.module.blocks[0].bias,
         head.module.blocks[0].q.weight,
         head.module.action_roles.weight,
