@@ -75,6 +75,7 @@ def test_instrumented_real_minibatch_profile_cpu_and_repeat_cases() -> None:
     result = profile_minibatches(
         _corpus(), devices=["cpu"], batch_sizes=[1, 2, 8],
         width=16, trials=1, warmups=0, seed=83,
+        topology_modes=("dynamic",),
     )
     assert result["schema"] == REPORT_SCHEMA
     assert result["real_combat_decisions"] == 4
