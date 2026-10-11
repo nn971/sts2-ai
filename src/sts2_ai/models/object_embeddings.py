@@ -34,8 +34,12 @@ class ObjectVocabulary:
             kinds=entries(token.kind for token in tokens),
             identities=entries(f"{token.kind}:{token.type_id}" for token in tokens),
             roles=entries(f"{token.kind}:{token.role}" for token in tokens),
-            categories=entries(f"{token.kind}:{tag}" for token in tokens for tag in token.categorical),
-            numeric_fields=entries(f"{token.kind}:{name}" for token in tokens for name, _ in token.numeric),
+            categories=entries(
+                f"{token.kind}:{tag}" for token in tokens for tag in token.categorical
+            ),
+            numeric_fields=entries(
+                f"{token.kind}:{name}" for token in tokens for name, _ in token.numeric
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -113,7 +117,9 @@ class TypedObjectEncoder:
                 return torch.tensor(value, dtype=torch.long, device=device)
             x = (
                 self.module.kinds(index(kind_id))
-                + self.module.identities(index(self._id("identities", f"{token.kind}:{token.type_id}")))
+                + self.module.identities(
+                    index(self._id("identities", f"{token.kind}:{token.type_id}"))
+                )
                 + self.module.roles(index(self._id("roles", f"{token.kind}:{token.role}")))
             )
             if token.categorical:
