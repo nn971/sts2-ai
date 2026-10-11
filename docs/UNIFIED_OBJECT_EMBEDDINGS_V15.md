@@ -2,7 +2,7 @@
 
 ## Status
 
-This is the **foundation**, not yet a new trainable PPO combat policy. Existing
+This is an **experimental model foundation**, not yet a fully wired PPO combat-training path. Existing
 v8/v12/v13 inference and checkpoint formats are unchanged. The v14 snapshot
 corpus remains frozen and compatible. No attention layer or action scorer has
 been attached to the new encoder yet.
@@ -63,11 +63,15 @@ emulator revision. Continue using the old revision for frozen v14 results.
 ## Model rollout plan
 
 1. **v15a:** object extraction, strict pointer and duplicate-instance checks.
-2. **v15b:** independently trainable typed embeddings, with a frozen explicit
-   vocabulary. This patch reaches here; it does not alter shipped inference.
-3. **v15c:** first attach an *object-pooled* control to the existing tactical
-   head with a zero-initialized residual branch (function-identical warm start).
-   Train and verify portable/batched Torch parity before benchmarking.
+2. **v15b:** independently trainable typed embeddings, with an explicit frozen
+   vocabulary.
+3. **v15c (prototype implemented):** an object-pooled control wrapping a
+   frozen v8/v13 tactical head. Two zero-initialized gates preserve the legacy
+   policy/value output exactly; a trainable Torch model can learn residual
+   action and value corrections. Portable no-Torch Python inference and
+   JSON/phase-split checkpoint round-trips are available. **Not yet connected
+   to the existing PPO rollout/optimizer or batched v13 path**. Full v15
+   training is not claimed.
 4. **v15d:** add relational self-attention and action cross-attention, with
    width/compute/parameter-matched feedforward controls.
 5. **v16:** independent source policies, synergy-specific snapshots (including
@@ -91,3 +95,52 @@ Run from the repository root:
 ```fish
 python -m pytest -q tests/test_object_instances_v15.py
 ```
+
+
+## v15c experimental pooled control
+
+The implementation in `models/pooled_objects.py` is a deliberately simple
+**attention-free** architecture for ablations:
+
+```text
+fair observation
+    ↓
+individual typed 64d embeddings
+    ├── mean over all public tokens → global context
+    └── mean over exact source/target object references → action context
+    ↓
+two small linear projections + tanh
+    ↓
+zero-initialized policy/value residual gates
+    ↓
+frozen v8/v13 outputs + bounded critic/logit corrections
+```
+
+For the value head, `tanh(value_gate)` ensures the correction cannot leave
+the valid [-1, 1] value range. The base model is not modified, and its exact
+outputs are returned while both gates are zero. After training, the checkpoint
+contains the full frozen base, the exact frozen identity/numeric/tag vocabulary
+and each trainable tensor, with strict non-finite/shape checks.
+
+The low-level opt-in API is:
+
+```python
+from sts2_ai.models.object_embeddings import ObjectVocabulary
+from sts2_ai.models.object_instances import extract_combat_objects
+from sts2_ai.models.pooled_objects import PooledObjectTorch
+
+# public_states are player-visible combat dictionaries.
+vocab = ObjectVocabulary.from_object_sets(
+    [extract_combat_objects(x) for x in public_states]
+)
+head = PooledObjectTorch(vocab, width=64)
+value, logits = head.forward(frozen_base_combat_model, observation, legal_actions)
+# Train head.module.parameters() with a loss derived from public combat
+# decisions; then export a Torch-free model usable by the phase-split loader.
+combat_model = head.export(frozen_base_combat_model)
+```
+
+Note: this API is a research building block, not yet a fully integrated PPO
+training command. The current v14 benchmark evaluates exported checkpoints
+without changes, but v15c requires further training integration and a frozen
+vocabulary assembled from a representative public-observation corpus.
