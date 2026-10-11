@@ -1,5 +1,7 @@
 # v15o — importance-sampled combat snapshots (opt-in)
 
+> **Separate upcoming research track:** [Desired Nature Training Implementation](DESIRED_NATURE_TRAINING_IMPLEMENTATION.md). v15o corrects **snapshot selection from an empirical corpus**; Nature will control **random outcomes within emulator transitions**. These are distinct probability ratios and must not be conflated.
+
 This stacked patch starts from v15n parallel snapshot PPO. **Existing v15l
 full-run and v15m/v15n snapshot checkpoint semantics remain unchanged** for the
 original `natural` and `balanced` modes. It does not claim that the observed
