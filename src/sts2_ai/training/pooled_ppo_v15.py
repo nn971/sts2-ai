@@ -27,7 +27,6 @@ from typing import Any
 
 from sts2_ai.emulator import EmulatorBackend, JsonlEmulatorBackend
 from sts2_ai.emulator.episode_goal import (
-    NATIVE_ACT1_BOSS_GOAL,
     PROTOTYPE_THREE_ACT_GOAL,
     require_episode_goal,
 )
@@ -119,7 +118,7 @@ def collect_public_vocabulary(
     """
     if min(runs, workers, max_decisions) <= 0:
         raise ValueError("Vocabulary runs/workers/cap must be positive")
-    if not 0 < temperature and math.isfinite(temperature):
+    if not (0 < temperature and math.isfinite(temperature)):
         raise ValueError("Invalid vocabulary collection temperature")
     require_episode_goal(episode_goal_version, environment)
     require_environment(backend, environment)
@@ -398,7 +397,7 @@ def train_pooled_combat_ppo(
     if not (math.isfinite(temperature_start) and temperature_start > 0
             and math.isfinite(temperature_end) and temperature_end > 0):
         raise ValueError("Invalid training temperatures")
-    if temperature_decay_rounds < 0:
+    if temperature_decay_rounds <= 0:
         raise ValueError("Invalid temperature decay")
     require_episode_goal(episode_goal_version, environment)
     require_environment(backend, environment)
