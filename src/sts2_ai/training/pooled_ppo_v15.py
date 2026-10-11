@@ -104,6 +104,11 @@ class PooledTrainingRound:
     mean_combat_target: float | None
     rollout_seconds: float
     optimizer_seconds: float
+    # Optional for backwards compatibility with v15j's 5-round checkpoint.
+    ppo_samples_used: int | None = None
+    mean_policy_loss: float | None = None
+    mean_value_loss: float | None = None
+    mean_entropy: float | None = None
 
 
 def _hash_json(value: Any) -> str:
@@ -674,6 +679,10 @@ def train_pooled_combat_ppo(
                 mean_combat_target=sum(targets) / len(targets) if targets else None,
                 rollout_seconds=rollout_time,
                 optimizer_seconds=time.perf_counter() - start,
+                ppo_samples_used=result.samples,
+                mean_policy_loss=result.mean_policy_loss,
+                mean_value_loss=result.mean_value_loss,
+                mean_entropy=result.mean_entropy,
             )
             rows.append(row)
             if checkpoint is not None:
@@ -687,7 +696,10 @@ def train_pooled_combat_ppo(
                 f"runs={row.played} complete={row.completed} wins={row.wins} "
                 f"resolved_combats={row.resolved_combats} "
                 f"combat_decisions={row.combat_decisions} "
+                f"ppo_samples={row.ppo_samples_used} "
                 f"updates={row.optimizer_steps} loss={row.mean_loss!r} "
+                f"policy={row.mean_policy_loss!r} value={row.mean_value_loss!r} "
+                f"entropy={row.mean_entropy!r} 
                 f"rollout_s={row.rollout_seconds:.2f} "
                 f"optimizer_s={row.optimizer_seconds:.2f}",
                 flush=True,
