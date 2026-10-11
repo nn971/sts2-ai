@@ -30,6 +30,7 @@ from sts2_ai.emulator.episode_goal import (
     require_episode_goal,
 )
 from sts2_ai.emulator.run_environment import LEGACY, require_environment
+from sts2_ai.evaluation.combat_snapshots import CombatSnapshotRecipe
 from sts2_ai.models.neural import NeuralPolicyValueModel
 from sts2_ai.models.object_embeddings import CompiledObjectFeatures, ObjectVocabulary
 from sts2_ai.models.object_instances import (
@@ -43,8 +44,8 @@ from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.models.pooled_objects import PooledObjectTorch, PortablePooledObjectModel
 from sts2_ai.models.protocol import PolicyValueEstimate
 from sts2_ai.models.relational_objects import (
-    RelationalObjectTorch,
     PortableRelationalObjectModel,
+    RelationalObjectTorch,
     RelationalTopology,
     _action_tokens,
     prepare_relational_topology,
@@ -56,15 +57,14 @@ from sts2_ai.training.parallel_rollouts import (
 )
 from sts2_ai.training.phase_split_ppo import gae_terminal
 from sts2_ai.training.phase_split_selfplay import _hp_preservation_target
-from sts2_ai.training.snapshot_curriculum import (
-    collect_snapshot_cohort,
-    sample_snapshot_curriculum,
-)
-from sts2_ai.evaluation.combat_snapshots import CombatSnapshotRecipe
 from sts2_ai.training.selfplay import (
     Episode,
     collect_public_episode,
     temperature_for_round,
+)
+from sts2_ai.training.snapshot_curriculum import (
+    collect_snapshot_cohort,
+    sample_snapshot_curriculum,
 )
 
 POOLED_PPO_VERSION = "sts2-v15c-frozen-strategy-combat-ppo-v1"
@@ -544,7 +544,8 @@ def initialize_combat_head(
         raise ValueError("Initialization requires pooled v15 weights")
     if combat.base.to_dict() != base.combat.to_dict():
         raise ValueError("Initialization combat base mismatch")
-    if combat.width != head.width or combat.vocabulary.to_dict() != head.vocabulary.to_dict():
+    if (combat.width != head.width
+            or combat.vocabulary.to_dict() != head.vocabulary.to_dict()):
         raise ValueError("Initialization width/vocabulary mismatch")
     reference = head.module.state_dict()
     if set(combat.weights) != set(reference):
@@ -700,7 +701,8 @@ def train_pooled_combat_ppo(
     with ExitStack() as scope:
         pool = (
             scope.enter_context(open_worker_pool(backend, workers))
-            if snapshot_recipes is None and workers > 1 and isinstance(backend, JsonlEmulatorBackend)
+            if (snapshot_recipes is None and workers > 1
+                and isinstance(backend, JsonlEmulatorBackend))
             else None
         )
         for i in range(len(rows), rounds):
