@@ -144,3 +144,72 @@ stochastic evaluation currently has no resumable source-group journal
 (unlike the original greedy evaluator), and no token-level action trace
 is saved for diagnosing specific card-target choices. PPO gradient telemetry
 is training-time only and cannot be reconstructed from the old round-200 JSON.
+
+
+## v15q: run the two-arm ablation and automatic paired comparison
+
+After fetching and switching to `agent/v15q-importance-ablation`, use the
+same source-disjoint development partition employed in the 200-round v15o
+greedy and stochastic evaluations. The runner checks that no
+`(seed, ascension, source_policy)` appears in both partitions.
+
+In Fish from the repository root:
+
+~~~fish
+python -u tools/run_importance_ablation_v15p.py \
+  --base-model results/ppo-v8-batched-40/models/stage-0120.json \
+  --vocabulary results/ppo-v15j-relational-cpu64/vocabulary.json \
+  --snapshot-corpus results/v15o-snapshots/partition/train.jsonl \
+  --eval-corpus results/v15o-snapshots/partition/development.jsonl \
+  --output-root results/v15q-ablation-seed29 \
+  --seed 29 --rounds 40 --episodes 32 --workers 8 \
+  --eval-workers 8 --ppo-epochs 3 --ppo-batch-size 64 \
+  --ppo-sample-limit 4096 --max-decisions 512 \
+  --eval-max-decisions 512 --snapshot-every 10 --plan-only
+~~~
+
+Remove `--plan-only` and rerun the **same command** to execute sequentially:
+40 rounds × 32 sampled authentic combats for lambda=0,
+40 rounds × 32 for lambda=0.7, paired held-out greedy evaluation of the
+final models against v8, and strict source-clustered A/B comparison.
+This is **2,560 new combat rollouts** in total, plus replayed held-out
+evaluations (which are not PPO training samples). Incomplete runs can
+resume with the *same flags* and `--resume`.
+
+At completion the runner writes:
+
+- `results/v15q-ablation-seed29/ablation-manifest.json` — exact file hashes and
+  experimental settings.
+- `target/report.json` and `priority/report.json` — per-round PPO
+  telemetry with `--diagnose-ppo` enabled.
+- `target/evaluation-greedy.json` and
+  `priority/evaluation-greedy.json` — full paired combat results
+  using v8 as baseline and the **same** held-out corpus.
+- `ablation-comparison.json` and `ablation-comparison.md` — direct
+  prioritized-minus-target survival and exit-HP contrasts, clustered
+  bootstrap intervals, tier breakdown and gradient/ESS diagnostic comparisons.
+- `target.log`, `priority.log`, `target-evaluation.log`,
+  `priority-evaluation.log`, and `comparison.log` — streaming logs.
+
+A completed held-out report is reused only when its baseline, candidate,
+corpus SHA256 and decision cap match the current inputs. Failed
+evaluations retain their original resumable source-run journal. Existing
+ablation manifests cannot silently be relabeled with different models,
+source splits, or training budgets.
+
+For manual re-analysis without rerunning either simulation:
+
+~~~fish
+python -u tools/analyze_importance_ablation_v15q.py \
+  --target-train results/v15q-ablation-seed29/target/report.json \
+  --priority-train results/v15q-ablation-seed29/priority/report.json \
+  --target-eval results/v15q-ablation-seed29/target/evaluation-greedy.json \
+  --priority-eval results/v15q-ablation-seed29/priority/evaluation-greedy.json \
+  --manifest results/v15q-ablation-seed29/ablation-manifest.json \
+  --output results/v15q-ablation-seed29/ablation-comparison.json
+~~~
+
+A single training seed is a **pilot**, not proof of the superiority of
+either proposal. If the effect is promising, repeat both arms with several
+independent training seeds and, after selection, collect a fresh final
+source-disjoint evaluation set. Full native-StS2 fidelity remains unverified.
