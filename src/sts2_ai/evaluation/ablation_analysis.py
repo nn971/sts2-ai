@@ -8,6 +8,7 @@ clustered on the original source run, never on individual fights.
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from collections.abc import Mapping
 from typing import Any
 
@@ -161,6 +162,10 @@ def compare_ablation(
         ("priority", priority_train, priority_eval),
     ):
         expected_candidate = training.get("candidate_model")
+        if expected_candidate is None and training.get("checkpoint"):
+            expected_candidate = str(
+                Path(training["checkpoint"]).with_name("model.json")
+            )
         if expected_candidate is not None and (
             expected_candidate != evaluation["candidate_model"]
         ):
@@ -172,6 +177,14 @@ def compare_ablation(
     if manifest is not None:
         if manifest.get("arms") != ARMS:
             raise ValueError("Ablation manifest has unexpected arms")
+        files = manifest.get("inputs", {})
+        ids = target_eval.get("evaluation", {}).get("identity", {})
+        for field, source in (
+            ("baseline_sha256", "base_model"),
+            ("corpus_sha256", "eval_corpus"),
+        ):
+            if source in files and ids.get(field) != files[source]["sha256"]:
+                raise ValueError(f"Ablation manifest/evaluation mismatch: {source}")
         settings = manifest.get("common_settings", {})
         if settings.get("rounds") != target_training["rounds"]:
             raise ValueError("Training rounds differ from ablation manifest")
