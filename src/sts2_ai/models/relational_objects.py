@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -221,6 +221,8 @@ class RelationalObjectTorch:
         objects: Sequence[ObjectSet],
         actions: Sequence[Sequence[tuple[str, tuple[ActionBinding, ...]]]],
         baselines: Sequence[PolicyValueEstimate],
+        *,
+        stage_hook: Callable[[str], None] | None = None,
     ) -> tuple[Any, tuple[Any, ...]]:
         """Batched padded object and action attention, without state leakage.
 
@@ -242,6 +244,8 @@ class RelationalObjectTorch:
         if any(n < 1 for n in sizes):
             raise ValueError("v15f requires at least the global object")
         embeddings = self.embedding.encode_many(objects)
+        if stage_hook is not None:
+            stage_hook("object_embedding")
         device, dtype = embeddings[0].device, embeddings[0].dtype
         nmax, d = max(sizes), self.width
         ids = torch.arange(nmax, device=device)
@@ -263,6 +267,8 @@ class RelationalObjectTorch:
             relation[i, :n, :n] = torch.tensor(
                 _relations(sample), device=device, dtype=torch.long,
             )
+        if stage_hook is not None:
+            stage_hook("relation_setup")
         hd = d // HEADS
         for block in self.module.blocks:
             q = block.q(x).reshape(b, nmax, HEADS, hd).transpose(1, 2)
@@ -280,6 +286,8 @@ class RelationalObjectTorch:
             x = block.norm2(
                 y + block.ff2(torch.nn.functional.silu(block.ff1(y)))
             )
+        if stage_hook is not None:
+            stage_hook("self_attention")
         lengths = torch.tensor(sizes, device=device, dtype=dtype)
         context = (
             (x * valid.unsqueeze(-1)).sum(dim=1) / lengths.unsqueeze(-1)
@@ -299,6 +307,8 @@ class RelationalObjectTorch:
             base_values + torch.tanh(self.module.value_gate) * correction
             * (1.0 - base_values.abs())
         )
+        if stage_hook is not None:
+            stage_hook("value_head")
         owners: list[int] = []
         kind_ids: list[int] = []
         action_counts: list[int] = []
@@ -321,6 +331,8 @@ class RelationalObjectTorch:
                 ])
                 logits0.append(baseline_logit)
         a = len(owners)
+        if stage_hook is not None:
+            stage_hook("action_metadata")
         if not a:
             return values, tuple(values.new_zeros((0,)) for _ in range(b))
         owner_tensor = torch.tensor(owners, dtype=torch.long, device=device)
@@ -372,6 +384,8 @@ class RelationalObjectTorch:
             )
         else:
             cross = self.module.empty_action.unsqueeze(0).expand(a, -1)
+        if stage_hook is not None:
+            stage_hook("action_cross_attention")
         counts = torch.tensor(action_counts, dtype=dtype, device=device)
         merged = torch.tanh(
             local_shared + kinds + cross
@@ -380,6 +394,8 @@ class RelationalObjectTorch:
         updates = self.module.policy_readout(merged).squeeze(-1)
         base_logits = torch.tensor(logits0, device=device, dtype=dtype)
         flat_logits = base_logits + self.module.policy_gate * updates
+        if stage_hook is not None:
+            stage_hook("policy_head")
         return values, flat_logits.split(action_lengths)
 
     def forward(
