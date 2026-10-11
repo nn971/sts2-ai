@@ -138,7 +138,7 @@ class PublicObjectsToy(TwoPhaseToy):
 
 
 def test_real_rollout_ppo_resume_and_vocabulary_binding(tmp_path) -> None:
-    torch = pytest.importorskip("torch")
+    pytest.importorskip("torch")
     base = frozen_policy()
     vocab = collect_public_vocabulary(
         PublicObjectsToy(), base, runs=2, max_decisions=8, seed=7,
