@@ -70,10 +70,12 @@ def build_corpus(
     vocabulary = ObjectVocabulary.from_object_sets(objects, manifest=manifest)
     torch.manual_seed(seed)
     head = RelationalObjectTorch(vocabulary, width=16)
+    preparation_started = time.perf_counter()
     samples, _ = prepare_pooled_samples(
         episodes, base.combat, head,
         temperature=temperature, gamma=0.995, gae_lambda=0.98,
     )
+    target_preparation_seconds = time.perf_counter() - preparation_started
     if len(samples) != len(decisions):
         raise ValueError("Resolved combat samples and public frames do not align")
     records = []
@@ -103,6 +105,7 @@ def build_corpus(
         "manifest": manifest, "records": records,
         "resolved_combats": sum(len(ep.combat_outcomes) for ep in episodes),
         "source_runs": len(episodes),
+        "target_preparation_seconds": target_preparation_seconds,
     }
     return {**data, "sha256": _digest(data)}
 
@@ -321,6 +324,7 @@ def profile_minibatches(
         "emulator_revision": corpus["emulator_revision"],
         "source_runs": corpus["source_runs"],
         "resolved_combats": corpus["resolved_combats"],
+        "target_preparation_seconds": corpus.get("target_preparation_seconds"),
         "real_combat_decisions": len(records),
         "sample_preparation_seconds": preparation,
         "sample_preparation_per_decision_ms": {
