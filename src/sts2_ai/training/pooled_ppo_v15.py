@@ -99,6 +99,12 @@ class PooledPpoMetrics:
     mean_policy_loss: float | None
     mean_value_loss: float | None
     mean_entropy: float | None
+    # Opt-in v15p diagnostics; absent from old optimizer checkpoints.
+    mean_preclip_grad_norm: float | None = None
+    max_preclip_grad_norm: float | None = None
+    gradient_clip_fraction: float | None = None
+    raw_advantage_std: float | None = None
+    decision_weight_ess_fraction: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +129,11 @@ class PooledTrainingRound:
     rollout_source: str = "full_run"
     importance_ess: float | None = None
     importance_weight_max: float | None = None
+    mean_preclip_grad_norm: float | None = None
+    max_preclip_grad_norm: float | None = None
+    gradient_clip_fraction: float | None = None
+    raw_advantage_std: float | None = None
+    decision_weight_ess_fraction: float | None = None
 
 
 def _hash_json(value: Any) -> str:
@@ -398,6 +409,7 @@ def ppo_update_pooled(
     batch_size: int = 32, sample_limit: int = 2048,
     clip_epsilon: float = 0.2, value_weight: float = 0.5,
     entropy_weight: float = 0.002, seed: int = 19,
+    diagnostics: bool = False,
 ) -> PooledPpoMetrics:
     """Minibatched clipped PPO; explicitly variable legal menus, no padding.
 
@@ -435,6 +447,12 @@ def ppo_update_pooled(
         avg = sum(s.advantage for s in rows) / len(rows)
         var = sum((s.advantage - avg) ** 2 for s in rows) / len(rows)
     denom = math.sqrt(var + 1e-8)
+    weights_for_ess = [s.importance_weight for s in rows]
+    weight_total = math.fsum(weights_for_ess)
+    decision_weight_ess_fraction = (
+        weight_total ** 2 / math.fsum(w * w for w in weights_for_ess) / len(rows)
+        if diagnostics else None
+    )
     advantages = [
         max(-5.0, min(5.0, (s.advantage - avg) / denom))
         for s in rows
@@ -442,6 +460,8 @@ def ppo_update_pooled(
     nsteps = 0
     sums = [0.0, 0.0, 0.0, 0.0]
     seen = 0
+    grad_norms: list[float] = []
+    clipped_gradients = 0
     for _ in range(epochs):
         order = list(range(len(rows)))
         rng.shuffle(order)
@@ -526,7 +546,13 @@ def ppo_update_pooled(
                     entropy_mean = torch.stack(entropies).mean()
             optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(head.module.parameters(), 1.0)
+            preclip = torch.nn.utils.clip_grad_norm_(head.module.parameters(), 1.0)
+            if diagnostics:
+                gradient_norm = float(preclip.detach().item())
+                if not math.isfinite(gradient_norm):
+                    raise ValueError("Non-finite v15p PPO gradient")
+                grad_norms.append(gradient_norm)
+                clipped_gradients += int(gradient_norm > 1.0)
             optimizer.step()
             for i, quantity in enumerate((
                 loss.detach(), actor_mean.detach(), critic_mean.detach(),
@@ -538,6 +564,15 @@ def ppo_update_pooled(
     return PooledPpoMetrics(
         len(rows), nsteps, sums[0] / seen, sums[1] / seen,
         sums[2] / seen, sums[3] / seen,
+        mean_preclip_grad_norm=(
+            math.fsum(grad_norms) / len(grad_norms) if diagnostics else None
+        ),
+        max_preclip_grad_norm=max(grad_norms) if diagnostics else None,
+        gradient_clip_fraction=(
+            clipped_gradients / len(grad_norms) if diagnostics else None
+        ),
+        raw_advantage_std=math.sqrt(var) if diagnostics else None,
+        decision_weight_ess_fraction=decision_weight_ess_fraction,
     )
 
 
@@ -639,6 +674,7 @@ def train_pooled_combat_ppo(
     snapshot_sampling: str = "balanced",
     snapshot_target_balance: float = 0.5,
     snapshot_priority_mix: float = 0.7,
+    diagnose_ppo: bool = False,
     initialize_from: PhaseSplitNeuralModel | None = None,
     on_round: Callable[
         [tuple[PooledTrainingRound, ...], PhaseSplitNeuralModel | None], None
@@ -731,6 +767,8 @@ def train_pooled_combat_ppo(
         config["architecture"] = architecture
     if initialize_from is not None:
         config["initialize_from_sha256"] = _hash_json(initialize_from.to_dict())
+    if diagnose_ppo:
+        config["diagnose_ppo"] = True
     if snapshot_recipes is not None:
         # This changes the fingerprint only for the new opt-in mode.
         # Existing v15l checkpoint fingerprints and resumption remain intact.
@@ -832,6 +870,7 @@ def train_pooled_combat_ppo(
                 sample_limit=sample_limit, clip_epsilon=clip_epsilon,
                 value_weight=value_weight, entropy_weight=entropy_weight,
                 seed=seed + i * 1000003,
+                diagnostics=diagnose_ppo,
             )
             row = PooledTrainingRound(
                 round_index=i, played=len(cohort),
@@ -859,6 +898,11 @@ def train_pooled_combat_ppo(
                 importance_weight_max=(
                     diagnostics["weight_max"] if diagnostics is not None else None
                 ),
+                mean_preclip_grad_norm=result.mean_preclip_grad_norm,
+                max_preclip_grad_norm=result.max_preclip_grad_norm,
+                gradient_clip_fraction=result.gradient_clip_fraction,
+                raw_advantage_std=result.raw_advantage_std,
+                decision_weight_ess_fraction=result.decision_weight_ess_fraction,
             )
             rows.append(row)
             if checkpoint is not None:
@@ -878,6 +922,9 @@ def train_pooled_combat_ppo(
                 f"entropy={row.mean_entropy!r} "
                 f"importance_ess={row.importance_ess!r} "
                 f"importance_weight_max={row.importance_weight_max!r} "
+                f"grad_norm={row.mean_preclip_grad_norm!r} "
+                f"grad_clip_fraction={row.gradient_clip_fraction!r} "
+                f"advantage_std={row.raw_advantage_std!r} "
                 f"rollout_s={row.rollout_seconds:.2f} "
                 f"optimizer_s={row.optimizer_seconds:.2f}",
                 flush=True,

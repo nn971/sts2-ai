@@ -18,6 +18,13 @@ on:
       - 'tests/test_long_run_training_v15.py'
       - 'tests/test_snapshot_curriculum_v15m.py'
       - 'tests/test_snapshot_importance_v15o.py'
+      - 'tests/test_combat_diagnostics_v15p.py'
+      - 'src/sts2_ai/evaluation/combat_diagnostics.py'
+      - 'src/sts2_ai/evaluation/stochastic_combat.py'
+      - 'src/sts2_ai/evaluation/combat_snapshots.py'
+      - 'tools/analyze_combat_checkpoints_v15p.py'
+      - 'tools/evaluate_stochastic_snapshots_v15p.py'
+      - 'tools/run_importance_ablation_v15p.py'
       - 'src/sts2_ai/training/snapshot_importance.py'
       - 'src/sts2_ai/training/snapshot_curriculum.py'
       - 'tools/prepare_snapshot_curriculum.py'
@@ -51,6 +58,13 @@ on:
       - 'tests/test_long_run_training_v15.py'
       - 'tests/test_snapshot_curriculum_v15m.py'
       - 'tests/test_snapshot_importance_v15o.py'
+      - 'tests/test_combat_diagnostics_v15p.py'
+      - 'src/sts2_ai/evaluation/combat_diagnostics.py'
+      - 'src/sts2_ai/evaluation/stochastic_combat.py'
+      - 'src/sts2_ai/evaluation/combat_snapshots.py'
+      - 'tools/analyze_combat_checkpoints_v15p.py'
+      - 'tools/evaluate_stochastic_snapshots_v15p.py'
+      - 'tools/run_importance_ablation_v15p.py'
       - 'src/sts2_ai/training/snapshot_importance.py'
       - 'src/sts2_ai/training/snapshot_curriculum.py'
       - 'tools/prepare_snapshot_curriculum.py'
@@ -81,8 +95,8 @@ jobs:
       - name: Install project and tests
         run: python -m pip install -e '.[dev]'
       - name: Test v15 object extraction and embeddings
-        run: python -m pytest -q tests/test_object_instances_v15.py tests/test_pooled_objects_v15.py tests/test_pooled_ppo_v15.py tests/test_relational_objects_v15.py tests/test_relational_ppo_v15.py tests/test_vectorized_objects_v15.py tests/test_batched_relational_v15.py tests/test_cached_relational_topology_v15.py tests/test_cached_object_features_v15.py tests/test_long_run_training_v15.py tests/test_snapshot_curriculum_v15m.py tests/test_snapshot_importance_v15o.py tests/test_vectorized_ppo_loss_v15.py tests/test_real_minibatch_profile_v15.py tests/test_choice_pool_visibility_v15.py tests/test_representation_audit_v15.py
+        run: python -m pytest -q tests/test_object_instances_v15.py tests/test_pooled_objects_v15.py tests/test_pooled_ppo_v15.py tests/test_relational_objects_v15.py tests/test_relational_ppo_v15.py tests/test_vectorized_objects_v15.py tests/test_batched_relational_v15.py tests/test_cached_relational_topology_v15.py tests/test_cached_object_features_v15.py tests/test_long_run_training_v15.py tests/test_snapshot_curriculum_v15m.py tests/test_snapshot_importance_v15o.py tests/test_combat_diagnostics_v15p.py tests/test_vectorized_ppo_loss_v15.py tests/test_real_minibatch_profile_v15.py tests/test_choice_pool_visibility_v15.py tests/test_representation_audit_v15.py
       - name: Syntax-check native audit and benchmarking commands
-        run: python -m compileall -q tools/audit_v15_representation.py tools/benchmark_v15_attention.py tools/profile_v15_real_minibatches.py tools/prepare_snapshot_curriculum.py tools/benchmark_snapshot_workers_v15n.py
+        run: python -m compileall -q tools/audit_v15_representation.py tools/benchmark_v15_attention.py tools/profile_v15_real_minibatches.py tools/prepare_snapshot_curriculum.py tools/benchmark_snapshot_workers_v15n.py tools/analyze_combat_checkpoints_v15p.py tools/evaluate_stochastic_snapshots_v15p.py tools/run_importance_ablation_v15p.py
       - name: CPU batched-attention throughput smoke
         run: python -u tools/benchmark_v15_attention.py --batch-sizes 1 4 --devices cpu --width 16 --warmups 0 --trials 1 --report /tmp/v15f-ci-benchmark.json

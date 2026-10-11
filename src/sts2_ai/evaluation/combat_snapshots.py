@@ -352,6 +352,7 @@ def evaluate_model_suite(
     on_replay_progress: Callable[[str, int, int, int], None] | None = None,
     on_run_results: Callable[[str, Sequence[MultiCombatResult]], None] | None = None,
     combat_progress_every: int = 32,
+    agent_factory: Callable[[str, CombatSnapshotRecipe], Agent] | None = None,
 ) -> list[MultiCombatResult]:
     """Replay each source prefix once, then fork once per model.
 
@@ -400,7 +401,8 @@ def evaluate_model_suite(
                     label: play_combat(
                         backend,
                         backend.fork(handle),
-                        agent,
+                        agent_factory(label, recipe)
+                        if agent_factory is not None else agent,
                         max_decisions=max_combat_decisions,
                         progress_every=combat_progress_every,
                         on_progress=(
