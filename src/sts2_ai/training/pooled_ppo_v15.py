@@ -31,7 +31,7 @@ from sts2_ai.emulator.episode_goal import (
 )
 from sts2_ai.emulator.run_environment import LEGACY, require_environment
 from sts2_ai.models.neural import NeuralPolicyValueModel
-from sts2_ai.models.object_embeddings import ObjectVocabulary
+from sts2_ai.models.object_embeddings import CompiledObjectFeatures, ObjectVocabulary
 from sts2_ai.models.object_instances import (
     ActionBinding,
     ObjectRef,
@@ -77,6 +77,7 @@ class PooledPpoSample:
     target: float
     action_bindings: tuple[tuple[str, tuple[ActionBinding, ...]], ...] | None = None
     relational_topology: RelationalTopology | None = None
+    compiled_features: CompiledObjectFeatures | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -250,20 +251,25 @@ def prepare_pooled_samples(
                         prepare_relational_topology(objects, bindings)
                         if bindings is not None else None
                     )
+                    features = (
+                        head.embedding.prepare(objects)
+                        if isinstance(head, RelationalObjectTorch) else None
+                    )
                     prepared.append((
                         objects, refs, bindings, baseline, decision, logprob,
-                        topology,
+                        topology, features,
                     ))
                     values.append(value)
                 adv, returns = gae_terminal(
                     values, target, gamma=gamma, lam=gae_lambda,
                 )
                 for (
-                    objects, refs, bindings, baseline, decision, logprob, topology
+                    objects, refs, bindings, baseline, decision,
+                    logprob, topology, features
                 ), a, ret in zip(prepared, adv, returns, strict=True):
                     samples.append(PooledPpoSample(
                         objects, refs, baseline, decision.chosen_index,
-                        logprob, a, ret, bindings, topology,
+                        logprob, a, ret, bindings, topology, features,
                     ))
                 rewards.append(target)
             if episode.completed and any(
@@ -400,6 +406,12 @@ def ppo_update_pooled(
                         else prepare_relational_topology(
                             rows[k].objects, rows[k].action_bindings,
                         )
+                        for k in chosen
+                    ],
+                    features=[
+                        rows[k].compiled_features
+                        if rows[k].compiled_features is not None
+                        else head.embedding.prepare(rows[k].objects)
                         for k in chosen
                     ],
                 )
