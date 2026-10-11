@@ -6,7 +6,7 @@ from dataclasses import replace
 
 import pytest
 from test_object_instances_v15 import frame
-from test_pooled_objects_v15 import menu, observe
+from test_pooled_objects_v15 import observe
 from test_pooled_ppo_v15 import combat_episode, frozen_policy
 
 from sts2_ai.emulator import LegalAction
@@ -18,9 +18,8 @@ from sts2_ai.models.object_instances import (
     extract_combat_objects,
     legal_action_object_refs,
 )
-from sts2_ai.models.relational_objects import RelationalObjectTorch, _action_tokens
+from sts2_ai.models.relational_objects import RelationalObjectTorch
 from sts2_ai.training.pooled_ppo_v15 import prepare_pooled_samples
-from sts2_ai.training.selfplay import PublicDecision
 from tools.profile_v15_real_minibatches import build_corpus, prepare_records
 
 
@@ -73,10 +72,11 @@ def test_missing_choice_pool_candidates_are_explicitly_unknown_and_linked() -> N
         LegalAction("a", "select_cards", '{"CardInstanceIds":[1019]}'),
     )
     more = _objects(renamed, other)
-    missing_features = lambda obj: sorted(
-        (t.kind, t.type_id, t.role, t.numeric, t.categorical)
-        for t in obj.tokens if t.role == "unobserved_choice"
-    )
+    def missing_features(obj):
+        return sorted(
+            (t.kind, t.type_id, t.role, t.numeric, t.categorical)
+            for t in obj.tokens if t.role == "unobserved_choice"
+        )
     assert missing_features(more) == missing_features(objects)
 
 
