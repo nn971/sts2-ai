@@ -17,7 +17,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
+import math
 import subprocess
 import sys
 from pathlib import Path
@@ -81,7 +81,7 @@ def command_for(args: argparse.Namespace, *, mix: float, arm: str) -> list[str]:
         "--snapshot-every", str(args.snapshot_every),
         "--diagnose-ppo",
     ]
-    if args.resume:
+    if args.resume and (args.output_root / arm / "checkpoint.pt").is_file():
         command.append("--resume")
     return command
 
@@ -112,14 +112,18 @@ def main() -> None:
         args.max_decisions, args.snapshot_every,
     ) <= 0:
         parser.error("All simulation/optimization sizes must be positive")
-    if not 0 <= args.target_balance <= 1:
+    if not math.isfinite(args.target_balance) or not 0 <= args.target_balance <= 1:
         parser.error("Target balance must lie in [0,1]")
     manifest = manifest_for(args)
     path = args.output_root / "ablation-manifest.json"
     if path.exists():
         if json.loads(path.read_text(encoding="utf-8")) != manifest:
             raise ValueError("Ablation manifest mismatch; refusing to reuse experiment")
-        if not args.resume and not args.plan_only:
+        if not args.resume and not args.plan_only and any(
+            (args.output_root / arm / "checkpoint.pt").exists()
+            or (args.output_root / f"{arm}.log").exists()
+            for arm in manifest["arms"]
+        ):
             raise FileExistsError(
                 "Existing ablation requires --resume; use new --output-root"
             )
