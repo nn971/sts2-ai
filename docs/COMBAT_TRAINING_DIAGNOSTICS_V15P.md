@@ -162,8 +162,8 @@ python -u tools/run_importance_ablation_v15p.py \
   --snapshot-corpus results/v15o-snapshots/partition/train.jsonl \
   --eval-corpus results/v15o-snapshots/partition/development.jsonl \
   --output-root results/v15q-ablation-seed29 \
-  --seed 29 --rounds 40 --episodes 32 --workers 8 \
-  --eval-workers 8 --ppo-epochs 3 --ppo-batch-size 64 \
+  --seed 29 --rounds 40 --episodes 32 --workers 15 \
+  --eval-workers 15 --ppo-epochs 3 --ppo-batch-size 64 \
   --ppo-sample-limit 4096 --max-decisions 512 \
   --eval-max-decisions 512 --snapshot-every 10 --plan-only
 ~~~
@@ -213,3 +213,5 @@ A single training seed is a **pilot**, not proof of the superiority of
 either proposal. If the effect is promising, repeat both arms with several
 independent training seeds and, after selection, collect a fresh final
 source-disjoint evaluation set. Full native-StS2 fidelity remains unverified.
+
+Fresh v15q ablations default to **15 training and evaluation workers**. The archived seed-29 pilot used 8 workers, which should not be changed retroactively in its provenance.
