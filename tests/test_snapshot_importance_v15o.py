@@ -6,6 +6,7 @@ from dataclasses import replace
 
 import pytest
 from test_combat_snapshots_v14 import ToyBackend
+from test_object_instances_v15 import frame
 from test_pooled_ppo_v15 import combat_episode, frozen_policy
 from test_snapshot_curriculum_v15m import authentic_recipe
 
@@ -21,7 +22,6 @@ from sts2_ai.training.snapshot_importance import (
     importance_diagnostics,
     snapshot_identity,
 )
-from test_object_instances_v15 import frame
 
 
 def corpus():
