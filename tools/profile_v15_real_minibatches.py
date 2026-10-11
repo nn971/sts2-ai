@@ -70,6 +70,10 @@ def build_corpus(
             state, [(a.kind, a.payload_json) for a in decision.legal_actions],
         ))
     vocabulary = ObjectVocabulary.from_object_sets(objects, manifest=manifest)
+    missing_candidates = sum(
+        token.role == "unobserved_choice"
+        for obj in objects for token in obj.tokens
+    )
     torch.manual_seed(seed)
     head = RelationalObjectTorch(vocabulary, width=16)
     preparation_started = time.perf_counter()
@@ -107,6 +111,7 @@ def build_corpus(
         "manifest": manifest, "records": records,
         "resolved_combats": sum(len(ep.combat_outcomes) for ep in episodes),
         "source_runs": len(episodes),
+        "unobserved_choice_tokens": missing_candidates,
         "target_preparation_seconds": target_preparation_seconds,
     }
     return {**data, "sha256": _digest(data)}
@@ -345,6 +350,10 @@ def profile_minibatches(
         "resolved_combats": corpus["resolved_combats"],
         "target_preparation_seconds": corpus.get("target_preparation_seconds"),
         "real_combat_decisions": len(records),
+        "unobserved_choice_tokens": sum(
+            token.role == "unobserved_choice"
+            for obj in objects for token in obj.tokens
+        ),
         "sample_preparation_seconds": preparation,
         "sample_preparation_per_decision_ms": {
             key: value * 1000 / len(records)
@@ -432,7 +441,8 @@ def main() -> None:
         )
         print(
             f"[v15g] saved {len(corpus['records'])} real PPO samples "
-            f"to {args.corpus}; collection_s={time.perf_counter()-start:.2f}",
+            f"to {args.corpus}; collection_s={time.perf_counter()-start:.2f} "
+            f"unobserved_choices={corpus['unobserved_choice_tokens']}",
             flush=True,
         )
     else:
