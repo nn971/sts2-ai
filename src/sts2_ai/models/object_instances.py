@@ -102,7 +102,7 @@ def _flatten(
             # Instance identifiers are pointers, never scalar neural input.
             # Includes nested affliction.source_enemy_instance_id and arrays
             # of instance IDs; changing arbitrary labels cannot change logits.
-            if (
+            if v is not None and (
                 k == "instance_id"
                 or k.endswith(("_instance_id", "_instance_ids"))
                 or k.endswith(("InstanceId", "InstanceIds"))
