@@ -5,6 +5,8 @@ import copy
 import json
 
 import pytest
+from test_enemy_instances_v8 import build_model
+from test_object_instances_v15 import frame
 
 from sts2_ai.emulator import LegalAction, Observation
 from sts2_ai.models.object_embeddings import ObjectVocabulary
@@ -15,11 +17,7 @@ from sts2_ai.models.pooled_objects import (
     PooledObjectTorch,
     PortablePooledObjectModel,
 )
-from test_enemy_instances_v8 import build_model
-from test_object_instances_v15 import frame
-
-
-def observe(state: dict) -> Observation:
+\n\ndef observe(state: dict) -> Observation:
     return Observation("prototype-fair-v0", json.dumps(state, sort_keys=True), "")
 
 
