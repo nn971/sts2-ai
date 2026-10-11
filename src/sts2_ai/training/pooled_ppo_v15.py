@@ -30,6 +30,7 @@ from sts2_ai.emulator.episode_goal import (
     require_episode_goal,
 )
 from sts2_ai.emulator.run_environment import LEGACY, require_environment
+from sts2_ai.evaluation.combat_snapshots import CombatSnapshotRecipe
 from sts2_ai.models.neural import NeuralPolicyValueModel
 from sts2_ai.models.object_embeddings import CompiledObjectFeatures, ObjectVocabulary
 from sts2_ai.models.object_instances import (
@@ -40,9 +41,10 @@ from sts2_ai.models.object_instances import (
     legal_action_object_refs,
 )
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
-from sts2_ai.models.pooled_objects import PooledObjectTorch
+from sts2_ai.models.pooled_objects import PooledObjectTorch, PortablePooledObjectModel
 from sts2_ai.models.protocol import PolicyValueEstimate
 from sts2_ai.models.relational_objects import (
+    PortableRelationalObjectModel,
     RelationalObjectTorch,
     RelationalTopology,
     _action_tokens,
@@ -59,6 +61,10 @@ from sts2_ai.training.selfplay import (
     Episode,
     collect_public_episode,
     temperature_for_round,
+)
+from sts2_ai.training.snapshot_curriculum import (
+    collect_snapshot_cohort,
+    sample_snapshot_curriculum,
 )
 
 POOLED_PPO_VERSION = "sts2-v15c-frozen-strategy-combat-ppo-v1"
@@ -109,6 +115,7 @@ class PooledTrainingRound:
     mean_policy_loss: float | None = None
     mean_value_loss: float | None = None
     mean_entropy: float | None = None
+    rollout_source: str = "full_run"
 
 
 def _hash_json(value: Any) -> str:
@@ -510,6 +517,48 @@ def _checkpoint_save(
             temporary.unlink(missing_ok=True)
 
 
+
+def initialize_combat_head(
+    head: PooledObjectTorch | RelationalObjectTorch,
+    base: PhaseSplitNeuralModel, initial: PhaseSplitNeuralModel,
+) -> None:
+    """Warm-start trainable v15 weights from an exact portable public model.
+
+    The base (both frozen heads), vocabulary and architecture must match.
+    Portable weights are copied to fresh Torch parameters; optimizer moments
+    are intentionally reset for a new experiment, never used for --resume.
+    """
+    import torch
+
+    combat = initial.combat
+    if not isinstance(base.combat, NeuralPolicyValueModel):
+        raise ValueError("Initialization requires a frozen legacy combat base")
+    if initial.strategy.to_dict() != base.strategy.to_dict():
+        raise ValueError("Initialization strategy differs from frozen base")
+    if initial.combat_value_objective != base.combat_value_objective:
+        raise ValueError("Initialization combat objective mismatch")
+    if isinstance(head, RelationalObjectTorch):
+        if not isinstance(combat, PortableRelationalObjectModel):
+            raise ValueError("Initialization requires relational v15 weights")
+    elif not isinstance(combat, PortablePooledObjectModel):
+        raise ValueError("Initialization requires pooled v15 weights")
+    if combat.base.to_dict() != base.combat.to_dict():
+        raise ValueError("Initialization combat base mismatch")
+    if (combat.width != head.width
+            or combat.vocabulary.to_dict() != head.vocabulary.to_dict()):
+        raise ValueError("Initialization width/vocabulary mismatch")
+    reference = head.module.state_dict()
+    if set(combat.weights) != set(reference):
+        raise ValueError("Initialization tensor names mismatch")
+    converted = {}
+    for name, existing in reference.items():
+        tensor = torch.as_tensor(combat.weights[name], dtype=existing.dtype)
+        if tensor.shape != existing.shape or not torch.isfinite(tensor).all():
+            raise ValueError(f"Initialization invalid tensor: {name}")
+        converted[name] = tensor
+    head.module.load_state_dict(converted)
+
+
 def train_pooled_combat_ppo(
     backend: EmulatorBackend, base: PhaseSplitNeuralModel,
     vocabulary: ObjectVocabulary, *,
@@ -529,6 +578,9 @@ def train_pooled_combat_ppo(
     progress: Callable[[PooledTrainingRound], None] | None = None,
     architecture: str = "pooled",
     snapshot_every: int = 0,
+    snapshot_recipes: Sequence[CombatSnapshotRecipe] | None = None,
+    snapshot_sampling: str = "balanced",
+    initialize_from: PhaseSplitNeuralModel | None = None,
     on_round: Callable[
         [tuple[PooledTrainingRound, ...], PhaseSplitNeuralModel | None], None
     ] | None = None,
@@ -550,7 +602,20 @@ def train_pooled_combat_ppo(
         raise ValueError("Invalid learning rate")
     if resume and checkpoint is None:
         raise ValueError("Resume requires a checkpoint")
-    if workers > 1 and not isinstance(backend, JsonlEmulatorBackend):
+    if snapshot_recipes is not None:
+        if not snapshot_recipes:
+            raise ValueError("Snapshot training requires at least one recipe")
+        if workers != 1:
+            raise ValueError("Snapshot training currently requires workers=1")
+        if environment != "native-overgrowth":
+            raise ValueError("Snapshots require the native Overgrowth environment")
+        if snapshot_sampling not in ("balanced", "natural"):
+            raise ValueError("Invalid snapshot sampling mode")
+        for recipe in snapshot_recipes:
+            recipe.validate()
+            if recipe.emulator_revision != backend.emulator_revision:
+                raise ValueError("Snapshot corpus emulator revision mismatch")
+    elif workers > 1 and not isinstance(backend, JsonlEmulatorBackend):
         raise ValueError("Parallel training requires the JSONL emulator")
     if not isinstance(base.combat, NeuralPolicyValueModel):
         raise ValueError("v15c PPO requires a frozen v8/v13 base combat head")
@@ -574,6 +639,8 @@ def train_pooled_combat_ppo(
         if architecture == "relational"
         else PooledObjectTorch(vocabulary, width=width)
     )
+    if initialize_from is not None:
+        initialize_combat_head(head, base, initialize_from)
     checkpoint_format = (
         RELATIONAL_PPO_CHECKPOINT if architecture == "relational"
         else POOLED_PPO_CHECKPOINT
@@ -597,6 +664,15 @@ def train_pooled_combat_ppo(
     }
     if architecture != "pooled":
         config["architecture"] = architecture
+    if initialize_from is not None:
+        config["initialize_from_sha256"] = _hash_json(initialize_from.to_dict())
+    if snapshot_recipes is not None:
+        # This changes the fingerprint only for the new opt-in mode.
+        # Existing v15l checkpoint fingerprints and resumption remain intact.
+        config["snapshot_curriculum"] = {
+            "sampling": snapshot_sampling,
+            "recipe_sha256": _hash_json([asdict(r) for r in snapshot_recipes]),
+        }
     fingerprint = _hash_json(config)
     rows: list[PooledTrainingRound] = []
     if resume:
@@ -625,7 +701,8 @@ def train_pooled_combat_ppo(
     with ExitStack() as scope:
         pool = (
             scope.enter_context(open_worker_pool(backend, workers))
-            if workers > 1 and isinstance(backend, JsonlEmulatorBackend)
+            if (snapshot_recipes is None and workers > 1
+                and isinstance(backend, JsonlEmulatorBackend))
             else None
         )
         for i in range(len(rows), rounds):
@@ -640,7 +717,17 @@ def train_pooled_combat_ppo(
             )
             seeds = [f"{seed_prefix}-{i}-{j}" for j in range(episodes_per_round)]
             start = time.perf_counter()
-            if pool is not None:
+            if snapshot_recipes is not None:
+                selected = sample_snapshot_curriculum(
+                    snapshot_recipes, count=episodes_per_round,
+                    seed=seed + i * 1000003, mode=snapshot_sampling,
+                )
+                cohort = collect_snapshot_cohort(
+                    backend, policy, selected,
+                    round_index=i, actor_seed=seed, temperature=temperature,
+                    max_decisions=max_decisions,
+                )
+            elif pool is not None:
                 cohort = collect_parallel(
                     pool, policy, seeds, base_seed=seed,
                     max_decisions=max_decisions, policy_id="prototype-fair-v0",
@@ -683,6 +770,9 @@ def train_pooled_combat_ppo(
                 mean_policy_loss=result.mean_policy_loss,
                 mean_value_loss=result.mean_value_loss,
                 mean_entropy=result.mean_entropy,
+                rollout_source=(
+                    "combat_snapshots" if snapshot_recipes is not None else "full_run"
+                ),
             )
             rows.append(row)
             if checkpoint is not None:
