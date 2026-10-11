@@ -22,7 +22,7 @@ from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH
 from sts2_ai.models.neural import NeuralPolicyValueModel
 from sts2_ai.models.object_embeddings import ObjectVocabulary
 from sts2_ai.models.object_instances import (
-    extract_combat_objects,
+    extract_actionable_combat_objects,
     legal_action_object_bindings,
 )
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
@@ -61,7 +61,9 @@ def _audit(
             state = json.loads(decision.observation.payload_json)
             if not isinstance(state, dict):
                 raise ValueError("Non-object public combat observation")
-            objects = extract_combat_objects(state)
+            objects = extract_actionable_combat_objects(
+                state, [(a.kind, a.payload_json) for a in decision.legal_actions],
+            )
             index = objects.index()  # Reject duplicate reference bugs.
             if len(index) != len(objects.tokens):
                 raise ValueError("Object reference cardinality mismatch")
