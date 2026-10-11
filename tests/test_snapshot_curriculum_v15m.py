@@ -180,3 +180,104 @@ def test_snapshot_failure_is_fatal_and_releases_every_handle() -> None:
             round_index=0, actor_seed=1, temperature=1.0,
         )
     assert backend.states == {}
+
+
+def test_portable_relational_warm_start_and_rejected_mismatch() -> None:
+    torch = pytest.importorskip("torch")
+    from test_pooled_ppo_v15 import frozen_policy
+    from test_object_instances_v15 import frame
+    from sts2_ai.models.object_embeddings import ObjectVocabulary
+    from sts2_ai.models.object_instances import extract_combat_objects
+    from sts2_ai.models.phase_split import PhaseSplitNeuralModel
+    from sts2_ai.models.relational_objects import RelationalObjectTorch
+    from sts2_ai.training.pooled_ppo_v15 import initialize_combat_head
+
+    base = frozen_policy()
+    vocabulary = ObjectVocabulary.from_object_sets([extract_combat_objects(frame())])
+    original = RelationalObjectTorch(vocabulary, width=16)
+    with torch.no_grad():
+        original.module.policy_gate.fill_(0.35)
+        original.module.value_gate.fill_(0.2)
+    initial = PhaseSplitNeuralModel(
+        base.strategy, original.export(base.combat),
+        "warm-start-source", combat_value_objective="hp_preservation",
+    )
+    restored = RelationalObjectTorch(vocabulary, width=16)
+    initialize_combat_head(restored, base, initial)
+    for name, param in original.module.state_dict().items():
+        assert torch.equal(param, restored.module.state_dict()[name])
+    with pytest.raises(ValueError, match="objective mismatch"):
+        initialize_combat_head(
+            restored, base, replace(initial, combat_value_objective="hp_first"),
+        )
+    with pytest.raises(ValueError, match="width/vocabulary mismatch"):
+        initialize_combat_head(RelationalObjectTorch(vocabulary, width=32), base, initial)
+
+
+def test_native_snapshot_training_is_a_distinct_ppo_checkpoint(tmp_path) -> None:
+    pytest.importorskip("torch")
+    from test_pooled_ppo_v15 import frozen_policy
+    from test_object_instances_v15 import frame
+    from test_combat_snapshots_v14 import observation, public
+    from sts2_ai.emulator import LegalAction
+    from sts2_ai.emulator.episode_goal import NATIVE_ACT1_BOSS_GOAL
+    from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH
+    from sts2_ai.models.object_embeddings import ObjectVocabulary
+    from sts2_ai.models.object_instances import extract_combat_objects
+    from sts2_ai.training.pooled_ppo_v15 import train_pooled_combat_ppo
+
+    class RichToy(ToyBackend):
+        def observe(self, handle, policy):
+            if self.states[handle] != "battle":
+                return super().observe(handle, policy)
+            state = public(floor=1, room_type=0, combat=True)
+            template = frame()
+            state["combat"] = template["combat"]
+            state["deck"] = template["deck"]
+            state["relics"] = template["relics"]
+            state["potions"] = template["potions"]
+            state["character_id"] = template["character_id"]
+            state["gold"] = template["gold"]
+            return observation(state)
+
+        def legal_actions(self, handle):
+            if self.states[handle] == "battle":
+                return (
+                    LegalAction("attack", "play_card",
+                                '{"CardInstanceId":11,"TargetEnemyId":1}'),
+                    LegalAction("fumble", "end_turn", "{}"),
+                )
+            return super().legal_actions(handle)
+
+    backend = RichToy()
+    recipe = authentic_recipe(backend)
+    base = frozen_policy()
+    vocabulary = ObjectVocabulary.from_object_sets([extract_combat_objects(frame())])
+    checkpoint = tmp_path / "snapshot.pt"
+    options = dict(
+        rounds=1, episodes_per_round=2, workers=1, seed=3,
+        environment=NATIVE_OVERGROWTH, episode_goal_version=NATIVE_ACT1_BOSS_GOAL,
+        max_decisions=4, width=16, architecture="relational",
+        epochs=1, batch_size=2, sample_limit=8,
+        snapshot_recipes=[recipe], checkpoint=checkpoint,
+    )
+    model, history = train_pooled_combat_ppo(
+        backend, base, vocabulary, **options,
+    )
+    assert history[0].rollout_source == "combat_snapshots"
+    assert history[0].resolved_combats == 2
+    assert history[0].ppo_samples_used == 2
+    assert model.strategy.to_dict() == base.strategy.to_dict()
+    assert checkpoint.is_file() and backend.states == {}
+    with pytest.raises(ValueError, match="configuration/emulator mismatch"):
+        train_pooled_combat_ppo(
+            backend, base, vocabulary,
+            **{**options, "rounds": 2, "snapshot_sampling": "natural",
+               "resume": True},
+        )
+    resumed, rows = train_pooled_combat_ppo(
+        backend, base, vocabulary,
+        **{**options, "rounds": 2, "resume": True},
+    )
+    assert len(rows) == 2 and resumed.combat is not None
+    assert backend.states == {}
