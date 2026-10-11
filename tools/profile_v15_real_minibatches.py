@@ -216,6 +216,7 @@ def profile_minibatches(
     width: int = 64, trials: int = 5, warmups: int = 2,
     seed: int = 71, loss_modes: tuple[str, ...] = ("loop", "batched"),
     topology_modes: tuple[str, ...] = ("dynamic", "cached"),
+    feature_modes: tuple[str, ...] = ("dynamic",),
 ) -> dict[str, Any]:
     """Measure actual PPO loss/grad/AdamW, plus synchronized forward phases."""
     import torch
@@ -226,6 +227,10 @@ def profile_minibatches(
         mode not in ("dynamic", "cached") for mode in topology_modes
     ):
         raise ValueError("Unknown relation topology profiling mode")
+    if not feature_modes or any(
+        mode not in ("dynamic", "compiled") for mode in feature_modes
+    ):
+        raise ValueError("Unknown embedding feature profiling mode")
     records = corpus["records"]
     normalized = _normalized_advantages(records)
     objects, bindings, baselines, preparation = prepare_records(records)
@@ -242,6 +247,9 @@ def profile_minibatches(
     torch.manual_seed(seed)
     source = RelationalObjectTorch(vocabulary, width=width)
     initial = copy.deepcopy(source.module.state_dict())
+    started = time.perf_counter()
+    compiled_features = [source.embedding.prepare(obj) for obj in objects]
+    feature_preparation_seconds = time.perf_counter() - started
     rng = random.Random(seed)
     max_batch = max(batch_sizes)
     # Same real examples and order on both devices and all trials.
@@ -268,116 +276,124 @@ def profile_minibatches(
             selected_raw = [records[i] for i in picked]
             selected_adv = [normalized[i] for i in picked]
             selected_topologies = [compiled[i] for i in picked]
+            selected_features = [compiled_features[i] for i in picked]
             for topology_mode in topology_modes:
-                for loss_mode in loss_modes:
-                    head = RelationalObjectTorch(vocabulary, width=width)
-                    head.module.load_state_dict(initial)
-                    head.module.to(device)
-                    optimizer = torch.optim.AdamW(head.module.parameters(), lr=0.0003)
-                    samples: list[dict[str, float]] = []
-                    peaks = []
+                for feature_mode in feature_modes:
+                    for loss_mode in loss_modes:
+                        head = RelationalObjectTorch(vocabulary, width=width)
+                        head.module.load_state_dict(initial)
+                        head.module.to(device)
+                        optimizer = torch.optim.AdamW(head.module.parameters(), lr=0.0003)
+                        samples: list[dict[str, float]] = []
+                        peaks = []
 
-                    def step(instrument: bool) -> dict[str, float]:
-                        elapsed: dict[str, float] = {}
-                        sync()
-                        began = previous = time.perf_counter()
-
-                        def mark(label: str) -> None:
-                            nonlocal previous
-                            if not instrument:
-                                return
+                        def step(instrument: bool) -> dict[str, float]:
+                            elapsed: dict[str, float] = {}
                             sync()
-                            now = time.perf_counter()
-                            elapsed[label] = now - previous
-                            previous = now
+                            began = previous = time.perf_counter()
 
-                        optimizer.zero_grad(set_to_none=True)
-                        mark("zero_grad")
-                        values, logits = head.forward_batch_prepared(
-                            selected_obj, selected_menu, selected_base,
-                            stage_hook=mark if instrument else None,
-                            topologies=(
-                                selected_topologies
-                                if topology_mode == "cached" else None
-                            ),
-                        )
-                        if loss_mode == "batched":
-                            loss = batched_ppo_loss(
-                                torch, values, logits,
-                                chosen_indices=[row["chosen_index"] for row in selected_raw],
-                                old_logprobs=[row["old_logprob"] for row in selected_raw],
-                                advantages=selected_adv,
-                                targets=[row["target"] for row in selected_raw],
-                                temperature=corpus["temperature"],
-                            )[0]
-                        else:
-                            loss = _ppo_loss(
-                                torch, values, logits, selected_raw, corpus["temperature"],
-                                normalized_advantages=selected_adv,
+                            def mark(label: str) -> None:
+                                nonlocal previous
+                                if not instrument:
+                                    return
+                                sync()
+                                now = time.perf_counter()
+                                elapsed[label] = now - previous
+                                previous = now
+
+                            optimizer.zero_grad(set_to_none=True)
+                            mark("zero_grad")
+                            values, logits = head.forward_batch_prepared(
+                                selected_obj, selected_menu, selected_base,
+                                stage_hook=mark if instrument else None,
+                                topologies=(
+                                    selected_topologies
+                                    if topology_mode == "cached" else None
+                                ),
+                                features=(
+                                    selected_features
+                                    if feature_mode == "compiled" else None
+                                ),
                             )
-                        mark("ppo_loss")
-                        loss.backward()
-                        mark("backward")
-                        torch.nn.utils.clip_grad_norm_(head.module.parameters(), 1.0)
-                        mark("gradient_clip")
-                        optimizer.step()
-                        mark("adamw_step")
-                        sync()
-                        elapsed["total"] = time.perf_counter() - began
-                        return elapsed
+                            if loss_mode == "batched":
+                                loss = batched_ppo_loss(
+                                    torch, values, logits,
+                                    chosen_indices=[row["chosen_index"] for row in selected_raw],
+                                    old_logprobs=[row["old_logprob"] for row in selected_raw],
+                                    advantages=selected_adv,
+                                    targets=[row["target"] for row in selected_raw],
+                                    temperature=corpus["temperature"],
+                                )[0]
+                            else:
+                                loss = _ppo_loss(
+                                    torch, values, logits, selected_raw, corpus["temperature"],
+                                    normalized_advantages=selected_adv,
+                                )
+                            mark("ppo_loss")
+                            loss.backward()
+                            mark("backward")
+                            torch.nn.utils.clip_grad_norm_(head.module.parameters(), 1.0)
+                            mark("gradient_clip")
+                            optimizer.step()
+                            mark("adamw_step")
+                            sync()
+                            elapsed["total"] = time.perf_counter() - began
+                            return elapsed
 
-                    for _ in range(warmups):
-                        step(False)
-                    uninstrumented: list[float] = []
-                    for _ in range(trials):
-                        if device.type == "cuda":
-                            torch.cuda.reset_peak_memory_stats(device)
-                        uninstrumented.append(step(False)["total"])
-                        if device.type == "cuda":
-                            peaks.append(torch.cuda.max_memory_allocated(device))
-                    for _ in range(trials):
-                        if device.type == "cuda":
-                            torch.cuda.reset_peak_memory_stats(device)
-                        samples.append(step(True))
-                        if device.type == "cuda":
-                            peaks.append(torch.cuda.max_memory_allocated(device))
-                    keys = sorted(set().union(*(sample.keys() for sample in samples)))
-                    medians = {
-                        key: statistics.median(sample.get(key, 0.0) for sample in samples)
-                        for key in keys
-                    }
-                    result = {
-                        "device": device_name, "batch_size": size,
-                        "loss_mode": loss_mode,
-                        "topology_mode": topology_mode,
-                        "median_seconds": medians,
-                        "uninstrumented_total_seconds": statistics.median(uninstrumented),
-                        "uninstrumented_trials_seconds": uninstrumented,
-                        "decisions_per_second": size / statistics.median(uninstrumented),
-                        "instrumentation_overhead_ratio": (
-                            medians["total"] / statistics.median(uninstrumented)
-                        ),
-                        "peak_cuda_allocated_bytes": max(peaks) if peaks else None,
-                        "tokens": {
-                            "mean": statistics.fmean(len(obj.tokens) for obj in selected_obj),
-                            "max": max(len(obj.tokens) for obj in selected_obj),
-                        },
-                        "legal_actions": {
-                            "mean": statistics.fmean(len(menu) for menu in selected_menu),
-                            "max": max(len(menu) for menu in selected_menu),
-                        },
-                        "reused_observations": len(set(picked)) != len(picked),
-                    }
-                    rows.append(result)
-                    print(
-                        f"[v15i] {device_name} batch={size} " 
-                        f"loss={loss_mode} topology={topology_mode} "
-                        f"ppo={statistics.median(uninstrumented) * 1000:.2f}ms "
-                        f"throughput={result['decisions_per_second']:.1f}/s "
-                        f"embed={medians.get('object_embedding', 0)*1000:.2f}ms "
-                        f"attention={medians.get('self_attention', 0)*1000:.2f}ms",
-                        flush=True,
-                    )
+                        for _ in range(warmups):
+                            step(False)
+                        uninstrumented: list[float] = []
+                        for _ in range(trials):
+                            if device.type == "cuda":
+                                torch.cuda.reset_peak_memory_stats(device)
+                            uninstrumented.append(step(False)["total"])
+                            if device.type == "cuda":
+                                peaks.append(torch.cuda.max_memory_allocated(device))
+                        for _ in range(trials):
+                            if device.type == "cuda":
+                                torch.cuda.reset_peak_memory_stats(device)
+                            samples.append(step(True))
+                            if device.type == "cuda":
+                                peaks.append(torch.cuda.max_memory_allocated(device))
+                        keys = sorted(set().union(*(sample.keys() for sample in samples)))
+                        medians = {
+                            key: statistics.median(sample.get(key, 0.0) for sample in samples)
+                            for key in keys
+                        }
+                        result = {
+                            "device": device_name, "batch_size": size,
+                            "loss_mode": loss_mode,
+                            "topology_mode": topology_mode,
+                            "feature_mode": feature_mode,
+                            "median_seconds": medians,
+                            "uninstrumented_total_seconds": statistics.median(uninstrumented),
+                            "uninstrumented_trials_seconds": uninstrumented,
+                            "decisions_per_second": size / statistics.median(uninstrumented),
+                            "instrumentation_overhead_ratio": (
+                                medians["total"] / statistics.median(uninstrumented)
+                            ),
+                            "peak_cuda_allocated_bytes": max(peaks) if peaks else None,
+                            "tokens": {
+                                "mean": statistics.fmean(len(obj.tokens) for obj in selected_obj),
+                                "max": max(len(obj.tokens) for obj in selected_obj),
+                            },
+                            "legal_actions": {
+                                "mean": statistics.fmean(len(menu) for menu in selected_menu),
+                                "max": max(len(menu) for menu in selected_menu),
+                            },
+                            "reused_observations": len(set(picked)) != len(picked),
+                        }
+                        rows.append(result)
+                        print(
+                            f"[v15i] {device_name} batch={size} " 
+                            f"loss={loss_mode} topology={topology_mode} "
+                            f"features={feature_mode} "
+                            f"ppo={statistics.median(uninstrumented) * 1000:.2f}ms "
+                            f"throughput={result['decisions_per_second']:.1f}/s "
+                            f"embed={medians.get('object_embedding', 0)*1000:.2f}ms "
+                            f"attention={medians.get('self_attention', 0)*1000:.2f}ms",
+                            flush=True,
+                        )
     return {
         "schema": REPORT_SCHEMA,
         "corpus_sha256": corpus["sha256"],
@@ -392,6 +408,7 @@ def profile_minibatches(
         ),
         "sample_preparation_seconds": preparation,
         "topology_preparation_seconds": compilation_seconds,
+        "feature_preparation_seconds": feature_preparation_seconds,
         "sample_preparation_per_decision_ms": {
             key: value * 1000 / len(records)
             for key, value in preparation.items()
@@ -401,6 +418,7 @@ def profile_minibatches(
         "width": width, "trials": trials, "warmups": warmups,
         "loss_modes": list(loss_modes),
         "topology_modes": list(topology_modes),
+        "feature_modes": list(feature_modes),
         "rows": rows,
         "notes": (
             "Throughput uses uninstrumented wall timing. Synchronized phase " 
@@ -436,7 +454,10 @@ def main() -> None:
                         default=["batched"])
     parser.add_argument("--topology-modes", nargs="+",
                         choices=("dynamic", "cached"),
-                        default=["dynamic", "cached"])
+                        default=["cached"])
+    parser.add_argument("--feature-modes", nargs="+",
+                        choices=("dynamic", "compiled"),
+                        default=["dynamic", "compiled"])
     args = parser.parse_args()
     if (min(args.runs, args.max_decisions, args.threads, args.width,
             args.trials, *args.batch_sizes) <= 0
@@ -504,6 +525,7 @@ def main() -> None:
         width=args.width, warmups=args.warmups, trials=args.trials, seed=args.seed,
         loss_modes=tuple(args.loss_modes),
         topology_modes=tuple(args.topology_modes),
+        feature_modes=tuple(args.feature_modes),
     )
     results["corpus_path"] = str(args.corpus)
     args.report.parent.mkdir(parents=True, exist_ok=True)
