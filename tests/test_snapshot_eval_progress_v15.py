@@ -12,6 +12,7 @@ from test_combat_snapshots_v14 import (
     SnapshotCollector,
     ToyBackend,
 )
+
 from sts2_ai.agents.base import Decision
 from sts2_ai.evaluation.combat_snapshots import evaluate_recipes
 from tools import snapshot_eval_runtime as runtime
