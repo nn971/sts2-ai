@@ -184,8 +184,9 @@ def test_snapshot_failure_is_fatal_and_releases_every_handle() -> None:
 
 def test_portable_relational_warm_start_and_rejected_mismatch() -> None:
     torch = pytest.importorskip("torch")
-    from test_pooled_ppo_v15 import frozen_policy
     from test_object_instances_v15 import frame
+    from test_pooled_ppo_v15 import frozen_policy
+
     from sts2_ai.models.object_embeddings import ObjectVocabulary
     from sts2_ai.models.object_instances import extract_combat_objects
     from sts2_ai.models.phase_split import PhaseSplitNeuralModel
@@ -216,9 +217,10 @@ def test_portable_relational_warm_start_and_rejected_mismatch() -> None:
 
 def test_native_snapshot_training_is_a_distinct_ppo_checkpoint(tmp_path) -> None:
     pytest.importorskip("torch")
-    from test_pooled_ppo_v15 import frozen_policy
-    from test_object_instances_v15 import frame
     from test_combat_snapshots_v14 import observation, public
+    from test_object_instances_v15 import frame
+    from test_pooled_ppo_v15 import frozen_policy
+
     from sts2_ai.emulator import LegalAction
     from sts2_ai.emulator.episode_goal import NATIVE_ACT1_BOSS_GOAL
     from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH
