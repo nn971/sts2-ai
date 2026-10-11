@@ -523,6 +523,10 @@ def train_pooled_combat_ppo(
     checkpoint: Path | None = None, resume: bool = False,
     progress: Callable[[PooledTrainingRound], None] | None = None,
     architecture: str = "pooled",
+    snapshot_every: int = 0,
+    on_round: Callable[
+        [tuple[PooledTrainingRound, ...], PhaseSplitNeuralModel | None], None
+    ] | None = None,
 ) -> tuple[PhaseSplitNeuralModel, tuple[PooledTrainingRound, ...]]:
     """Train ONLY the combat residual, from a frozen phase-split checkpoint.
 
@@ -533,6 +537,8 @@ def train_pooled_combat_ppo(
 
     if architecture not in ("pooled", "relational"):
         raise ValueError("Unknown v15 combat architecture")
+    if snapshot_every < 0:
+        raise ValueError("Snapshot interval must be nonnegative")
     if min(rounds, episodes_per_round, workers, max_decisions, width) <= 0:
         raise ValueError("Expected positive training sizes")
     if not 0 < learning_rate < 1:
@@ -688,6 +694,18 @@ def train_pooled_combat_ppo(
             )
             if progress is not None:
                 progress(row)
+            if on_round is not None:
+                milestone = None
+                if snapshot_every and (i + 1) % snapshot_every == 0:
+                    # Export only after the corresponding optimizer checkpoint
+                    # has been durably committed. Re-exporting is read-only
+                    # and does not affect PPO's RNG or optimizer trajectory.
+                    milestone = PhaseSplitNeuralModel(
+                        base.strategy, head.export(base.combat),
+                        f"v15-{architecture}-{fingerprint[:12]}-{i + 1}",
+                        combat_value_objective="hp_preservation",
+                    )
+                on_round(tuple(rows), milestone)
     final = PhaseSplitNeuralModel(
         base.strategy, head.export(base.combat),
         f"v15-{architecture}-{fingerprint[:12]}-{rounds}",
