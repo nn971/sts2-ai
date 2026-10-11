@@ -1,5 +1,7 @@
 # Self-improving stochastic PUCT: bounded variance roadmap
 
+> **Interchangeable chance provider plan:** [Desired Nature Training Implementation](DESIRED_NATURE_TRAINING_IMPLEMENTATION.md) and its [emulator RNG counterpart](https://github.com/nn971/sts2-emulator/pull/119). The new plan first establishes mechanically sound controlled chance transitions; public-history-conditional probability calibration and fair stochastic search remain separate later validation gates.
+
 **Status:** active implementation; an opt-in public-history-conditioned rejection
 reference, empirical finite-cohort sampler, and stochastic PUCT kernel exist.
 A *scalable, native-probability-calibrated* fair search/data-collection loop,
