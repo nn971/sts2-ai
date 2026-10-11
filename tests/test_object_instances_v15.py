@@ -91,8 +91,8 @@ def test_pending_combat_card_selection_preserves_chosen_instance_set() -> None:
         )
     with pytest.raises(ValueError, match="Missing CardInstanceIds"):
         legal_action_object_refs("select_cards", "{}", objects)
-    with pytest.raises(ValueError, match="Missing CardInstanceId"):
-        legal_action_object_refs("play_card", "{}", objects)
+    # Opaque legacy/toy play_card menus have no public pointer information.
+    assert legal_action_object_refs("play_card", "{}", objects) == ()
 
 
 def test_multiple_instanced_powers_on_one_owner_keep_distinct_references() -> None:
