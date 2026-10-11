@@ -42,7 +42,12 @@ from sts2_ai.models.object_instances import (
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.models.pooled_objects import PooledObjectTorch
 from sts2_ai.models.protocol import PolicyValueEstimate
-from sts2_ai.models.relational_objects import RelationalObjectTorch, _action_tokens
+from sts2_ai.models.relational_objects import (
+    RelationalObjectTorch,
+    RelationalTopology,
+    _action_tokens,
+    prepare_relational_topology,
+)
 from sts2_ai.training.parallel_rollouts import (
     collect_parallel,
     episode_actor_seed,
@@ -71,6 +76,7 @@ class PooledPpoSample:
     advantage: float
     target: float
     action_bindings: tuple[tuple[str, tuple[ActionBinding, ...]], ...] | None = None
+    relational_topology: RelationalTopology | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,19 +246,24 @@ def prepare_pooled_samples(
                     value = float(v.item())
                     if not math.isfinite(logprob) or not math.isfinite(value):
                         raise ValueError("Non-finite PPO behavior output")
+                    topology = (
+                        prepare_relational_topology(objects, bindings)
+                        if bindings is not None else None
+                    )
                     prepared.append((
                         objects, refs, bindings, baseline, decision, logprob,
+                        topology,
                     ))
                     values.append(value)
                 adv, returns = gae_terminal(
                     values, target, gamma=gamma, lam=gae_lambda,
                 )
-                for (objects, refs, bindings, baseline, decision, logprob), a, ret in zip(
-                    prepared, adv, returns, strict=True,
-                ):
+                for (
+                    objects, refs, bindings, baseline, decision, logprob, topology
+                ), a, ret in zip(prepared, adv, returns, strict=True):
                     samples.append(PooledPpoSample(
                         objects, refs, baseline, decision.chosen_index,
-                        logprob, a, ret, bindings,
+                        logprob, a, ret, bindings, topology,
                     ))
                 rewards.append(target)
             if episode.completed and any(
@@ -383,6 +394,14 @@ def ppo_update_pooled(
                     [rows[k].objects for k in chosen],
                     [rows[k].action_bindings for k in chosen],
                     [rows[k].baseline for k in chosen],
+                    topologies=[
+                        rows[k].relational_topology
+                        if rows[k].relational_topology is not None
+                        else prepare_relational_topology(
+                            rows[k].objects, rows[k].action_bindings,
+                        )
+                        for k in chosen
+                    ],
                 )
                 loss, actor_mean, critic_mean, entropy_mean = batched_ppo_loss(
                     torch, values, logits_batch,
