@@ -175,11 +175,15 @@ def evaluate_source(
         log(f"[snapshot pid={os.getpid()}] source={seed} floor={floor} "
             f"model={model} combat_decisions={decision}/{max_combat_decisions}")
 
+    def replay(seed: str, floor: int, count: int, total: int) -> None:
+        log(f"[snapshot pid={os.getpid()}] source={seed} floor={floor} "
+            f"prefix_actions={count}/{total}")
+
     return evaluate_recipes(
         backend, recipes, baseline, candidate,
         max_combat_decisions=max_combat_decisions,
         on_run_start=started, on_snapshot_complete=snapshot,
-        on_combat_progress=active,
+        on_combat_progress=active, on_replay_progress=replay,
         combat_progress_every=progress_every,
     )
 
