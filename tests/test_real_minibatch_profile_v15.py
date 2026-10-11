@@ -7,7 +7,6 @@ import json
 import pytest
 from test_pooled_ppo_v15 import combat_episode, frozen_policy
 
-from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from tools.profile_v15_real_minibatches import (
     REPORT_SCHEMA,
     SCHEMA,
