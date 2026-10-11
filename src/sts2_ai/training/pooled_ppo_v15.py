@@ -377,10 +377,13 @@ def batched_ppo_loss(
         log_prob.exp() * log_prob.masked_fill(~valid, 0.0)
     ).sum(dim=1)
     if sample_weights is None:
-        reduce = lambda x: x.mean()
+        def reduce(x: Any) -> Any:
+            return x.mean()
     else:
         weights = torch.tensor(sample_weights, device=device, dtype=dtype)
-        reduce = lambda x: (weights * x).sum() / weights.sum()
+
+        def reduce(x: Any) -> Any:
+            return (weights * x).sum() / weights.sum()
     return (
         reduce(policy_loss + value_weight * value_loss
                - entropy_weight * entropy),
