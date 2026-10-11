@@ -283,3 +283,96 @@ def test_native_snapshot_training_is_a_distinct_ppo_checkpoint(tmp_path) -> None
     )
     assert len(rows) == 2 and resumed.combat is not None
     assert backend.states == {}
+
+
+def test_parallel_snapshot_batching_matches_serial_and_preserves_groups(monkeypatch):
+    from sts2_ai.training import parallel_rollouts
+    from sts2_ai.training.snapshot_curriculum import (
+        plan_snapshot_batches,
+    )
+    from sts2_ai.models.phase_split import PhaseSplitNeuralModel
+
+    class PortableActionModel(ActionModel):
+        def to_dict(self):
+            return {"test_action": self.action}
+
+    class InProcessPool:
+        def __init__(self, backend):
+            self.backend = backend
+            self.requests = []
+
+        def map(self, function, requests):
+            # Simulates isolated process tasks with a pinned backend.
+            for request in requests:
+                self.requests.append(request)
+                yield function(request)
+
+    a = ToyBackend()
+    b = ToyBackend()
+    template = authentic_recipe(a)
+    selected = [
+        replace(template, seed=f"source-{i % 6}")
+        for i in range(18)
+    ]
+    expected = collect_snapshot_cohort(
+        a, PortableActionModel(), selected,
+        round_index=9, actor_seed=101, temperature=0.7,
+    )
+    monkeypatch.setattr(parallel_rollouts, "_WORKER_BACKEND", b)
+    monkeypatch.setattr(
+        PhaseSplitNeuralModel, "from_dict",
+        classmethod(lambda cls, payload: PortableActionModel(payload["test_action"])),
+    )
+    pool = InProcessPool(b)
+    actual = collect_snapshot_cohort(
+        b, PortableActionModel(), selected, round_index=9,
+        actor_seed=101, temperature=0.7, pool=pool, workers=3,
+    )
+    assert actual == expected
+    assert a.states == {} and b.states == {}
+    assert len(pool.requests) == 3
+    assert sorted({
+        tuple(index for _, group in request.groups for index, _ in group[1])
+        for request in pool.requests
+    }) != []  # Every request contains a source group.
+    processed_groups = [
+        group[0] for batch in pool.requests for group in batch.groups
+    ]
+    assert len(processed_groups) == 6
+    assert len(set(processed_groups)) == 6
+    assert sum(
+        len(items) for batch in pool.requests
+        for _, items in batch.groups
+    ) == len(selected)
+    assert all(
+        request.model_payload == {"test_action": "attack"}
+        for request in pool.requests
+    )
+    groups = {}
+    for i, recipe in enumerate(selected):
+        groups.setdefault(source_key(recipe), []).append((i, recipe))
+    assert plan_snapshot_batches(
+        groups, workers=3, max_decisions=256,
+    ) == plan_snapshot_batches(
+        dict(reversed(list(groups.items()))), workers=3,
+        max_decisions=256,
+    )
+    with pytest.raises(ValueError, match="pool"):
+        collect_snapshot_cohort(
+            b, PortableActionModel(), selected,
+            round_index=9, actor_seed=101, temperature=0.7, workers=3,
+        )
+
+
+def test_parallel_snapshot_worker_rejects_missing_private_backend(monkeypatch):
+    from sts2_ai.training import parallel_rollouts
+    from sts2_ai.training.snapshot_curriculum import (
+        SnapshotWorkerBatch, _worker_collect_snapshot_batch,
+    )
+
+    monkeypatch.setattr(parallel_rollouts, "_WORKER_BACKEND", None)
+    job = SnapshotWorkerBatch(
+        (), {}, 0, 13, 1.0, 8,
+    )
+    with pytest.raises(RuntimeError, match="independent emulator"):
+        _worker_collect_snapshot_batch(job)
