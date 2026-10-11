@@ -34,6 +34,7 @@ from sts2_ai.emulator.run_environment import LEGACY, require_environment
 from sts2_ai.models.neural import NeuralPolicyValueModel
 from sts2_ai.models.object_embeddings import ObjectVocabulary
 from sts2_ai.models.object_instances import (
+    ActionBinding,
     ObjectRef,
     ObjectSet,
     extract_combat_objects,
@@ -42,6 +43,7 @@ from sts2_ai.models.object_instances import (
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.models.pooled_objects import PooledObjectTorch
 from sts2_ai.models.protocol import PolicyValueEstimate
+from sts2_ai.models.relational_objects import RelationalObjectTorch, _action_tokens
 from sts2_ai.training.parallel_rollouts import (
     collect_parallel,
     episode_actor_seed,
@@ -57,6 +59,7 @@ from sts2_ai.training.selfplay import (
 
 POOLED_PPO_VERSION = "sts2-v15c-frozen-strategy-combat-ppo-v1"
 POOLED_PPO_CHECKPOINT = "sts2-v15c-pooled-combat-checkpoint-v1"
+RELATIONAL_PPO_CHECKPOINT = "sts2-v15d-relational-combat-checkpoint-v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +71,7 @@ class PooledPpoSample:
     old_logprob: float
     advantage: float
     target: float
+    action_bindings: tuple[tuple[str, tuple[ActionBinding, ...]], ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,7 +181,8 @@ def _prepared_decision(
 
 def prepare_pooled_samples(
     cohort: Sequence[Episode], base: NeuralPolicyValueModel,
-    head: PooledObjectTorch, *, temperature: float, gamma: float,
+    head: PooledObjectTorch | RelationalObjectTorch, *,
+    temperature: float, gamma: float,
     gae_lambda: float,
 ) -> tuple[list[PooledPpoSample], list[float]]:
     """Cache behavior probabilities and GAE before *any* optimizer update.
@@ -211,23 +216,31 @@ def prepare_pooled_samples(
                     if not 0 <= decision.chosen_index < len(decision.legal_actions):
                         raise ValueError("Chosen action absent from legal menu")
                     objects, refs, baseline = _prepared_decision(decision, base)
-                    v, logits = head.forward_prepared(objects, refs, baseline)
+                    bindings = (
+                        _action_tokens(decision.legal_actions, objects)
+                        if isinstance(head, RelationalObjectTorch) else None
+                    )
+                    v, logits = head.forward_prepared(
+                        objects, bindings if bindings is not None else refs, baseline,
+                    )
                     old = torch.nn.functional.log_softmax(logits / temperature, dim=0)
                     logprob = float(old[decision.chosen_index].item())
                     value = float(v.item())
                     if not math.isfinite(logprob) or not math.isfinite(value):
                         raise ValueError("Non-finite PPO behavior output")
-                    prepared.append((objects, refs, baseline, decision, logprob))
+                    prepared.append((
+                        objects, refs, bindings, baseline, decision, logprob,
+                    ))
                     values.append(value)
                 adv, returns = gae_terminal(
                     values, target, gamma=gamma, lam=gae_lambda,
                 )
-                for (objects, refs, baseline, decision, logprob), a, ret in zip(
+                for (objects, refs, bindings, baseline, decision, logprob), a, ret in zip(
                     prepared, adv, returns, strict=True,
                 ):
                     samples.append(PooledPpoSample(
                         objects, refs, baseline, decision.chosen_index,
-                        logprob, a, ret,
+                        logprob, a, ret, bindings,
                     ))
                 rewards.append(target)
             if episode.completed and any(
@@ -239,7 +252,8 @@ def prepare_pooled_samples(
 
 
 def ppo_update_pooled(
-    head: PooledObjectTorch, samples: Sequence[PooledPpoSample],
+    head: PooledObjectTorch | RelationalObjectTorch,
+    samples: Sequence[PooledPpoSample],
     optimizer: Any, *, temperature: float, epochs: int = 3,
     batch_size: int = 32, sample_limit: int = 2048,
     clip_epsilon: float = 0.2, value_weight: float = 0.5,
@@ -287,8 +301,14 @@ def ppo_update_pooled(
             entropies = []
             for k in chosen:
                 s = rows[k]
+                if isinstance(head, RelationalObjectTorch):
+                    if s.action_bindings is None:
+                        raise ValueError("Missing v15d action-role bindings")
+                    action_input = s.action_bindings
+                else:
+                    action_input = s.action_refs
                 v, logits = head.forward_prepared(
-                    s.objects, s.action_refs, s.baseline,
+                    s.objects, action_input, s.baseline,
                 )
                 lp = torch.nn.functional.log_softmax(logits / temperature, dim=0)
                 selected = lp[s.chosen_index]
@@ -323,13 +343,15 @@ def ppo_update_pooled(
 
 
 def _checkpoint_save(
-    path: Path, *, torch: Any, head: PooledObjectTorch, optimizer: Any,
+    path: Path, *, torch: Any,
+    head: PooledObjectTorch | RelationalObjectTorch, optimizer: Any,
     fingerprint: str, emulator_revision: str,
     rows: list[PooledTrainingRound],
+    checkpoint_format: str = POOLED_PPO_CHECKPOINT,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     data = {
-        "format": POOLED_PPO_CHECKPOINT,
+        "format": checkpoint_format,
         "fingerprint": fingerprint,
         "emulator_revision": emulator_revision,
         "module": {name: x.detach().cpu().clone()
@@ -370,6 +392,7 @@ def train_pooled_combat_ppo(
     entropy_weight: float = 0.002,
     checkpoint: Path | None = None, resume: bool = False,
     progress: Callable[[PooledTrainingRound], None] | None = None,
+    architecture: str = "pooled",
 ) -> tuple[PhaseSplitNeuralModel, tuple[PooledTrainingRound, ...]]:
     """Train ONLY the combat residual, from a frozen phase-split checkpoint.
 
@@ -378,6 +401,8 @@ def train_pooled_combat_ppo(
     """
     import torch
 
+    if architecture not in ("pooled", "relational"):
+        raise ValueError("Unknown v15 combat architecture")
     if min(rounds, episodes_per_round, workers, max_decisions, width) <= 0:
         raise ValueError("Expected positive training sizes")
     if not 0 < learning_rate < 1:
@@ -403,7 +428,15 @@ def train_pooled_combat_ppo(
     require_environment(backend, environment)
     torch.manual_seed(seed)
     torch.set_num_threads(1)
-    head = PooledObjectTorch(vocabulary, width=width)
+    head = (
+        RelationalObjectTorch(vocabulary, width=width)
+        if architecture == "relational"
+        else PooledObjectTorch(vocabulary, width=width)
+    )
+    checkpoint_format = (
+        RELATIONAL_PPO_CHECKPOINT if architecture == "relational"
+        else POOLED_PPO_CHECKPOINT
+    )
     optimizer = torch.optim.AdamW(head.module.parameters(), lr=learning_rate)
     revision = str(getattr(backend, "emulator_revision", "test-backend"))
     config = {
@@ -421,12 +454,14 @@ def train_pooled_combat_ppo(
         "clip_epsilon": clip_epsilon, "gamma": gamma, "gae_lambda": gae_lambda,
         "value_weight": value_weight, "entropy_weight": entropy_weight,
     }
+    if architecture != "pooled":
+        config["architecture"] = architecture
     fingerprint = _hash_json(config)
     rows: list[PooledTrainingRound] = []
     if resume:
         assert checkpoint is not None
         saved = torch.load(checkpoint, map_location="cpu", weights_only=True)
-        if not isinstance(saved, dict) or saved.get("format") != POOLED_PPO_CHECKPOINT:
+        if not isinstance(saved, dict) or saved.get("format") != checkpoint_format:
             raise ValueError("Wrong v15c PPO checkpoint format")
         if (saved.get("fingerprint") != fingerprint
                 or saved.get("emulator_revision") != revision):
@@ -455,7 +490,7 @@ def train_pooled_combat_ppo(
         for i in range(len(rows), rounds):
             policy = PhaseSplitNeuralModel(
                 base.strategy, head.export(base.combat),
-                f"v15c-before-round-{i}",
+                f"v15-{architecture}-before-round-{i}",
                 combat_value_objective="hp_preservation",
             )
             temperature = temperature_for_round(
@@ -509,9 +544,10 @@ def train_pooled_combat_ppo(
                 _checkpoint_save(
                     checkpoint, torch=torch, head=head, optimizer=optimizer,
                     fingerprint=fingerprint, emulator_revision=revision, rows=rows,
+                    checkpoint_format=checkpoint_format,
                 )
             print(
-                f"[v15c] round={i + 1}/{rounds} "
+                f"[v15-{architecture}] round={i + 1}/{rounds} "
                 f"runs={row.played} complete={row.completed} wins={row.wins} "
                 f"resolved_combats={row.resolved_combats} "
                 f"combat_decisions={row.combat_decisions} "
@@ -524,7 +560,7 @@ def train_pooled_combat_ppo(
                 progress(row)
     final = PhaseSplitNeuralModel(
         base.strategy, head.export(base.combat),
-        f"v15c-pooled-{fingerprint[:12]}-{rounds}",
+        f"v15-{architecture}-{fingerprint[:12]}-{rounds}",
         combat_value_objective="hp_preservation",
     )
     return final, tuple(rows)
