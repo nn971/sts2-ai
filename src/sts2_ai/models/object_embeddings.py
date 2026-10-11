@@ -147,6 +147,30 @@ class ObjectVocabulary:
         return cls(**fields)
 
 
+
+@dataclass(frozen=True, slots=True)
+class CompiledObjectFeatures:
+    """Public, weight-independent token indices; safe across PPO epochs.
+
+    Instance references, numeric instance IDs, and private emulator state
+    are not represented. Numeric *values* are frozen only until the public
+    observation changes; PPO replays immutable captured decisions.
+    """
+
+    count: int
+    kinds: tuple[int, ...]
+    identities: tuple[int, ...]
+    roles: tuple[int, ...]
+    category_rows: tuple[int, ...]
+    category_ids: tuple[int, ...]
+    category_counts: tuple[int, ...]
+    numeric_groups: tuple[
+        tuple[int, tuple[int, ...], tuple[int, ...], tuple[float, ...]], ...
+    ]
+    numeric_counts: tuple[int, ...]
+
+
+
 class TypedObjectEncoder:
     """Lazily requires Torch; the main package keeps dependency-free inference.
 
@@ -187,6 +211,137 @@ class TypedObjectEncoder:
 
     def _id(self, name: str, value: str) -> int:
         return self._maps[name].get(value, 0)
+
+
+    def prepare(self, objects: ObjectSet) -> CompiledObjectFeatures:
+        """Compile visible categorical/numeric labels once, not neural values."""
+        kind_ids = []
+        identities = []
+        roles = []
+        category_rows = []
+        category_ids = []
+        category_counts = []
+        numeric_rows: dict[int, list[int]] = {}
+        numeric_ids: dict[int, list[int]] = {}
+        numeric_values: dict[int, list[float]] = {}
+        numeric_counts = []
+        for row, token in enumerate(objects.tokens):
+            kind = self._id("kinds", token.kind)
+            kind_ids.append(kind)
+            identities.append(self._id("identities", f"{token.kind}:{token.type_id}"))
+            roles.append(self._id("roles", f"{token.kind}:{token.role}"))
+            category_counts.append(max(1, len(token.categorical)))
+            numeric_counts.append(max(1, len(token.numeric)))
+            for tag in token.categorical:
+                category_rows.append(row)
+                category_ids.append(
+                    self._id("categories", f"{token.kind}:{tag}")
+                )
+            for field, value in token.numeric:
+                numeric_rows.setdefault(kind, []).append(row)
+                numeric_ids.setdefault(kind, []).append(
+                    self._id("numeric_fields", f"{token.kind}:{field}")
+                )
+                numeric_values.setdefault(kind, []).append(
+                    math.copysign(math.log1p(abs(value)), value) / 4.0
+                )
+        return CompiledObjectFeatures(
+            count=len(objects.tokens),
+            kinds=tuple(kind_ids),
+            identities=tuple(identities),
+            roles=tuple(roles),
+            category_rows=tuple(category_rows),
+            category_ids=tuple(category_ids),
+            category_counts=tuple(category_counts),
+            numeric_groups=tuple(
+                (
+                    kind, tuple(numeric_rows[kind]), tuple(numeric_ids[kind]),
+                    tuple(numeric_values[kind]),
+                )
+                for kind in sorted(numeric_rows)
+            ),
+            numeric_counts=tuple(numeric_counts),
+        )
+
+    def encode_many_compiled(
+        self, prepared: Sequence[CompiledObjectFeatures],
+    ) -> tuple[Any, ...]:
+        """Encode pre-indexed public tokens with the *current* model weights.
+
+        All Torch embeddings, projections, norms and gradients are freshly
+        evaluated on each call. No stale tensor, autograd graph or private
+        state is retained by the cache.
+        """
+        torch = self.torch
+        device = self.module.kinds.weight.device
+        dtype = self.module.kinds.weight.dtype
+        lengths = [row.count for row in prepared]
+        total = sum(lengths)
+        if total == 0:
+            return tuple(
+                self.module.kinds.weight.new_zeros((length, self.width))
+                for length in lengths
+            )
+
+        def ids(values: Sequence[int]) -> Any:
+            return torch.tensor(values, dtype=torch.long, device=device)
+
+        kinds = [v for row in prepared for v in row.kinds]
+        identities = [v for row in prepared for v in row.identities]
+        roles = [v for row in prepared for v in row.roles]
+        x = (
+            self.module.kinds(ids(kinds))
+            + self.module.identities(ids(identities))
+            + self.module.roles(ids(roles))
+        )
+        cat_rows: list[int] = []
+        cat_ids: list[int] = []
+        cat_counts: list[int] = []
+        offset = 0
+        for row in prepared:
+            cat_rows.extend(offset + local for local in row.category_rows)
+            cat_ids.extend(row.category_ids)
+            cat_counts.extend(row.category_counts)
+            offset += row.count
+        if cat_rows:
+            vectors = self.module.categories(ids(cat_ids))
+            sums = torch.zeros_like(x).index_add(0, ids(cat_rows), vectors)
+            counts = torch.tensor(
+                cat_counts, device=device, dtype=dtype,
+            ).unsqueeze(-1)
+            x = x + sums / counts
+
+        numeric_by_kind: dict[
+            int, tuple[list[int], list[int], list[float]]
+        ] = {}
+        num_counts: list[int] = []
+        offset = 0
+        for row in prepared:
+            num_counts.extend(row.numeric_counts)
+            for kind, positions, fields, values in row.numeric_groups:
+                bucket = numeric_by_kind.setdefault(kind, ([], [], []))
+                bucket[0].extend(offset + local for local in positions)
+                bucket[1].extend(fields)
+                bucket[2].extend(values)
+            offset += row.count
+        if numeric_by_kind:
+            sums = torch.zeros_like(x)
+            for kind in sorted(numeric_by_kind):
+                positions, fields, values = numeric_by_kind[kind]
+                field_vectors = self.module.numeric_fields(ids(fields))
+                scalar = torch.tensor(
+                    values, device=device, dtype=dtype,
+                ).unsqueeze(-1)
+                projected = self.module.numeric_layers[kind](
+                    torch.cat((field_vectors, scalar), dim=-1)
+                )
+                sums = sums.index_add(0, ids(positions), projected)
+            counts = torch.tensor(
+                num_counts, device=device, dtype=dtype,
+            ).unsqueeze(-1)
+            x = x + sums / counts
+        result = self.module.norm(x)
+        return tuple(torch.split(result, lengths, dim=0))
 
     def encode_many(self, batches: Sequence[ObjectSet]) -> tuple[Any, ...]:
         """Encode all visible tokens in one differentiable vectorized pass.
