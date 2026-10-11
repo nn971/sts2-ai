@@ -37,7 +37,6 @@ from sts2_ai.models.object_instances import (
     ObjectRef,
     ObjectSet,
     extract_actionable_combat_objects,
-    extract_combat_objects,
     legal_action_object_refs,
 )
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
