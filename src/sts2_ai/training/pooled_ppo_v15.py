@@ -2,9 +2,8 @@
 
 This is intentionally separate from the existing phase_split_ppo_batch path:
 the v15 pooled control is an independent residual model, not a reinterpretation
-of v8 flattened feature tensors. Each PPO minibatch contains multiple combat
-decisions but computes instance embeddings per decision (no padding/leakage).
-Batched tensorized object encoding is a later performance optimization.
+of v8 flattened feature tensors. Relational v15d PPO uses padded, masked,
+batched object/action attention; the pooled v15c control remains unchanged.
 
 Only resolved *public combat segments* supply terminal HP-preservation GAE.
 An unfinished combat in a decision-capped run has no target and is excluded.
@@ -306,17 +305,26 @@ def ppo_update_pooled(
             policy_losses = []
             value_losses = []
             entropies = []
-            for k in chosen:
-                s = rows[k]
-                if isinstance(head, RelationalObjectTorch):
-                    if s.action_bindings is None:
-                        raise ValueError("Missing v15d action-role bindings")
-                    action_input = s.action_bindings
-                else:
-                    action_input = s.action_refs
-                v, logits = head.forward_prepared(
-                    s.objects, action_input, s.baseline,
+            if isinstance(head, RelationalObjectTorch):
+                if any(rows[k].action_bindings is None for k in chosen):
+                    raise ValueError("Missing v15d action-role bindings")
+                values, logits_batch = head.forward_batch_prepared(
+                    [rows[k].objects for k in chosen],
+                    [rows[k].action_bindings for k in chosen],
+                    [rows[k].baseline for k in chosen],
                 )
+                predictions = [
+                    (values[i], logits_batch[i]) for i in range(len(chosen))
+                ]
+            else:
+                predictions = [
+                    head.forward_prepared(
+                        rows[k].objects, rows[k].action_refs, rows[k].baseline,
+                    )
+                    for k in chosen
+                ]
+            for k, (v, logits) in zip(chosen, predictions, strict=True):
+                s = rows[k]
                 lp = torch.nn.functional.log_softmax(logits / temperature, dim=0)
                 selected = lp[s.chosen_index]
                 ratio = (selected - s.old_logprob).clamp(-20.0, 20.0).exp()
