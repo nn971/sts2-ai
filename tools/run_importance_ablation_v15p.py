@@ -149,7 +149,7 @@ def main() -> None:
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--rounds", type=int, default=40)
     parser.add_argument("--episodes", type=int, default=32)
-    parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--workers", type=int, default=15)
     parser.add_argument("--seed", type=int, default=29)
     parser.add_argument("--width", type=int, default=64)
     parser.add_argument("--target-balance", type=float, default=0.5)
@@ -164,7 +164,7 @@ def main() -> None:
         "--eval-corpus", type=Path,
         help="Source-disjoint held-out combat snapshots; evaluate both trained arms",
     )
-    parser.add_argument("--eval-workers", type=int, default=8)
+    parser.add_argument("--eval-workers", type=int, default=15)
     parser.add_argument("--eval-max-decisions", type=int, default=512)
     parser.add_argument("--bootstrap-samples", type=int, default=2000)
     args = parser.parse_args()
