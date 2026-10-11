@@ -99,8 +99,14 @@ def _flatten(
         for k, v in sorted(value.items()):
             if not isinstance(k, str):
                 raise ValueError(f"Non-string object metadata key: {prefix}")
-            # Never represent arbitrary identity counters as learned values.
-            if k in ("instance_id", "persistent_card_instance_id"):
+            # Instance identifiers are pointers, never scalar neural input.
+            # Includes nested affliction.source_enemy_instance_id and arrays
+            # of instance IDs; changing arbitrary labels cannot change logits.
+            if (
+                k == "instance_id"
+                or k.endswith(("_instance_id", "_instance_ids"))
+                or k.endswith(("InstanceId", "InstanceIds"))
+            ):
                 continue
             _flatten(f"{prefix}.{k}", v, numerical, categorical, depth=depth + 1)
     elif isinstance(value, list):
