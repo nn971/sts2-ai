@@ -7,7 +7,7 @@ have reserved embeddings rather than being silently dropped.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,21 +26,103 @@ class ObjectVocabulary:
     numeric_fields: tuple[str, ...]
 
     @staticmethod
-    def from_object_sets(samples: Sequence[ObjectSet]) -> ObjectVocabulary:
+    def from_object_sets(
+        samples: Sequence[ObjectSet], *,
+        manifest: Mapping[str, Any] | None = None,
+    ) -> ObjectVocabulary:
+        """Build a frozen vocabulary from public observations + declared catalog.
+
+        The bridge's capability manifest contains only implemented content
+        identifiers, not engine state or private RNG. It prevents unseen
+        catalog cards/enemies/relics/potions/powers from all sharing <UNK>.
+        Dynamic categorical tags and numeric fields still come from
+        *public* samples; their OOV rate is separately reportable.
+        """
         tokens = [token for sample in samples for token in sample.tokens]
+
         def entries(values: Any) -> tuple[str, ...]:
             return (UNKNOWN, *sorted(set(values) - {UNKNOWN}))
+
+        catalog: set[str] = {"global:player"}
+        roles: set[str] = {
+            "global:combat",
+            "card:hand", "card:draw_pile", "card:discard_pile",
+            "card:exhaust_pile", "card:play_pile",
+            "enemy:living", "relic:owned", "potion:held",
+            "power:active", "status:active",
+        }
+        if manifest is not None:
+            for kind, field in (
+                ("card", "cardIds"), ("enemy", "enemyIds"),
+                ("relic", "relicIds"), ("potion", "potionIds"),
+                ("power", "powerIds"),
+            ):
+                values = manifest.get(field)
+                if (not isinstance(values, list)
+                        or any(not isinstance(v, str) or not v for v in values)
+                        or len(set(values)) != len(values)):
+                    raise ValueError(f"Invalid emulator manifest {field}")
+                catalog.update(f"{kind}:{value}" for value in values)
         return ObjectVocabulary(
-            kinds=entries(token.kind for token in tokens),
-            identities=entries(f"{token.kind}:{token.type_id}" for token in tokens),
-            roles=entries(f"{token.kind}:{token.role}" for token in tokens),
+            kinds=entries(
+                [token.kind for token in tokens]
+                + ["global", "card", "enemy", "relic", "potion", "power", "status"]
+            ),
+            identities=entries(
+                catalog | {f"{token.kind}:{token.type_id}" for token in tokens}
+            ),
+            roles=entries(
+                roles | {f"{token.kind}:{token.role}" for token in tokens}
+            ),
             categories=entries(
-                f"{token.kind}:{tag}" for token in tokens for tag in token.categorical
+                f"{token.kind}:{tag}"
+                for token in tokens for tag in token.categorical
             ),
             numeric_fields=entries(
-                f"{token.kind}:{name}" for token in tokens for name, _ in token.numeric
+                f"{token.kind}:{name}"
+                for token in tokens for name, _ in token.numeric
             ),
         )
+
+    def oov_report(self, samples: Sequence[ObjectSet]) -> dict[str, Any]:
+        """Audit OOV use; no raw instance IDs are included in the report."""
+        known = {
+            name: set(getattr(self, name))
+            for name in ("kinds", "identities", "roles", "categories", "numeric_fields")
+        }
+        total = {name: 0 for name in known}
+        missing: dict[str, dict[str, int]] = {name: {} for name in known}
+
+        def observe(namespace: str, key: str) -> None:
+            total[namespace] += 1
+            if key not in known[namespace]:
+                items = missing[namespace]
+                items[key] = items.get(key, 0) + 1
+
+        for sample in samples:
+            for token in sample.tokens:
+                observe("kinds", token.kind)
+                observe("identities", f"{token.kind}:{token.type_id}")
+                observe("roles", f"{token.kind}:{token.role}")
+                for tag in token.categorical:
+                    observe("categories", f"{token.kind}:{tag}")
+                for field, _ in token.numeric:
+                    observe("numeric_fields", f"{token.kind}:{field}")
+
+        return {
+            name: {
+                "total": total[name],
+                "unknown": sum(missing[name].values()),
+                "unknown_fraction": (
+                    sum(missing[name].values()) / total[name]
+                    if total[name] else 0.0
+                ),
+                "examples": sorted(
+                    missing[name], key=lambda key: (-missing[name][key], key),
+                )[:20],
+            }
+            for name in known
+        }
 
     def to_dict(self) -> dict[str, Any]:
         return {
