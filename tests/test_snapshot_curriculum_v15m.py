@@ -362,7 +362,8 @@ def test_parallel_snapshot_batching_matches_serial_and_preserves_groups(monkeypa
 def test_parallel_snapshot_worker_rejects_missing_private_backend(monkeypatch):
     from sts2_ai.training import parallel_rollouts
     from sts2_ai.training.snapshot_curriculum import (
-        SnapshotWorkerBatch, _worker_collect_snapshot_batch,
+        SnapshotWorkerBatch,
+        _worker_collect_snapshot_batch,
     )
 
     monkeypatch.setattr(parallel_rollouts, "_WORKER_BACKEND", None)
