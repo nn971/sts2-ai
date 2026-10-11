@@ -138,6 +138,7 @@ def test_ppo_replay_compiles_features_once_and_profiles_both_modes() -> None:
     episode = combat_episode()
     base = frozen_policy()
     from test_object_instances_v15 import frame
+
     from sts2_ai.models.relational_objects import RelationalObjectTorch
 
     objects = extract_combat_objects(frame())
