@@ -8,7 +8,7 @@ from test_batched_relational_v15 import _cohort, _head
 from test_pooled_ppo_v15 import combat_episode, frozen_policy
 
 from sts2_ai.models.object_embeddings import ObjectVocabulary, TypedObjectEncoder
-from sts2_ai.models.object_instances import extract_combat_objects
+from sts2_ai.models.object_instances import OBJECT_SCHEMA, ObjectSet, extract_combat_objects
 from sts2_ai.models.protocol import PolicyValueEstimate
 from sts2_ai.models.relational_objects import prepare_relational_topology
 from sts2_ai.training.pooled_ppo_v15 import prepare_pooled_samples
@@ -104,19 +104,10 @@ def test_empty_sample_encoder_and_malformed_feature_batch() -> None:
     torch = pytest.importorskip("torch")
     vocab = ObjectVocabulary.from_object_sets([])
     enc = TypedObjectEncoder(vocab, width=16)
-    empty = enc.prepare(extract_combat_objects({
-        "combat": {
-            "turn": 1, "energy": 2, "player_block": 0,
-            "hand": [], "draw_pile": [], "draw_pile_count": 0,
-            "discard_pile": [], "exhaust_pile": [], "play_pile": [],
-            "enemies": [], "player_powers": [],
-        },
-        "player": {"hp": 50, "max_hp": 60},
-        "relics": [], "potions": [],
-    }))
-    assert empty.count > 0
+    empty = enc.prepare(ObjectSet(OBJECT_SCHEMA, ()))
+    assert empty.count == 0
     x = enc.encode_many_compiled([empty])
-    assert x[0].shape[0] == empty.count
+    assert x[0].shape == (0, 16)
     torch, head = _head()
     _, _, objects, actions = _cohort()
     values = [PolicyValueEstimate(tuple(0.0 for _ in menu), 0.2)
