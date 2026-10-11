@@ -19,7 +19,11 @@ from typing import Any
 
 from sts2_ai.emulator import LegalAction, Observation
 from sts2_ai.models.neural import NeuralPolicyValueModel
-from sts2_ai.models.object_embeddings import ObjectVocabulary, TypedObjectEncoder
+from sts2_ai.models.object_embeddings import (
+    CompiledObjectFeatures,
+    ObjectVocabulary,
+    TypedObjectEncoder,
+)
 from sts2_ai.models.object_instances import (
     ActionBinding,
     ObjectRef,
@@ -266,6 +270,7 @@ class RelationalObjectTorch:
         *,
         stage_hook: Callable[[str], None] | None = None,
         topologies: Sequence[RelationalTopology] | None = None,
+        features: Sequence[CompiledObjectFeatures] | None = None,
     ) -> tuple[Any, tuple[Any, ...]]:
         """Batched padded object and action attention, without state leakage.
 
@@ -280,6 +285,8 @@ class RelationalObjectTorch:
             raise ValueError("v15f batch objects/actions/baselines mismatch")
         if topologies is not None and len(topologies) != b:
             raise ValueError("Cached relational topology batch size mismatch")
+        if features is not None and len(features) != b:
+            raise ValueError("Compiled embedding feature batch size mismatch")
         if not b:
             return (
                 self.module.policy_gate.new_zeros((0,)),
@@ -288,7 +295,13 @@ class RelationalObjectTorch:
         sizes = [len(obj.tokens) for obj in objects]
         if any(n < 1 for n in sizes):
             raise ValueError("v15f requires at least the global object")
-        embeddings = self.embedding.encode_many(objects)
+        if features is not None:
+            if any(feature.count != len(obj.tokens)
+                   for obj, feature in zip(objects, features, strict=True)):
+                raise ValueError("Compiled embedding features no longer match sample")
+            embeddings = self.embedding.encode_many_compiled(features)
+        else:
+            embeddings = self.embedding.encode_many(objects)
         if stage_hook is not None:
             stage_hook("object_embedding")
         device, dtype = embeddings[0].device, embeddings[0].dtype
