@@ -111,6 +111,45 @@ def test_nonzero_gate_is_permutation_and_id_equivariant() -> None:
     )
 
 
+def test_snapshot_repeated_powers_evaluate_with_torch_portable_parity() -> None:
+    torch, base, head, _ = make()
+    with torch.no_grad():
+        head.module.policy_gate.fill_(0.3)
+        head.module.value_gate.fill_(0.2)
+    state = frame()
+    strangle = "proto.power.strangle"
+    state["combat"]["enemies"][0]["powers"] = [
+        {"power_id": strangle, "stacks": 1},
+        {"power_id": strangle, "stacks": 2},
+        {"power_id": strangle, "stacks": 3},
+    ]
+    state["combat"]["enemies"][1]["powers"] = [
+        {"power_id": strangle, "stacks": 4},
+    ]
+    state["combat"]["player_powers"].extend([
+        {"power_id": strangle, "stacks": 1},
+        {"power_id": strangle, "stacks": 2},
+    ])
+    actions = menu()
+    observation = observe(state)
+    portable = head.export(base)
+    value, logits = head.forward(base, observation, actions)
+    estimate = portable.evaluate(observation, actions)
+    assert estimate.value == pytest.approx(float(value.detach()), abs=1e-5)
+    assert estimate.action_logits == pytest.approx(
+        logits.detach().tolist(), abs=1e-5,
+    )
+    # Owner-local repetition must not create order-sensitive policy inputs.
+    shuffled = copy.deepcopy(state)
+    shuffled["combat"]["enemies"][0]["powers"].reverse()
+    shuffled["combat"]["player_powers"].reverse()
+    other = portable.evaluate(observe(shuffled), actions)
+    assert other.value == pytest.approx(estimate.value, abs=1e-6)
+    assert other.action_logits == pytest.approx(
+        estimate.action_logits, abs=1e-5,
+    )
+
+
 def test_gate_gets_gradient_and_can_change_policy() -> None:
     torch, base, head, _ = make()
     optimizer = torch.optim.Adam(head.module.parameters(), lr=0.05)
