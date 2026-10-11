@@ -166,14 +166,25 @@ def prepare_records(records: list[dict[str, Any]]):
     return objects, bindings, baselines, dict(timings)
 
 
-def _ppo_loss(torch: Any, values: Any, menus: tuple[Any, ...],
-              rows: list[dict[str, Any]], temperature: float) -> Any:
-    advantages = [float(row["advantage"]) for row in rows]
-    avg = statistics.fmean(advantages)
+def _normalized_advantages(rows: list[dict[str, Any]]) -> list[float]:
+    """Match v15 PPO normalization over the entire selected replay buffer."""
+    values = [float(row["advantage"]) for row in rows]
+    avg = statistics.fmean(values)
     scale = math.sqrt(
-        statistics.fmean((x - avg) ** 2 for x in advantages) + 1e-8
+        statistics.fmean((x - avg) ** 2 for x in values) + 1e-8
     )
-    norm = [max(-5.0, min(5.0, (x - avg) / scale)) for x in advantages]
+    return [max(-5.0, min(5.0, (x - avg) / scale)) for x in values]
+
+
+def _ppo_loss(torch: Any, values: Any, menus: tuple[Any, ...],
+              rows: list[dict[str, Any]], temperature: float,
+              *, normalized_advantages: list[float] | None = None) -> Any:
+    norm = (
+        normalized_advantages if normalized_advantages is not None
+        else _normalized_advantages(rows)
+    )
+    if len(norm) != len(rows):
+        raise ValueError("PPO advantages and legal menus differ in size")
     losses = []
     for i, (menu, row) in enumerate(zip(menus, rows, strict=True)):
         logp = torch.nn.functional.log_softmax(menu / temperature, dim=0)
@@ -196,6 +207,7 @@ def profile_minibatches(
     import torch
 
     records = corpus["records"]
+    normalized = _normalized_advantages(records)
     objects, bindings, baselines, preparation = prepare_records(records)
     vocabulary = ObjectVocabulary.from_object_sets(
         objects, manifest=corpus["manifest"],
@@ -228,6 +240,7 @@ def profile_minibatches(
             selected_menu = [bindings[i] for i in picked]
             selected_base = [baselines[i] for i in picked]
             selected_raw = [records[i] for i in picked]
+            selected_adv = [normalized[i] for i in picked]
             head = RelationalObjectTorch(vocabulary, width=width)
             head.module.load_state_dict(initial)
             head.module.to(device)
@@ -257,6 +270,7 @@ def profile_minibatches(
                 )
                 loss = _ppo_loss(
                     torch, values, logits, selected_raw, corpus["temperature"],
+                    normalized_advantages=selected_adv,
                 )
                 mark("ppo_loss")
                 loss.backward()
