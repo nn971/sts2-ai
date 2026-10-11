@@ -41,6 +41,7 @@ def test_live_combat_progress_and_completed_source_callbacks() -> None:
     starts = []
     completed = []
     decisions = []
+    replayed = []
     finished = []
     results = evaluate_recipes(
         backend, [recipe], SimpleAgent("attack"), SimpleAgent("fumble"),
@@ -52,11 +53,15 @@ def test_live_combat_progress_and_completed_source_callbacks() -> None:
         on_combat_progress=lambda seed, floor, name, n: decisions.append(
             (seed, floor, name, n)
         ),
+        on_replay_progress=lambda seed, floor, n, total: replayed.append(
+            (seed, floor, n, total)
+        ),
         on_run_results=lambda seed, rows: finished.append((seed, tuple(rows))),
     )
     assert starts == [("toy-progress", 1)]
     assert completed == [("toy-progress", 1, 1)]
     assert {name for _, _, name, _ in decisions} == {"baseline", "candidate"}
+    assert replayed == [("toy-progress", 1, 1, 1)]
     assert len(finished) == 1
     assert finished[0][1] == tuple(results)
     assert not backend.states
