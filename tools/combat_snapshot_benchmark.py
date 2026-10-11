@@ -16,10 +16,8 @@ from sts2_ai.evaluation import play_run
 from sts2_ai.evaluation.combat_snapshots import (
     SCHEMA,
     SnapshotCollector,
-    build_report,
-    evaluate_recipes,
-    load_recipes,
 )
+from snapshot_eval_runtime import evaluate_paired_snapshots
 
 
 def log(message: str) -> None:
@@ -67,27 +65,13 @@ def collect(args: argparse.Namespace) -> None:
 
 
 def evaluate(args: argparse.Namespace) -> None:
-    recipes = load_recipes(args.corpus)
-    if not recipes:
-        raise ValueError("Empty combat snapshot corpus")
-    baseline = PhaseSplitGreedyAgent.load(args.baseline_model)
-    candidate = PhaseSplitGreedyAgent.load(args.candidate_model)
-    with JsonlEmulatorBackend(build=args.build) as backend:
-        log(f"[snapshots] evaluating {len(recipes)} entries on pinned "
-            f"emulator {backend.emulator_revision[:12]}")
-        results = evaluate_recipes(
-            backend, recipes, baseline, candidate,
-            max_combat_decisions=args.max_combat_decisions,
-        )
-        report = build_report(
-            results, emulator_revision=backend.emulator_revision,
-            corpus=str(args.corpus), baseline_model=str(args.baseline_model),
-            candidate_model=str(args.candidate_model),
-        )
-    args.report.parent.mkdir(parents=True, exist_ok=True)
-    args.report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
-    log(f"[snapshots] completed {len(results)} pairs; "
-        f"overall={report['summary']} report={args.report}")
+    evaluate_paired_snapshots(
+        corpus=args.corpus, baseline_model=args.baseline_model,
+        candidate_model=args.candidate_model, report_path=args.report,
+        workers=args.workers, max_combat_decisions=args.max_combat_decisions,
+        progress_every=args.progress_every,
+        limit_source_runs=args.limit_source_runs, build=args.build,
+    )
 
 
 def main() -> None:
@@ -108,6 +92,12 @@ def main() -> None:
     b.add_argument("--candidate-model", type=Path, required=True)
     b.add_argument("--report", type=Path, required=True)
     b.add_argument("--max-combat-decisions", type=int, default=256)
+    b.add_argument("--workers", type=int, default=1,
+                   help="Independent emulator processes for source-run parallelism")
+    b.add_argument("--progress-every", type=int, default=32,
+                   help="Heartbeat every N combat decisions for an active policy")
+    b.add_argument("--limit-source-runs", type=int,
+                   help="Pilot only: evaluate the first N grouped source runs")
     b.add_argument("--build", action="store_true")
     args = parser.parse_args()
     if args.command == "collect":
