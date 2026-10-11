@@ -286,11 +286,9 @@ def test_native_snapshot_training_is_a_distinct_ppo_checkpoint(tmp_path) -> None
 
 
 def test_parallel_snapshot_batching_matches_serial_and_preserves_groups(monkeypatch):
-    from sts2_ai.training import parallel_rollouts
-    from sts2_ai.training.snapshot_curriculum import (
-        plan_snapshot_batches,
-    )
     from sts2_ai.models.phase_split import PhaseSplitNeuralModel
+    from sts2_ai.training import parallel_rollouts
+    from sts2_ai.training.snapshot_curriculum import plan_snapshot_batches
 
     class PortableActionModel(ActionModel):
         def to_dict(self):
@@ -331,10 +329,7 @@ def test_parallel_snapshot_batching_matches_serial_and_preserves_groups(monkeypa
     assert actual == expected
     assert a.states == {} and b.states == {}
     assert len(pool.requests) == 3
-    assert sorted({
-        tuple(index for _, group in request.groups for index, _ in group[1])
-        for request in pool.requests
-    }) != []  # Every request contains a source group.
+    assert all(request.groups for request in pool.requests)
     processed_groups = [
         group[0] for batch in pool.requests for group in batch.groups
     ]
