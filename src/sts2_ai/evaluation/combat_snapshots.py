@@ -346,6 +346,7 @@ def evaluate_model_suite(
     on_snapshot_complete: Callable[[str, int, int], None] | None = None,
     on_combat_progress: Callable[[str, int, str, int], None] | None = None,
     on_run_results: Callable[[str, Sequence[MultiCombatResult]], None] | None = None,
+    combat_progress_every: int = 32,
 ) -> list[MultiCombatResult]:
     """Replay each source prefix once, then fork once per model.
 
@@ -355,6 +356,8 @@ def evaluate_model_suite(
     """
     if len(models) < 2 or any(not name.strip() for name in models):
         raise ValueError("A suite requires at least two nonempty model labels")
+    if combat_progress_every <= 0:
+        raise ValueError("Combat progress interval must be positive")
     groups: dict[tuple[str, int, str], list[CombatSnapshotRecipe]] = defaultdict(list)
     for recipe in recipes:
         recipe.validate()
@@ -387,6 +390,7 @@ def evaluate_model_suite(
                         backend.fork(handle),
                         agent,
                         max_decisions=max_combat_decisions,
+                        progress_every=combat_progress_every,
                         on_progress=(
                             (lambda decisions, model_name=label, floor=recipe.floor:
                              on_combat_progress(seed, floor, model_name, decisions))
@@ -438,6 +442,7 @@ def evaluate_recipes(
     on_snapshot_complete: Callable[[str, int, int], None] | None = None,
     on_combat_progress: Callable[[str, int, str, int], None] | None = None,
     on_run_results: Callable[[str, Sequence[PairedCombatResult]], None] | None = None,
+    combat_progress_every: int = 32,
 ) -> list[PairedCombatResult]:
     """Two-model compatibility interface; replay/validation shared with suite."""
     def deliver(seed: str, rows: Sequence[MultiCombatResult]) -> None:
@@ -451,6 +456,7 @@ def evaluate_recipes(
         on_snapshot_complete=on_snapshot_complete,
         on_combat_progress=on_combat_progress,
         on_run_results=deliver if on_run_results is not None else None,
+        combat_progress_every=combat_progress_every,
     )
     return pair_model_suite(results, "baseline", "candidate")
 
