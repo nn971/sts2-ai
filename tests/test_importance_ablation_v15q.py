@@ -182,3 +182,16 @@ def test_existing_eval_verification_rejects_stale_artifacts(tmp_path: Path):
         _verify_evaluation(
             report, base=base, model=model, corpus=corpus, max_decisions=256
         )
+
+
+def test_ablation_rejects_unrelated_export_or_manifest_hash():
+    reports = _reports()
+    reports["target_train"]["checkpoint"] = "results/target/checkpoint.pt"
+    with pytest.raises(ValueError, match="candidate path mismatch"):
+        compare_ablation(**reports, samples=10)
+    reports = _reports()
+    reports["manifest"]["inputs"] = {
+        "base_model": {"sha256": "different"},
+    }
+    with pytest.raises(ValueError, match="manifest/evaluation mismatch"):
+        compare_ablation(**reports, samples=10)
