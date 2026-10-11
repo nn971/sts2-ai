@@ -11,6 +11,9 @@ on:
       - 'tests/test_pooled_objects_v15.py'
       - 'tests/test_relational_objects_v15.py'
       - 'tests/test_relational_ppo_v15.py'
+      - 'tests/test_vectorized_objects_v15.py'
+      - 'tests/test_representation_audit_v15.py'
+      - 'tools/audit_v15_representation.py'
       - 'tests/test_pooled_ppo_v15.py'
       - 'src/sts2_ai/training/pooled_ppo_v15.py'
       - 'tools/train_pooled_objects_v15.py'
@@ -26,6 +29,9 @@ on:
       - 'tests/test_pooled_objects_v15.py'
       - 'tests/test_relational_objects_v15.py'
       - 'tests/test_relational_ppo_v15.py'
+      - 'tests/test_vectorized_objects_v15.py'
+      - 'tests/test_representation_audit_v15.py'
+      - 'tools/audit_v15_representation.py'
       - 'tests/test_pooled_ppo_v15.py'
       - 'src/sts2_ai/training/pooled_ppo_v15.py'
       - 'tools/train_pooled_objects_v15.py'
@@ -45,4 +51,6 @@ jobs:
       - name: Install project and tests
         run: python -m pip install -e '.[dev]'
       - name: Test v15 object extraction and embeddings
-        run: python -m pytest -q tests/test_object_instances_v15.py tests/test_pooled_objects_v15.py tests/test_pooled_ppo_v15.py tests/test_relational_objects_v15.py tests/test_relational_ppo_v15.py
+        run: python -m pytest -q tests/test_object_instances_v15.py tests/test_pooled_objects_v15.py tests/test_pooled_ppo_v15.py tests/test_relational_objects_v15.py tests/test_relational_ppo_v15.py tests/test_vectorized_objects_v15.py tests/test_representation_audit_v15.py
+      - name: Syntax-check native audit command
+        run: python -m compileall -q tools/audit_v15_representation.py

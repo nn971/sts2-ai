@@ -159,7 +159,14 @@ def collect_public_vocabulary(
                 observations.append(extract_combat_objects(state))
     if not observations:
         raise ValueError("No public combat observations available for vocabulary")
-    return ObjectVocabulary.from_object_sets(observations)
+    # The pinned JSONL backend already validates the fair public capability
+    # manifest at handshake. Use only its declared static IDs; never parse
+    # private engine state or scrape internal sources for vocabulary labels.
+    manifest = (
+        backend.capability_manifest
+        if isinstance(backend, JsonlEmulatorBackend) else None
+    )
+    return ObjectVocabulary.from_object_sets(observations, manifest=manifest)
 
 
 def _prepared_decision(
