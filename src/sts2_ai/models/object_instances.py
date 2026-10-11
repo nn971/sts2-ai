@@ -284,8 +284,9 @@ def legal_action_object_refs(
         refs.extend(ObjectRef("card", value) for value in choices)
     else:
         card = payload.get("CardInstanceId", payload.get("card_instance_id"))
-        if action_kind == "play_card" and card is None:
-            raise ValueError("Missing CardInstanceId in play_card action")
+        # The native emulator always supplies CardInstanceId for play_card.
+        # Legacy/test emulators may expose only a kind and an opaque action
+        # ID: preserve the empty-ref fallback instead of rejecting the run.
         if card is not None:
             if type(card) is not int or card <= 0:
                 raise ValueError("Invalid action pointer CardInstanceId")
