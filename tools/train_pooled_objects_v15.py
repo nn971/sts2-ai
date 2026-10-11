@@ -92,6 +92,10 @@ def main() -> None:
                         help="Build pinned .NET emulator before starting")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument(
+        "--diagnose-ppo", action="store_true",
+        help="Record PPO gradient-norm/clipping, raw advantage variance, and ESS",
+    )
+    parser.add_argument(
         "--initialize-from-model", type=Path,
         help="Fresh experiment warm-start from compatible exported v15 weights",
     )
@@ -170,6 +174,8 @@ def main() -> None:
         "max_decisions": args.max_decisions,
         "episode_goal": args.episode_goal,
     }
+    if args.diagnose_ppo:
+        training_settings["diagnose_ppo"] = True
     if initial is not None:
         training_settings["initialize_from_model"] = str(args.initialize_from_model)
     if snapshot_recipes is not None:
@@ -266,6 +272,7 @@ def main() -> None:
             snapshot_sampling=args.snapshot_sampling,
             snapshot_target_balance=args.snapshot_target_balance,
             snapshot_priority_mix=args.snapshot_priority_mix,
+            diagnose_ppo=args.diagnose_ppo,
             initialize_from=initial,
             on_round=publish_round,
         )
