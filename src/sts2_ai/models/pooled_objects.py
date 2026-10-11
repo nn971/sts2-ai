@@ -171,7 +171,7 @@ class PooledObjectTorch:
                                device=embedded.device)
         value_delta = self.module.value_readout(torch.tanh(shared)).squeeze()
         value = (
-            value0 + self.module.value_gate * torch.tanh(value_delta)
+            value0 + torch.tanh(self.module.value_gate) * torch.tanh(value_delta)
             * (1.0 - value0.abs())
         )
         if not actions:
@@ -322,7 +322,7 @@ class PortablePooledObjectModel:
             self.weights["value_readout.weight"], self.weights["value_readout.bias"],
             [math.tanh(x) for x in shared],
         )[0]
-        value = (baseline.value + gates[1] * math.tanh(value_delta)
+        value = (baseline.value + math.tanh(gates[1]) * math.tanh(value_delta)
                  * (1.0 - abs(baseline.value)))
         index = objects.index()
         logits = []
