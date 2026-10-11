@@ -100,9 +100,17 @@ def main() -> None:
         help="Opt-in replay-verified combat-only training; use a TRAIN partition",
     )
     parser.add_argument(
-        "--snapshot-sampling", choices=("balanced", "natural"),
+        "--snapshot-sampling", choices=("balanced", "natural", "importance"),
         default="balanced",
-        help="Progress × encounter-tier curriculum, or natural corpus weights",
+        help="Progress/tier balanced, empirical natural, or weighted importance",
+    )
+    parser.add_argument(
+        "--snapshot-target-balance", type=float, default=0.5,
+        help="Importance only: target mixture of uniform observed strata vs natural",
+    )
+    parser.add_argument(
+        "--snapshot-priority-mix", type=float, default=0.7,
+        help="Importance only: proposal mixture with priority distribution (<1)",
     )
     parser.add_argument(
         "--snapshot-every", type=int, default=20,
@@ -168,6 +176,9 @@ def main() -> None:
         training_settings["snapshot_corpus"] = str(args.snapshot_corpus)
         training_settings["snapshot_sampling"] = args.snapshot_sampling
         training_settings["rollout_source"] = "combat_snapshots"
+        if args.snapshot_sampling == "importance":
+            training_settings["snapshot_target_balance"] = args.snapshot_target_balance
+            training_settings["snapshot_priority_mix"] = args.snapshot_priority_mix
     with JsonlEmulatorBackend(build=args.build) as backend:
         if vocab_path.is_file():
             vocabulary = ObjectVocabulary.from_dict(json.loads(
@@ -253,6 +264,8 @@ def main() -> None:
             snapshot_every=args.snapshot_every,
             snapshot_recipes=snapshot_recipes,
             snapshot_sampling=args.snapshot_sampling,
+            snapshot_target_balance=args.snapshot_target_balance,
+            snapshot_priority_mix=args.snapshot_priority_mix,
             initialize_from=initial,
             on_round=publish_round,
         )

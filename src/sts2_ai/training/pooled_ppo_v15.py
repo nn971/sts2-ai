@@ -66,6 +66,10 @@ from sts2_ai.training.snapshot_curriculum import (
     collect_snapshot_cohort,
     sample_snapshot_curriculum,
 )
+from sts2_ai.training.snapshot_importance import (
+    build_importance_distribution,
+    importance_diagnostics,
+)
 
 POOLED_PPO_VERSION = "sts2-v15c-frozen-strategy-combat-ppo-v1"
 POOLED_PPO_CHECKPOINT = "sts2-v15c-pooled-combat-checkpoint-v1"
@@ -84,6 +88,7 @@ class PooledPpoSample:
     action_bindings: tuple[tuple[str, tuple[ActionBinding, ...]], ...] | None = None
     relational_topology: RelationalTopology | None = None
     compiled_features: CompiledObjectFeatures | None = None
+    importance_weight: float = 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +121,8 @@ class PooledTrainingRound:
     mean_value_loss: float | None = None
     mean_entropy: float | None = None
     rollout_source: str = "full_run"
+    importance_ess: float | None = None
+    importance_weight_max: float | None = None
 
 
 def _hash_json(value: Any) -> str:
@@ -215,6 +222,7 @@ def prepare_pooled_samples(
     head: PooledObjectTorch | RelationalObjectTorch, *,
     temperature: float, gamma: float,
     gae_lambda: float,
+    episode_weights: Sequence[float] | None = None,
 ) -> tuple[list[PooledPpoSample], list[float]]:
     """Cache behavior probabilities and GAE before *any* optimizer update.
 
@@ -224,10 +232,17 @@ def prepare_pooled_samples(
     torch = head.torch
     if not math.isfinite(temperature) or temperature <= 0:
         raise ValueError("Invalid PPO behavior temperature")
+    if episode_weights is not None:
+        if len(episode_weights) != len(cohort):
+            raise ValueError("Importance weights must match snapshot episodes")
+        if any(not math.isfinite(w) or w <= 0 for w in episode_weights):
+            raise ValueError("Importance weights must be finite and positive")
+        if any(not ep.completed or len(ep.combat_outcomes) != 1 for ep in cohort):
+            raise ValueError("Importance snapshots require one resolved combat per draw")
     samples: list[PooledPpoSample] = []
     rewards: list[float] = []
     with torch.no_grad():
-        for episode in cohort:
+        for episode_index, episode in enumerate(cohort):
             visited: set[int] = set()
             for segment in episode.combat_outcomes:
                 indices = list(range(segment.start_decision, segment.end_decision))
@@ -282,6 +297,8 @@ def prepare_pooled_samples(
                     samples.append(PooledPpoSample(
                         objects, refs, baseline, decision.chosen_index,
                         logprob, a, ret, bindings, topology, features,
+                        (episode_weights[episode_index] / len(indices))
+                        if episode_weights is not None else 1.0,
                     ))
                 rewards.append(target)
             if episode.completed and any(
@@ -306,6 +323,7 @@ def batched_ppo_loss(
     clip_epsilon: float = 0.2,
     value_weight: float = 0.5,
     entropy_weight: float = 0.002,
+    sample_weights: Sequence[float] | None = None,
 ) -> tuple[Any, Any, Any, Any]:
     """One masked PPO loss graph for a batch of variable legal-action menus.
 
@@ -320,7 +338,7 @@ def batched_ppo_loss(
         raise ValueError("Batched PPO values and action menus mismatch")
     if any(len(rows) != b for rows in (
         chosen_indices, old_logprobs, advantages, targets,
-    )):
+    )) or (sample_weights is not None and len(sample_weights) != b):
         raise ValueError("Batched PPO metadata and action menus mismatch")
     sizes = [int(menu.numel()) for menu in logits]
     if any(length <= 0 or not 0 <= chosen_indices[i] < length
@@ -330,6 +348,10 @@ def batched_ppo_loss(
         raise ValueError("Invalid PPO temperature")
     if not 0 < clip_epsilon < 1:
         raise ValueError("Invalid PPO clipping")
+    if sample_weights is not None and any(
+        not math.isfinite(w) or w <= 0 for w in sample_weights
+    ):
+        raise ValueError("PPO importance weights must be finite and positive")
     device, dtype = values.device, values.dtype
     lengths = torch.tensor(sizes, device=device, dtype=torch.long)
     valid = (
@@ -354,10 +376,18 @@ def batched_ppo_loss(
     entropy = -(
         log_prob.exp() * log_prob.masked_fill(~valid, 0.0)
     ).sum(dim=1)
+    if sample_weights is None:
+        def reduce(x: Any) -> Any:
+            return x.mean()
+    else:
+        weights = torch.tensor(sample_weights, device=device, dtype=dtype)
+
+        def reduce(x: Any) -> Any:
+            return (weights * x).sum() / weights.sum()
     return (
-        (policy_loss + value_weight * value_loss
-         - entropy_weight * entropy).mean(),
-        policy_loss.mean(), value_loss.mean(), entropy.mean(),
+        reduce(policy_loss + value_weight * value_loss
+               - entropy_weight * entropy),
+        reduce(policy_loss), reduce(value_loss), reduce(entropy),
     )
 
 
@@ -382,7 +412,9 @@ def ppo_update_pooled(
     if not math.isfinite(temperature) or temperature <= 0:
         raise ValueError("Invalid PPO temperature")
     if any(not math.isfinite(s.target) or not math.isfinite(s.advantage)
-           or not math.isfinite(s.old_logprob) for s in samples):
+           or not math.isfinite(s.old_logprob)
+           or not math.isfinite(s.importance_weight) or s.importance_weight <= 0
+           for s in samples):
         raise ValueError("Non-finite PPO training sample")
     if not samples:
         return PooledPpoMetrics(0, 0, None, None, None, None)
@@ -390,8 +422,18 @@ def ppo_update_pooled(
     rows = list(samples)
     if len(rows) > sample_limit:
         rows = [rows[i] for i in sorted(rng.sample(range(len(rows)), sample_limit))]
-    avg = sum(s.advantage for s in rows) / len(rows)
-    var = sum((s.advantage - avg) ** 2 for s in rows) / len(rows)
+    importance_mode = any(s.importance_weight != 1.0 for s in rows)
+    if importance_mode:
+        weight_sum = math.fsum(s.importance_weight for s in rows)
+        avg = math.fsum(
+            s.importance_weight * s.advantage for s in rows
+        ) / weight_sum
+        var = math.fsum(
+            s.importance_weight * (s.advantage - avg) ** 2 for s in rows
+        ) / weight_sum
+    else:
+        avg = sum(s.advantage for s in rows) / len(rows)
+        var = sum((s.advantage - avg) ** 2 for s in rows) / len(rows)
     denom = math.sqrt(var + 1e-8)
     advantages = [
         max(-5.0, min(5.0, (s.advantage - avg) / denom))
@@ -435,6 +477,10 @@ def ppo_update_pooled(
                     targets=[rows[k].target for k in chosen],
                     temperature=temperature, clip_epsilon=clip_epsilon,
                     value_weight=value_weight, entropy_weight=entropy_weight,
+                    sample_weights=(
+                        [rows[k].importance_weight for k in chosen]
+                        if importance_mode else None
+                    ),
                 )
             else:
                 losses = []
@@ -463,10 +509,21 @@ def ppo_update_pooled(
                     policy_losses.append(actor)
                     value_losses.append(critic)
                     entropies.append(entropy)
-                loss = torch.stack(losses).mean()
-                actor_mean = torch.stack(policy_losses).mean()
-                critic_mean = torch.stack(value_losses).mean()
-                entropy_mean = torch.stack(entropies).mean()
+                if importance_mode:
+                    weights = torch.tensor(
+                        [rows[k].importance_weight for k in chosen],
+                        dtype=losses[0].dtype, device=losses[0].device,
+                    )
+                    weights = weights / weights.sum()
+                    loss = (weights * torch.stack(losses)).sum()
+                    actor_mean = (weights * torch.stack(policy_losses)).sum()
+                    critic_mean = (weights * torch.stack(value_losses)).sum()
+                    entropy_mean = (weights * torch.stack(entropies)).sum()
+                else:
+                    loss = torch.stack(losses).mean()
+                    actor_mean = torch.stack(policy_losses).mean()
+                    critic_mean = torch.stack(value_losses).mean()
+                    entropy_mean = torch.stack(entropies).mean()
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(head.module.parameters(), 1.0)
@@ -580,6 +637,8 @@ def train_pooled_combat_ppo(
     snapshot_every: int = 0,
     snapshot_recipes: Sequence[CombatSnapshotRecipe] | None = None,
     snapshot_sampling: str = "balanced",
+    snapshot_target_balance: float = 0.5,
+    snapshot_priority_mix: float = 0.7,
     initialize_from: PhaseSplitNeuralModel | None = None,
     on_round: Callable[
         [tuple[PooledTrainingRound, ...], PhaseSplitNeuralModel | None], None
@@ -607,12 +666,20 @@ def train_pooled_combat_ppo(
             raise ValueError("Snapshot training requires at least one recipe")
         if environment != "native-overgrowth":
             raise ValueError("Snapshots require the native Overgrowth environment")
-        if snapshot_sampling not in ("balanced", "natural"):
+        if snapshot_sampling not in ("balanced", "natural", "importance"):
             raise ValueError("Invalid snapshot sampling mode")
         for recipe in snapshot_recipes:
             recipe.validate()
             if recipe.emulator_revision != backend.emulator_revision:
                 raise ValueError("Snapshot corpus emulator revision mismatch")
+    importance_sampler = (
+        build_importance_distribution(
+            snapshot_recipes, target_balance=snapshot_target_balance,
+            priority_mix=snapshot_priority_mix,
+        )
+        if snapshot_recipes is not None and snapshot_sampling == "importance"
+        else None
+    )
     if workers > 1 and not isinstance(backend, JsonlEmulatorBackend):
         raise ValueError("Parallel training requires the JSONL emulator")
     if not isinstance(base.combat, NeuralPolicyValueModel):
@@ -671,6 +738,10 @@ def train_pooled_combat_ppo(
             "sampling": snapshot_sampling,
             "recipe_sha256": _hash_json([asdict(r) for r in snapshot_recipes]),
         }
+        if importance_sampler is not None:
+            config["snapshot_curriculum"]["target_balance"] = snapshot_target_balance
+            config["snapshot_curriculum"]["priority_mix"] = snapshot_priority_mix
+            config["snapshot_curriculum"]["priority_version"] = "hp-tier-proxy-v1"
     fingerprint = _hash_json(config)
     rows: list[PooledTrainingRound] = []
     if resume:
@@ -714,11 +785,21 @@ def train_pooled_combat_ppo(
             )
             seeds = [f"{seed_prefix}-{i}-{j}" for j in range(episodes_per_round)]
             start = time.perf_counter()
+            importance_weights = None
+            diagnostics = None
             if snapshot_recipes is not None:
-                selected = sample_snapshot_curriculum(
-                    snapshot_recipes, count=episodes_per_round,
-                    seed=seed + i * 1000003, mode=snapshot_sampling,
-                )
+                if importance_sampler is not None:
+                    draws = importance_sampler.draw(
+                        count=episodes_per_round, seed=seed + i * 1000003,
+                    )
+                    selected = tuple(draw.recipe for draw in draws)
+                    importance_weights = tuple(draw.weight for draw in draws)
+                    diagnostics = importance_diagnostics(draws)
+                else:
+                    selected = sample_snapshot_curriculum(
+                        snapshot_recipes, count=episodes_per_round,
+                        seed=seed + i * 1000003, mode=snapshot_sampling,
+                    )
                 cohort = collect_snapshot_cohort(
                     backend, policy, selected,
                     round_index=i, actor_seed=seed, temperature=temperature,
@@ -743,6 +824,7 @@ def train_pooled_combat_ppo(
             samples, targets = prepare_pooled_samples(
                 cohort, base.combat, head,
                 temperature=temperature, gamma=gamma, gae_lambda=gae_lambda,
+                episode_weights=importance_weights,
             )
             result = ppo_update_pooled(
                 head, samples, optimizer,
@@ -770,6 +852,13 @@ def train_pooled_combat_ppo(
                 rollout_source=(
                     "combat_snapshots" if snapshot_recipes is not None else "full_run"
                 ),
+                importance_ess=(
+                    diagnostics["effective_sample_size"]
+                    if diagnostics is not None else None
+                ),
+                importance_weight_max=(
+                    diagnostics["weight_max"] if diagnostics is not None else None
+                ),
             )
             rows.append(row)
             if checkpoint is not None:
@@ -787,6 +876,8 @@ def train_pooled_combat_ppo(
                 f"updates={row.optimizer_steps} loss={row.mean_loss!r} "
                 f"policy={row.mean_policy_loss!r} value={row.mean_value_loss!r} "
                 f"entropy={row.mean_entropy!r} "
+                f"importance_ess={row.importance_ess!r} "
+                f"importance_weight_max={row.importance_weight_max!r} "
                 f"rollout_s={row.rollout_seconds:.2f} "
                 f"optimizer_s={row.optimizer_seconds:.2f}",
                 flush=True,
