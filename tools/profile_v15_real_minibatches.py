@@ -271,6 +271,13 @@ def profile_minibatches(
 
             for _ in range(warmups):
                 step(False)
+            uninstrumented: list[float] = []
+            for _ in range(trials):
+                if device.type == "cuda":
+                    torch.cuda.reset_peak_memory_stats(device)
+                uninstrumented.append(step(False)["total"])
+                if device.type == "cuda":
+                    peaks.append(torch.cuda.max_memory_allocated(device))
             for _ in range(trials):
                 if device.type == "cuda":
                     torch.cuda.reset_peak_memory_stats(device)
@@ -285,7 +292,12 @@ def profile_minibatches(
             result = {
                 "device": device_name, "batch_size": size,
                 "median_seconds": medians,
-                "decisions_per_second": size / medians["total"],
+                "uninstrumented_total_seconds": statistics.median(uninstrumented),
+                "uninstrumented_trials_seconds": uninstrumented,
+                "decisions_per_second": size / statistics.median(uninstrumented),
+                "instrumentation_overhead_ratio": (
+                    medians["total"] / statistics.median(uninstrumented)
+                ),
                 "peak_cuda_allocated_bytes": max(peaks) if peaks else None,
                 "tokens": {
                     "mean": statistics.fmean(len(obj.tokens) for obj in selected_obj),
@@ -300,7 +312,7 @@ def profile_minibatches(
             rows.append(result)
             print(
                 f"[v15g] {device_name} batch={size} "
-                f"ppo={medians['total'] * 1000:.2f}ms "
+                f"ppo={statistics.median(uninstrumented) * 1000:.2f}ms "
                 f"throughput={result['decisions_per_second']:.1f}/s "
                 f"embed={medians.get('object_embedding', 0)*1000:.2f}ms "
                 f"attention={medians.get('self_attention', 0)*1000:.2f}ms",
@@ -323,7 +335,8 @@ def profile_minibatches(
         "width": width, "trials": trials, "warmups": warmups,
         "rows": rows,
         "notes": (
-            "Synchronized stage profiling includes synchronization overhead. "
+            "Throughput uses uninstrumented wall timing. Synchronized phase " 
+            "timing is reported separately and includes CUDA sync overhead. "
             "Only throwaway benchmark optimizer weights are updated; "
             "rollout collection and public PPO targets are reused verbatim. "
             "This is NOT gameplay win-rate or total training throughput."
