@@ -306,3 +306,30 @@ def legal_action_object_refs(
         if ref not in index:
             raise ValueError(f"Legal action references an absent object: {ref}")
     return tuple(refs)
+
+
+@dataclass(frozen=True, slots=True)
+class ActionBinding:
+    """A visible action-object edge with an explicit *semantic* role.
+
+    No instance integer is ever an input feature. Role preserves the
+    difference between a card source, potion source, enemy target, and an
+    individual card chosen by a pending combat selection.
+    """
+    role: str
+    ref: ObjectRef
+
+
+def legal_action_object_bindings(
+    action_kind: str, payload_json: str, objects: ObjectSet,
+) -> tuple[ActionBinding, ...]:
+    """Return typed action references without changing the v15c pointer API."""
+    refs = legal_action_object_refs(action_kind, payload_json, objects)
+    if action_kind == "select_cards":
+        return tuple(ActionBinding("selected_card", ref) for ref in refs)
+    roles = {
+        "card": "source_card",
+        "potion": "source_potion",
+        "enemy": "target_enemy",
+    }
+    return tuple(ActionBinding(roles[ref.kind], ref) for ref in refs)
