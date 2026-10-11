@@ -12,6 +12,8 @@ on:
       - 'tests/test_relational_objects_v15.py'
       - 'tests/test_relational_ppo_v15.py'
       - 'tests/test_vectorized_objects_v15.py'
+      - 'tests/test_batched_relational_v15.py'
+      - 'tools/benchmark_v15_attention.py'
       - 'tests/test_representation_audit_v15.py'
       - 'tools/audit_v15_representation.py'
       - 'tests/test_pooled_ppo_v15.py'
@@ -30,6 +32,8 @@ on:
       - 'tests/test_relational_objects_v15.py'
       - 'tests/test_relational_ppo_v15.py'
       - 'tests/test_vectorized_objects_v15.py'
+      - 'tests/test_batched_relational_v15.py'
+      - 'tools/benchmark_v15_attention.py'
       - 'tests/test_representation_audit_v15.py'
       - 'tools/audit_v15_representation.py'
       - 'tests/test_pooled_ppo_v15.py'
@@ -51,6 +55,8 @@ jobs:
       - name: Install project and tests
         run: python -m pip install -e '.[dev]'
       - name: Test v15 object extraction and embeddings
-        run: python -m pytest -q tests/test_object_instances_v15.py tests/test_pooled_objects_v15.py tests/test_pooled_ppo_v15.py tests/test_relational_objects_v15.py tests/test_relational_ppo_v15.py tests/test_vectorized_objects_v15.py tests/test_representation_audit_v15.py
-      - name: Syntax-check native audit command
-        run: python -m compileall -q tools/audit_v15_representation.py
+        run: python -m pytest -q tests/test_object_instances_v15.py tests/test_pooled_objects_v15.py tests/test_pooled_ppo_v15.py tests/test_relational_objects_v15.py tests/test_relational_ppo_v15.py tests/test_vectorized_objects_v15.py tests/test_batched_relational_v15.py tests/test_representation_audit_v15.py
+      - name: Syntax-check native audit and benchmarking commands
+        run: python -m compileall -q tools/audit_v15_representation.py tools/benchmark_v15_attention.py
+      - name: CPU batched-attention throughput smoke
+        run: python -u tools/benchmark_v15_attention.py --batch-sizes 1 4 --devices cpu --width 16 --warmups 0 --trials 1 --report /tmp/v15f-ci-benchmark.json
