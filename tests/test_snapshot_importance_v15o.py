@@ -65,8 +65,10 @@ def test_target_proposal_reweighting_is_exact_for_finite_corpus() -> None:
     )
     target = math.fsum(p * x for p, x in zip(d.target_probabilities, f, strict=True))
     assert corrected == pytest.approx(target)
-    assert d.target_probabilities[-1] > d.target_probabilities[0]
-    assert d.proposal_probabilities[-1] > d.target_probabilities[-1]
+    weak_index = next(i for i, r in enumerate(d.recipes) if r.tier == "weak")
+    boss_index = next(i for i, r in enumerate(d.recipes) if r.tier == "boss")
+    assert d.target_probabilities[boss_index] > d.target_probabilities[weak_index]
+    assert d.proposal_probabilities[boss_index] > d.target_probabilities[boss_index]
 
 
 def test_draws_are_reproducible_positive_and_ess_bounded() -> None:
