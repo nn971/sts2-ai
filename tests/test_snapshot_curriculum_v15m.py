@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, replace
+from dataclasses import replace
 
 import pytest
 from test_combat_snapshots_v14 import FAIR, ToyBackend
 
 from sts2_ai.agents.base import Decision
-from sts2_ai.models.protocol import PolicyValueEstimate
 from sts2_ai.evaluation.combat_snapshots import SnapshotCollector
+from sts2_ai.models.protocol import PolicyValueEstimate
 from sts2_ai.training.snapshot_curriculum import (
     collect_snapshot_cohort,
     sample_snapshot_curriculum,
