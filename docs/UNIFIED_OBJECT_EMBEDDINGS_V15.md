@@ -15,7 +15,10 @@ record per distinguishable combat instance:
 - each owned relic, with public state and ordered trigger counters;
 - each potion *slot* (duplicate potion types are preserved);
 - each living enemy (duplicate species preserved), plus its owned power/status
-  tokens; player powers are attached to the global player.
+  tokens; player powers are attached to the global player. **Power arrays may
+  contain repeated `power_id` values for the same owner** (instanced powers
+  such as `proto.power.strangle`). Keep one token per observed power record,
+  not one per owner/type. Status dictionaries remain keyed by status ID.
 
 Card `instance_id` is unique across observed combat zones and acts as a
 **pointer only**. Persistent `deck` records are NOT duplicated as new combat
@@ -74,6 +77,21 @@ emulator revision. Continue using the old revision for frozen v14 results.
    width/compute/parameter-matched feedforward controls.
 5. **v16:** independent source policies, synergy-specific snapshots (including
    mutations and enchantments once publicly representable), and held-out runs.
+
+### v15c duplicate-power snapshot regression
+
+The pinned emulator's `PrototypePowerInstanceState` supports explicitly
+instanced powers. A single enemy or player can therefore hold multiple
+publicly visible records with the same `power_id` and different stacks.
+
+The extractor now keys each power token by (owning object, power kind,
+*owner-local occurrence ordinal*), while leaving that ordinal out of
+numeric/categorical learned features. The ordinal is only a transient pointer
+to distinguish observed records and is not stable across reordered frames.
+This preserves counts, values and pooled contributions without changing
+the checkpoint vocabulary or requiring retraining. A new integration test
+reproduces repeated `proto.power.strangle` records, exercises nonzero gated
+Torch and portable inference, and verifies order-invariant predictions.
 
 ### Invariants and testing
 
