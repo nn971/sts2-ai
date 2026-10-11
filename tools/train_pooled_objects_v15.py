@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from sts2_ai.emulator import JsonlEmulatorBackend
+from sts2_ai.evaluation.combat_snapshots import load_recipes
 from sts2_ai.emulator.episode_goal import EPISODE_GOALS, NATIVE_ACT1_BOSS_GOAL
 from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH
 from sts2_ai.models.object_embeddings import ObjectVocabulary
@@ -91,6 +92,15 @@ def main() -> None:
                         help="Build pinned .NET emulator before starting")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument(
+        "--snapshot-corpus", type=Path,
+        help="Opt-in replay-verified combat-only training; use a TRAIN partition",
+    )
+    parser.add_argument(
+        "--snapshot-sampling", choices=("balanced", "natural"),
+        default="balanced",
+        help="Progress × encounter-tier curriculum, or natural corpus weights",
+    )
+    parser.add_argument(
         "--snapshot-every", type=int, default=20,
         help="Export portable model milestones every N completed rounds; 0 disables",
     )
@@ -101,6 +111,14 @@ def main() -> None:
         parser.error("Rounds/episodes/workers/vocabulary-runs must be positive")
     if args.snapshot_every < 0:
         parser.error("--snapshot-every must be nonnegative")
+    if args.snapshot_corpus is not None and args.workers != 1:
+        parser.error("Snapshot rollout mode currently requires --workers 1")
+    if args.snapshot_corpus is not None and not args.snapshot_corpus.is_file():
+        parser.error("Snapshot training corpus does not exist")
+    snapshot_recipes = (
+        tuple(load_recipes(args.snapshot_corpus))
+        if args.snapshot_corpus is not None else None
+    )
 
     base = PhaseSplitNeuralModel.load(args.base_model)
     if base.combat_value_objective != "hp_preservation":
@@ -136,6 +154,10 @@ def main() -> None:
         "max_decisions": args.max_decisions,
         "episode_goal": args.episode_goal,
     }
+    if snapshot_recipes is not None:
+        training_settings["snapshot_corpus"] = str(args.snapshot_corpus)
+        training_settings["snapshot_sampling"] = args.snapshot_sampling
+        training_settings["rollout_source"] = "combat_snapshots"
     with JsonlEmulatorBackend(build=args.build) as backend:
         if vocab_path.is_file():
             vocabulary = ObjectVocabulary.from_dict(json.loads(
@@ -164,7 +186,9 @@ def main() -> None:
         print(
             f"[v15c] PPO start: rounds={args.rounds} episodes={args.episodes} "
             f"workers={args.workers} seed={args.seed} goal={args.episode_goal} "
-            f"resume={args.resume} frozen_base={args.base_model}", flush=True,
+            f"resume={args.resume} frozen_base={args.base_model} "
+            f"rollout={'combat_snapshots' if snapshot_recipes is not None else 'full_run'}",
+            flush=True,
         )
         model_path = output / "model.json"
         report_path = output / "report.json"
@@ -217,6 +241,8 @@ def main() -> None:
             checkpoint=checkpoint, resume=args.resume,
             architecture=args.architecture,
             snapshot_every=args.snapshot_every,
+            snapshot_recipes=snapshot_recipes,
+            snapshot_sampling=args.snapshot_sampling,
             on_round=publish_round,
         )
         _atomic_model(model_path, model)
