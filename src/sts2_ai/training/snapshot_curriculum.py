@@ -12,6 +12,8 @@ import math
 import random
 from collections import defaultdict
 from collections.abc import Sequence
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import dataclass
 
 from sts2_ai.emulator import EmulatorBackend
 from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH, reset_training_run
@@ -178,16 +180,127 @@ def _snapshot_episode(
         backend.release_many([handle])
 
 
+IndexedRecipe = tuple[int, CombatSnapshotRecipe]
+SourceGroup = tuple[SourceKey, tuple[IndexedRecipe, ...]]
+
+
+@dataclass(frozen=True, slots=True)
+class SnapshotWorkerBatch:
+    """One frozen policy per process task; source runs remain atomic."""
+
+    groups: tuple[SourceGroup, ...]
+    model_payload: dict[str, Any]
+    round_index: int
+    actor_seed: int
+    temperature: float
+    max_decisions: int
+
+
+def plan_snapshot_batches(
+    grouped: dict[SourceKey, list[IndexedRecipe]], *,
+    workers: int, max_decisions: int,
+) -> tuple[tuple[SourceGroup, ...], ...]:
+    """Greedy deterministic grouping of whole source runs into worker batches.
+
+    One serialized v15 model is sent per batch (at most one per worker).
+    Prefix length and anticipated combat actions approximate source work.
+    This scheduling heuristic has no effect on the chosen episodes/RNG.
+    """
+    if type(workers) is not int or workers <= 0 or max_decisions <= 0:
+        raise ValueError("Invalid snapshot batch worker count or combat cap")
+    if not grouped:
+        return ()
+    ranks = sorted(
+        grouped.items(),
+        key=lambda kv: (
+            -(max(len(recipe.action_ids) for _, recipe in kv[1])
+              + min(32, max_decisions) * len(kv[1])),
+            kv[0],
+        ),
+    )
+    bucket_count = min(workers, len(ranks))
+    buckets: list[list[SourceGroup]] = [[] for _ in range(bucket_count)]
+    loads = [0] * bucket_count
+    for key, rows in ranks:
+        ordered = tuple(sorted(rows, key=lambda item: (
+            len(item[1].action_ids), item[0],
+        )))
+        estimated = (
+            max(len(recipe.action_ids) for _, recipe in ordered)
+            + min(32, max_decisions) * len(ordered)
+        )
+        destination = min(range(bucket_count), key=lambda i: (loads[i], i))
+        buckets[destination].append((key, ordered))
+        loads[destination] += estimated
+    return tuple(tuple(bucket) for bucket in buckets)
+
+
+def _collect_source_group(
+    backend: EmulatorBackend, model: PhaseSplitNeuralModel,
+    group: SourceGroup, *,
+    round_index: int, actor_seed: int, temperature: float,
+    max_decisions: int,
+) -> tuple[tuple[int, Episode], ...]:
+    (seed, ascension, _source), items = group
+    handle = reset_training_run(backend, seed, NATIVE_OVERGROWTH, ascension)
+    prefix: tuple[str, ...] = ()
+    results: list[tuple[int, Episode]] = []
+    try:
+        for index, recipe in items:
+            if (recipe.emulator_revision != backend.emulator_revision
+                    or source_key(recipe) != group[0]):
+                raise ValueError("Snapshot source/revision mismatch")
+            if recipe.action_ids[:len(prefix)] != prefix:
+                raise ValueError("Inconsistent source-run snapshot prefixes")
+            handle = _advance(backend, handle, recipe.action_ids[len(prefix):])
+            prefix = recipe.action_ids
+            _verify(backend, handle, recipe)
+            episode_seed = f"snapshot-{round_index}-{index}-{seed}-{recipe.exact_hash}"
+            episode = _snapshot_episode(
+                backend, backend.fork(handle), model,
+                episode_seed=episode_seed, actor_seed=actor_seed,
+                temperature=temperature, max_decisions=max_decisions,
+            )
+            results.append((index, episode))
+    finally:
+        backend.release_many([handle])
+    return tuple(results)
+
+
+def _worker_collect_snapshot_batch(
+    batch: SnapshotWorkerBatch,
+) -> tuple[tuple[int, Episode], ...]:
+    """Process-isolated backend from the existing pinned rollout pool."""
+    from sts2_ai.training import parallel_rollouts
+
+    backend = parallel_rollouts._WORKER_BACKEND
+    if backend is None:
+        raise RuntimeError("Snapshot worker has no independent emulator")
+    model = PhaseSplitNeuralModel.from_dict(batch.model_payload)
+    results: list[tuple[int, Episode]] = []
+    for group in batch.groups:
+        results.extend(_collect_source_group(
+            backend, model, group,
+            round_index=batch.round_index,
+            actor_seed=batch.actor_seed,
+            temperature=batch.temperature,
+            max_decisions=batch.max_decisions,
+        ))
+    return tuple(results)
+
+
 def collect_snapshot_cohort(
     backend: EmulatorBackend, model: PhaseSplitNeuralModel,
     selected: Sequence[CombatSnapshotRecipe], *, round_index: int,
     actor_seed: int, temperature: float, max_decisions: int = 256,
+    pool: ProcessPoolExecutor | None = None, workers: int = 1,
 ) -> tuple[Episode, ...]:
-    """Replay each original run once, fork verified entries, return ordered episodes.
+    """Replay verified sources, fork combat and return ordered on-policy episodes.
 
-    Repeated snapshots are legitimate on-policy samples with different actor
-    random draws but the same pinned starting hidden RNG. Do not interpret
-    repeats as independent stochastic *environment* continuations.
+    With a pool, each task owns complete source-run groups; worker completion
+    order cannot alter episode order or sampled actions. Exact hidden handles
+    never leave the owning emulator process. Identical recipes deliberately
+    share initial RNG even if repeated under different action samples.
     """
     if not selected or max_decisions <= 0:
         raise ValueError("Require selected snapshots and a positive decision cap")
@@ -195,37 +308,48 @@ def collect_snapshot_cohort(
         raise ValueError("Invalid snapshot rollout temperature")
     if type(round_index) is not int or round_index < 0:
         raise ValueError("Invalid snapshot round index")
-    grouped: dict[SourceKey, list[tuple[int, CombatSnapshotRecipe]]] = defaultdict(list)
+    if type(workers) is not int or workers <= 0:
+        raise ValueError("Invalid snapshot worker count")
+    if (pool is None and workers != 1) or (pool is not None and workers <= 1):
+        raise ValueError("Multiprocess snapshots require a pool and workers > 1")
+    grouped: dict[SourceKey, list[IndexedRecipe]] = defaultdict(list)
     for index, recipe in enumerate(selected):
         recipe.validate()
         if recipe.emulator_revision != backend.emulator_revision:
             raise ValueError("Snapshot emulator revision mismatch")
         grouped[source_key(recipe)].append((index, recipe))
-
+    batches = plan_snapshot_batches(
+        grouped, workers=workers, max_decisions=max_decisions,
+    )
     results: list[Episode | None] = [None] * len(selected)
-    for (seed, ascension, _source), items in sorted(grouped.items()):
-        items.sort(key=lambda pair: (len(pair[1].action_ids), pair[0]))
-        handle = reset_training_run(backend, seed, NATIVE_OVERGROWTH, ascension)
-        prefix: tuple[str, ...] = ()
-        try:
-            for index, recipe in items:
-                if recipe.action_ids[:len(prefix)] != prefix:
-                    raise ValueError("Inconsistent source-run snapshot prefixes")
-                if len(recipe.action_ids) < len(prefix):
-                    raise ValueError("Snapshot replay moved backwards")
-                handle = _advance(backend, handle, recipe.action_ids[len(prefix):])
-                prefix = recipe.action_ids
-                _verify(backend, handle, recipe)
-                episode_seed = (
-                    f"snapshot-{round_index}-{index}-{seed}-{recipe.exact_hash}"
-                )
-                results[index] = _snapshot_episode(
-                    backend, backend.fork(handle), model,
-                    episode_seed=episode_seed, actor_seed=actor_seed,
+    if pool is None:
+        batches_returned = (
+            tuple(
+                result for group in batch
+                for result in _collect_source_group(
+                    backend, model, group,
+                    round_index=round_index, actor_seed=actor_seed,
                     temperature=temperature, max_decisions=max_decisions,
                 )
-        finally:
-            backend.release_many([handle])
+            )
+            for batch in batches
+        )
+    else:
+        payload = model.to_dict()
+        requests = (
+            SnapshotWorkerBatch(
+                batch, payload, round_index, actor_seed, temperature,
+                max_decisions,
+            )
+            for batch in batches
+        )
+        batches_returned = pool.map(_worker_collect_snapshot_batch, requests)
+    for group_results in batches_returned:
+        for index, episode in group_results:
+            if (type(index) is not int or not 0 <= index < len(results)
+                    or results[index] is not None):
+                raise ValueError("Snapshot worker returned duplicate/invalid result")
+            results[index] = episode
     if any(episode is None for episode in results):
         raise ValueError("Incomplete snapshot cohort")
     return tuple(episode for episode in results if episode is not None)
