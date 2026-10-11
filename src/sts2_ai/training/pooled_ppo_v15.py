@@ -37,7 +37,6 @@ from sts2_ai.models.object_instances import (
     ObjectRef,
     ObjectSet,
     extract_actionable_combat_objects,
-    extract_combat_objects,
     legal_action_object_refs,
 )
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
@@ -264,6 +263,75 @@ def prepare_pooled_samples(
     return samples, rewards
 
 
+
+def batched_ppo_loss(
+    torch: Any,
+    values: Any,
+    logits: Sequence[Any],
+    *,
+    chosen_indices: Sequence[int],
+    old_logprobs: Sequence[float],
+    advantages: Sequence[float],
+    targets: Sequence[float],
+    temperature: float,
+    clip_epsilon: float = 0.2,
+    value_weight: float = 0.5,
+    entropy_weight: float = 0.002,
+) -> tuple[Any, Any, Any, Any]:
+    """One masked PPO loss graph for a batch of variable legal-action menus.
+
+    Return (combined, policy, value, entropy) *means*. In contrast to
+    a Python loop issuing one log_softmax and gradient graph per decision,
+    this pads the variable menu once, runs a single softmax, and masks
+    padded entries from entropy. Padding never changes probabilities
+    or gradients of the real actions.
+    """
+    b = len(logits)
+    if not b or values.ndim != 1 or values.shape[0] != b:
+        raise ValueError("Batched PPO values and action menus mismatch")
+    if any(len(rows) != b for rows in (
+        chosen_indices, old_logprobs, advantages, targets,
+    )):
+        raise ValueError("Batched PPO metadata and action menus mismatch")
+    sizes = [int(menu.numel()) for menu in logits]
+    if any(length <= 0 or not 0 <= chosen_indices[i] < length
+           for i, length in enumerate(sizes)):
+        raise ValueError("Batched PPO requires nonempty legal menus and valid actions")
+    if not math.isfinite(temperature) or temperature <= 0:
+        raise ValueError("Invalid PPO temperature")
+    if not 0 < clip_epsilon < 1:
+        raise ValueError("Invalid PPO clipping")
+    device, dtype = values.device, values.dtype
+    lengths = torch.tensor(sizes, device=device, dtype=torch.long)
+    valid = (
+        torch.arange(max(sizes), device=device)[None, :]
+        < lengths[:, None]
+    )
+    padded = torch.nn.utils.rnn.pad_sequence(
+        logits, batch_first=True, padding_value=torch.finfo(dtype).min,
+    )
+    log_prob = torch.nn.functional.log_softmax(padded / temperature, dim=-1)
+    indices = torch.tensor(chosen_indices, device=device, dtype=torch.long)
+    selected = log_prob.gather(1, indices.unsqueeze(1)).squeeze(1)
+    old = torch.tensor(old_logprobs, device=device, dtype=dtype)
+    adv = torch.tensor(advantages, device=device, dtype=dtype)
+    target = torch.tensor(targets, device=device, dtype=dtype)
+    ratio = (selected - old).clamp(-20.0, 20.0).exp()
+    clipped = ratio.clamp(1.0 - clip_epsilon, 1.0 + clip_epsilon)
+    policy_loss = -torch.minimum(ratio * adv, clipped * adv)
+    value_loss = (values - target).square()
+    # Replace padded log probabilities before multiplication to avoid
+    # 0 * (-inf) under aggressive clipping or mixed-precision settings.
+    entropy = -(
+        log_prob.exp() * log_prob.masked_fill(~valid, 0.0)
+    ).sum(dim=1)
+    return (
+        (policy_loss + value_weight * value_loss
+         - entropy_weight * entropy).mean(),
+        policy_loss.mean(), value_loss.mean(), entropy.mean(),
+    )
+
+
 def ppo_update_pooled(
     head: PooledObjectTorch | RelationalObjectTorch,
     samples: Sequence[PooledPpoSample],
@@ -308,10 +376,6 @@ def ppo_update_pooled(
         rng.shuffle(order)
         for start in range(0, len(order), batch_size):
             chosen = order[start:start + batch_size]
-            losses = []
-            policy_losses = []
-            value_losses = []
-            entropies = []
             if isinstance(head, RelationalObjectTorch):
                 if any(rows[k].action_bindings is None for k in chosen):
                     raise ValueError("Missing v15d action-role bindings")
@@ -320,40 +384,53 @@ def ppo_update_pooled(
                     [rows[k].action_bindings for k in chosen],
                     [rows[k].baseline for k in chosen],
                 )
-                predictions = [
-                    (values[i], logits_batch[i]) for i in range(len(chosen))
-                ]
+                loss, actor_mean, critic_mean, entropy_mean = batched_ppo_loss(
+                    torch, values, logits_batch,
+                    chosen_indices=[rows[k].chosen_index for k in chosen],
+                    old_logprobs=[rows[k].old_logprob for k in chosen],
+                    advantages=[advantages[k] for k in chosen],
+                    targets=[rows[k].target for k in chosen],
+                    temperature=temperature, clip_epsilon=clip_epsilon,
+                    value_weight=value_weight, entropy_weight=entropy_weight,
+                )
             else:
-                predictions = [
-                    head.forward_prepared(
-                        rows[k].objects, rows[k].action_refs, rows[k].baseline,
+                losses = []
+                policy_losses = []
+                value_losses = []
+                entropies = []
+                for k in chosen:
+                    sample = rows[k]
+                    value, logits = head.forward_prepared(
+                        sample.objects, sample.action_refs, sample.baseline,
                     )
-                    for k in chosen
-                ]
-            for k, (v, logits) in zip(chosen, predictions, strict=True):
-                s = rows[k]
-                lp = torch.nn.functional.log_softmax(logits / temperature, dim=0)
-                selected = lp[s.chosen_index]
-                ratio = (selected - s.old_logprob).clamp(-20.0, 20.0).exp()
-                adv = advantages[k]
-                clipped = ratio.clamp(1.0 - clip_epsilon, 1.0 + clip_epsilon)
-                policy_loss = -torch.minimum(ratio * adv, clipped * adv)
-                value_loss = (v - s.target).square()
-                entropy = -(lp.exp() * lp).sum()
-                losses.append(policy_loss + value_weight * value_loss
-                              - entropy_weight * entropy)
-                policy_losses.append(policy_loss)
-                value_losses.append(value_loss)
-                entropies.append(entropy)
-            loss = torch.stack(losses).mean()
+                    logp = torch.nn.functional.log_softmax(
+                        logits / temperature, dim=0,
+                    )
+                    selected = logp[sample.chosen_index]
+                    ratio = (selected - sample.old_logprob).clamp(-20.0, 20.0).exp()
+                    clipped = ratio.clamp(1.0 - clip_epsilon, 1.0 + clip_epsilon)
+                    actor = -torch.minimum(
+                        ratio * advantages[k], clipped * advantages[k],
+                    )
+                    critic = (value - sample.target).square()
+                    entropy = -(logp.exp() * logp).sum()
+                    losses.append(
+                        actor + value_weight * critic - entropy_weight * entropy
+                    )
+                    policy_losses.append(actor)
+                    value_losses.append(critic)
+                    entropies.append(entropy)
+                loss = torch.stack(losses).mean()
+                actor_mean = torch.stack(policy_losses).mean()
+                critic_mean = torch.stack(value_losses).mean()
+                entropy_mean = torch.stack(entropies).mean()
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(head.module.parameters(), 1.0)
             optimizer.step()
             for i, quantity in enumerate((
-                loss.detach(), torch.stack(policy_losses).mean().detach(),
-                torch.stack(value_losses).mean().detach(),
-                torch.stack(entropies).mean().detach(),
+                loss.detach(), actor_mean.detach(), critic_mean.detach(),
+                entropy_mean.detach(),
             )):
                 sums[i] += float(quantity) * len(chosen)
             seen += len(chosen)

@@ -12,8 +12,8 @@ from test_pooled_ppo_v15 import combat_episode, frozen_policy
 from sts2_ai.emulator import LegalAction
 from sts2_ai.models.object_embeddings import ObjectVocabulary
 from sts2_ai.models.object_instances import (
-    ObjectRef,
     UNOBSERVED_CHOICE_TYPE,
+    ObjectRef,
     extract_actionable_combat_objects,
     extract_combat_objects,
     legal_action_object_refs,

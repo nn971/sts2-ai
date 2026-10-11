@@ -79,7 +79,12 @@ def test_instrumented_real_minibatch_profile_cpu_and_repeat_cases() -> None:
     assert result["schema"] == REPORT_SCHEMA
     assert result["real_combat_decisions"] == 4
     assert result["resolved_combats"] == 2
-    assert len(result["rows"]) == 3
+    assert len(result["rows"]) == 6
+    assert {r["loss_mode"] for r in result["rows"]} == {"loop", "batched"}
+    assert {(r["batch_size"], r["loss_mode"]) for r in result["rows"]} == {
+        (size, mode)
+        for size in (1, 2, 8) for mode in ("loop", "batched")
+    }
     assert result["vocabulary_oov"]["identities"]["unknown"] == 0
     assert result["rows"][-1]["reused_observations"]
     for row in result["rows"]:
