@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import copy
-import json
 
 import pytest
 from test_object_instances_v15 import frame
