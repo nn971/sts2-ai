@@ -23,7 +23,7 @@ CARD_DYNAMIC_FIELDS = (
 @dataclass(frozen=True, slots=True)
 class ObjectRef:
     kind: str
-    key: int | str | tuple[str, str]
+    key: int | str | tuple[str, str] | tuple[str, str, int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,11 +210,20 @@ def extract_combat_objects(state: dict[str, Any]) -> ObjectSet:
 
     player = ObjectRef("global", "player")
     def append_effects(owner: ObjectRef, powers: object, statuses: object = None) -> None:
+        # Powers can be instanced: a single owner may legitimately have two
+        # records with the same power_id (e.g. proto.power.strangle). Each
+        # occurrence must remain distinct; combining stacks would change the
+        # number of objects and potentially the modeled game mechanics.
+        # Occurrence numbers are transient lookup keys only, never features.
+        occurrences: dict[str, int] = {}
         for power in _records(powers, "powers"):
             ident = _identifier(power, "power_id", "power")
+            ordinal = occurrences.get(ident, 0)
+            occurrences[ident] = ordinal + 1
             num = {"stacks": _number(power.get("stacks"), "power.stacks")}
             objects.append(_token(
-                "power", ident, "active", ObjectRef("power", (str(owner), ident)),
+                "power", ident, "active",
+                ObjectRef("power", (str(owner), ident, ordinal)),
                 num, [], owner,
             ))
         if statuses is not None:
