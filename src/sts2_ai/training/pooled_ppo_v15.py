@@ -104,6 +104,11 @@ class PooledTrainingRound:
     mean_combat_target: float | None
     rollout_seconds: float
     optimizer_seconds: float
+    # Optional for backwards compatibility with v15j's 5-round checkpoint.
+    ppo_samples_used: int | None = None
+    mean_policy_loss: float | None = None
+    mean_value_loss: float | None = None
+    mean_entropy: float | None = None
 
 
 def _hash_json(value: Any) -> str:
@@ -523,6 +528,10 @@ def train_pooled_combat_ppo(
     checkpoint: Path | None = None, resume: bool = False,
     progress: Callable[[PooledTrainingRound], None] | None = None,
     architecture: str = "pooled",
+    snapshot_every: int = 0,
+    on_round: Callable[
+        [tuple[PooledTrainingRound, ...], PhaseSplitNeuralModel | None], None
+    ] | None = None,
 ) -> tuple[PhaseSplitNeuralModel, tuple[PooledTrainingRound, ...]]:
     """Train ONLY the combat residual, from a frozen phase-split checkpoint.
 
@@ -533,6 +542,8 @@ def train_pooled_combat_ppo(
 
     if architecture not in ("pooled", "relational"):
         raise ValueError("Unknown v15 combat architecture")
+    if snapshot_every < 0:
+        raise ValueError("Snapshot interval must be nonnegative")
     if min(rounds, episodes_per_round, workers, max_decisions, width) <= 0:
         raise ValueError("Expected positive training sizes")
     if not 0 < learning_rate < 1:
@@ -668,6 +679,10 @@ def train_pooled_combat_ppo(
                 mean_combat_target=sum(targets) / len(targets) if targets else None,
                 rollout_seconds=rollout_time,
                 optimizer_seconds=time.perf_counter() - start,
+                ppo_samples_used=result.samples,
+                mean_policy_loss=result.mean_policy_loss,
+                mean_value_loss=result.mean_value_loss,
+                mean_entropy=result.mean_entropy,
             )
             rows.append(row)
             if checkpoint is not None:
@@ -681,13 +696,28 @@ def train_pooled_combat_ppo(
                 f"runs={row.played} complete={row.completed} wins={row.wins} "
                 f"resolved_combats={row.resolved_combats} "
                 f"combat_decisions={row.combat_decisions} "
+                f"ppo_samples={row.ppo_samples_used} "
                 f"updates={row.optimizer_steps} loss={row.mean_loss!r} "
+                f"policy={row.mean_policy_loss!r} value={row.mean_value_loss!r} "
+                f"entropy={row.mean_entropy!r} "
                 f"rollout_s={row.rollout_seconds:.2f} "
                 f"optimizer_s={row.optimizer_seconds:.2f}",
                 flush=True,
             )
             if progress is not None:
                 progress(row)
+            if on_round is not None:
+                milestone = None
+                if snapshot_every and (i + 1) % snapshot_every == 0:
+                    # Export only after the corresponding optimizer checkpoint
+                    # has been durably committed. Re-exporting is read-only
+                    # and does not affect PPO's RNG or optimizer trajectory.
+                    milestone = PhaseSplitNeuralModel(
+                        base.strategy, head.export(base.combat),
+                        f"v15-{architecture}-{fingerprint[:12]}-{i + 1}",
+                        combat_value_objective="hp_preservation",
+                    )
+                on_round(tuple(rows), milestone)
     final = PhaseSplitNeuralModel(
         base.strategy, head.export(base.combat),
         f"v15-{architecture}-{fingerprint[:12]}-{rounds}",

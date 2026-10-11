@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 from sts2_ai.emulator import JsonlEmulatorBackend
 from sts2_ai.emulator.episode_goal import EPISODE_GOALS, NATIVE_ACT1_BOSS_GOAL
@@ -23,6 +25,34 @@ from sts2_ai.training.pooled_ppo_v15 import (
     collect_public_vocabulary,
     train_pooled_combat_ppo,
 )
+
+
+def _atomic_json(path: Path, content: dict[str, Any]) -> None:
+    """Commit report snapshots without publishing a half-written JSON file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pending = path.with_name(path.name + ".pending")
+    try:
+        with pending.open("w", encoding="utf-8") as stream:
+            json.dump(content, stream, indent=2, sort_keys=True)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(pending, path)
+    finally:
+        pending.unlink(missing_ok=True)
+
+
+def _atomic_model(path: Path, model: PhaseSplitNeuralModel) -> None:
+    """A named milestone is a complete independently loadable model."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pending = path.with_name(path.name + ".pending")
+    try:
+        model.save(pending)
+        with pending.open("rb") as stream:
+            os.fsync(stream.fileno())
+        os.replace(pending, path)
+    finally:
+        pending.unlink(missing_ok=True)
 
 
 def main() -> None:
@@ -60,11 +90,17 @@ def main() -> None:
     parser.add_argument("--build", action="store_true",
                         help="Build pinned .NET emulator before starting")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument(
+        "--snapshot-every", type=int, default=20,
+        help="Export portable model milestones every N completed rounds; 0 disables",
+    )
     args = parser.parse_args()
     if not args.base_model.is_file():
         parser.error("Base model path does not exist")
     if min(args.rounds, args.episodes, args.workers, args.vocabulary_runs) <= 0:
         parser.error("Rounds/episodes/workers/vocabulary-runs must be positive")
+    if args.snapshot_every < 0:
+        parser.error("--snapshot-every must be nonnegative")
 
     base = PhaseSplitNeuralModel.load(args.base_model)
     if base.combat_value_objective != "hp_preservation":
@@ -80,6 +116,26 @@ def main() -> None:
     if args.vocabulary is not None and not vocab_path.is_file():
         parser.error("Explicit --vocabulary path does not exist")
 
+    training_settings = {
+        "architecture": args.architecture,
+        "width": args.width, "seed": args.seed,
+        "seed_prefix": args.seed_prefix,
+        "episodes_per_round": args.episodes, "workers": args.workers,
+        "vocabulary_runs": args.vocabulary_runs,
+        "vocabulary_seed_prefix": args.vocabulary_seed_prefix,
+        "temperature_start": args.temperature_start,
+        "temperature_end": args.temperature_end,
+        "temperature_decay_rounds": args.temperature_decay_rounds,
+        "learning_rate": args.learning_rate,
+        "ppo_epochs": args.ppo_epochs,
+        "ppo_batch_size": args.ppo_batch_size,
+        "ppo_sample_limit": args.ppo_sample_limit,
+        "ppo_clip_epsilon": args.ppo_clip_epsilon,
+        "ppo_gamma": args.ppo_gamma,
+        "ppo_gae_lambda": args.ppo_gae_lambda,
+        "max_decisions": args.max_decisions,
+        "episode_goal": args.episode_goal,
+    }
     with JsonlEmulatorBackend(build=args.build) as backend:
         if vocab_path.is_file():
             vocabulary = ObjectVocabulary.from_dict(json.loads(
@@ -110,6 +166,39 @@ def main() -> None:
             f"workers={args.workers} seed={args.seed} goal={args.episode_goal} "
             f"resume={args.resume} frozen_base={args.base_model}", flush=True,
         )
+        model_path = output / "model.json"
+        report_path = output / "report.json"
+
+        def make_report(history: tuple[Any, ...]) -> dict[str, Any]:
+            return {
+                "schema": POOLED_PPO_VERSION,
+                "architecture": args.architecture,
+                "base_model": str(args.base_model),
+                "vocabulary": str(vocab_path),
+                "emulator_revision": backend.emulator_revision,
+                "combat_objective": base.combat_value_objective,
+                "rounds_requested": args.rounds,
+                "rounds_completed": len(history),
+                "checkpoint": str(checkpoint),
+                "snapshot_every": args.snapshot_every,
+                "training_settings": training_settings,
+                "rows": [asdict(row) for row in history],
+            }
+
+        def publish_round(history: tuple[Any, ...],
+                          milestone: PhaseSplitNeuralModel | None) -> None:
+            # Called only *after* checkpoint.pt is atomically committed.
+            # Preserve a live report even when no portable milestone is due.
+            _atomic_json(report_path, make_report(history))
+            if milestone is not None:
+                stage = output / "models" / f"stage-{len(history):04d}.json"
+                _atomic_model(stage, milestone)
+                _atomic_model(model_path, milestone)
+                print(
+                    f"[v15-{args.architecture}] exported milestone "
+                    f"round={len(history)} model={stage}", flush=True,
+                )
+
         model, rows = train_pooled_combat_ppo(
             backend, base, vocabulary,
             rounds=args.rounds, episodes_per_round=args.episodes,
@@ -127,19 +216,11 @@ def main() -> None:
             gamma=args.ppo_gamma, gae_lambda=args.ppo_gae_lambda,
             checkpoint=checkpoint, resume=args.resume,
             architecture=args.architecture,
+            snapshot_every=args.snapshot_every,
+            on_round=publish_round,
         )
-    model_path = output / "model.json"
-    report_path = output / "report.json"
-    model.save(model_path)
-    report_path.write_text(json.dumps({
-        "schema": POOLED_PPO_VERSION,
-        "architecture": args.architecture,
-        "base_model": str(args.base_model),
-        "vocabulary": str(vocab_path),
-        "emulator_revision": backend.emulator_revision,
-        "combat_objective": model.combat_value_objective,
-        "rows": [asdict(row) for row in rows],
-    }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        _atomic_model(model_path, model)
+        _atomic_json(report_path, make_report(rows))
     print(
         f"[v15-{args.architecture}] complete: model={model_path} report={report_path} "
         f"checkpoint={checkpoint}", flush=True,
