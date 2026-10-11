@@ -16,9 +16,9 @@ from pathlib import Path
 from typing import Any
 
 from sts2_ai.emulator import JsonlEmulatorBackend
-from sts2_ai.evaluation.combat_snapshots import load_recipes
 from sts2_ai.emulator.episode_goal import EPISODE_GOALS, NATIVE_ACT1_BOSS_GOAL
 from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH
+from sts2_ai.evaluation.combat_snapshots import load_recipes
 from sts2_ai.models.object_embeddings import ObjectVocabulary
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.training.pooled_ppo_v15 import (
