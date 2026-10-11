@@ -116,10 +116,11 @@ Start fresh without --resume. Subsequent resumes must preserve the exact
 portable initial model, seed, vocabulary, recipe content and optimizer
 settings, increasing only the desired total number of rounds.
 
-Snapshot rollout currently uses ONE emulator process and amortizes prefix
-replay over selected entries from each source run. Further speedups should
-parallelize source runs and ultimately use a versioned direct snapshot
-restore API in sts2-emulator. Throughput benefits are not yet measured.
+v15n supports independent emulator workers (see
+docs/PARALLEL_SNAPSHOT_CURRICULUM_V15N.md). The original single-worker
+snapshot path remains available. Replays are grouped by original source run,
+while direct versioned snapshot restoration remains an emulator roadmap item.
+Measure speedup on the workstation before choosing a worker count.
 
 In snapshot-mode reports, 'wins' means combat victories; 'completed'
 means resolved combats. The 'rollout_source' field marks this difference

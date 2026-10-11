@@ -115,8 +115,6 @@ def main() -> None:
         parser.error("Rounds/episodes/workers/vocabulary-runs must be positive")
     if args.snapshot_every < 0:
         parser.error("--snapshot-every must be nonnegative")
-    if args.snapshot_corpus is not None and args.workers != 1:
-        parser.error("Snapshot rollout mode currently requires --workers 1")
     if args.snapshot_corpus is not None and not args.snapshot_corpus.is_file():
         parser.error("Snapshot training corpus does not exist")
     if args.initialize_from_model is not None and not args.initialize_from_model.is_file():
