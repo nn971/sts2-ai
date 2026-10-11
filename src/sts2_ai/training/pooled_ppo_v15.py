@@ -55,6 +55,11 @@ from sts2_ai.training.parallel_rollouts import (
 )
 from sts2_ai.training.phase_split_ppo import gae_terminal
 from sts2_ai.training.phase_split_selfplay import _hp_preservation_target
+from sts2_ai.training.snapshot_curriculum import (
+    collect_snapshot_cohort,
+    sample_snapshot_curriculum,
+)
+from sts2_ai.evaluation.combat_snapshots import CombatSnapshotRecipe
 from sts2_ai.training.selfplay import (
     Episode,
     collect_public_episode,
@@ -109,6 +114,7 @@ class PooledTrainingRound:
     mean_policy_loss: float | None = None
     mean_value_loss: float | None = None
     mean_entropy: float | None = None
+    rollout_source: str = "full_run"
 
 
 def _hash_json(value: Any) -> str:
@@ -529,6 +535,8 @@ def train_pooled_combat_ppo(
     progress: Callable[[PooledTrainingRound], None] | None = None,
     architecture: str = "pooled",
     snapshot_every: int = 0,
+    snapshot_recipes: Sequence[CombatSnapshotRecipe] | None = None,
+    snapshot_sampling: str = "balanced",
     on_round: Callable[
         [tuple[PooledTrainingRound, ...], PhaseSplitNeuralModel | None], None
     ] | None = None,
@@ -550,7 +558,20 @@ def train_pooled_combat_ppo(
         raise ValueError("Invalid learning rate")
     if resume and checkpoint is None:
         raise ValueError("Resume requires a checkpoint")
-    if workers > 1 and not isinstance(backend, JsonlEmulatorBackend):
+    if snapshot_recipes is not None:
+        if not snapshot_recipes:
+            raise ValueError("Snapshot training requires at least one recipe")
+        if workers != 1:
+            raise ValueError("Snapshot training currently requires workers=1")
+        if environment != "native-overgrowth":
+            raise ValueError("Snapshots require the native Overgrowth environment")
+        if snapshot_sampling not in ("balanced", "natural"):
+            raise ValueError("Invalid snapshot sampling mode")
+        for recipe in snapshot_recipes:
+            recipe.validate()
+            if recipe.emulator_revision != backend.emulator_revision:
+                raise ValueError("Snapshot corpus emulator revision mismatch")
+    elif workers > 1 and not isinstance(backend, JsonlEmulatorBackend):
         raise ValueError("Parallel training requires the JSONL emulator")
     if not isinstance(base.combat, NeuralPolicyValueModel):
         raise ValueError("v15c PPO requires a frozen v8/v13 base combat head")
@@ -597,6 +618,13 @@ def train_pooled_combat_ppo(
     }
     if architecture != "pooled":
         config["architecture"] = architecture
+    if snapshot_recipes is not None:
+        # This changes the fingerprint only for the new opt-in mode.
+        # Existing v15l checkpoint fingerprints and resumption remain intact.
+        config["snapshot_curriculum"] = {
+            "sampling": snapshot_sampling,
+            "recipe_sha256": _hash_json([asdict(r) for r in snapshot_recipes]),
+        }
     fingerprint = _hash_json(config)
     rows: list[PooledTrainingRound] = []
     if resume:
@@ -625,7 +653,7 @@ def train_pooled_combat_ppo(
     with ExitStack() as scope:
         pool = (
             scope.enter_context(open_worker_pool(backend, workers))
-            if workers > 1 and isinstance(backend, JsonlEmulatorBackend)
+            if snapshot_recipes is None and workers > 1 and isinstance(backend, JsonlEmulatorBackend)
             else None
         )
         for i in range(len(rows), rounds):
@@ -640,7 +668,17 @@ def train_pooled_combat_ppo(
             )
             seeds = [f"{seed_prefix}-{i}-{j}" for j in range(episodes_per_round)]
             start = time.perf_counter()
-            if pool is not None:
+            if snapshot_recipes is not None:
+                selected = sample_snapshot_curriculum(
+                    snapshot_recipes, count=episodes_per_round,
+                    seed=seed + i * 1000003, mode=snapshot_sampling,
+                )
+                cohort = collect_snapshot_cohort(
+                    backend, policy, selected,
+                    round_index=i, actor_seed=seed, temperature=temperature,
+                    max_decisions=max_decisions,
+                )
+            elif pool is not None:
                 cohort = collect_parallel(
                     pool, policy, seeds, base_seed=seed,
                     max_decisions=max_decisions, policy_id="prototype-fair-v0",
@@ -683,6 +721,9 @@ def train_pooled_combat_ppo(
                 mean_policy_loss=result.mean_policy_loss,
                 mean_value_loss=result.mean_value_loss,
                 mean_entropy=result.mean_entropy,
+                rollout_source=(
+                    "combat_snapshots" if snapshot_recipes is not None else "full_run"
+                ),
             )
             rows.append(row)
             if checkpoint is not None:
