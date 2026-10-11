@@ -24,7 +24,7 @@ from sts2_ai.models.object_instances import (
     ActionBinding,
     ObjectRef,
     ObjectSet,
-    extract_combat_objects,
+    extract_actionable_combat_objects,
     legal_action_object_bindings,
 )
 from sts2_ai.models.pooled_objects import (
@@ -405,7 +405,9 @@ class RelationalObjectTorch:
         state = json.loads(observation.payload_json)
         if not isinstance(state, dict):
             raise ValueError("Invalid public combat observation")
-        objects = extract_combat_objects(state)
+        objects = extract_actionable_combat_objects(
+            state, [(a.kind, a.payload_json) for a in actions],
+        )
         return self.forward_prepared(
             objects, _action_tokens(actions, objects),
             base.evaluate(observation, actions),
@@ -584,7 +586,9 @@ class PortableRelationalObjectModel:
         state = json.loads(observation.payload_json)
         if not isinstance(state, dict):
             raise ValueError("Invalid public combat observation")
-        objects = extract_combat_objects(state)
+        objects = extract_actionable_combat_objects(
+            state, [(a.kind, a.payload_json) for a in legal_actions],
+        )
         actions = _action_tokens(legal_actions, objects)
         x = self._encode(objects)
         d, n = self.width, len(x)
