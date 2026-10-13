@@ -7,7 +7,6 @@ engine or submodule is modified by this suite.
 from __future__ import annotations
 
 import json
-from dataclasses import replace
 
 import pytest
 
