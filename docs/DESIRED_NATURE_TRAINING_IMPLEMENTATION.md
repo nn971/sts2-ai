@@ -1,5 +1,18 @@
 # Desired Nature Training Implementation
 
+**Implementation note (2026-10-14):** The original document below is the
+long-range design, and its introductory status describes its 2026-10-12
+proposal state. Work on [AI PR #71](https://github.com/nn971/sts2-ai/pull/71)
+now implements **N0, a restricted N1/N2 isolated HP/intent bridge, and
+N4 synthetic toy-gradient groundwork**. See
+[runbook](NATURE_GROUNDWORK_RUNBOOK.md) for executable acceptance evidence
+and [missing emulator interfaces](NATURE_EMULATOR_INTERFACE_GAPS.md)
+([emulator issue #143](https://github.com/nn971/sts2-emulator/issues/143)).
+Full playable controlled combat, 15 native emulator workers, original
+chance-law calibration, PPO Nature integration and learned Nature training
+remain future stages.
+
+
 **Status:** proposed `sts2-ai` implementation roadmap, documentation only; 2026-10-12.  
 **Upstream dependency:** [`sts2-emulator` Desired RNG Implementation](https://github.com/nn971/sts2-emulator/blob/docs/desired-rng-implementation-v111/docs/DESIRED_RNG_IMPLEMENTATION.md), [emulator design PR #119](https://github.com/nn971/sts2-emulator/pull/119).  
 **Development base:** v15q combat importance-sampling/diagnostics branch; do not reinterpret existing checkpoint fingerprints.  
