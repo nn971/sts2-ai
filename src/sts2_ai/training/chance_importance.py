@@ -45,11 +45,16 @@ def log_chance_ratio(
     """log(p/q), rejecting missing support and unverified reference laws."""
     if reference.event_id != event_id:
         raise ValueError("Chance law event/provenance mismatch")
-    _check_probabilities(proposal, full_support=True)
+    _check_probabilities(proposal, full_support=False)
     if len(proposal) != len(reference.probabilities):
         raise ValueError("Chance proposal and target support differ")
+    if any(p > 0 and q <= 0 for p, q in
+           zip(reference.probabilities, proposal, strict=True)):
+        raise ValueError("Proposal lacks positive target support")
     if type(selected_index) is not int or not 0 <= selected_index < len(proposal):
         raise ValueError("Selected chance index outside support")
+    if proposal[selected_index] <= 0:
+        raise ValueError("Selected chance outcome has zero proposal probability")
     p = reference.probabilities[selected_index]
     return math.log(p) - math.log(proposal[selected_index]) if p else -math.inf
 
