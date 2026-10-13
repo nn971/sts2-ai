@@ -23,7 +23,7 @@ class UniformNature:
         # Each occurrence owns its own RNG; worker scheduling cannot change it.
         if type(self.seed) is not int:
             raise ValueError("Nature seed must be an integer")
-        material = f"{self.seed}|{event.event_id}".encode("utf-8")
+        material = f"{self.seed}|{event.event_id}".encode()
         local_seed = int.from_bytes(hashlib.sha256(material).digest()[:16], "big")
         index = random.Random(local_seed).randrange(event.support_count)
         result = NatureProposal(index, self.policy_id, -math.log(event.support_count))
