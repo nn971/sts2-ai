@@ -60,3 +60,21 @@ def test_full_support_proposal_mixing():
         mixture_proposal(p, (0.4, 0.6), alpha=1.0)
     with pytest.raises(ValueError, match="All importance weights"):
         effective_sample_size([-math.inf, -math.inf])
+
+
+def test_zero_mass_reference_outcomes_preserve_importance_support():
+    # q may put mass on a p=0 outcome, contributing a zero-weight rollout.
+    p = ChanceLaw("toy-zero-v1", "event-zero", (1.0, 0.0),
+                  "SYNTHETIC_EXACT")
+    assert log_chance_ratio(
+        p, (0.5, 0.5), event_id="event-zero", selected_index=1,
+    ) == -math.inf
+    q = mixture_proposal(p, (0.0, 1.0), alpha=0.8)
+    assert q == pytest.approx((0.2, 0.8))
+    assert log_chance_ratio(
+        p, (1.0, 0.0), event_id="event-zero", selected_index=0,
+    ) == pytest.approx(0.0)
+    with pytest.raises(ValueError, match="zero proposal"):
+        log_chance_ratio(
+            p, (1.0, 0.0), event_id="event-zero", selected_index=1,
+        )
