@@ -15,7 +15,6 @@ import pytest
 from sts2_ai.nature.corpus import NatureFixture, file_sha256, load_fixtures, record_filename
 from sts2_ai.nature.worker_corpus import collect_isolated_corpus
 
-
 FAKE = Path(__file__).resolve().parent / "fixtures" / "fake_nature_jsonl.py"
 
 
