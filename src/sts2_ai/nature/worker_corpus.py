@@ -288,6 +288,6 @@ def collect_isolated_corpus(
         "manifest_sha256": manifest["identity_sha256"],
         "records_digest": digest,
     }
-    atomic_write(output_root / "execution.json", json.dumps(execution, indent=2, sort_keys=True) + "\n")
+    atomic_write(\n        output_root / "execution.json",\n        json.dumps(execution, indent=2, sort_keys=True) + "\n",\n    )
     print(f"[nature-n3] DONE records_digest={digest} output={output_root}", flush=True)
     return {**summary, "execution": execution}
