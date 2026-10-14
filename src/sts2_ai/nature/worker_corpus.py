@@ -24,7 +24,6 @@ from sts2_ai.emulator.controlled_chance import (
 )
 
 from .corpus import (
-    CORPUS_SCHEMA,
     RECORD_SCHEMA,
     NatureFixture,
     atomic_write,
