@@ -106,8 +106,6 @@ def _execute(
             nature_policy_id=policy.policy_id,
             entries=tuple(entries),
         )
-        if not entries:
-            raise ControlledChanceUnavailable("Fixture had no externally selected chance events")
         return transcript, boundary.fingerprint
     finally:
         bridge.release(*handles)
