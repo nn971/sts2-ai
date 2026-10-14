@@ -26,7 +26,8 @@ def publish(state):
     state = json.loads(json.dumps(state))
     states[handle] = state
     kind, index = state["kind"], state["index"]
-    limit = 2 if kind == "initial_hp" else 1
+    limit = (2 if kind == "initial_hp" else
+             0 if state["params"]["native_entry"] == "DeterministicNoDraw" else 1)
     pending = None
     if index < limit:
         pending = {
@@ -69,7 +70,8 @@ def serve(request):
         state = states[request["nature_handle"]]
         if digest(state) != request["fingerprint"]:
             raise ValueError("Stale fingerprint")
-        count = 2 if state["kind"] == "initial_hp" else 1
+        count = (2 if state["kind"] == "initial_hp" else
+                 0 if state["params"]["native_entry"] == "DeterministicNoDraw" else 1)
         if state["index"] >= count:
             raise ValueError("Completed fixture")
         if type(request["selected_index"]) is not int or not 0 <= request["selected_index"] < 3:
