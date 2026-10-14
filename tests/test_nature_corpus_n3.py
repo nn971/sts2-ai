@@ -103,7 +103,7 @@ def test_source_disjoint_and_fixture_input_validation(tmp_path: Path):
     leaked = (replace(items[0], partition="evaluation"), *items[1:])
     with pytest.raises(ValueError, match="leaks|leakage"):
         execute(leaked, tmp_path / "leak", workers=1)
-    with pytest.raises(ValueError, match="Duplicate"):
+    with pytest.raises(ValueError, match="duplicate"):
         execute((items[0], items[0]), tmp_path / "dup", workers=1)
     with pytest.raises(ValueError, match="only Hive/Glory"):
         replace(items[0], act=1)
@@ -126,7 +126,7 @@ def test_protocol_and_policy_identity_rejected_on_resume(tmp_path: Path):
     extra = root / "records" / "foreign.json"
     extra.write_text("{}")
     with pytest.raises(ValueError, match="Unknown Nature record"):
-        execute(items, root, workers=1, resume=True)
+        execute(items, root, workers=1, resume=True, mode="first")
     extra.unlink()
     manifest = json.loads((root / "manifest.json").read_text())
     assert manifest["scope"] == "isolated-combat-entry-only"
