@@ -131,3 +131,20 @@ def test_protocol_and_policy_identity_rejected_on_resume(tmp_path: Path):
     manifest = json.loads((root / "manifest.json").read_text())
     assert manifest["scope"] == "isolated-combat-entry-only"
     assert manifest["fixture_count"] == 2
+
+
+
+def test_deterministic_intents_have_valid_empty_chance_transcript(tmp_path: Path):
+    source = NatureFixture(
+        fixture_id="deterministic-intent", seed="deterministic-1",
+        source_policy="synthetic-protocol-v1", partition="evaluation",
+        ascension=0, act=2,
+        encounter_id="synthetic.only.no_chance",
+        native_entry="DeterministicNoDraw",
+        total_floor=20, kind="intents",
+    )
+    result = execute((source,), tmp_path / "zero", workers=15)
+    assert result["decision_count"] == 0
+    record = json.loads((tmp_path / "zero" / "corpus.jsonl").read_text())
+    assert record["transcript"]["entries"] == []
+    assert record["final_fingerprint"] == record["replay_fingerprint"]
