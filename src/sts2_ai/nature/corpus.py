@@ -152,8 +152,7 @@ def validated_record(
     transcript = ChanceTranscript.from_json(json.dumps(raw.get("transcript")))
     if (transcript.emulator_revision != manifest["emulator_revision"] or
             transcript.nature_policy_id != raw.get("nature_policy_id") or
-            len(transcript.entries) != raw.get("decision_count") or
-            not transcript.entries):
+            len(transcript.entries) != raw.get("decision_count")):
         raise ValueError("Nature record transcript inconsistency")
     if (not isinstance(raw.get("final_fingerprint"), str) or
             raw["final_fingerprint"] != raw.get("replay_fingerprint")):
