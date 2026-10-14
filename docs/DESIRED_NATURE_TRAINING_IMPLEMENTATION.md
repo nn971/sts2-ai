@@ -8,9 +8,13 @@ N4 synthetic toy-gradient groundwork**. See
 [runbook](NATURE_GROUNDWORK_RUNBOOK.md) for executable acceptance evidence
 and [missing emulator interfaces](NATURE_EMULATOR_INTERFACE_GAPS.md)
 ([emulator issue #143](https://github.com/nn971/sts2-emulator/issues/143)).
-Full playable controlled combat, 15 native emulator workers, original
-chance-law calibration, PPO Nature integration and learned Nature training
-remain future stages.
+Work on [AI PR #72](https://github.com/nn971/sts2-ai/pull/72)
+adds **N3 isolated corpus collection**, a 15-process worker runner,
+strict run/partition provenance, resumable records and deterministic
+replay; see the [N3 runbook](NATURE_N3_CORPUS_RUNBOOK.md).
+Full playable controlled combat, 15-worker **native emulator benchmark
+acceptance**, original chance-law calibration, PPO Nature integration
+and learned Nature training remain future stages.
 
 
 **Status:** proposed `sts2-ai` implementation roadmap, documentation only; 2026-10-12.  
