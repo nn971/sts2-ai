@@ -16,7 +16,6 @@ from sts2_ai.nature.corpus import (
     NatureFixture,
     file_sha256,
     load_fixtures,
-    manifest_identity,
     record_filename,
 )
 from sts2_ai.nature.worker_corpus import collect_isolated_corpus
