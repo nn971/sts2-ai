@@ -53,6 +53,7 @@ def play_controlled_fixture(
     player_choose: Callable[[FairPlayerFrame], str],
     max_boundaries: int = 512,
     on_decision: Callable[[PlayableDecision], None] | None = None,
+    record_transitions: bool = False,
 ) -> PlayableTrajectory:
     """Use the actual HP->intent continuation and mechanically execute actions.
 
@@ -98,11 +99,17 @@ def play_controlled_fixture(
                 isolated_handles.append(state)
             if state.kind == "intents":
                 break
+            before_advance = state.fingerprint
             state = isolated.advance(state)
             isolated_handles.append(state)
+            if record_transitions:
+                append("system", before_advance, "nature_advance", "", state.fingerprint)
 
+        before_playable = state.fingerprint
         frame = playable.begin(state, seed=seed)
         playable_handles.append(frame)
+        if record_transitions:
+            append("system", before_playable, "controlled_begin", "", frame.fingerprint)
         while frame.phase != "terminal":
             if len(decisions) >= max_boundaries:
                 raise RuntimeError("Controlled fixture boundary budget exhausted: censored")
