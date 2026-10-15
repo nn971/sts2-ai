@@ -147,7 +147,8 @@ def bridges(wire):
 def test_complete_combat_joint_script_is_exact_and_releases_handles():
     wire = Wire()
     isolated, playable = bridges(wire)
-    choose = lambda frame: frame.action_ids[0]
+    def choose(frame):
+        return frame.action_ids[0]
     first = play_controlled_fixture(isolated, playable, FirstLegalNature(),
                                     player_choose=choose, **FIXTURE)
     assert [d.kind for d in first.decisions] == [
