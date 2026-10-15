@@ -2,7 +2,7 @@
 
 Research infrastructure for building an AI that can make strong **whole-run strategic decisions** in *Slay the Spire 2*.
 
-**Nature development:** see [Desired Nature Training Implementation](docs/DESIRED_NATURE_TRAINING_IMPLEMENTATION.md), [N0–N4 groundwork](docs/NATURE_GROUNDWORK_RUNBOOK.md), and [N3 isolated 15-worker corpus](docs/NATURE_N3_CORPUS_RUNBOOK.md). Typed policies, an isolated HP/intent bridge, exact synthetic chance-gradient checks, and resumable replay infrastructure are implemented on the Nature PR stack. Full playable controlled combat and learned Nature training depend on the [missing emulator interfaces](docs/NATURE_EMULATOR_INTERFACE_GAPS.md); existing v15 training remains unchanged.
+**Nature development:** see [Desired Nature Training Implementation](docs/DESIRED_NATURE_TRAINING_IMPLEMENTATION.md), [N0–N4 groundwork](docs/NATURE_GROUNDWORK_RUNBOOK.md), and [N3 isolated 15-worker corpus](docs/NATURE_N3_CORPUS_RUNBOOK.md), plus the [semantic-event adapter](docs/NATURE_SEMANTIC_ADAPTER_N1N2.md). Typed policies, an isolated HP/intent bridge, exact synthetic chance-gradient checks, and resumable replay infrastructure are implemented on the Nature PR stack. Full playable controlled combat and learned Nature training depend on the [missing emulator interfaces](docs/NATURE_EMULATOR_INTERFACE_GAPS.md); existing v15 training remains unchanged.
 
 The long-term objective is an agent that reasons jointly about:
 
