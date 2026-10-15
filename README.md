@@ -43,6 +43,15 @@ sts2-emulator  <---  sts2-ai
 
 `sts2-ai` may reason about the value of a decision. `sts2-emulator` only determines what the decision mechanically does.
 
+## Experiment evidence rule
+
+All training, agent, sampling and Nature comparisons follow the
+[project-wide experiment evidence standard](docs/EXPERIMENT_EVIDENCE_STANDARD.md).
+**Short runs (including 20-round pilots) establish only smoke/diagnostic
+evidence.** Feature-quality conclusions require substantial
+learning-curve coverage, matched compute and native-RNG evaluation,
+independent training seeds, and quantified training/evaluation uncertainty.
+
 ## Current status
 
 **Native-structure Overgrowth training is now wired to the verified emulator reset:**
