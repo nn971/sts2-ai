@@ -120,8 +120,12 @@ def test_schedule_independent_semantic_outcomes():
 class FakeSemanticWire:
     """A synthetic sequence: peek, known-card draw, unknown draw, intent."""
 
-    def __init__(self, *, legacy=False):
+    def __init__(self, *, legacy=False, operations=None):
         self.legacy = legacy
+        self.operations = operations or [
+            "draw_card", "reveal_card", "enemy_intent",
+            "select_distinct", "generate_offer",
+        ]
         self.states = {}
         self.counter = 0
         self.actions_seen = []
@@ -178,10 +182,7 @@ class FakeSemanticWire:
                 "wireSchemaId": "prototype-ai-jsonl-v0",
                 "semanticChanceSchemaId": PROPOSED_WIRE_SCHEMA if not self.legacy else None,
                 "semanticChanceRepresentationId": "nature-deferred-v1",
-                "semanticChanceOperations": [
-                    "draw_card", "reveal_card", "enemy_intent",
-                    "select_distinct", "generate_offer",
-                ],
+                "semanticChanceOperations": self.operations,
                 "fairPolicyId": "prototype-fair-v0",
             }
         if operation == "semantic_begin":
@@ -288,3 +289,17 @@ def test_semantic_player_fairness_and_stale_pending_guards():
             replace(frame, fingerprint="forged-stale-fingerprint"),
             SemanticProposal(1, event.candidate_ids[1], "script"),
         )
+
+
+def test_incremental_semantic_capabilities_fail_on_missing_operation():
+    wire = FakeSemanticWire(operations=["draw_card", "reveal_card", "enemy_intent"])
+    bridge = SemanticNatureBridge(wire, emulator_revision="test")
+    assert bridge.operations == frozenset(wire.operations)
+    partial = FakeSemanticWire(operations=["draw_card"])
+    with pytest.raises(SemanticCapabilityUnavailable, match="contract mismatch"):
+        SemanticNatureBridge(partial, emulator_revision="test")
+    draw_only = SemanticNatureBridge(
+        partial, emulator_revision="test", required_operations=frozenset({"draw_card"}),
+    )
+    with pytest.raises(SemanticCapabilityUnavailable, match="unadvertised"):
+        draw_only.begin(fixture_id="toy", seed="s")
