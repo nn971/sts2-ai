@@ -167,3 +167,27 @@ standalone Nature learning pilot and toy experiment. Actual native
 chance-law calibration and calibrated importance-weighted PPO are later
 work packages. The first experiment uses no map, rewards, shops,
 formations, or other discretionary Nature-controlled RNG.
+
+## First CI observation — synthetic combat only (2026-10-15)
+
+[Focused Nature CI #38763137565](https://github.com/nn971/sts2-ai/actions/runs/38763137565)
+passed unit tests and the three-seed toy A/B (20 rounds, 24 combat
+episodes per batch, 256 reference-evaluation toy episodes per seed).
+
+| Training seed | Nature-trained minus native-trained player return under toy native RNG | Learned Nature minus untrained Nature, same frozen player |
+| --- | ---: | ---: |
+| 29 | +0.0220 | −0.1494 |
+| 30 | −0.1117 | −0.1191 |
+| 31 | +0.0189 | −0.1283 |
+| **Mean** | **−0.0236** | **−0.1323** |
+
+These are **synthetic reward units**, not percentage-point win-rate changes.
+Nature learned to lower the frozen player's return in all three toy seeds.
+The Nature-trained player's held-out native performance improved in two of
+three seeds but was worse on average; the initial result is **inconclusive
+for player improvement** and motivates the controlled StS2 experiment.
+Native player control received more player optimizer steps but the same
+number of total simulated combats; this deliberately measures performance
+per simulator episode, *including the opportunity cost of training Nature*.
+Three seeds are insufficient to claim statistical significance. StS2
+emulator semantic-gameplay/JSONL trials have **not** been executed.
