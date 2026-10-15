@@ -231,6 +231,7 @@ def run_paired_toy_pilot(
         raise ValueError("Need rounds, 2+ batch episodes and 2+ held-out episodes")
     control = ToyPlayer(seed=seed + 100)
     robust = ToyPlayer(seed=seed + 100)
+    frozen_probe = ToyPlayer(seed=seed + 100)
     opponent = TwoSiteNature(seed=seed + 200, mix=nature_mix)
     holdouts = tuple(seed + 1_000_000 + i for i in range(evaluation_episodes))
     progress = []
@@ -266,9 +267,27 @@ def run_paired_toy_pilot(
             left, right = _evaluate(control, seeds=holdouts), _evaluate(
                 robust, seeds=holdouts,
             )
+            frozen_native = _evaluate(frozen_probe, seeds=holdouts)
+            frozen_nature_rows = tuple(
+                run_toy_combat(
+                    frozen_probe, episode=10_000_000 + i,
+                    nature=opponent, native_seed=sv,
+                )
+                for i, sv in enumerate(holdouts)
+            )
+            frozen_nature_return = math.fsum(
+                row.reward for row in frozen_nature_rows
+            ) / len(frozen_nature_rows)
             progress.append({
                 "round": r + 1,
                 "native": left, "nature_train": right,
+                "frozen_player_difficulty": {
+                    "native_return": frozen_native["return"],
+                    "nature_return": frozen_nature_return,
+                    "nature_minus_native": (
+                        frozen_nature_return - frozen_native["return"]
+                    ),
+                },
                 "delta_native_eval_return": right["return"] - left["return"],
                 "nature_objective": nature_stats,
                 "simulated_combats_per_arm": (r + 1) * 2 * episodes_per_batch,
