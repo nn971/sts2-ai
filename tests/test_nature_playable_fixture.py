@@ -6,10 +6,13 @@ import json
 import pytest
 
 from sts2_ai.emulator.controlled_chance import (
-    ControlledChanceUnavailable, IsolatedNatureBridge,
+    ControlledChanceUnavailable,
+    IsolatedNatureBridge,
 )
 from sts2_ai.emulator.playable_chance import (
-    PLAYABLE_SCHEMA, PlayableBoundary, PlayableNatureBridge,
+    PLAYABLE_SCHEMA,
+    PlayableBoundary,
+    PlayableNatureBridge,
 )
 from sts2_ai.nature.playable_trajectory import play_controlled_fixture
 from sts2_ai.nature.policies import FirstLegalNature, ScriptedNature
