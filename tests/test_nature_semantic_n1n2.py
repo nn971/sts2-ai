@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import math
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 
 import pytest
 
@@ -283,4 +284,7 @@ def test_semantic_player_fairness_and_stale_pending_guards():
     child = bridge.resolve(frame, selected)
     assert child.phase == "chance"
     with pytest.raises(ValueError, match="Stale semantic pending"):
-        bridge.resolve(frame, SemanticProposal(1, event.candidate_ids[1], "script"))
+        bridge.resolve(
+            replace(frame, fingerprint="forged-stale-fingerprint"),
+            SemanticProposal(1, event.candidate_ids[1], "script"),
+        )
