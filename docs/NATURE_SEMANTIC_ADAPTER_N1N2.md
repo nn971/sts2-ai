@@ -71,6 +71,11 @@ with silent semantic reinterpretation.
 }
 ```
 
+The bridge negotiates **incremental operation subsets**. The first
+structural pilot requires `draw_card`, `reveal_card` and `enemy_intent` by
+default; offer operations may be added later. Encountering any operation
+outside the server-advertised set raises an explicit capability error.
+
 New opt-in operations proposed:
 
 - `semantic_begin(fixture_id,seed)`: explicit semantic initializer,
