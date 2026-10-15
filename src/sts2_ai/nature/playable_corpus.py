@@ -126,6 +126,13 @@ def _run_once(fixture: NatureFixture, policy: Any, *, cap: int):
     if _worker_isolated is None or _worker_playable is None:
         raise RuntimeError("Playable worker is not initialized")
     decisions: list[PlayableDecision] = []
+    attempted: list[str] = []
+
+    def choose(frame: Any) -> str:
+        action = frame.action_ids[0]
+        attempted.append(action)
+        return action
+
     status = STATUS_TERMINAL
     site = operation = None
     terminal_fingerprint: str | None = None
@@ -136,15 +143,19 @@ def _run_once(fixture: NatureFixture, policy: Any, *, cap: int):
             encounter_id=fixture.encounter_id,
             native_entry=fixture.native_entry,
             total_floor=fixture.total_floor,
-            player_choose=lambda frame: frame.action_ids[0],
+            player_choose=choose,
             max_boundaries=cap, on_decision=decisions.append,
+            record_transitions=True,
         )
         if tuple(decisions) != result.decisions:
             raise RuntimeError("Playable callback disagrees with returned trace")
         terminal_fingerprint = result.terminal_fingerprint
     except (ControlledChanceUnavailable, RuntimeError) as exc:
         status, site, operation = _status(exc)
-    return status, site, operation, terminal_fingerprint, tuple(decisions)
+    return (
+        status, site, operation, terminal_fingerprint,
+        tuple(decisions), tuple(attempted),
+    )
 
 
 def _run_job(index: int, fixture: NatureFixture, manifest: dict[str, Any]):
@@ -152,7 +163,7 @@ def _run_job(index: int, fixture: NatureFixture, manifest: dict[str, Any]):
         manifest["nature_mode"], manifest["nature_seed"], fixture,
     )
     cap = manifest["max_boundaries"]
-    status, site, operation, terminal, decisions = _run_once(
+    status, site, operation, terminal, decisions, attempted = _run_once(
         fixture, policy, cap=cap,
     )
     scripted = ScriptedNature.from_selections(
@@ -163,9 +174,18 @@ def _run_job(index: int, fixture: NatureFixture, manifest: dict[str, Any]):
     # observation is stable in an adversarial Nature branch.
     # On a censored/unsupported prefix the second run must reach the same
     # blocked boundary and never consume any extra scripted outcomes.
-    player_actions = iter(
-        row.selection for row in decisions if row.kind == "player"
-    )
+    player_actions = iter(attempted)
+    repeat_attempted: list[str] = []
+
+    def replay_choose(frame: Any) -> str:
+        try:
+            action = next(player_actions)
+        except StopIteration as exc:
+            raise ValueError("Unrecorded replay player action") from exc
+        if action not in frame.action_ids:
+            raise ValueError("Replayed player action became illegal")
+        repeat_attempted.append(action)
+        return action
     assert _worker_isolated is not None and _worker_playable is not None
     repeat: list[PlayableDecision] = []
     repeat_status = STATUS_TERMINAL
@@ -177,8 +197,9 @@ def _run_job(index: int, fixture: NatureFixture, manifest: dict[str, Any]):
             seed=fixture.seed, act=fixture.act,
             encounter_id=fixture.encounter_id,
             native_entry=fixture.native_entry, total_floor=fixture.total_floor,
-            player_choose=lambda frame: next(player_actions),
+            player_choose=replay_choose,
             max_boundaries=cap, on_decision=repeat.append,
+            record_transitions=True,
         )
         repeat_terminal = result.terminal_fingerprint
         if tuple(repeat) != result.decisions:
@@ -189,7 +210,7 @@ def _run_job(index: int, fixture: NatureFixture, manifest: dict[str, Any]):
     if (
         repeat_status != status or repeat_site != site or
         repeat_operation != operation or repeat_terminal != terminal or
-        tuple(repeat) != decisions
+        tuple(repeat) != decisions or tuple(repeat_attempted) != attempted
     ):
         raise ValueError(f"Joint playable chance/player replay diverged: {fixture.fixture_id}")
     record = seal_record({
@@ -208,6 +229,8 @@ def _run_job(index: int, fixture: NatureFixture, manifest: dict[str, Any]):
         "decision_count": len(decisions),
         "chance_count": sum(row.kind == "nature" for row in decisions),
         "player_count": sum(row.kind == "player" for row in decisions),
+        "system_count": sum(row.kind == "system" for row in decisions),
+        "attempted_player_actions": list(attempted),
         "decisions": [asdict(row) for row in decisions],
     })
     return index, record, os.getpid()
@@ -239,8 +262,21 @@ def _validate(
             sum(row.get("kind") == "nature" for row in rows)
             != record.get("chance_count") or
             sum(row.get("kind") == "player" for row in rows)
-            != record.get("player_count")):
+            != record.get("player_count") or
+            sum(row.get("kind") == "system" for row in rows)
+            != record.get("system_count") or
+            sum(row.get("kind") not in ("player", "nature", "system") for row in rows)
+            != 0):
         raise ValueError("Playable Nature record decision counts mismatch")
+    attempts = record.get("attempted_player_actions")
+    if (not isinstance(attempts, list) or
+            any(not isinstance(x, str) or not x for x in attempts) or
+            len(attempts) < record.get("player_count", 0) or
+            len(attempts) > record.get("player_count", 0) + 1):
+        raise ValueError("Invalid playable attempted player actions")
+    successful = [row["selection"] for row in rows if row.get("kind") == "player"]
+    if attempts[:len(successful)] != successful:
+        raise ValueError("Playable attempted player action history mismatch")
     try:
         typed = tuple(PlayableDecision(**row) for row in rows)
     except (ValueError, TypeError) as exc:
