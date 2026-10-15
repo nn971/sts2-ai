@@ -7,9 +7,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
-from sts2_ai.emulator.semantic_chance import SemanticNatureBridge
+if TYPE_CHECKING:
+    from sts2_ai.emulator.semantic_chance import SemanticNatureBridge
 
 from .protocol import canonical_sha256
 from .semantic import PROPOSED_WIRE_SCHEMA, SemanticEvent, SemanticProposal
