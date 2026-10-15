@@ -81,8 +81,12 @@ The report separates **two diagnostic questions**:
 
 - `frozen_player_difficulty.nature_minus_native`: whether learned Nature
   creates a lower-return distribution for the *same initial frozen player*.
-  Negative values demonstrate the adversary is effective in this declared
-  toy game; they do not demonstrate a stronger trained player.
+  A negative value describes difficulty relative to the toy native source;
+  it can already be negative under an **untrained** exploratory proposal.
+- `frozen_player_difficulty.learned_minus_untrained_nature`: compares the
+  optimized opponent with its initial full-support proposal against the
+  same frozen player. Negative values are more direct evidence of learned
+  adversarial difficulty, subject to sampling uncertainty.
 - `delta_native_eval_return`: whether the Nature-trained player improves
   versus equal-compute native training on a held-out synthetic-native
   law. This is the pilot's actual objective; positive is better.
