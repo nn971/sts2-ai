@@ -12,10 +12,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from sts2_ai.emulator.controlled_chance import (
+    WIRE_SCHEMA,
     ControlledChanceUnavailable,
     IsolatedBoundary,
     NatureWire,
-    WIRE_SCHEMA,
 )
 from sts2_ai.emulator.jsonl_backend import FAIR_POLICY_ID, OBSERVATION_SCHEMA_ID
 from sts2_ai.nature.protocol import ChanceEvent
