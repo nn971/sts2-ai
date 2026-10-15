@@ -8,8 +8,9 @@ The emulator remains authoritative for deck constraints and game mechanics.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping, Protocol
+from typing import Any, Protocol
 
 from sts2_ai.nature.semantic import (
     PROPOSED_WIRE_SCHEMA,
