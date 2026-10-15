@@ -84,6 +84,8 @@ def play_controlled_fixture(
         state = hp
         while True:
             while not state.complete:
+                if len(decisions) >= max_boundaries:
+                    raise RuntimeError("Controlled fixture boundary budget exhausted: censored")
                 if state.pending is None:
                     raise RuntimeError("Missing initial chance event")
                 event = state.pending
