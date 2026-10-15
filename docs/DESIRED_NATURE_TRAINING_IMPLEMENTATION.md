@@ -22,6 +22,8 @@ and learned Nature training remain future stages.
 **Development base:** v15q combat importance-sampling/diagnostics branch; do not reinterpret existing checkpoint fingerprints.  
 **Scope:** single-player Silent combat first; later generalize to whole-run macro stochasticity. Multiplayer-only and cross-character mechanics are outside this initial milestone.
 
+**AI implementation note (2026-10-15):** A new opt-in `SemanticEvent` / `SemanticNatureBridge` and joint trajectory driver are implemented on `feature/nature-semantic-adapter-n1n2`. See [semantic N1/N2 adapter contract](NATURE_SEMANTIC_ADAPTER_N1N2.md). The emulator semantic deck-state kernel is presently pure, so the new bridge has synthetic contract tests and deliberately refuses the legacy JSONL handshake; live semantic gameplay requires a separately advertised emulator capability. Existing N3 fixture and v15 paths remain intact.
+
 ## 0A. Nature semantic-state interface update (2026-10-15)
 
 **Accepted architecture:** the emulator presents one game-mechanics interface

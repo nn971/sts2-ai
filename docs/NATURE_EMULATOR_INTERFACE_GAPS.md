@@ -4,6 +4,41 @@
 to `sts2-emulator` code or to the emulator submodule pin are included.
 See [desired Nature design](DESIRED_NATURE_TRAINING_IMPLEMENTATION.md).
 
+## Update: revised semantic RNG architecture (2026-10-15)
+
+The original gap table below describes the **initial isolated #137/#140
+fixture snapshot**. Subsequent emulator PRs #144–#155 delivered opt-in
+playable fixture actions, end-turn intent/recycle suspensions, random
+targeting, card-generation/hand-cost continuations and guarded replay.
+[Emulator PR #156](https://github.com/nn971/sts2-emulator/pull/156)
+adds the pure `sts2-v111-semantic-deck-v1` provider kernel following
+the [revised desired RNG design](https://github.com/nn971/sts2-emulator/blob/main/docs/DESIRED_RNG_IMPLEMENTATION.md).
+
+For the revised AI Nature interface, the priority gaps are now:
+
+1. **New semantic JSONL capability:** advertise a distinct opt-in
+   `semanticChanceSchemaId` and operation set; expose engine-owned
+   deferred `draw_card` / `reveal_card` decisions with stable physical
+   instance IDs, support/constraint fingerprints, epoch identity and
+   fork/save/load/replay. The kernel is currently **not** wired into
+   live `DrawCards`, player observations or JSONL.
+2. **Mechanical draw/hook integration:** implement known-top and partially
+   revealed positions, source-timed recycle, forced top/bottom/middle
+   insertion, peek/scry and repeated CardDrawn hooks at the correct
+   continuation stages. No duplicate semantic event for previously
+   committed identity and no duplicate primitive shuffle likelihood.
+3. **Visible weighted intents:** after source AI-history filters, expose
+   eligible intent IDs, raw weights and normalization to Nature, then
+   commit and publicly reveal the chosen intent at the normal boundary.
+   Preserve native ticket/cursor parity separately.
+4. **Full supported-combat terminal rollout and 15-worker .NET parity:**
+   current integrations are targeted mechanisms/fixtures, not a completed
+   general playable Nature run. Original-game `p` laws remain unverified.
+
+See [AI semantic adapter runbook](NATURE_SEMANTIC_ADAPTER_N1N2.md).
+The new AI wire names are **proposed**, not already supported by emulator.
+The legacy primitive-index / isolated Nature protocols are preserved.
+
 ## Source-verified current state
 
 Inspected `sts2-emulator` draft
