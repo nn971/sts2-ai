@@ -38,7 +38,8 @@ class Wire:
             kind = "initial_hp" if phase == 0 else "intents"
             at_choice = len(choices) == 0
             pending = None if not at_choice else {
-                "siteId": "combat.initial_unique_hp" if phase == 0 else "combat.committed_intent.index_draw",
+                "siteId": ("combat.initial_unique_hp" if phase == 0
+                           else "combat.committed_intent.index_draw"),
                 "streamId": "run.niche" if phase == 0 else "run.monster_ai",
                 "ownerId": "creature:1", "ordinal": 0, "operationKind": "bounded_integer",
                 "sourceVersion": "v0.111.0", "orderedCandidates": [], "boundedCount": 2,
