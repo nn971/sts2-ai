@@ -9,6 +9,14 @@ randomness and player-visible observations.
 [N3 playable fixture diagnostics PR #77](https://github.com/nn971/sts2-ai/pull/77).
 The desired RNG/Nature documents (updated 2026-10-15) remain authoritative.
 
+> **Evidence level: smoke/diagnostic only.** This feature follows the
+> [project-wide experiment evidence standard](https://github.com/nn971/sts2-ai/blob/main/docs/EXPERIMENT_EVIDENCE_STANDARD.md).
+> The 20-round / three-seed toy comparison exercises the optimizer and
+> experiment infrastructure. It is **not** a feature-value assessment,
+> positive or negative. Assess Nature only after substantial real-combat
+> training, replicated native-RNG evaluation, and both training-seed and
+> source-run uncertainty analysis.
+
 ## Experiment question and success criterion
 
 Does training the player against a small, learned Nature proposal over only
@@ -29,7 +37,11 @@ Evaluate **both** player checkpoints under independent **native RNG** on a
 common, source-run-disjoint combat holdout. Compare combat survival, win
 rate, exit HP, native evaluation return and confidence intervals clustered
 by source run. Evaluate after fixed total emulator combats / elapsed compute.
-Run at least three training seeds before any promotion decision.
+Use at least five independently retrained seeds as an initial
+decision-grade target, with more whenever the observed model-to-model
+variance demands it. Substantial training length must be justified by
+learning curves, mature baseline budgets, and stage-appropriate samples;
+three-seed/20-round pilots remain smoke/diagnostic tests.
 
 This first learned proposal is a **stress-testing adversary**, *not*
 variance-minimizing importance sampling. Its `q` need not equal source
@@ -99,13 +111,16 @@ performance, and 3 toy seeds are a machinery smoke, not a confidence interval.
 ## Live emulator integration gate (issue #143)
 
 [Emulator PR #162](https://github.com/nn971/sts2-emulator/pull/162)
-already implements a **restricted genuine end-turn action**:
-real enemy-intent commitments, source-timed discard recycle, deferred
-physical draw identities, per-card hooks, and the next legal player
-decision. It is limited to a checkpoint with **empty draw pile and
-nonempty discard pile** and remains internal to the C# emulator.
-Complete semantic combat JSONL and persistent per-card unknown-order
-state across arbitrary player actions are still pending.
+implements a genuine restricted end-turn continuation through controlled
+intents and deferred card draws. Subsequently,
+[PR #163](https://github.com/nn971/sts2-emulator/pull/163)
+persists the unresolved semantic deck through supported basic Silent
+Strike/Defend actions and multiple end turns, including a subsequent
+nonempty draw pile. Initial entry still requires an honestly new
+source-time shuffle state. Full externally playable **semantic JSONL**,
+source-weighted intent metadata, broader card actions and complete
+terminal combat episodes remain outstanding. These are P0 blockers in
+[emulator issue #143](https://github.com/nn971/sts2-emulator/issues/143).
 
 To connect the above training loop to actual combat, the emulator must
 supply a **new, opt-in, versioned two-site playable semantic capability**:
@@ -189,5 +204,9 @@ for player improvement** and motivates the controlled StS2 experiment.
 Native player control received more player optimizer steps but the same
 number of total simulated combats; this deliberately measures performance
 per simulator episode, *including the opportunity cost of training Nature*.
-Three seeds are insufficient to claim statistical significance. StS2
-emulator semantic-gameplay/JSONL trials have **not** been executed.
+This short toy run is an **evidence-level 1 smoke**, unsuitable for
+accepting, rejecting, or ranking Nature for the actual project.
+StS2 emulator semantic-gameplay/JSONL trials have **not** been executed.
+Decision-grade tests require substantial training and independent
+native-RNG validation under the
+[project evidence standard](https://github.com/nn971/sts2-ai/blob/main/docs/EXPERIMENT_EVIDENCE_STANDARD.md).
