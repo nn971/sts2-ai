@@ -52,6 +52,7 @@ def play_controlled_fixture(
     total_floor: int,
     player_choose: Callable[[FairPlayerFrame], str],
     max_boundaries: int = 512,
+    on_decision: Callable[[PlayableDecision], None] | None = None,
 ) -> PlayableTrajectory:
     """Use the actual HP->intent continuation and mechanically execute actions.
 
@@ -74,7 +75,10 @@ def play_controlled_fixture(
     def append(kind: str, before: str, identity: str, choice: str, after: str) -> None:
         if len(decisions) >= max_boundaries:
             raise RuntimeError("Controlled fixture boundary budget exhausted: censored")
-        decisions.append(PlayableDecision(kind, before, identity, choice, after))
+        row = PlayableDecision(kind, before, identity, choice, after)
+        decisions.append(row)
+        if on_decision is not None:
+            on_decision(row)
 
     try:
         state = hp
