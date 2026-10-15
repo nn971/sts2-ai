@@ -5,8 +5,9 @@ versioned bridge must author all support, constraints and transitions.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 from sts2_ai.emulator.semantic_chance import SemanticNatureBridge
 
