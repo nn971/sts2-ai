@@ -14,7 +14,7 @@ from typing import Any
 from sts2_ai.emulator.controlled_chance import (
     ControlledChanceUnavailable, IsolatedBoundary, NatureWire, WIRE_SCHEMA,
 )
-from sts2_ai.emulator.jsonl_backend import OBSERVATION_SCHEMA_ID, FAIR_POLICY_ID
+from sts2_ai.emulator.jsonl_backend import FAIR_POLICY_ID, OBSERVATION_SCHEMA_ID
 from sts2_ai.nature.protocol import ChanceEvent
 
 PLAYABLE_SCHEMA = "sts2-v111-controlled-playable-fixture-v1"
@@ -36,7 +36,8 @@ class PlayableBoundary:
         if raw.get("schemaId") != PLAYABLE_SCHEMA:
             raise ControlledChanceUnavailable("Playable fixture schema mismatch")
         handle, fingerprint = raw.get("controlledHandle"), raw.get("fingerprint")
-        if not isinstance(handle, str) or not handle or not isinstance(fingerprint, str) or not fingerprint:
+        if (not isinstance(handle, str) or not handle or
+                not isinstance(fingerprint, str) or not fingerprint:
             raise ControlledChanceUnavailable("Incomplete playable handle/fingerprint")
         if type(raw.get("terminal")) is not bool:
             raise ControlledChanceUnavailable("Missing playable terminal flag")
@@ -156,7 +157,9 @@ class PlayableNatureBridge:
         if not isinstance(observation, dict) or not isinstance(actions, list):
             raise ControlledChanceUnavailable("Invalid public observation or actions")
         ids = tuple(a.get("actionId") for a in actions if isinstance(a, dict))
-        if len(ids) != len(actions) or any(not isinstance(x, str) or not x for x in ids) or len(set(ids)) != len(ids):
+        if (len(ids) != len(actions) or
+                any(not isinstance(x, str) or not x for x in ids) or
+                len(set(ids)) != len(ids)):
             raise ControlledChanceUnavailable("Malformed public action menu")
         if raw.get("terminal") is not False or not isinstance(raw.get("observationHash"), str):
             raise ControlledChanceUnavailable("Player-boundary status/hash mismatch")
@@ -201,7 +204,9 @@ class PlayableNatureBridge:
         return self._decode(raw)
 
     def release(self, *frames: PlayableBoundary) -> int:
-        raw = self.wire.call("controlled_release_many", controlled_handles=[x.handle for x in frames])
+        raw = self.wire.call(
+            "controlled_release_many", controlled_handles=[x.handle for x in frames],
+        )
         count = raw.get("released")
         if type(count) is not int or not 0 <= count <= len(frames):
             raise ControlledChanceUnavailable("Invalid released handle count")
