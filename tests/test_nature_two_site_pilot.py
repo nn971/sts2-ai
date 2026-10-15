@@ -131,6 +131,7 @@ class MinimalSemanticCombat:
     """Synthetic 2 chance / 1 player / terminal adapter, not actual C# combat."""
 
     def __init__(self, *, unsupported: bool = False):
+        self.emulator_revision = "synthetic-test-only"
         self.unsupported = unsupported
         self.released = 0
         self.state = 0
