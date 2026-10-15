@@ -4,12 +4,14 @@ on:
     paths:
       - 'src/sts2_ai/nature/**'
       - 'src/sts2_ai/emulator/controlled_chance.py'
+      - 'src/sts2_ai/emulator/playable_chance.py'
       - 'src/sts2_ai/emulator/semantic_chance.py'
       - 'src/sts2_ai/training/chance_importance.py'
       - 'src/sts2_ai/training/nature_oracle.py'
       - 'tests/test_nature_*.py'
       - 'tests/test_chance_importance.py'
       - 'tools/inspect_nature_rollout.py'
+      - 'tools/inspect_nature_playable.py'
       - 'tools/collect_nature_isolated.py'
       - 'tools/benchmark_nature_workers.py'
       - 'tests/test_nature_corpus_n3.py'
@@ -20,12 +22,14 @@ on:
     paths:
       - 'src/sts2_ai/nature/**'
       - 'src/sts2_ai/emulator/controlled_chance.py'
+      - 'src/sts2_ai/emulator/playable_chance.py'
       - 'src/sts2_ai/emulator/semantic_chance.py'
       - 'src/sts2_ai/training/chance_importance.py'
       - 'src/sts2_ai/training/nature_oracle.py'
       - 'tests/test_nature_*.py'
       - 'tests/test_chance_importance.py'
       - 'tools/inspect_nature_rollout.py'
+      - 'tools/inspect_nature_playable.py'
       - 'tools/collect_nature_isolated.py'
       - 'tools/benchmark_nature_workers.py'
       - 'tests/test_nature_corpus_n3.py'
@@ -52,6 +56,8 @@ jobs:
           tests/test_nature_corpus_n3.py
           tests/fixtures/fake_nature_jsonl.py
           src/sts2_ai/emulator/controlled_chance.py
+          src/sts2_ai/emulator/playable_chance.py
+          tests/test_nature_playable_fixture.py
           src/sts2_ai/emulator/semantic_chance.py
           tests/test_nature_semantic_n1n2.py
           tests/test_nature_semantic_oracle.py
@@ -62,6 +68,7 @@ jobs:
           tests/test_nature_gradient_reference.py
           tests/test_chance_importance.py
           tools/inspect_nature_rollout.py
+          tools/inspect_nature_playable.py
       - name: Strict isolated protocol and exact-oracle tests
         run: >-
           python -m pytest -q
@@ -72,4 +79,5 @@ jobs:
           tests/test_nature_corpus_n3.py
           tests/test_nature_semantic_n1n2.py
           tests/test_nature_semantic_oracle.py
-      - run: python -m compileall -q tools/inspect_nature_rollout.py tools/collect_nature_isolated.py tools/benchmark_nature_workers.py src/sts2_ai/nature
+          tests/test_nature_playable_fixture.py
+      - run: python -m compileall -q tools/inspect_nature_rollout.py tools/inspect_nature_playable.py tools/collect_nature_isolated.py tools/benchmark_nature_workers.py src/sts2_ai/nature
