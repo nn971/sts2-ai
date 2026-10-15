@@ -101,7 +101,7 @@ jobs:
       - name: Toy intent/draw Nature combat A/B smoke
         run: >-
           python -u tools/try_two_site_nature_toy.py
-          --rounds 8 --episodes-per-batch 16
-          --evaluation-episodes 128 --seed 29
+          --rounds 20 --episodes-per-batch 24
+          --evaluation-episodes 256 --seeds 29 30 31
           --output /tmp/nature-two-site-toy.json
       - run: python -m compileall -q tools/try_two_site_nature_toy.py src/sts2_ai/training/two_site_combat_toy.py tools/collect_nature_playable_coverage.py tests/fixtures/fake_nature_playable_jsonl.py tools/inspect_nature_rollout.py tools/inspect_nature_playable.py tools/collect_nature_isolated.py tools/benchmark_nature_workers.py src/sts2_ai/nature
