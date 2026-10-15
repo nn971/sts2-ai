@@ -224,7 +224,8 @@ class TwoSiteNature:
 
     @classmethod
     def restore(cls, data: dict[str, object]) -> TwoSiteNature:
-        if data.get("schema") != PILOT_SCHEMA or data.get("calibrated_native_reference_law") is not False:
+        if (data.get("schema") != PILOT_SCHEMA or
+                data.get("calibrated_native_reference_law") is not False):
             raise ValueError("Nature pilot checkpoint schema/provenance mismatch")
         weights = data["weights"]
         if not isinstance(weights, dict) or any(
