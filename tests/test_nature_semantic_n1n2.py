@@ -113,7 +113,7 @@ def test_schedule_independent_semantic_outcomes():
         policy = UniformSemanticNature(73)
         expected = policy.propose(event)
         with ThreadPoolExecutor(max_workers=15) as pool:
-            actual = tuple(pool.map(lambda _: policy.propose(event), range(150)))
+            actual = tuple(pool.map(lambda _, p=policy, e=event: p.propose(e), range(150)))
         assert actual == (expected,) * 150
 
 
