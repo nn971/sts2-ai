@@ -9,7 +9,6 @@ from sts2_ai.emulator.semantic_chance import SemanticBoundary
 from sts2_ai.nature.semantic import SemanticEvent, SemanticProposal
 from sts2_ai.nature.two_site_opponent import (
     PILOT_OPERATIONS,
-    PILOT_SCHEMA,
     PilotEpisode,
     TwoSiteNature,
 )
@@ -56,9 +55,6 @@ def test_two_site_nature_eligibility_and_unverified_laws() -> None:
 
 def test_adversarial_reinforce_shifts_q_toward_lower_player_return() -> None:
     opponent = TwoSiteNature(seed=41, learning_rate=0.24, mix=0.9)
-    reference = semantic_toy_event(
-        "draw_card", ("good#1", "bad#2"), episode=0, turn=0,
-    )
     initial, _ = opponent._distribution(
         "draw_card", "turn:0", ("good", "bad"), (0.5, 0.5),
     )
