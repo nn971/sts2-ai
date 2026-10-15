@@ -144,12 +144,12 @@ class SemanticNatureBridge:
             selected_index=proposal.selected_index,
             selected_id=proposal.selected_id,
         )
-        return SemanticBoundary.decode(result)
+        return self._decode(result)
 
     def step(self, frame: SemanticBoundary, action_id: str) -> SemanticBoundary:
         if frame.phase != "player" or action_id not in frame.legal_actions:
             raise ValueError("Illegal semantic player action or wrong decision phase")
-        return SemanticBoundary.decode(
+        return self._decode(
             self.wire.call("semantic_step", semantic_handle=frame.handle,
                            fingerprint=frame.fingerprint, action_id=action_id)
         )
@@ -177,7 +177,7 @@ class SemanticNatureBridge:
     def load(self, snapshot: str) -> SemanticBoundary:
         if not snapshot:
             raise ValueError("Semantic snapshot required")
-        return SemanticBoundary.decode(
+        return self._decode(
             self.wire.call("semantic_load", snapshot=snapshot)
         )
 
