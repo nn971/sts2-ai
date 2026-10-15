@@ -18,8 +18,12 @@ Silent all-Act gameplay, PPO optimizer, or frozen policy checkpoint changes.
   **first-legal public action**. That is an API smoke, not v15 performance.
 - Capture every completed interleaved player and Nature decision, preserving
   parent/child state fingerprints, fair action-menu identity, exact chance
-  event identity, and selected outcome. Replay the same fixture with
-  scripted chance indices and the same observed player action sequence.
+  event identity, and selected outcome. Record the deterministic
+  HP→intent and intent→playable stage transitions explicitly so trace
+  continuity can be checked across namespaces. Record attempted player
+  actions separately when an RNG blocker prevents a child from being
+  published. Replay the same fixture with scripted chance indices and
+  the same attempted player action sequence.
 - Compare **exact decision prefix, terminal fingerprint (if any), and
   first blocked site**. Replay equivalence also applies to censored or
   unsupported paths, not only completed fixtures.
@@ -56,7 +60,7 @@ set -l dll /tmp/sts2-nature-bridge/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2E
 set -l rev (git -C /tmp/sts2-nature-bridge rev-parse HEAD)
 
 python -u tools/collect_nature_playable_coverage.py \
-    --fixtures data/nature/isolated-fixtures.example.jsonl \
+    --fixtures data/nature/playable-fixtures.example.jsonl \
     --emulator-dll "$dll" --emulator-revision "$rev" \
     --nature-mode first --nature-seed 29 \
     --workers 15 --max-boundaries 512 \
@@ -64,10 +68,13 @@ python -u tools/collect_nature_playable_coverage.py \
     --output-root results/nature/playable-coverage-first
 ```
 
-Every playable fixture must begin at `kind=initial_hp`. The source
-partitioned input may include Hive and Glory supported entries. The
-example fixture file demonstrates the schema and should be adapted to
-real, currently supported entry identifiers before full benchmarking.
+Every playable fixture must begin at `kind=initial_hp`. The new
+[playable fixture sample](../data/nature/playable-fixtures.example.jsonl)
+contains two independently declared MytesNormal Hive entries for transport
+smoke testing. Both invoke the existing source-shaped HP/intent prefix.
+The input may include other independently verified Hive/Glory supported
+entries for a broader blocker census. Two fixtures do not measure steady
+15-worker throughput.
 Use `--resume` on interrupted runs with the same exact fixtures, policy,
 decision cap, emulator SHA and DLL hash. Worker count may change.
 
