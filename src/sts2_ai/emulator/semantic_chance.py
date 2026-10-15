@@ -83,7 +83,12 @@ class SemanticBoundary:
 class SemanticNatureBridge:
     """No native RNG reimplementation, and no legacy swap-ticket reinterpretation."""
 
-    def __init__(self, wire: SemanticWire, *, emulator_revision: str):
+    def __init__(
+        self, wire: SemanticWire, *, emulator_revision: str,
+        required_operations: frozenset[str] = frozenset({
+            "draw_card", "reveal_card", "enemy_intent",
+        }),
+    ):
         if not emulator_revision:
             raise ValueError("Explicit emulator SHA is required for Nature provenance")
         hello = wire.call("hello")
@@ -96,20 +101,32 @@ class SemanticNatureBridge:
             )
         if hello.get("semanticChanceRepresentationId") != "nature-deferred-v1":
             raise SemanticCapabilityUnavailable("No deferred-card Nature representation")
-        if set(hello.get("semanticChanceOperations", [])) != {
+        advertised = hello.get("semanticChanceOperations")
+        supported = {
             "draw_card", "reveal_card", "enemy_intent",
             "select_distinct", "generate_offer",
-        }:
+        }
+        if (not isinstance(advertised, list) or not advertised
+                or len(set(advertised)) != len(advertised)
+                or not set(advertised) <= supported
+                or not required_operations <= set(advertised)):
             raise SemanticCapabilityUnavailable("Semantic operation contract mismatch")
+        self.operations = frozenset(advertised)
         if hello.get("fairPolicyId") != FAIR_POLICY_ID:
             raise SemanticCapabilityUnavailable("Player policy fairness contract changed")
         self.wire = wire
         self.emulator_revision = emulator_revision
 
+    def _decode(self, response: Mapping[str, Any]) -> SemanticBoundary:
+        frame = SemanticBoundary.decode(response)
+        if frame.event is not None and frame.event.operation not in self.operations:
+            raise SemanticCapabilityUnavailable("Unexpected unadvertised semantic event")
+        return frame
+
     def begin(self, *, fixture_id: str, seed: str) -> SemanticBoundary:
         if not fixture_id or not seed:
             raise ValueError("Semantic fixture provenance missing")
-        return SemanticBoundary.decode(
+        return self._decode(
             self.wire.call("semantic_begin", fixture_id=fixture_id, seed=seed)
         )
 
@@ -138,7 +155,7 @@ class SemanticNatureBridge:
         )
 
     def fork(self, frame: SemanticBoundary) -> SemanticBoundary:
-        child = SemanticBoundary.decode(
+        child = self._decode(
             self.wire.call("semantic_fork", semantic_handle=frame.handle)
         )
         if child.fingerprint != frame.fingerprint or child.phase != frame.phase:
