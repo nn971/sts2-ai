@@ -45,7 +45,9 @@ def main() -> None:
                 f"nature_trained_return={checkpoint['nature_train']['return']:.4f} "
                 f"native_eval_delta={checkpoint['delta_native_eval_return']:+.4f} "
                 f"frozen_nature_difficulty="
-                f"{checkpoint['frozen_player_difficulty']['nature_minus_native']:+.4f}",
+                f"{checkpoint['frozen_player_difficulty']['nature_minus_native']:+.4f} "
+                f"learned_vs_untrained_nature="
+                f"{checkpoint['frozen_player_difficulty']['learned_minus_untrained_nature']:+.4f}",
                 flush=True,
             )
     if len(runs) == 1:
@@ -60,6 +62,11 @@ def main() -> None:
             run["progress"][-1]["frozen_player_difficulty"]["nature_minus_native"]
             for run in runs
         ]
+        learned_deltas = [
+            run["progress"][-1]["frozen_player_difficulty"][
+                "learned_minus_untrained_nature"
+            ] for run in runs
+        ]
         report = {
             "schema": "sts2-ai-two-site-toy-multiseed-v1",
             "synthetic_not_sts2": True,
@@ -69,6 +76,7 @@ def main() -> None:
                 "mean_native_eval_delta": statistics.mean(deltas),
                 "stdev_native_eval_delta": statistics.stdev(deltas),
                 "mean_frozen_nature_difficulty": statistics.mean(difficulties),
+                "mean_learned_minus_untrained_nature": statistics.mean(learned_deltas),
                 "nature_better_native_eval_count": sum(x > 0 for x in deltas),
                 "seed_count": len(seeds),
             },
@@ -77,6 +85,8 @@ def main() -> None:
             "[nature-two-site-toy] "
             f"multi_seed_mean_delta={report['summary']['mean_native_eval_delta']:+.4f} "
             f"mean_difficulty={report['summary']['mean_frozen_nature_difficulty']:+.4f} "
+            f"learned_vs_untrained="
+            f"{report['summary']['mean_learned_minus_untrained_nature']:+.4f} "
             f"better_native_eval={report['summary']['nature_better_native_eval_count']}"
             f"/{len(seeds)}",
             flush=True,
