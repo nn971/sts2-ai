@@ -12,7 +12,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from sts2_ai.emulator.controlled_chance import (
-    ControlledChanceUnavailable, IsolatedBoundary, NatureWire, WIRE_SCHEMA,
+    ControlledChanceUnavailable,
+    IsolatedBoundary,
+    NatureWire,
+    WIRE_SCHEMA,
 )
 from sts2_ai.emulator.jsonl_backend import FAIR_POLICY_ID, OBSERVATION_SCHEMA_ID
 from sts2_ai.nature.protocol import ChanceEvent
@@ -37,7 +40,7 @@ class PlayableBoundary:
             raise ControlledChanceUnavailable("Playable fixture schema mismatch")
         handle, fingerprint = raw.get("controlledHandle"), raw.get("fingerprint")
         if (not isinstance(handle, str) or not handle or
-                not isinstance(fingerprint, str) or not fingerprint:
+                not isinstance(fingerprint, str) or not fingerprint):
             raise ControlledChanceUnavailable("Incomplete playable handle/fingerprint")
         if type(raw.get("terminal")) is not bool:
             raise ControlledChanceUnavailable("Missing playable terminal flag")
