@@ -73,12 +73,24 @@ python -m pip install -e '.[dev]'
 python -m pytest -q tests/test_nature_two_site_pilot.py
 python -u tools/try_two_site_nature_toy.py \
     --rounds 40 --episodes-per-batch 32 \
-    --evaluation-episodes 1024 --seed 29 --nature-mix 0.75 \
-    --output results/nature/two-site-toy-seed29.json
+    --evaluation-episodes 1024 --seeds 29 30 31 --nature-mix 0.75 \
+    --output results/nature/two-site-toy-three-seeds.json
 ```
 
-Run several seeds and inspect the paired native-eval deltas. The testbed's
-arbitrary toy card/HP rewards cannot establish actual StS2 performance.
+The report separates **two diagnostic questions**:
+
+- `frozen_player_difficulty.nature_minus_native`: whether learned Nature
+  creates a lower-return distribution for the *same initial frozen player*.
+  Negative values demonstrate the adversary is effective in this declared
+  toy game; they do not demonstrate a stronger trained player.
+- `delta_native_eval_return`: whether the Nature-trained player improves
+  versus equal-compute native training on a held-out synthetic-native
+  law. This is the pilot's actual objective; positive is better.
+
+`--seeds` supplies independent player/Nature training seeds and reports
+cross-seed means and counts; each run retains stage-by-stage checkpoints.
+The testbed's arbitrary toy card/HP rewards cannot establish actual StS2
+performance, and 3 toy seeds are a machinery smoke, not a confidence interval.
 
 ## Live emulator integration gate (issue #143)
 
