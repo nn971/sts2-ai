@@ -233,6 +233,7 @@ def run_paired_toy_pilot(
     robust = ToyPlayer(seed=seed + 100)
     frozen_probe = ToyPlayer(seed=seed + 100)
     opponent = TwoSiteNature(seed=seed + 200, mix=nature_mix)
+    untrained_opponent = TwoSiteNature(seed=seed + 200, mix=nature_mix)
     holdouts = tuple(seed + 1_000_000 + i for i in range(evaluation_episodes))
     progress = []
     for r in range(rounds):
@@ -278,14 +279,28 @@ def run_paired_toy_pilot(
             frozen_nature_return = math.fsum(
                 row.reward for row in frozen_nature_rows
             ) / len(frozen_nature_rows)
+            untrained_rows = tuple(
+                run_toy_combat(
+                    frozen_probe, episode=10_000_000 + i,
+                    nature=untrained_opponent, native_seed=sv,
+                )
+                for i, sv in enumerate(holdouts)
+            )
+            frozen_untrained_return = math.fsum(
+                row.reward for row in untrained_rows
+            ) / len(untrained_rows)
             progress.append({
                 "round": r + 1,
                 "native": left, "nature_train": right,
                 "frozen_player_difficulty": {
                     "native_return": frozen_native["return"],
                     "nature_return": frozen_nature_return,
+                    "untrained_nature_return": frozen_untrained_return,
                     "nature_minus_native": (
                         frozen_nature_return - frozen_native["return"]
+                    ),
+                    "learned_minus_untrained_nature": (
+                        frozen_nature_return - frozen_untrained_return
                     ),
                 },
                 "delta_native_eval_return": right["return"] - left["return"],
