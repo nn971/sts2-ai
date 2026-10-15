@@ -219,11 +219,18 @@ class LegacyPlayableBridge:
 
     def fork(self, frame: LegacyFrame) -> LegacyFrame:
         raw = self.wire.call("controlled_fork", controlled_handle=frame.handle)
-        if raw.get("parent") != frame.handle or raw.get("fingerprint") != frame.fingerprint:
+        if (raw.get("parent") != frame.handle or
+                raw.get("fingerprint") != frame.fingerprint or
+                not isinstance(raw.get("controlledHandle"), str)):
             raise ControlledChanceUnavailable("Fork provenance mismatch")
-        return self._read(self.wire.call(
-            "controlled_load", snapshot=self.save_handle(raw["controlledHandle"]),
-        ))
+        forked = LegacyFrame(
+            handle=raw["controlledHandle"], fingerprint=frame.fingerprint,
+            phase=frame.phase, pending=frame.pending, terminal=frame.terminal,
+            transcript=frame.transcript,
+        )
+        if self.trace(forked) != self.trace(frame):
+            raise ControlledChanceUnavailable("Fork chance transcript divergence")
+        return forked
 
     def save_handle(self, handle: str) -> str:
         raw = self.wire.call("controlled_save", controlled_handle=handle)
