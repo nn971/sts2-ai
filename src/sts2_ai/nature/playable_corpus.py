@@ -33,7 +33,6 @@ from sts2_ai.emulator.playable_chance import (
 from sts2_ai.nature.corpus import (
     NatureFixture,
     atomic_write,
-    load_fixtures,
     record_filename,
     seal_record,
 )
@@ -246,7 +245,7 @@ def _validate(
         typed = tuple(PlayableDecision(**row) for row in rows)
     except (ValueError, TypeError) as exc:
         raise ValueError("Malformed playable Nature trace") from exc
-    for a, b in zip(typed, typed[1:]):
+    for a, b in zip(typed, typed[1:], strict=False):
         if a.fingerprint_after != b.fingerprint_before:
             raise ValueError("Discontinuous playable Nature trajectory")
     if record["status"] == STATUS_TERMINAL:
