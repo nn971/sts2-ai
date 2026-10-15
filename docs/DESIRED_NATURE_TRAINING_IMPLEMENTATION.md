@@ -8,15 +8,89 @@ N4 synthetic toy-gradient groundwork**. See
 [runbook](NATURE_GROUNDWORK_RUNBOOK.md) for executable acceptance evidence
 and [missing emulator interfaces](NATURE_EMULATOR_INTERFACE_GAPS.md)
 ([emulator issue #143](https://github.com/nn971/sts2-emulator/issues/143)).
-Full playable controlled combat, 15 native emulator workers, original
-chance-law calibration, PPO Nature integration and learned Nature training
-remain future stages.
+Work on [AI PR #72](https://github.com/nn971/sts2-ai/pull/72)
+adds **N3 isolated corpus collection**, a 15-process worker runner,
+strict run/partition provenance, resumable records and deterministic
+replay; see the [N3 runbook](NATURE_N3_CORPUS_RUNBOOK.md).
+Full playable controlled combat, 15-worker **native emulator benchmark
+acceptance**, original chance-law calibration, PPO Nature integration
+and learned Nature training remain future stages.
 
 
 **Status:** proposed `sts2-ai` implementation roadmap, documentation only; 2026-10-12.  
 **Upstream dependency:** [`sts2-emulator` Desired RNG Implementation](https://github.com/nn971/sts2-emulator/blob/docs/desired-rng-implementation-v111/docs/DESIRED_RNG_IMPLEMENTATION.md), [emulator design PR #119](https://github.com/nn971/sts2-emulator/pull/119).  
 **Development base:** v15q combat importance-sampling/diagnostics branch; do not reinterpret existing checkpoint fingerprints.  
 **Scope:** single-player Silent combat first; later generalize to whole-run macro stochasticity. Multiplayer-only and cross-character mechanics are outside this initial milestone.
+
+## 0A. Nature semantic-state interface update (2026-10-15)
+
+**Accepted architecture:** the emulator presents one game-mechanics interface
+while its **native** randomness provider holds exact RNG cursors and committed
+hidden values (such as draw-pile order). The **controlled Nature** provider
+can instead hold unresolved, mechanically constrained hidden objects and
+ask for a semantic outcome at the time the engine needs it. Both use the
+same source-authentic hooks and player observations. Native primitive
+shuffle tickets and Nature's deferred `draw_card` choices are different
+representations of one stochastic mechanism; never train or importance-weight
+both for the same shuffle.
+
+### Nature event contract and first adapters
+
+Consume versioned semantic events with stable owner/instance IDs,
+eligible outcome support, event timing, known-information/constraint
+fingerprints, weights where defined, and explicit reference-law status.
+The emulator is solely responsible for eligibility, persistent state,
+mechanic resumption and card-placement constraints; Python selects legal
+outcomes and logs proposals. Nature-specific private metadata remains
+separate from the player's ordinary observation and value/policy features.
+
+- **`draw_card`:** choose one eligible unresolved card **instance** for
+  the next top-card draw or reveal, consistent with prior shuffles, known
+  top/bottom placements, scry/peek, random insertions and other constraints.
+  Already-known top cards resolve automatically without a redundant choice.
+  Recycle/reshuffle resets the appropriate hidden permutation once, at
+  the source mechanic's timing. Consecutive draws invoke subsequent
+  draw-triggered hooks before the next chance event.
+- **`enemy_intent`:** choose among the currently eligible source intents.
+  The emulator provides their **raw weights**, normalization and probability
+  provenance after applying its internal AI move history, phase, and
+  anti-repeat rules. Nature needs the current support/weights, not the
+  enemy's entire hidden AI state. The selected intent is committed and
+  publicly visible before the player acts.
+- **`select_distinct` / `generate_offer`:** handle sequential
+  without-replacement picks and any additional pool restrictions, preserving
+  complete offers before the player's selection. Bounded native swap
+  transcripts remain a separate compatibility mode.
+
+For new semantic events, have the AI bridge reject an emulator capability
+mismatch instead of treating a legacy swap-index event as `draw_card`.
+`DrawBelief` is a useful toy/reference model for exchangeable unknown
+cards, but the live engine must authoritatively represent instance identity
+and positional constraints. Calibrated `p` may be computed from audited
+weights/conditional distributions; scripted/adversarial `q` may run
+unweighted before such calibration. Keep per-event log-`q`,
+probability-law IDs and full support for any later importance correction.
+
+### Scope, milestones and regression gates
+
+Defer Nature-controlled **Act-map generation**: the full map is visible to
+the player and map control is low priority. Enemy intents are already
+visible at the player-action boundary; no hidden-intent prediction
+interface is needed. Rewards, shops and formations follow ordinary
+source-site chance adapters with no new architecture-specific blockers.
+Do not add cross-stream-correlation reconstruction to the structural
+Nature training roadmap. Original-game likelihood claims still use the
+declared reference-law gate in N5.
+
+Add an opt-in **N1/N2 semantic-state bridge** milestone before live Nature
+training: native-versus-scripted enemy-intent support/weights and exact
+public observation; small shuffled-deck permutation enumeration; forced
+top/bottom/middle insertion, scry/peek and recycled-draw tests; 1-card
+revelation vs known-card no-event behavior; multi-pick offers; fork/save/
+replay and 15-worker scheduling independence. Then run frozen-player
+combat snapshots and compare against untouched native held-out evaluation.
+Record exact capability/schema versions in all new corpus manifests;
+preserve existing N0–N4, N3 corpus, v15 checkpoints and results.
 
 ## 0. Decision and objective
 
@@ -106,9 +180,9 @@ Implement these interchangeable controllers using the same backend:
 3. **Uniform legal and adversarial heuristic:** controlled stress tests; no unbiased-training claims unless their `q` and a valid reference `p` are known.
 4. **Finite exact enumeration:** exhaust a tiny event support and check the expected result of every continuation.
 
-Start with the emulator's initial v111 migration seams: `run.niche` monster HP, `run.monster_ai` intent selection, and encounter-local formation choices; expand to random combat target/card draws **only when the emulator exposes those operations at the actual point of randomness**.
+Start with the emulator's initial v111 migration seams: `run.niche` monster HP, `run.monster_ai` intent selection, and encounter-local formation choices. Next consume the opt-in **semantic** interfaces: source-committed visible intents with weights, and Nature per-card draws from a deferred hidden deck. Native-mode primitive operations keep their original RNG call timing.
 
-Existing combat-entry snapshots may already contain an established hidden shuffle. Changing a visible later draw by editing the draw pile is **not** equivalent to intervening at the earlier shuffle. For Nature experiments, fork at a legitimate pending chance boundary or generate new trajectories through an intercepted operation. Keep source-run-disjoint snapshot partitions.
+Existing native combat-entry snapshots may already contain an exact hidden shuffle. To enable per-draw Nature, **initialize a declared controlled deferred-deck state** through the emulator's supported transition/conversion contract; selecting a later card is then a legitimate semantic chance event with preserved constraints. Never patch an already-resolved exact native deck to impersonate a Nature boundary. Keep source-run-disjoint snapshot partitions.
 
 **First structural success gate:** controlled single-player combat segments complete deterministically (or fail explicitly for unsupported events), using the same public player policy and mechanics; replay/fork and legal-menu traces match the forced outcomes. No probabilistic inference or Nature learning is necessary for this gate.
 
@@ -226,8 +300,8 @@ reward_schema: hp_preservation-v15
 | Stage | Implementation in `sts2-ai` | Dependency / gate |
 | --- | --- | --- |
 | **N0 — Contract/spec** | Define Nature/trajectory types and manifest; pin emulator expected chance capability; keep old paths stable. | Emulator design D0; documentation/protocol tests. |
-| **N1 — Bridge** | Opt-in controlled backend, event decoding, `advance/resolve` orchestration, handles, explicit failure modes. | Emulator D3/D4. Replay same scripted outcomes; no hidden player leak. |
-| **N2 — Fixed Nature** | Native delegator, scripted, legal-uniform/heuristic, small finite enumerator. | Supported emulator chance call sites. Complete supported combat segments. |
+| **N1 — Bridge** | Opt-in controlled backend, event decoding, `advance/resolve` orchestration, and semantic-state capabilities (`draw_card`, weighted `enemy_intent`, constrained pools). | Emulator D3/D4 and semantic-state contract. Replay, schema rejection, no hidden player leak. |
+| **N2 — Fixed Nature** | Native delegator, scripted, legal-uniform/heuristic and small finite enumerator; draw-pile constraint and intent-weight fixtures. | Equivalent small-deck laws, visible-intent weights, forced placements, deterministic forks, supported combat segments. |
 | **N3 — Structured corpus** | Chance transcripts, source-run manifests, fork/replay audit, 15-worker determinism/perf. | N1/N2. Strict hashes and worker-equivalent transcripts. |
 | **N4 — Toy probability oracle** | Pure `p/q` / `log W` / ESS maths plus exact finite-horizon expected-reward and policy-gradient tests. | Explicit toy `p`, not native calibration. Exact identities and stochastic convergence. |
 | **N5 — Reference law gate** | Accept audited event probabilities with versioned conditioning assumptions; reject unverified or absent `p` in calibrated modes. | Emulator D6, source-law evidence. No silent probability fallback. |

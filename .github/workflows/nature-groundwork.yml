@@ -9,6 +9,10 @@ on:
       - 'tests/test_nature_*.py'
       - 'tests/test_chance_importance.py'
       - 'tools/inspect_nature_rollout.py'
+      - 'tools/collect_nature_isolated.py'
+      - 'tools/benchmark_nature_workers.py'
+      - 'tests/test_nature_corpus_n3.py'
+      - 'tests/fixtures/fake_nature_jsonl.py'
       - '.github/workflows/nature-groundwork.yml'
   pull_request:
     paths:
@@ -19,6 +23,10 @@ on:
       - 'tests/test_nature_*.py'
       - 'tests/test_chance_importance.py'
       - 'tools/inspect_nature_rollout.py'
+      - 'tools/collect_nature_isolated.py'
+      - 'tools/benchmark_nature_workers.py'
+      - 'tests/test_nature_corpus_n3.py'
+      - 'tests/fixtures/fake_nature_jsonl.py'
       - '.github/workflows/nature-groundwork.yml'
   workflow_dispatch:
 
@@ -35,6 +43,10 @@ jobs:
         run: >-
           python -m ruff check
           src/sts2_ai/nature
+          tools/collect_nature_isolated.py
+          tools/benchmark_nature_workers.py
+          tests/test_nature_corpus_n3.py
+          tests/fixtures/fake_nature_jsonl.py
           src/sts2_ai/emulator/controlled_chance.py
           src/sts2_ai/training/chance_importance.py
           src/sts2_ai/training/nature_oracle.py
@@ -50,4 +62,5 @@ jobs:
           tests/test_nature_emulator_integration.py
           tests/test_nature_gradient_reference.py
           tests/test_chance_importance.py
-      - run: python -m compileall -q tools/inspect_nature_rollout.py src/sts2_ai/nature
+          tests/test_nature_corpus_n3.py
+      - run: python -m compileall -q tools/inspect_nature_rollout.py tools/collect_nature_isolated.py tools/benchmark_nature_workers.py src/sts2_ai/nature
