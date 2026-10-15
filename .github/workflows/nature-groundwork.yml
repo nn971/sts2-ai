@@ -4,6 +4,7 @@ on:
     paths:
       - 'src/sts2_ai/nature/**'
       - 'src/sts2_ai/emulator/controlled_chance.py'
+      - 'src/sts2_ai/emulator/playable_chance.py'
       - 'src/sts2_ai/emulator/semantic_chance.py'
       - 'src/sts2_ai/training/chance_importance.py'
       - 'src/sts2_ai/training/nature_oracle.py'
@@ -20,6 +21,7 @@ on:
     paths:
       - 'src/sts2_ai/nature/**'
       - 'src/sts2_ai/emulator/controlled_chance.py'
+      - 'src/sts2_ai/emulator/playable_chance.py'
       - 'src/sts2_ai/emulator/semantic_chance.py'
       - 'src/sts2_ai/training/chance_importance.py'
       - 'src/sts2_ai/training/nature_oracle.py'
@@ -52,6 +54,8 @@ jobs:
           tests/test_nature_corpus_n3.py
           tests/fixtures/fake_nature_jsonl.py
           src/sts2_ai/emulator/controlled_chance.py
+          src/sts2_ai/emulator/playable_chance.py
+          tests/test_nature_playable_fixture.py
           src/sts2_ai/emulator/semantic_chance.py
           tests/test_nature_semantic_n1n2.py
           tests/test_nature_semantic_oracle.py
@@ -72,4 +76,5 @@ jobs:
           tests/test_nature_corpus_n3.py
           tests/test_nature_semantic_n1n2.py
           tests/test_nature_semantic_oracle.py
+          tests/test_nature_playable_fixture.py
       - run: python -m compileall -q tools/inspect_nature_rollout.py tools/collect_nature_isolated.py tools/benchmark_nature_workers.py src/sts2_ai/nature
