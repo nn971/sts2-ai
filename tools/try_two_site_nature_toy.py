@@ -21,24 +21,67 @@ def main() -> None:
     parser.add_argument("--episodes-per-batch", type=int, default=32)
     parser.add_argument("--evaluation-episodes", type=int, default=1024)
     parser.add_argument("--seed", type=int, default=29)
+    parser.add_argument("--seeds", type=int, nargs="+",
+                        help="Independent training seeds; overrides --seed")
     parser.add_argument("--nature-mix", type=float, default=0.75)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    result = run_paired_toy_pilot(
-        rounds=args.rounds, episodes_per_batch=args.episodes_per_batch,
-        seed=args.seed, evaluation_episodes=args.evaluation_episodes,
-        nature_mix=args.nature_mix,
-    )
-    for checkpoint in result["progress"]:
+    seeds = args.seeds or [args.seed]
+    if len(seeds) != len(set(seeds)):
+        parser.error("Training seeds must be unique")
+    runs = []
+    for seed in seeds:
+        result = run_paired_toy_pilot(
+            rounds=args.rounds, episodes_per_batch=args.episodes_per_batch,
+            seed=seed, evaluation_episodes=args.evaluation_episodes,
+            nature_mix=args.nature_mix,
+        )
+        runs.append(result)
+        for checkpoint in result["progress"]:
+            print(
+                "[nature-two-site-toy] "
+                f"seed={seed} round={checkpoint['round']} "
+                f"native_return={checkpoint['native']['return']:.4f} "
+                f"nature_trained_return={checkpoint['nature_train']['return']:.4f} "
+                f"native_eval_delta={checkpoint['delta_native_eval_return']:+.4f} "
+                f"frozen_nature_difficulty="
+                f"{checkpoint['frozen_player_difficulty']['nature_minus_native']:+.4f}",
+                flush=True,
+            )
+    if len(runs) == 1:
+        report = runs[0]
+    else:
+        import statistics
+
+        deltas = [
+            run["progress"][-1]["delta_native_eval_return"] for run in runs
+        ]
+        difficulties = [
+            run["progress"][-1]["frozen_player_difficulty"]["nature_minus_native"]
+            for run in runs
+        ]
+        report = {
+            "schema": "sts2-ai-two-site-toy-multiseed-v1",
+            "synthetic_not_sts2": True,
+            "seeds": seeds,
+            "runs": runs,
+            "summary": {
+                "mean_native_eval_delta": statistics.mean(deltas),
+                "stdev_native_eval_delta": statistics.stdev(deltas),
+                "mean_frozen_nature_difficulty": statistics.mean(difficulties),
+                "nature_better_native_eval_count": sum(x > 0 for x in deltas),
+                "seed_count": len(seeds),
+            },
+        }
         print(
             "[nature-two-site-toy] "
-            f"round={checkpoint['round']} "
-            f"native_return={checkpoint['native']['return']:.4f} "
-            f"nature_trained_return={checkpoint['nature_train']['return']:.4f} "
-            f"native_eval_delta={checkpoint['delta_native_eval_return']:+.4f}",
+            f"multi_seed_mean_delta={report['summary']['mean_native_eval_delta']:+.4f} "
+            f"mean_difficulty={report['summary']['mean_frozen_nature_difficulty']:+.4f} "
+            f"better_native_eval={report['summary']['nature_better_native_eval_count']}"
+            f"/{len(seeds)}",
             flush=True,
         )
-    atomic_write(args.output, json.dumps(result, indent=2, sort_keys=True) + "\n")
+    atomic_write(args.output, json.dumps(report, indent=2, sort_keys=True) + "\n")
     print(f"[nature-two-site-toy] report={args.output}", flush=True)
 
 
