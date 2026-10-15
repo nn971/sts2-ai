@@ -4,6 +4,21 @@
 
 This interim bridge targets `sts2-v111-controlled-playable-fixture-v1` on the emulator integration branch. It starts from the isolated source-shaped HP → intent chain and uses `controlled_begin`, `controlled_resolve`, `controlled_observe`, `controlled_step`, `controlled_fork/save/load/trace/release_many`. The driver runs the actual emulator's player mechanics, never mutating a finished transition in Python.
 
+## Executable smoke
+
+Use the compiled CLI from the reviewed emulator integration branch, then run:
+
+```fish
+python -u tools/inspect_nature_playable.py \
+    --emulator-dll /path/to/Sts2Emulator.Cli.dll \
+    --emulator-revision EXACT_EMULATOR_SHA \
+    --seed nature-playable-smoke --act 2 \
+    --mode first --max-boundaries 512 \
+    --output results/nature-playable-smoke.json
+```
+
+The tool writes an explicit `TERMINAL_REPLAY_PASS`, `CENSORED` or `FAILED_OR_UNSUPPORTED` report. Its first-legal player heuristic is an adapter smoke, not a trained v15 policy.
+
 ## Minimal Python use
 
 ```python
@@ -12,7 +27,7 @@ from sts2_ai.emulator.playable_chance import PlayableNatureBridge
 from sts2_ai.nature.policies import FirstLegalNature, ScriptedNature
 from sts2_ai.nature.playable_trajectory import play_controlled_fixture
 
-with NatureJsonlProcess(["dotnet", "/path/to/Sts2Emulator.Cli.dll", "jsonl"]) as wire:
+with NatureJsonlProcess(["dotnet", "/path/to/Sts2Emulator.Cli.dll", "prototype-ai-jsonl"]) as wire:
     iso = IsolatedNatureBridge(wire, emulator_revision="EXACT_EMULATOR_SHA")
     playable = PlayableNatureBridge(wire, emulator_revision="EXACT_EMULATOR_SHA")
     result = play_controlled_fixture(
@@ -38,7 +53,7 @@ with NatureJsonlProcess(["dotnet", "/path/to/Sts2Emulator.Cli.dll", "jsonl"]) as
     assert replay.replay_id == result.replay_id
 ```
 
-The `dotnet` invocation must be adjusted to the compiled emulator CLI's actual command syntax. The callable `player_choose` is intentionally separate from Nature; its only input is a fair public observation and legal player IDs. Substitute an existing frozen policy adapter once real-game action bindings are verified. The default first-legal player is a structural smoke, not a performance evaluation.
+The `dotnet` invocation uses the existing `prototype-ai-jsonl` CLI command. The callable `player_choose` is intentionally separate from Nature; its only input is a fair public observation and legal player IDs. Substitute an existing frozen policy adapter once real-game action bindings are verified. The default first-legal player is a structural smoke, not a performance evaluation.
 
 ## Gates and limits
 
