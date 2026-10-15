@@ -80,7 +80,8 @@ def test_unsupported_sites_are_counted_and_replayed_identically(tmp_path):
     rows = [json.loads(x) for x in (tmp_path / "one" / "corpus.jsonl").read_text().splitlines()]
     blocker = next(x for x in rows if x["status"] == STATUS_UNSUPPORTED)
     assert blocker["terminal_fingerprint"] is None
-    assert blocker["decision_count"] == 4
+    assert blocker["decision_count"] == 5
+    assert blocker["attempted_player_actions"] == ["end_turn"]
     assert blocker["blocked_site"] == "combat.unmigrated_test"
 
 
