@@ -12,6 +12,9 @@ on:
       - 'tests/test_chance_importance.py'
       - 'tools/inspect_nature_rollout.py'
       - 'tools/inspect_nature_playable.py'
+      - 'tools/collect_nature_playable_coverage.py'
+      - 'tests/test_nature_playable_corpus.py'
+      - 'tests/fixtures/fake_nature_playable_jsonl.py'
       - 'tools/collect_nature_isolated.py'
       - 'tools/benchmark_nature_workers.py'
       - 'tests/test_nature_corpus_n3.py'
@@ -30,6 +33,9 @@ on:
       - 'tests/test_chance_importance.py'
       - 'tools/inspect_nature_rollout.py'
       - 'tools/inspect_nature_playable.py'
+      - 'tools/collect_nature_playable_coverage.py'
+      - 'tests/test_nature_playable_corpus.py'
+      - 'tests/fixtures/fake_nature_playable_jsonl.py'
       - 'tools/collect_nature_isolated.py'
       - 'tools/benchmark_nature_workers.py'
       - 'tests/test_nature_corpus_n3.py'
@@ -69,6 +75,9 @@ jobs:
           tests/test_chance_importance.py
           tools/inspect_nature_rollout.py
           tools/inspect_nature_playable.py
+          tools/collect_nature_playable_coverage.py
+          tests/test_nature_playable_corpus.py
+          tests/fixtures/fake_nature_playable_jsonl.py
       - name: Strict isolated protocol and exact-oracle tests
         run: >-
           python -m pytest -q
@@ -80,4 +89,5 @@ jobs:
           tests/test_nature_semantic_n1n2.py
           tests/test_nature_semantic_oracle.py
           tests/test_nature_playable_fixture.py
-      - run: python -m compileall -q tools/inspect_nature_rollout.py tools/inspect_nature_playable.py tools/collect_nature_isolated.py tools/benchmark_nature_workers.py src/sts2_ai/nature
+          tests/test_nature_playable_corpus.py
+      - run: python -m compileall -q tools/collect_nature_playable_coverage.py tests/fixtures/fake_nature_playable_jsonl.py tools/inspect_nature_rollout.py tools/inspect_nature_playable.py tools/collect_nature_isolated.py tools/benchmark_nature_workers.py src/sts2_ai/nature

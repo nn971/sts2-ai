@@ -52,6 +52,8 @@ def play_controlled_fixture(
     total_floor: int,
     player_choose: Callable[[FairPlayerFrame], str],
     max_boundaries: int = 512,
+    on_decision: Callable[[PlayableDecision], None] | None = None,
+    record_transitions: bool = False,
 ) -> PlayableTrajectory:
     """Use the actual HP->intent continuation and mechanically execute actions.
 
@@ -74,12 +76,17 @@ def play_controlled_fixture(
     def append(kind: str, before: str, identity: str, choice: str, after: str) -> None:
         if len(decisions) >= max_boundaries:
             raise RuntimeError("Controlled fixture boundary budget exhausted: censored")
-        decisions.append(PlayableDecision(kind, before, identity, choice, after))
+        row = PlayableDecision(kind, before, identity, choice, after)
+        decisions.append(row)
+        if on_decision is not None:
+            on_decision(row)
 
     try:
         state = hp
         while True:
             while not state.complete:
+                if len(decisions) >= max_boundaries:
+                    raise RuntimeError("Controlled fixture boundary budget exhausted: censored")
                 if state.pending is None:
                     raise RuntimeError("Missing initial chance event")
                 event = state.pending
@@ -92,11 +99,17 @@ def play_controlled_fixture(
                 isolated_handles.append(state)
             if state.kind == "intents":
                 break
+            before_advance = state.fingerprint
             state = isolated.advance(state)
             isolated_handles.append(state)
+            if record_transitions:
+                append("system", before_advance, "nature_advance", "", state.fingerprint)
 
+        before_playable = state.fingerprint
         frame = playable.begin(state, seed=seed)
         playable_handles.append(frame)
+        if record_transitions:
+            append("system", before_playable, "controlled_begin", "", frame.fingerprint)
         while frame.phase != "terminal":
             if len(decisions) >= max_boundaries:
                 raise RuntimeError("Controlled fixture boundary budget exhausted: censored")
