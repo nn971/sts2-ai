@@ -115,3 +115,35 @@ preserves the new contract's responsibilities. When ReferenceNature
 and Chance Law arrive, their declared `p` becomes the reference
 evaluation target and is independently validated. Native installed-game
 fidelity remains the Inspector's separate concern.
+
+
+## Verified first cross-repository acceptance (2026-10-16)
+
+[Dedicated AI + pinned C# CI #38926378414](https://github.com/nn971/sts2-ai/actions/runs/38926378414) **passed**:
+- Source-matched contract tests and Ruff; separately pinned emulator comparator built cleanly.
+- Five source-route pairs completed **5 Nature victories and 5 ordinary
+  comparator victories**, with matching pre-controller opening fingerprints,
+  intent-normalized fair initial public views and both-arm scripted replay
+  through genuine terminal states and private snapshot restoration.
+- Running the same five independent source runs under a **one-worker pool**
+  and a **15-worker-capacity pool** produced **identical complete pair
+  records** and digest `a8ae5bb235e2293baaeafe1e6e0388adf8f872cc1ab30f36646912a3383ef9a9`.
+  Because this smoke has five independent fixtures, the latter pool
+  observed **five active worker processes**; it does not demonstrate
+  15 simultaneously busy real combats. Test actual 15-worker saturation
+  when a larger source-disjoint corpus is available.
+- The structural fair player observed a mean Nature-minus-ordinary
+  return of **−0.0100 synthetic pilot reward units** over those five
+  real-emulator pairs, each under the declared unverified law.
+- A separately generated **explicitly untrained** portable phase-split
+  v15-shaped model completed five more real pairs using the frozen
+  public-player adapter with `silent-basic-v1` action masking, including
+  exact dual-arm replay. This is checkpoint *schema/inference* validation,
+  not trained-v15 performance; its five-pair observed mean delta was
+  −0.0300.
+
+**Evidence level 1 only:** both microcomparisons are tiny and selected
+for mechanical support. Their signs are not estimates of a Nature
+training benefit and no feature judgment should be drawn. The
+ordinary comparator also remains source-probability
+`UNVERIFIED` and separate from pending Chance Law/ReferenceNature.
