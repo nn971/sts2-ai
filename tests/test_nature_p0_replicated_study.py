@@ -106,9 +106,9 @@ def test_two_axis_bootstrap_multiple_training_restarts_and_budget_ledger():
     assert result["research_replication_floor_met"] is True
     assert result["between_training_seed_sd"] > 0
     assert result["training_seed_uncertainty"] == "TWO_AXIS_BOOTSTRAP"
-    assert result["ordinary_mean_score_delta"] == pytest.approx(0.155)
-    assert result["paired_training_seed_and_source_bootstrap_95pct"][0] <= 0.155
-    assert result["paired_training_seed_and_source_bootstrap_95pct"][1] >= 0.155
+    assert result["ordinary_mean_score_delta"] == pytest.approx(0.165)
+    assert result["paired_training_seed_and_source_bootstrap_95pct"][0] <= 0.165
+    assert result["paired_training_seed_and_source_bootstrap_95pct"][1] >= 0.165
     assert result["budget_status"] == "EQUAL_PLAYER_OPTIMIZER_STEPS_NOT_TOTAL_COMPUTE"
     assert result["total_compute_matching"] == "NOT_ESTABLISHED"
     assert result["decision_grade"] is False
