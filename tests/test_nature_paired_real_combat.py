@@ -216,7 +216,7 @@ def test_same_source_intent_mask_terminal_and_full_dual_replay():
     assert result["same_opening"] and result["same_initial_public_state"]
     assert result["nature_minus_ordinary_return"] == pytest.approx(-0.08)
     assert result["probability_status"] == "UNVERIFIED"
-    assert session.released == 14
+    assert session.released == 16
 
 
 def test_capability_failure_and_source_mismatch_fail_closed():
