@@ -173,29 +173,40 @@ class FrozenP0Player:
         )
         return public, tuple(actions)
 
+    @staticmethod
+    def scoped_actions(
+        observation: dict[str, Any], actions: tuple[LegalAction, ...],
+        scope: str,
+    ) -> tuple[LegalAction, ...]:
+        """Apply the same public source-menu restriction in rollout and audit."""
+        if scope not in PLAYER_ACTION_SCOPES:
+            raise FrozenPolicyInferenceError("Unsupported player action scope")
+        if scope == "all-legal-v1":
+            return actions
+        hand = {
+            str(card["instance_id"]): card["card_id"]
+            for card in observation.get("combat", {}).get("hand", [])
+        }
+        filtered: list[LegalAction] = []
+        for action in actions:
+            if action.kind == "end_turn":
+                filtered.append(action)
+            elif action.kind == "play_card":
+                card_id = json.loads(action.payload_json).get("CardInstanceId")
+                if hand.get(str(card_id)) in SUPPORTED_BASIC_CARDS:
+                    filtered.append(action)
+        if not filtered:
+            raise FrozenPolicyInferenceError(
+                "No supported basic Silent action in the fair legal menu"
+            )
+        return tuple(filtered)
+
     def choose(
         self, observation: dict[str, Any],
         raw_actions: list[dict[str, Any]],
     ) -> str:
-        public, actions = self._public_types(observation, raw_actions)
-        if self.action_scope == "silent-basic-v1":
-            hand = {
-                str(card["instance_id"]): card["card_id"]
-                for card in observation.get("combat", {}).get("hand", [])
-            }
-            filtered: list[LegalAction] = []
-            for action in actions:
-                if action.kind == "end_turn":
-                    filtered.append(action)
-                elif action.kind == "play_card":
-                    card_id = json.loads(action.payload_json).get("CardInstanceId")
-                    if hand.get(str(card_id)) in SUPPORTED_BASIC_CARDS:
-                        filtered.append(action)
-            actions = tuple(filtered)
-            if not actions:
-                raise FrozenPolicyInferenceError(
-                    "No supported basic Silent action in the fair legal menu"
-                )
+        public, source_actions = self._public_types(observation, raw_actions)
+        actions = self.scoped_actions(observation, source_actions, self.action_scope)
         estimate = self.model.evaluate(public, actions)
         logits = estimate.action_logits
         if len(logits) != len(actions) or any(
@@ -234,7 +245,13 @@ class FrozenP0Player:
                 (logits[selected] - maximum) / self.temperature
                 - math.log(normalized)
             )
+            # Retain the exact *public* inputs sent by the source emulator.
+            # Together with the replay's support_identity these certify the
+            # full source menu and projection, including unselected actions.
             self.training_actions.append({
+                "source_observation": json.loads(json.dumps(observation)),
+                "source_legal_actions": json.loads(json.dumps(raw_actions)),
+                "source_support_identity": canonical_sha256([observation, raw_actions]),
                 "observation": {
                     "policy_id": public.policy_id,
                     "payload_json": public.payload_json,
