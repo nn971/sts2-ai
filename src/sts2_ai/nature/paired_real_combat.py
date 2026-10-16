@@ -19,7 +19,6 @@ from typing import Any, Protocol
 from sts2_ai.emulator.semantic_p0_combat import (
     EMULATOR_SCHEMA,
     INTENT_SCHEMA,
-    P0SemanticInterfaceError,
     _pending_event,
     strike_first_player,
 )
