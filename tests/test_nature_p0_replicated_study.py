@@ -99,6 +99,13 @@ def analyze(items):
     )
 
 
+def reseal_experiment(item):
+    exp = item["holdout"]["experiment"]
+    exp["fingerprint"] = canonical_sha256({
+        key: value for key, value in exp.items() if key != "fingerprint"
+    })
+
+
 def test_two_axis_bootstrap_multiple_training_restarts_and_budget_ledger():
     items = [replica(x) for x in (1, 3, 5, 7, 9)]
     result = analyze(items)
@@ -140,6 +147,7 @@ def test_duplicate_training_or_actor_seed_is_rejected():
         analyze([replica(1), replica(1)])
     items = [replica(1), replica(2)]
     items[1]["holdout"]["experiment"]["actor_seed"] = 9001
+    reseal_experiment(items[1])
     with pytest.raises(ValueError, match="actor RNG seed"):
         analyze(items)
 
@@ -152,10 +160,12 @@ def test_mismatched_checkpoint_config_and_source_partitions_rejected():
         analyze(mismatch)
     mismatch = copy.deepcopy(items)
     mismatch[1]["holdout"]["experiment"]["train_sha256"] = "x" * 64
+    reseal_experiment(mismatch[1])
     with pytest.raises(ValueError, match="disagrees with training"):
         analyze(mismatch)
     mismatch = copy.deepcopy(items)
     mismatch[1]["holdout"]["experiment"]["holdout_sha256"] = "x" * 64
+    reseal_experiment(mismatch[1])
     with pytest.raises(ValueError, match="Held-out source groups"):
         analyze(mismatch)
 
