@@ -1,0 +1,81 @@
+name: nature-paired-source-combat
+
+on:
+  push:
+    paths:
+      - 'src/sts2_ai/nature/paired_real_combat.py'
+      - 'src/sts2_ai/nature/paired_real_workers.py'
+      - 'tools/compare_nature_ordinary_combat.py'
+      - 'tests/test_nature_paired_real_combat.py'
+      - '.github/workflows/nature-paired-source-combat.yml'
+  pull_request:
+    paths:
+      - 'src/sts2_ai/nature/paired_real_combat.py'
+      - 'src/sts2_ai/nature/paired_real_workers.py'
+      - 'tools/compare_nature_ordinary_combat.py'
+      - 'tests/test_nature_paired_real_combat.py'
+      - '.github/workflows/nature-paired-source-combat.yml'
+  workflow_dispatch:
+
+jobs:
+  paired-nature-vs-ordinary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ai
+      - uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: 8cbb15ab32ba50dff5d40c214ef7a85266761694
+          path: emulator
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install AI dependencies
+        working-directory: ai
+        run: python -m pip install -e '.[dev]'
+      - name: Check paired two-site boundary, strict replay and policy isolation
+        working-directory: ai
+        run: |
+          python -m ruff check src/sts2_ai/nature/paired_real_combat.py src/sts2_ai/nature/paired_real_workers.py tools/compare_nature_ordinary_combat.py tests/test_nature_paired_real_combat.py
+          python -m pytest -q tests/test_nature_paired_real_combat.py
+      - name: Build exact emulator native-policy comparator feature commit
+        working-directory: emulator
+        run: |
+          dotnet restore Sts2Emulator.sln
+          dotnet build Sts2Emulator.sln --no-restore -c Release
+      - name: Paired actual C# combats in one process (mechanical smoke)
+        working-directory: ai
+        run: >-
+          python -u tools/compare_nature_ordinary_combat.py
+          --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll
+          --emulator-bindings ../emulator/bindings/python
+          --emulator-revision 8cbb15ab32ba50dff5d40c214ef7a85266761694
+          --workers 1 --output /tmp/paired-1.json
+      - name: Compare identical source-run pairs across 15 process workers
+        working-directory: ai
+        run: |
+          python -u tools/compare_nature_ordinary_combat.py \
+            --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings ../emulator/bindings/python \
+            --emulator-revision 8cbb15ab32ba50dff5d40c214ef7a85266761694 \
+            --workers 15 --output /tmp/paired-15.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          left = json.loads(Path('/tmp/paired-1.json').read_text())
+          right = json.loads(Path('/tmp/paired-15.json').read_text())
+          assert left['source_group_count'] == right['source_group_count'] == 5
+          assert left['records_digest'] == right['records_digest']
+          assert left['records'] == right['records']
+          assert all(r['same_opening'] and r['same_initial_public_state']
+                     for r in right['records'])
+          assert all(r['nature']['outcome'] in ('victory','defeat')
+                     and r['ordinary']['outcome'] in ('victory','defeat')
+                     for r in right['records'])
+          print('[nature-paired] PASS 1-vs-15 worker complete paired transcript equality')
+          PY
