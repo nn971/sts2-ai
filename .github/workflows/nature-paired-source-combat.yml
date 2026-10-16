@@ -79,3 +79,25 @@ jobs:
                      for r in right['records'])
           print('[nature-paired] PASS 1-vs-15 worker complete paired transcript equality')
           PY
+      - name: Check portable v15-shaped public player on paired real C# arms
+        working-directory: ai
+        run: |
+          python -u tools/make_nature_p0_test_model.py --output /tmp/nature-p0-untrained.json
+          python -u tools/compare_nature_ordinary_combat.py \
+            --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings ../emulator/bindings/python \
+            --emulator-revision 8cbb15ab32ba50dff5d40c214ef7a85266761694 \
+            --player-model /tmp/nature-p0-untrained.json \
+            --player-action-scope silent-basic-v1 \
+            --workers 5 --output /tmp/paired-frozen-test-model.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('/tmp/paired-frozen-test-model.json').read_text())
+          assert report['player_checkpoint_sha256']
+          assert report['source_group_count'] == 5
+          assert report['estimated_training_benefit'] == 'NOT_TESTED'
+          assert all(x['same_opening'] and x['same_initial_public_state']
+                     for x in report['records'])
+          print('[nature-paired] PASS untrained v15-shaped frozen public player on 5 real source pairs')
+          PY
