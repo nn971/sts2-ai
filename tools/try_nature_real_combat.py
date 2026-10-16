@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 
 from sts2_ai.emulator.semantic_p0_combat import CombatFixture
+from sts2_ai.emulator.semantic_p0_frozen_player import FrozenPlayerSpec
 from sts2_ai.nature.corpus import atomic_write, file_sha256
 from sts2_ai.nature.real_combat_workers import (
     collect_real_combat_batch,
@@ -25,6 +26,12 @@ def main() -> None:
     parser.add_argument("--emulator-bindings", type=Path, required=True)
     parser.add_argument("--emulator-revision", required=True)
     parser.add_argument("--mode", choices=("rollout", "nature-smoke"), default="rollout")
+    parser.add_argument("--player-model", type=Path,
+                        help="Portable frozen phase-split v15 model.json (read only)")
+    parser.add_argument("--player-temperature", type=float, default=1.0)
+    parser.add_argument("--player-sampling", action="store_true",
+                        help="Sample frozen player logits, otherwise greedy")
+    parser.add_argument("--player-actor-seed", type=int, default=2026)
     parser.add_argument("--seed", type=int, default=29)
     parser.add_argument("--episodes", type=int, default=30)
     parser.add_argument("--rounds", type=int, default=2)
@@ -38,6 +45,13 @@ def main() -> None:
         parser.error("Provide emulator's own checked-out bindings/python directory")
     if args.episodes < 2 or args.workers < 1:
         parser.error("Use at least two fixtures and a positive worker count")
+    player_spec = (
+        FrozenPlayerSpec.from_file(
+            args.player_model, seed=args.player_actor_seed,
+            temperature=args.player_temperature,
+            greedy=not args.player_sampling,
+        ) if args.player_model is not None else None
+    )
     command = (
         "dotnet", str(args.emulator_dll.resolve()), "prototype-ai-jsonl",
     )
@@ -47,6 +61,7 @@ def main() -> None:
             emulator_command=command, emulator_bindings=args.emulator_bindings,
             emulator_revision=args.emulator_revision, workers=args.workers,
             nature_mix=args.nature_mix, output=args.output,
+            player_spec=player_spec,
         )
     else:
         fixtures = tuple(
@@ -64,14 +79,21 @@ def main() -> None:
             emulator_bindings=args.emulator_bindings,
             emulator_revision=args.emulator_revision,
             workers=args.workers, progress_every=5,
+            player_spec=player_spec,
         )
         report["emulator_dll_sha256"] = file_sha256(args.emulator_dll)
         report["evidence_level"] = "smoke-only"
+        report["player_model_source"] = (
+            "portable-v15-frozen-export" if player_spec is not None else
+            "structural-strike-first"
+        )
         atomic_write(args.output, json.dumps(report, indent=2, sort_keys=True) + "\n")
     print(
         f"[nature-real] mode={args.mode} "
         f"real_sts2_emulator=True source_law=UNVERIFIED "
-        f"native_strength_evaluation=False report={args.output}",
+        f"native_strength_evaluation=False "
+        f"player={player_spec.policy_id if player_spec else 'structural'} "
+        f"report={args.output}",
         flush=True,
     )
 
