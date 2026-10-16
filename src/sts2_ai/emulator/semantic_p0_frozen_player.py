@@ -21,6 +21,8 @@ from sts2_ai.nature.protocol import canonical_sha256
 
 PUBLIC_POLICY_ID = "prototype-fair-v0"
 PLAYER_SPEC_SCHEMA = "sts2-ai-nature-p0-frozen-player-v1"
+PLAYER_ACTION_SCOPES = frozenset({"silent-basic-v1", "all-legal-v1"})
+SUPPORTED_BASIC_CARDS = frozenset({"proto.silent.strike", "proto.silent.defend"})
 
 
 class FrozenPolicyInferenceError(RuntimeError):
@@ -42,6 +44,7 @@ class FrozenPlayerSpec:
     actor_seed: int
     temperature: float = 1.0
     greedy: bool = True
+    action_scope: str = "silent-basic-v1"
     schema: str = PLAYER_SPEC_SCHEMA
 
     def __post_init__(self) -> None:
@@ -54,16 +57,18 @@ class FrozenPlayerSpec:
             raise ValueError("Frozen player seed must be an integer")
         if not math.isfinite(self.temperature) or self.temperature <= 0:
             raise ValueError("Frozen player temperature must be positive")
+        if self.action_scope not in PLAYER_ACTION_SCOPES:
+            raise ValueError("Unsupported frozen player action scope")
 
     @classmethod
     def from_file(
         cls, path: Path, *, seed: int, temperature: float = 1.0,
-        greedy: bool = True,
+        greedy: bool = True, action_scope: str = "silent-basic-v1",
     ) -> FrozenPlayerSpec:
         if not path.is_file():
             raise FileNotFoundError(f"Frozen portable v15 JSON missing: {path}")
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        return cls(str(path.resolve()), digest, seed, temperature, greedy)
+        return cls(str(path.resolve()), digest, seed, temperature, greedy, action_scope)
 
     def load_pinned(self) -> PhaseSplitNeuralModel:
         path = Path(self.model_path)
@@ -78,14 +83,14 @@ class FrozenPlayerSpec:
         return int(
             canonical_sha256([
                 self.actor_seed, fixture_seed, fixture_id,
-                self.model_sha256, self.temperature, self.greedy,
+                self.model_sha256, self.temperature, self.greedy, self.action_scope,
             ])[:16], 16,
         )
 
     @property
     def policy_id(self) -> str:
         variant = "greedy" if self.greedy else "sampled"
-        return f"frozen-v15-{variant}-{self.model_sha256[:16]}"
+        return f"frozen-v15-{variant}-{self.action_scope}-{self.model_sha256[:16]}"
 
 
 class FrozenP0Player:
@@ -94,16 +99,20 @@ class FrozenP0Player:
     def __init__(
         self, model: PublicPolicy, *, actor_seed: int,
         temperature: float = 1.0, greedy: bool = True,
+        action_scope: str = "all-legal-v1",
     ):
         if type(actor_seed) is not int:
             raise ValueError("Actor seed must be an integer")
         if not math.isfinite(temperature) or temperature <= 0:
             raise ValueError("Invalid actor temperature")
+        if action_scope not in PLAYER_ACTION_SCOPES:
+            raise ValueError("Unsupported frozen player action scope")
         self.model = model
+        self.action_scope = action_scope
         self.temperature = temperature
         self.greedy = greedy
         self.rng = random.Random(actor_seed)
-        self.policy_id = f"frozen-v15-{model.model_id}"
+        self.policy_id = f"frozen-v15-{action_scope}-{model.model_id}"
         self.decisions = 0
 
     @staticmethod
@@ -149,6 +158,24 @@ class FrozenP0Player:
         raw_actions: list[dict[str, Any]],
     ) -> str:
         public, actions = self._public_types(observation, raw_actions)
+        if self.action_scope == "silent-basic-v1":
+            hand = {
+                str(card["instance_id"]): card["card_id"]
+                for card in observation.get("combat", {}).get("hand", [])
+            }
+            filtered: list[LegalAction] = []
+            for action in actions:
+                if action.kind == "end_turn":
+                    filtered.append(action)
+                elif action.kind == "play_card":
+                    card_id = json.loads(action.payload_json).get("CardInstanceId")
+                    if hand.get(str(card_id)) in SUPPORTED_BASIC_CARDS:
+                        filtered.append(action)
+            actions = tuple(filtered)
+            if not actions:
+                raise FrozenPolicyInferenceError(
+                    "No supported basic Silent action in the fair legal menu"
+                )
         estimate = self.model.evaluate(public, actions)
         logits = estimate.action_logits
         if len(logits) != len(actions) or any(
