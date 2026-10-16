@@ -11,6 +11,10 @@ from sts2_ai.emulator.semantic_p0_frozen_player import (
     FrozenP0Player,
     FrozenPolicyInferenceError,
 )
+from sts2_ai.emulator.semantic_p0_public_projection import (
+    project_public_p0_observation,
+)
+from sts2_ai.models.object_instances import extract_combat_objects
 from sts2_ai.training.nature_real_combat_ppo import (
     RealPlayerPpoError,
     validate_recorded_action,
@@ -123,3 +127,58 @@ def test_source_action_scope_masks_unimplemented_card():
     chosen = actor.choose(OBS, menu)
     assert chosen in {"strike:3", "end_turn"}
     assert len(actor.training_actions[0]["legal_actions"]) == 2
+
+
+def test_public_count_only_pile_projection_has_no_fabricated_cards():
+    source = {
+        "hp": 58, "max_hp": 66,
+        "combat": {
+            "hand": [{"instance_id": 3, "card_id": "proto.silent.strike"}],
+            "draw_pile": 7, "draw_pile_count": 7,
+            "discard_pile": 3, "exhaust_pile": 0, "play_pile": 0,
+            "enemies": [{
+                "instance_id": 2, "enemy_id": "proto.enemy.test",
+                "hp": 10, "statuses": {},
+            }],
+        },
+    }
+    projected = project_public_p0_observation(source)
+    assert source["combat"]["draw_pile"] == 7  # Source remains untouched.
+    assert projected["combat"]["draw_pile"] == []
+    assert projected["combat"]["draw_pile_count"] == 7
+    assert projected["combat"]["draw_pile_opaque"] is True
+    assert projected["combat"]["discard_pile_count"] == 3
+    assert "combat.draw_pile" in projected["p0_opaque_public_fields"]
+    objects = extract_combat_objects(projected)
+    assert len([x for x in objects.tokens if x.kind == "card"]) == 1
+    assert any(
+        name == "p0_opaque:combat.draw_pile"
+        for x in objects.tokens if x.kind == "global"
+        for name in x.categorical
+    )
+    actor = FrozenP0Player(
+        SimplePublicPolicy(), actor_seed=2, greedy=False,
+        action_scope="silent-basic-v1", capture_training=True,
+    )
+    chosen = actor.choose(source, MENU)
+    assert chosen in {"strike:3", "end_turn"}
+    assert "p0_public_projection" in actor.training_actions[0][
+        "observation"
+    ]["payload_json"]
+
+
+def test_legacy_wrong_card_count_still_rejected_and_opaque_guarded():
+    legacy = {
+        "hp": 22, "combat": {
+            "hand": [], "draw_pile": [], "discard_pile": [],
+            "exhaust_pile": [], "play_pile": [], "choice_pool": [],
+            "draw_pile_count": 2, "relic_counters": [],
+            "player_powers": [], "enemies": [],
+        },
+        "relics": [], "potions": [],
+    }
+    with pytest.raises(ValueError, match="does not match"):
+        extract_combat_objects(legacy)
+    legacy["combat"]["draw_pile_opaque"] = True
+    with pytest.raises(ValueError, match="Invalid opaque"):
+        extract_combat_objects(legacy)
