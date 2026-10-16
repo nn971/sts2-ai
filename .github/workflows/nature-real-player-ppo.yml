@@ -12,6 +12,9 @@ on:
       - 'tools/make_nature_ppo_test_model.py'
       - 'tests/test_nature_real_player_ppo.py'
       - 'tests/test_nature_p0_research_eval.py'
+      - 'tests/test_nature_p0_replicated_study.py'
+      - 'src/sts2_ai/nature/replicated_study.py'
+      - 'tools/analyze_nature_p0_replicas.py'
       - 'src/sts2_ai/nature/research_p0.py'
       - 'tools/make_nature_p0_source_splits.py'
       - 'tools/evaluate_nature_p0_player_ppo.py'
@@ -27,6 +30,9 @@ on:
       - 'tools/make_nature_ppo_test_model.py'
       - 'tests/test_nature_real_player_ppo.py'
       - 'tests/test_nature_p0_research_eval.py'
+      - 'tests/test_nature_p0_replicated_study.py'
+      - 'src/sts2_ai/nature/replicated_study.py'
+      - 'tools/analyze_nature_p0_replicas.py'
       - 'src/sts2_ai/nature/research_p0.py'
       - 'tools/make_nature_p0_source_splits.py'
       - 'tools/evaluate_nature_p0_player_ppo.py'
@@ -59,7 +65,7 @@ jobs:
       - name: Validate sampled fair player action and on-policy PPO provenance
         working-directory: ai
         run: |
-          python -m ruff check src/sts2_ai/emulator/semantic_p0_frozen_player.py src/sts2_ai/emulator/semantic_p0_public_projection.py src/sts2_ai/models/object_instances.py src/sts2_ai/nature/paired_real_workers.py src/sts2_ai/nature/research_p0.py src/sts2_ai/training/nature_real_combat_ppo.py tools/train_nature_two_site_player_ppo.py tools/make_nature_ppo_test_model.py tools/make_nature_p0_source_splits.py tools/evaluate_nature_p0_player_ppo.py tests/test_nature_real_player_ppo.py tests/test_nature_p0_research_eval.py
+          python -m ruff check src/sts2_ai/emulator/semantic_p0_frozen_player.py src/sts2_ai/emulator/semantic_p0_public_projection.py src/sts2_ai/models/object_instances.py src/sts2_ai/nature/paired_real_workers.py src/sts2_ai/nature/research_p0.py src/sts2_ai/nature/replicated_study.py src/sts2_ai/training/nature_real_combat_ppo.py tools/train_nature_two_site_player_ppo.py tools/make_nature_ppo_test_model.py tools/make_nature_p0_source_splits.py tools/evaluate_nature_p0_player_ppo.py tools/analyze_nature_p0_replicas.py tests/test_nature_real_player_ppo.py tests/test_nature_p0_research_eval.py tests/test_nature_p0_replicated_study.py
           python -m pytest -q tests/test_nature_real_player_ppo.py tests/test_nature_p0_research_eval.py
       - name: Build pinned ordinary-policy comparator emulator
         working-directory: emulator
