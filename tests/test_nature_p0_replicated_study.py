@@ -186,5 +186,5 @@ def test_reported_score_or_fingerprint_forgery_rejected():
 def test_single_training_replica_explicitly_has_no_seed_uncertainty():
     result = analyze([replica(2)])
     assert result["training_seed_uncertainty"] == "NOT_ESTIMATED"
-    assert result["between_training_seed_sd"] is None
+    assert result["between_replica_sd_including_actor_sampling"] is None
     assert result["decision_grade"] is False
