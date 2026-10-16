@@ -87,6 +87,7 @@ def _execute_job_inner(
             _worker_player_model, actor_seed=episode_actor_seed,
             temperature=_worker_player_spec.temperature,
             greedy=_worker_player_spec.greedy,
+            action_scope=_worker_player_spec.action_scope,
         )
         choose = actor.choose
         policy_id = _worker_player_spec.policy_id
@@ -207,6 +208,9 @@ def collect_real_combat_batch(
         ),
         "player_temperature": (
             player_spec.temperature if player_spec is not None else None
+        ),
+        "player_action_scope": (
+            player_spec.action_scope if player_spec is not None else None
         ),
         "workers_requested": workers,
         "worker_processes_observed": len(observed),
