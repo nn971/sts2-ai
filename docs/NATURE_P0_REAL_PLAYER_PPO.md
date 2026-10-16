@@ -112,3 +112,30 @@ See the mandatory
 Never infer improved Nature/player quality from one round, five encounters,
 or a 20-round test. The underlying emulator original-game probabilities
 remain `UNVERIFIED` until separately audited.
+
+
+## Explicit count-only public draw piles (first real PPO integration finding)
+
+The pinned semantic P0 fair observation can expose `combat.draw_pile`
+as a **count** with physical card identities withheld, whereas the
+legacy v15 public object encoder expected a complete array of known
+card records. This is a genuine information-schema difference between
+the two emulator interfaces, not a training numerical bug.
+
+The new `semantic_p0_public_projection.py` converts a P0 count-only
+zone to an **explicitly opaque** empty object list plus the **observed
+count**, annotating `p0_opaque_public_fields`. It never invents
+card-instance IDs, types, ordering or unseen effects. The v15 object
+extractor recognizes this versioned marker and exposes
+`p0_opaque:combat.draw_pile` as a categorical public-information
+flag, preserving the original count as a scalar. The strict legacy
+invariant `draw_pile_count == len(draw_pile)` remains required outside
+this explicitly versioned P0 projection.
+
+Unprovided relic, potion or effect arrays are likewise marked as
+**unobserved**, not asserted absent. The actor and PPO preparer both
+use the **same recorded projected public observation** and thus the
+same input features. This projection should eventually become a
+native, versioned public-observation schema agreed with the user's
+unified emulator stochastic interface. It is deliberately confined
+to AI and does not alter the emulator game mechanics.
