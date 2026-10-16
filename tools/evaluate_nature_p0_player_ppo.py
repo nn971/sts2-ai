@@ -117,10 +117,14 @@ def main() -> None:
             temperature=args.temperature, action_scope=spec.action_scope,
         )
         output_rows[label] = rows
+        ordinary_mean = (
+            sum(r["score"] for r in rows if r["arm"] == "ordinary")
+            / len(holdout)
+        )
         print(
             f"[nature-p0-holdout] {label} source_runs={len(holdout)} "
-            f"ordinary_mean={sum(r['score'] for r in rows if r['arm'] == 'ordinary') / len(holdout):.4f} "
-            "reference_law=UNVERIFIED", flush=True,
+            f"ordinary_mean={ordinary_mean:.4f} reference_law=UNVERIFIED",
+            flush=True,
         )
     metrics = ordinary_policy_comparison(
         output_rows["nature_trained"], output_rows["ordinary_trained"],
