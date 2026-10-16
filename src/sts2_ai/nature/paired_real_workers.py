@@ -19,7 +19,10 @@ from typing import Any
 
 from sts2_ai.emulator.semantic_p0_frozen_player import FrozenP0Player, FrozenPlayerSpec
 from sts2_ai.nature.paired_real_combat import (
-    PAIR_SCHEMA, PairedSourceFixture, paired_record, play_paired_source_combat,
+    PAIR_SCHEMA,
+    PairedSourceFixture,
+    paired_record,
+    play_paired_source_combat,
 )
 from sts2_ai.nature.protocol import canonical_sha256
 from sts2_ai.nature.two_site_opponent import TwoSiteNature
