@@ -134,8 +134,10 @@ def verified_eval_rows(
                 or record.get("ppo_behavior_model_sha256") != model_sha256):
             raise ValueError("Unpaired source opening or wrong frozen player")
         fixture = record["fixture"]
-        if not isinstance(fixture, dict):
-            raise ValueError("Missing source fixture identity")
+        opening = record.get("source_opening_fingerprint")
+        if (not isinstance(opening, str) or not opening
+                or not isinstance(fixture, dict)):
+            raise ValueError("Missing source fixture/opening provenance")
         source = PairedSourceFixture(
             fixture["fixture_id"], fixture["seed"], fixture["region"]
         )
@@ -147,6 +149,9 @@ def verified_eval_rows(
         for arm in ("ordinary", "nature"):
             trace = record[arm]
             rows = capture[arm]
+            first_public = trace.get("first_public_fingerprint")
+            if not isinstance(first_public, str) or not first_public:
+                raise ValueError("Missing original fair public opening")
             player_steps = [step for step in trace["decisions"]
                             if step["phase"] == "player"]
             if (not rows or len(rows) != len(player_steps)
@@ -172,6 +177,8 @@ def verified_eval_rows(
                 "fixture_id": source.fixture_id,
                 "source_seed": source.seed,
                 "region": source.region,
+                "source_opening_fingerprint": opening,
+                "initial_public_fingerprint": first_public,
                 "arm": arm,
                 "score": score,
                 "victory": trace["outcome"] == "victory",
@@ -225,6 +232,13 @@ def ordinary_policy_comparison(
         rhs = {(row["region"], row["fixture_id"]): row for row in right[seed]}
         if lhs.keys() != rhs.keys():
             raise ValueError("Source-run scenes differ between player checkpoints")
+        for key in lhs:
+            for field in ("source_opening_fingerprint", "initial_public_fingerprint"):
+                if (not lhs[key].get(field)
+                        or lhs[key][field] != rhs[key].get(field)):
+                    raise ValueError(
+                        "Frozen players did not receive the same source/public opening"
+                    )
         local = [lhs[k]["score"] - rhs[k]["score"] for k in sorted(lhs)]
         local_wins = [
             float(lhs[k]["victory"]) - float(rhs[k]["victory"])
