@@ -76,7 +76,7 @@ def test_sampled_behavior_exact_probability_and_public_menu():
     ({"action_scope": "all-legal-v1"}, "scope"),
     ({"selected_id": "not-issued"}, "identity drift"),
     ({"chosen_index": 111}, "Chosen action index"),
-    ({"behavior_logprob": float("nan")}, "Nonfinite"),
+    ({"behavior_logprob": float("nan")}, "nonfinite"),
     ({"behavior_logprob": 2.0}, "exceeds zero"),
 ])
 def test_wrong_behavior_or_forged_action_is_rejected(corrupt, match):
