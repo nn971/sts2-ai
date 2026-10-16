@@ -20,7 +20,9 @@ from pathlib import Path
 from typing import Any
 
 from sts2_ai.emulator.semantic_p0_combat import (
-    CombatFixture, play_real_two_site, strike_first_player,
+    CombatFixture,
+    play_real_two_site,
+    strike_first_player,
 )
 from sts2_ai.nature.corpus import atomic_write
 from sts2_ai.nature.protocol import canonical_sha256
@@ -129,7 +131,8 @@ def collect_real_combat_batch(
             if n % progress_every == 0 or n == len(fixtures):
                 print(
                     f"[nature-p0] complete={n}/{len(fixtures)} "
-                    f"victory={sum(x is not None and x['outcome'] == 'victory' for x in completed)} "
+                    f"victory={sum(x is not None and x['outcome'] == 'victory' for x in completed)}"
+                    " "
                     f"workers_seen={len(observed)}", flush=True,
                 )
     if any(x is None for x in completed):
