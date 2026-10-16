@@ -11,6 +11,10 @@ on:
       - 'tools/train_nature_two_site_player_ppo.py'
       - 'tools/make_nature_ppo_test_model.py'
       - 'tests/test_nature_real_player_ppo.py'
+      - 'tests/test_nature_p0_research_eval.py'
+      - 'src/sts2_ai/nature/research_p0.py'
+      - 'tools/make_nature_p0_source_splits.py'
+      - 'tools/evaluate_nature_p0_player_ppo.py'
       - '.github/workflows/nature-real-player-ppo.yml'
   pull_request:
     paths:
@@ -22,6 +26,10 @@ on:
       - 'tools/train_nature_two_site_player_ppo.py'
       - 'tools/make_nature_ppo_test_model.py'
       - 'tests/test_nature_real_player_ppo.py'
+      - 'tests/test_nature_p0_research_eval.py'
+      - 'src/sts2_ai/nature/research_p0.py'
+      - 'tools/make_nature_p0_source_splits.py'
+      - 'tools/evaluate_nature_p0_player_ppo.py'
       - '.github/workflows/nature-real-player-ppo.yml'
   workflow_dispatch:
 
@@ -51,8 +59,8 @@ jobs:
       - name: Validate sampled fair player action and on-policy PPO provenance
         working-directory: ai
         run: |
-          python -m ruff check src/sts2_ai/emulator/semantic_p0_frozen_player.py src/sts2_ai/emulator/semantic_p0_public_projection.py src/sts2_ai/models/object_instances.py src/sts2_ai/nature/paired_real_workers.py src/sts2_ai/training/nature_real_combat_ppo.py tools/train_nature_two_site_player_ppo.py tools/make_nature_ppo_test_model.py tests/test_nature_real_player_ppo.py
-          python -m pytest -q tests/test_nature_real_player_ppo.py
+          python -m ruff check src/sts2_ai/emulator/semantic_p0_frozen_player.py src/sts2_ai/emulator/semantic_p0_public_projection.py src/sts2_ai/models/object_instances.py src/sts2_ai/nature/paired_real_workers.py src/sts2_ai/nature/research_p0.py src/sts2_ai/training/nature_real_combat_ppo.py tools/train_nature_two_site_player_ppo.py tools/make_nature_ppo_test_model.py tools/make_nature_p0_source_splits.py tools/evaluate_nature_p0_player_ppo.py tests/test_nature_real_player_ppo.py tests/test_nature_p0_research_eval.py
+          python -m pytest -q tests/test_nature_real_player_ppo.py tests/test_nature_p0_research_eval.py
       - name: Build pinned ordinary-policy comparator emulator
         working-directory: emulator
         run: |
@@ -103,4 +111,32 @@ jobs:
           assert model.combat_value_objective == 'hp_preservation'
           assert (root / 'trainer-state.pt').is_file()
           print('[nature-real-ppo] PASS source-backed v15 PPO and separate Nature optimizer smoke')
+          PY
+      - name: Exercise source-run holdout gate with test-only untrained baseline
+        working-directory: ai
+        run: |
+          cat > /tmp/p0-heldout-source-fixtures.jsonl <<'EOF'
+          {"fixture_id":"holdout-a","seed":"p0-unseen-ci-001","region":"Overgrowth","partition":"evaluation"}
+          {"fixture_id":"holdout-b","seed":"p0-unseen-ci-002","region":"Underdocks","partition":"evaluation"}
+          EOF
+          python -u tools/evaluate_nature_p0_player_ppo.py \
+            --nature-trained /tmp/p0-nature-player-ppo-smoke/final-model.json \
+            --ordinary-trained /tmp/p0-test-only-pooled.json \
+            --train-corpus /tmp/p0-train-source-fixtures.jsonl \
+            --holdout-corpus /tmp/p0-heldout-source-fixtures.jsonl \
+            --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings ../emulator/bindings/python \
+            --emulator-revision 8cbb15ab32ba50dff5d40c214ef7a85266761694 \
+            --workers 2 --bootstrap-replicates 100 \
+            --output-root /tmp/p0-heldout-smoke
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          d = json.loads(Path('/tmp/p0-heldout-smoke/holdout-report.json').read_text())
+          assert d['source_run_count'] == 2
+          assert d['decision_grade'] is False
+          assert d['source_chance_law'] == 'UNVERIFIED'
+          assert d['research_verdict'] == 'NOT_ESTABLISHED'
+          assert len(d['rows']['ordinary_trained']) == 4
+          print('[nature-p0-holdout] PASS source-disjoint integration gate only')
           PY
