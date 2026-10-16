@@ -17,6 +17,10 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from sts2_ai.emulator.protocol import LegalAction, Observation
+from sts2_ai.emulator.semantic_p0_frozen_player import (
+    FrozenP0Player,
+    FrozenPolicyInferenceError,
+)
 from sts2_ai.models.neural import NeuralPolicyValueModel
 from sts2_ai.models.pooled_objects import PooledObjectTorch
 from sts2_ai.models.relational_objects import (
@@ -30,6 +34,7 @@ from sts2_ai.training.pooled_ppo_v15 import (
     _prepared_decision,
 )
 from sts2_ai.training.selfplay import PublicDecision
+from sts2_ai.nature.protocol import canonical_sha256
 
 P0_PPO_SCHEMA = "sts2-ai-p0-source-combat-player-ppo-v1"
 
@@ -59,8 +64,6 @@ def validate_recorded_action(
         raise RealPlayerPpoError("Player action uses a nonfair observation policy")
     try:
         payload = json.loads(obs["payload_json"])
-        from sts2_ai.nature.protocol import canonical_sha256
-
         if not isinstance(payload, dict) or "semanticDeck" in payload or "pending" in payload:
             raise RealPlayerPpoError("Hidden/private state in player PPO observation")
         if obs.get("observation_hash") != canonical_sha256(payload):
@@ -87,6 +90,31 @@ def validate_recorded_action(
     if (expected_scope == "silent-basic-v1"
             and any(a.kind not in ("end_turn", "play_card") for a in actions)):
         raise RealPlayerPpoError("Unmasked unsupported player action in P0 PPO")
+
+    # The exact source-issued *unrestricted* public menu is part of the
+    # emulator's replay support_identity. Re-derive both the public projection
+    # and the restricted behavior menu, including unselected actions.
+    source_observation = raw.get("source_observation")
+    source_menu = raw.get("source_legal_actions")
+    if not isinstance(source_observation, dict) or not isinstance(source_menu, list):
+        raise RealPlayerPpoError("Missing complete source player menu provenance")
+    try:
+        source_identity = canonical_sha256([source_observation, source_menu])
+        source_public, all_source_actions = FrozenP0Player._public_types(
+            source_observation, source_menu
+        )
+        scoped = FrozenP0Player.scoped_actions(
+            source_observation, all_source_actions, expected_scope
+        )
+    except (FrozenPolicyInferenceError, ValueError, TypeError, KeyError) as exc:
+        raise RealPlayerPpoError("Malformed source player menu provenance") from exc
+    if raw.get("source_support_identity") != source_identity:
+        raise RealPlayerPpoError("Source action-menu provenance digest mismatch")
+    if source_public != observation or scoped != actions:
+        raise RealPlayerPpoError(
+            "Recorded PPO observation/legal menu differs from issued source menu"
+        )
+
     lp, value = raw.get("behavior_logprob"), raw.get("behavior_value")
     if any(type(x) not in (int, float) or not math.isfinite(x) for x in (lp, value)):
         raise RealPlayerPpoError("Missing/nonfinite behavior log-probability or value")
@@ -176,9 +204,12 @@ def prepare_real_combat_ppo_samples(
                 )
                 if decision.legal_actions[decision.chosen_index].action_id != step["selected_id"]:
                     raise RealPlayerPpoError("PPO selected action mismatches exact replay")
-                if (step.get("support_identity") is None
-                        or not isinstance(step["support_identity"], str)):
-                    raise RealPlayerPpoError("Missing source action-menu provenance")
+                if (not isinstance(step.get("support_identity"), str)
+                        or not step["support_identity"]
+                        or raw["source_support_identity"] != step["support_identity"]):
+                    raise RealPlayerPpoError(
+                        "Source player action-menu diverges from verified replay"
+                    )
                 objects, refs, baseline = _prepared_decision(decision, base)
                 bindings = (
                     _action_tokens(decision.legal_actions, objects)
