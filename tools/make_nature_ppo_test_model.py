@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Generate a TEST-ONLY v15 pooled model for real emulator PPO contract CI.
 
-Zero-weight residual gates and zero-policy legacy heads produce an untrained
-uniform actor. This has no relation to the existing trained v15 checkpoints.
+Untrained legacy heads and nonzero tiny residual gates force the portable
+public-object encoder to execute in external workers, preventing the
+zero-gate fast path from hiding a fair-observation compatibility bug.
+This model is NOT a trained player checkpoint.
 """
 from __future__ import annotations
 
@@ -49,6 +51,11 @@ def main() -> None:
     torch.manual_seed(29)
     vocabulary = ObjectVocabulary.from_object_sets(())
     trainable = PooledObjectTorch(vocabulary, width=16)
+    # Actively exercise the portable object encoder in every combat; its
+    # zero-gate short circuit would otherwise bypass P0 public projection.
+    with torch.no_grad():
+        trainable.module.policy_gate.fill_(0.025)
+        trainable.module.value_gate.fill_(0.015)
     exported = PhaseSplitNeuralModel(
         base.strategy, trainable.export(base.combat),
         "test-only-untrained-pooled-v15",
