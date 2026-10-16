@@ -12,7 +12,6 @@ improves general gameplay from smoke tests.
 from __future__ import annotations
 
 import json
-import math
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from typing import Any, Protocol
