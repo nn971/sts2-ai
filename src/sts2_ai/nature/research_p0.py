@@ -10,7 +10,6 @@ import json
 import math
 import random
 from collections import defaultdict
-from dataclasses import asdict
 from pathlib import Path
 from statistics import mean
 from typing import Any
