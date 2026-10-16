@@ -123,3 +123,37 @@ def test_portable_phase_split_checkpoint_digest_and_seed_provenance(tmp_path):
     path.write_text(path.read_text() + "\n")
     with pytest.raises(FrozenPolicyInferenceError, match="digest mismatch"):
         spec.load_pinned()
+
+
+def test_silent_basic_mask_excludes_unsupported_cards_but_keeps_original_menu_ids():
+    class BasicPolicy:
+        model_id = "basic-test"
+
+        def evaluate(self, obs, actions):
+            assert {a.action_id for a in actions} == {"strike", "defend", "end"}
+            assert '"hand"' in obs.payload_json
+            return FakeEstimate(tuple(
+                1.0 if a.action_id == "strike" else 0.0 for a in actions
+            ))
+
+    hand = {
+        "combat": {"hand": [
+            {"instance_id": 1, "card_id": "proto.silent.strike"},
+            {"instance_id": 2, "card_id": "proto.silent.survivor"},
+            {"instance_id": 3, "card_id": "proto.silent.defend"},
+        ]},
+    }
+    menu = [
+        {"actionId": "strike", "kind": "play_card",
+         "payloadJson": '{"CardInstanceId":1}'},
+        {"actionId": "survivor", "kind": "play_card",
+         "payloadJson": '{"CardInstanceId":2}'},
+        {"actionId": "defend", "kind": "play_card",
+         "payloadJson": '{"CardInstanceId":3}'},
+        {"actionId": "end", "kind": "end_turn", "payloadJson": "{}"},
+    ]
+    actor = FrozenP0Player(
+        BasicPolicy(), actor_seed=29, action_scope="silent-basic-v1",
+    )
+    assert actor.choose(hand, menu) == "strike"
+    assert "survivor" in {a["actionId"] for a in menu}
