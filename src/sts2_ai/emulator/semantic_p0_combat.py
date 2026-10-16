@@ -63,6 +63,8 @@ class CombatFixture:
     native_entry: str
     total_floor: int
     ascension: int = 0
+    map_column: int = 3
+    map_row: int = 1
     replay_opening_draw_hooks: bool = True
     other_chance_provider_id: str = OTHER_CHANCE_NATIVE_CODEC
 
@@ -223,12 +225,19 @@ def strike_first_player(
     This is deliberately *not* the frozen v15 policy or a performance
     baseline. It operates only on a fair, source-issued action menu.
     """
-    for action in actions:
-        if action.get("kind") == "play_card" and "STRIKE" in (
-            str(action.get("cardModel", "")) +
-            str(action.get("card_model", "")) +
-            str(action.get("card_id", ""))).upper():
-            return action["actionId"]
+    hand = {
+        card["instance_id"]: card["card_id"]
+        for card in _observation.get("combat", {}).get("hand", [])
+    }
+    for preferred in ("proto.silent.strike", "proto.silent.defend"):
+        for action in actions:
+            if action.get("kind") != "play_card":
+                continue
+            import json
+
+            payload = json.loads(action.get("payloadJson", "{}"))
+            if hand.get(payload.get("CardInstanceId")) == preferred:
+                return action["actionId"]
     for action in actions:
         if action.get("kind") == "end_turn":
             return action["actionId"]
@@ -258,6 +267,7 @@ def play_real_two_site(
         fixture.seed, act=fixture.act, encounter_id=fixture.encounter_id,
         native_entry=fixture.native_entry, total_floor=fixture.total_floor,
         ascension=fixture.ascension,
+        map_column=fixture.map_column, map_row=fixture.map_row,
         replay_opening_draw_hooks=fixture.replay_opening_draw_hooks,
         other_chance_provider_id=fixture.other_chance_provider_id,
     )
