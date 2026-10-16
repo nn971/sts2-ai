@@ -152,7 +152,11 @@ def extract_combat_objects(state: dict[str, Any]) -> ObjectSet:
     for k in ("hp", "max_hp", "act", "floor", "gold"):
         if k in state and state[k] is not None:
             global_num[k] = _number(state[k], k)
-    for k in ("turn", "energy", "player_block", "draw_pile_count"):
+    for k in (
+        "turn", "energy", "player_block", "draw_pile_count",
+        "discard_pile_count", "exhaust_pile_count", "play_pile_count",
+        "choice_pool_count",
+    ):
         if k in combat and combat[k] is not None:
             global_num[k] = _number(combat[k], k)
     if isinstance(state.get("character_id"), str):
