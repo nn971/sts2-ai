@@ -30,6 +30,29 @@ player/Nature action IDs with exact support, constraints and state
 fingerprints. JSONL worker reports include the model hash, actor seed,
 policy choice mode and per-episode seed.
 
+## Current P0 source-mechanics action restriction
+
+The current emulator semantic combat has audited only a narrow
+Strike/Defend/end-turn action subset. A full v15 model may legitimately
+prefer Survivor, Neutralize or another card from the public legal menu,
+but trying to execute one of these currently aborts with
+`UNSUPPORTED_SEMANTIC_DECK site=combat.player_action
+operation=card_effect_requires_semantic_audit`.
+
+By default the adapter applies `--player-action-scope silent-basic-v1`:
+it projects the **same fair source-issued legal menu** onto Strike,
+Defend and end turn using **only the public hand's card model and
+the source action's CardInstanceId**. All selected actions still come
+directly from the emulator's original action IDs. The model's logits
+are evaluated on this restricted menu.
+
+**This is a deliberately action-masked frozen v15 policy, not an
+unmodified full v15 policy.** Both experiment arms must use the
+same action restriction when we obtain an ordinary-RNG comparator.
+Use `--player-action-scope all-legal-v1` only after the emulator's
+mechanical audit covers every action reachable by the model.
+Unsupported mechanics remain explicit failures, never silent fallbacks.
+
 ## Run with a real exported frozen v15 model (Fish)
 
 ```fish
