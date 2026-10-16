@@ -13,7 +13,6 @@ import sys
 import time
 import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import asdict
 from multiprocessing.util import Finalize
 from pathlib import Path
 from typing import Any
