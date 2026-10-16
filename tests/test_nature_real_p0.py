@@ -212,7 +212,7 @@ def test_unverified_native_law_and_guarded_support(fixture):
 
 def test_scripted_wrong_card_or_incomplete_trajectory_rejected(fixture):
     session = FakeSession()
-    with pytest.raises(P0SemanticInterfaceError, match="support/constraint divergence"):
+    with pytest.raises(P0SemanticInterfaceError, match="Player observation/menu drift"):
         play_real_two_site(
             session, fixture, emulator_revision="fake",
             scripted_choices=(
