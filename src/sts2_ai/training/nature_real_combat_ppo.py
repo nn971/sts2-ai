@@ -28,13 +28,13 @@ from sts2_ai.models.relational_objects import (
     _action_tokens,
     prepare_relational_topology,
 )
+from sts2_ai.nature.protocol import canonical_sha256
 from sts2_ai.training.phase_split_ppo import gae_terminal
 from sts2_ai.training.pooled_ppo_v15 import (
     PooledPpoSample,
     _prepared_decision,
 )
 from sts2_ai.training.selfplay import PublicDecision
-from sts2_ai.nature.protocol import canonical_sha256
 
 P0_PPO_SCHEMA = "sts2-ai-p0-source-combat-player-ppo-v1"
 
