@@ -17,6 +17,9 @@ from typing import Any, Protocol
 
 from sts2_ai.emulator.protocol import LegalAction, Observation
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
+from sts2_ai.emulator.semantic_p0_public_projection import (
+    CARD_ZONES, project_public_p0_observation,
+)
 from sts2_ai.nature.protocol import canonical_sha256
 
 PUBLIC_POLICY_ID = "prototype-fair-v0"
@@ -147,12 +150,25 @@ class FrozenP0Player:
                 raise FrozenPolicyInferenceError("Invalid public action payload") from exc
             actions.append(LegalAction(ident, kind, payload))
             seen.add(ident)
-        # JSON source semantics are preserved (all fields are from a fair
-        # observation). The value is the public content's own stable hash,
-        # not a hidden/full-state fingerprint.
-        text = json.dumps(observation, separators=(",", ":"), sort_keys=True)
+        # The P0 engine may reveal a pile COUNT while hiding card IDs.
+        # Convert to an explicitly opaque v15 public representation, never
+        # to guessed card identities. Keep the minimal old-fixture format.
+        combat = observation.get("combat", {})
+        needs_p0_projection = (
+            isinstance(combat, dict)
+            and (
+                any(type(combat.get(zone)) is int for zone in CARD_ZONES)
+                or ("draw_pile_count" in combat
+                    and not isinstance(combat.get("draw_pile"), list))
+            )
+        )
+        visible = (
+            project_public_p0_observation(observation)
+            if needs_p0_projection else observation
+        )
+        text = json.dumps(visible, separators=(",", ":"), sort_keys=True)
         public = Observation(
-            PUBLIC_POLICY_ID, text, canonical_sha256(observation),
+            PUBLIC_POLICY_ID, text, canonical_sha256(visible),
         )
         return public, tuple(actions)
 
