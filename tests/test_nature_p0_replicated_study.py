@@ -113,8 +113,10 @@ def test_two_axis_bootstrap_multiple_training_restarts_and_budget_ledger():
     assert result["replica_count"] == 5
     assert result["heldout_source_run_count"] == 2
     assert result["research_replication_floor_met"] is True
-    assert result["between_training_seed_sd"] > 0
-    assert result["training_seed_uncertainty"] == "TWO_AXIS_BOOTSTRAP"
+    assert result["between_replica_sd_including_actor_sampling"] > 0
+    assert result["training_seed_uncertainty"] == "REPLICA_VARIATION_CONFOUNDED_WITH_ACTOR_RNG"
+    assert result["actor_sampling_repeats_per_training_seed"] == 1
+    assert result["training_seed_variance_separately_identified"] is False
     assert result["ordinary_mean_score_delta"] == pytest.approx(0.165)
     assert result["paired_training_seed_and_source_bootstrap_95pct"][0] <= 0.165
     assert result["paired_training_seed_and_source_bootstrap_95pct"][1] >= 0.165
