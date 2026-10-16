@@ -7,7 +7,10 @@ from dataclasses import dataclass
 
 import pytest
 
-from sts2_ai.emulator.semantic_p0_frozen_player import FrozenP0Player
+from sts2_ai.emulator.semantic_p0_frozen_player import (
+    FrozenP0Player,
+    FrozenPolicyInferenceError,
+)
 from sts2_ai.training.nature_real_combat_ppo import (
     RealPlayerPpoError,
     validate_recorded_action,
@@ -104,7 +107,7 @@ def test_greedy_rollout_not_used_as_on_policy_ppo():
         SimplePublicPolicy(), actor_seed=17, greedy=True,
         action_scope="silent-basic-v1", capture_training=True,
     )
-    with pytest.raises(ValueError, match="stochastic"):
+    with pytest.raises(FrozenPolicyInferenceError, match="stochastic"):
         actor.choose(OBS, MENU)
 
 
