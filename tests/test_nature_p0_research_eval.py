@@ -66,12 +66,14 @@ def fake_paired_record():
     trace = {
         "outcome": "victory", "exit_hp": 48,
         "decisions": [step], "trace_digest": "source-verified-test-trace",
+        "first_public_fingerprint": "same-public-opening",
     }
     record = {
         "schema": PAIR_SCHEMA,
         "fixture": {"fixture_id": "holdout-0", "seed": "eval-only-0",
                     "region": "Overgrowth"},
         "same_opening": True, "same_initial_public_state": True,
+        "source_opening_fingerprint": "same-source-opening",
         "ppo_behavior_model_sha256": "a" * 64,
         "player_ppo": {"nature": [raw], "ordinary": [raw]},
         "nature": trace, "ordinary": trace,
@@ -186,9 +188,13 @@ def test_exact_eval_replay_provenance_and_public_hp_reward():
 def test_ordinary_comparator_uses_matching_source_runs_and_cluster_bootstrap():
     left = [
         {"arm": "ordinary", "region": "Overgrowth", "fixture_id": "a",
-         "source_seed": "source-a", "score": 1.0, "victory": True},
+         "source_seed": "source-a", "score": 1.0, "victory": True,
+         "source_opening_fingerprint": "opening-a",
+         "initial_public_fingerprint": "public-a"},
         {"arm": "ordinary", "region": "Underdocks", "fixture_id": "b",
-         "source_seed": "source-b", "score": 0.7, "victory": True},
+         "source_seed": "source-b", "score": 0.7, "victory": True,
+         "source_opening_fingerprint": "opening-b",
+         "initial_public_fingerprint": "public-b"},
         {"arm": "nature", "region": "Underdocks", "fixture_id": "b",
          "source_seed": "source-b", "score": 0.3, "victory": False},
     ]
@@ -210,3 +216,6 @@ def test_ordinary_comparator_uses_matching_source_runs_and_cluster_bootstrap():
     mismatch = [dict(right[0], source_seed="different"), right[1]]
     with pytest.raises(ValueError, match="unmatched"):
         ordinary_policy_comparison(left, mismatch, bootstrap_replicates=100)
+    wrong_opening = [dict(right[0], initial_public_fingerprint="different"), right[1]]
+    with pytest.raises(ValueError, match="same source/public opening"):
+        ordinary_policy_comparison(left, wrong_opening, bootstrap_replicates=100)
