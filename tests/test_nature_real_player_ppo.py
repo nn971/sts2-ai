@@ -191,6 +191,11 @@ def test_public_count_only_pile_projection_has_no_fabricated_cards():
     assert projected["combat"]["discard_pile_count"] == 3
     assert "combat.draw_pile" in projected["p0_opaque_public_fields"]
     objects = extract_combat_objects(projected)
+    global_object = next(x for x in objects.tokens if x.kind == "global")
+    global_features = dict(global_object.numeric)
+    assert global_features["draw_pile_count"] == 7
+    assert global_features["discard_pile_count"] == 3
+    assert global_features["exhaust_pile_count"] == 0
     assert len([x for x in objects.tokens if x.kind == "card"]) == 1
     assert any(
         name == "p0_opaque:combat.draw_pile"
@@ -206,6 +211,19 @@ def test_public_count_only_pile_projection_has_no_fabricated_cards():
     assert "p0_public_projection" in actor.training_actions[0][
         "observation"
     ]["payload_json"]
+
+
+def test_count_only_public_pile_conflict_fails_closed():
+    fair = {
+        "hp": 20, "max_hp": 66,
+        "combat": {
+            "hand": [], "enemies": [],
+            "draw_pile": 4, "draw_pile_count": 4,
+            "discard_pile": 3, "discard_pile_count": 2,
+        },
+    }
+    with pytest.raises(ValueError, match="Inconsistent source P0 count"):
+        project_public_p0_observation(fair)
 
 
 def test_legacy_wrong_card_count_still_rejected_and_opaque_guarded():
