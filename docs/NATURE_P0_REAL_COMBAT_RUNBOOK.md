@@ -107,3 +107,36 @@ entry/room effects and source conditional chance laws are **UNVERIFIED**.
 and already-known positions are consumed mechanically without an
 additional Nature ticket. A hidden-source native shuffle and a Nature
 deferred identity cannot both be counted for the same epoch.
+
+
+## Verified AI→.NET integration (2026-10-16)
+
+The complete [pinned emulator integration CI run #38878584942](https://github.com/nn971/sts2-ai/actions/runs/38878584942)
+**passed**. The workflow separately checked out and built emulator
+`22e6114db7c58990163892e28ce23abd2fa03024`, installed this AI
+branch, ran the focused P0 unit tests, then drove real C# mechanics
+through the external emulator Python/JSONL API:
+
+- **15 independent OS workers / 15 seeded Act 1 Shrinker Beetle
+  combats:** all 15 reached genuine `victory` under the
+  legal Strike/Defend/end-turn player and the **untrained** two-site
+  Nature proposal. Exactly 15 distinct worker processes were observed.
+  Each combat's full interleaved player/Nature trace was replayed
+  with scripted semantic selections; terminal fingerprint and saved
+  private snapshot restoration matched.
+- **Real Nature learning plumbing:** two REINFORCE optimizer updates,
+  each on four complete terminal combats, ran successfully. The
+  reported first-/second-round source-limited combat returns were
+  1.5300 / 1.5450, win rate 1.000 / 1.000, and gradient norms
+  0.10922 / 0.09495. These are **not native comparison returns**
+  or evidence of strategic improvement.
+- **Scope limitation:** this is an intentionally easy weak Act 1
+  source-pinned encounter under a deterministic structural player,
+  rather than frozen v15. The 15/15 victories provide a terminal/
+  replay API test only. We need richer difficulty/encounters,
+  source-run-disjoint data, frozen/v15 player actions, and a genuine
+  matched native-RNG comparator before decision-grade training.
+
+This first positive integration outcome moves the AI consumer from
+synthetic-only to **real emulated combat**. It does not close the
+native-reference comparison or game-source parity gaps in #143.
