@@ -40,9 +40,14 @@ def project_public_p0_observation(source: dict[str, Any]) -> dict[str, Any]:
             container[key] = []
             return
         if type(value) is int and value >= 0:
+            declared = container.get(key + "_count")
+            if declared is not None and (
+                type(declared) is not int or declared != value
+            ):
+                raise ValueError(f"Inconsistent source P0 count at {marker}")
             opaque.append(marker)
             container[key] = []
-            container.setdefault(key + "_count", value)
+            container[key + "_count"] = value
             return
         raise ValueError(f"Unexpected public P0 field {marker}")
 
