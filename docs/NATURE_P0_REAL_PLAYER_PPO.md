@@ -184,3 +184,54 @@ evaluated and no claimed player-strength improvement is supported.
 The next research task is creating a substantial, strictly partitioned
 source-run corpus and feeding an actual trained v15 checkpoint through
 both ordinary/Nature arms for a matched-compute, replicated study.
+
+## Candidate source splits and frozen-player holdout (2026-10-17)
+
+The follow-up research instrument comprises these files:
+
+- \`src/sts2_ai/nature/research_p0.py\`: homogeneous partitions,
+  disjoint *source seeds across all regions*, production HP-preservation
+  scores, full replay/menu provenance, and source-run-clustered bootstrap
+  comparison on the ordinary comparator.
+- \`tools/make_nature_p0_source_splits.py\`: reproducible, region-balanced
+  train/development/evaluation **candidate** JSONLs and integrity manifest.
+  Candidate generation is **not** source-support or fidelity verification:
+  selected C# scenes must finish in the pinned emulator.
+- \`tools/evaluate_nature_p0_player_ppo.py\`: immutable two-checkpoint
+  source-run-disjoint holdout using the same sampled-action scope and a fixed
+  untrained zero-mix Nature stress policy. The ordinary emulator arm is the
+  **primary** outcome; the Nature arm is diagnostic. All actions are replay
+  verified; the evaluator performs **zero gradient updates**.
+
+Fish shell usage:
+
+\`\`\`fish
+python -u tools/make_nature_p0_source_splits.py \
+  --seed 1731 --train 12800 --development 256 --evaluation 512 \
+  --output results/nature/p0-source-splits-1731
+
+# Run independent Nature and ordinary PPO jobs starting with the same
+# pretrained v15 and the same train.jsonl, with matched player optimizer budget.
+
+python -u tools/evaluate_nature_p0_player_ppo.py \
+  --nature-trained results/nature/p0-nature-seed29/final-model.json \
+  --ordinary-trained results/nature/p0-ordinary-seed29/final-model.json \
+  --train-corpus results/nature/p0-source-splits-1731/train.jsonl \
+  --holdout-corpus results/nature/p0-source-splits-1731/evaluation.jsonl \
+  --emulator-dll "$dll" --emulator-bindings "$emulator/bindings/python" \
+  --emulator-revision "$rev" --workers 15 \
+  --output-root results/nature/p0-holdout-seed29
+\`\`\`
+
+The holdout difference is paired by *source-run seed*. Its bootstrap
+reports conditional source-run uncertainty. Retraining-seed uncertainty,
+multiple independent actor sampling replicates and matched total compute
+(including Nature optimization) still require a replicated experiment.
+The actor RNG seed includes its checkpoint digest: source scenes match,
+but sampled player action noise is not common-random-number coupled.
+The underlying source chance law and native-game fidelity remain
+\`UNVERIFIED\`; reports explicitly set \`decision_grade: false\` and
+\`research_verdict: NOT_ESTABLISHED\`.
+
+CI exercises two previously unused C# routes and untrained test models
+only to validate this protocol's plumbing, never to judge Nature.
