@@ -16,10 +16,11 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from sts2_ai.emulator.protocol import LegalAction, Observation
-from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.emulator.semantic_p0_public_projection import (
-    CARD_ZONES, project_public_p0_observation,
+    CARD_ZONES,
+    project_public_p0_observation,
 )
+from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.nature.protocol import canonical_sha256
 
 PUBLIC_POLICY_ID = "prototype-fair-v0"
