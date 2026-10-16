@@ -13,6 +13,7 @@ import multiprocessing
 import os
 import sys
 import time
+import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict
 from multiprocessing.util import Finalize
@@ -24,6 +25,7 @@ from sts2_ai.emulator.semantic_p0_combat import (
     play_real_two_site,
     strike_first_player,
 )
+from sts2_ai.emulator.semantic_p0_frozen_player import FrozenP0Player, FrozenPlayerSpec
 from sts2_ai.nature.corpus import atomic_write
 from sts2_ai.nature.protocol import canonical_sha256
 from sts2_ai.nature.two_site_opponent import PilotChoice, PilotEpisode, TwoSiteNature
@@ -31,43 +33,73 @@ from sts2_ai.nature.two_site_opponent import PilotChoice, PilotEpisode, TwoSiteN
 REPORT_SCHEMA = "sts2-ai-nature-p0-real-combat-batch-v1"
 _worker_session: Any | None = None
 _worker_revision = ""
+_worker_player_model: Any | None = None
+_worker_player_spec: FrozenPlayerSpec | None = None
 
 
 def _close_worker() -> None:
-    global _worker_session
+    global _worker_session, _worker_player_model, _worker_player_spec
     if _worker_session is not None:
         _worker_session.__exit__(None, None, None)
         _worker_session = None
+    _worker_player_model = None
+    _worker_player_spec = None
 
 
 def _initialize(
     command: tuple[str, ...], binding_dir: str, revision: str,
+    player_spec: FrozenPlayerSpec | None = None,
 ) -> None:
-    global _worker_session, _worker_revision
+    global _worker_session, _worker_revision, _worker_player_model, _worker_player_spec
     if _worker_session is not None:
         raise RuntimeError("Worker already has a live emulator")
     sys.path.insert(0, binding_dir)
     module = importlib.import_module("sts2_emulator")
     _worker_session = module.Session(list(command))
     _worker_revision = revision
+    _worker_player_spec = player_spec
+    if player_spec is not None:
+        try:
+            _worker_player_model = player_spec.load_pinned()
+        except BaseException:
+            _close_worker()
+            raise
     Finalize(None, _close_worker, exitpriority=10)
 
 
-def _execute_job(
+def _execute_job_inner(
     index: int, fixture: CombatFixture, nature_state: dict[str, Any],
 ) -> tuple[int, dict[str, Any], int]:
     if _worker_session is None:
         raise RuntimeError("Semantic emulator worker is not initialized")
     nature = TwoSiteNature.restore(nature_state)
+    if _worker_player_spec is None:
+        choose = strike_first_player
+        policy_id = "fair-strike-defend-then-end-turn-v1"
+        episode_actor_seed = None
+    else:
+        if _worker_player_model is None:
+            raise RuntimeError("Frozen player model unavailable in worker")
+        episode_actor_seed = _worker_player_spec.episode_seed(
+            fixture_seed=fixture.seed, fixture_id=fixture.fixture_id,
+        )
+        actor = FrozenP0Player(
+            _worker_player_model, actor_seed=episode_actor_seed,
+            temperature=_worker_player_spec.temperature,
+            greedy=_worker_player_spec.greedy,
+            action_scope=_worker_player_spec.action_scope,
+        )
+        choose = actor.choose
+        policy_id = _worker_player_spec.policy_id
     first = play_real_two_site(
         _worker_session, fixture, emulator_revision=_worker_revision,
-        nature=nature, player_choose=strike_first_player,
+        nature=nature, player_choose=choose,
         max_boundaries=512,
     )
     repeat = play_real_two_site(
         _worker_session, fixture, emulator_revision=_worker_revision,
         scripted_choices=first.trace.replay_choices(),
-        player_choose=strike_first_player, max_boundaries=512,
+        player_choose=choose, max_boundaries=512,
     )
     if first.trace.digest != repeat.trace.digest:
         raise ValueError("Real source combat transcript replay diverged")
@@ -75,6 +107,8 @@ def _execute_job(
         "fixture": asdict(fixture),
         "trace": asdict(first.trace),
         "trace_digest": first.trace.digest,
+        "player_policy": policy_id,
+        "player_actor_seed": episode_actor_seed,
         "return": first.player_return,
         "outcome": first.trace.outcome,
         "exit_hp": first.trace.exit_hp,
@@ -87,12 +121,29 @@ def _execute_job(
     }
     return index, result, os.getpid()
 
+def _execute_job(
+    index: int, fixture: CombatFixture, nature_state: dict[str, Any],
+) -> tuple[int, dict[str, Any], int]:
+    try:
+        return _execute_job_inner(index, fixture, nature_state)
+    except Exception:
+        # Vendor-defined sts2_emulator.EmulatorError cannot be unpickled
+        # by the main Python process (which intentionally does not load
+        # the external Python binding). Transport a built-in exception,
+        # preserving the originating stack as plain diagnostic text.
+        raise RuntimeError(
+            f"Nature real-combat worker fixture={fixture.fixture_id} failed:\n"
+            + traceback.format_exc()
+        ) from None
+
+
 
 def collect_real_combat_batch(
     fixtures: tuple[CombatFixture, ...], *, nature: TwoSiteNature,
     emulator_command: tuple[str, ...], emulator_bindings: Path,
     emulator_revision: str, workers: int = 15,
     progress_every: int = 10,
+    player_spec: FrozenPlayerSpec | None = None,
 ) -> dict[str, Any]:
     if not fixtures or len({f.fixture_id for f in fixtures}) != len(fixtures):
         raise ValueError("Fixtures must have nonempty unique IDs")
@@ -102,6 +153,9 @@ def collect_real_combat_batch(
         raise ValueError("Emulator executable and pinned revision required")
     if not (emulator_bindings / "sts2_emulator" / "__init__.py").exists():
         raise ValueError("Pinned emulator Python bindings directory is missing")
+    if player_spec is not None:
+        # Fail before launching workers if the frozen checkpoint drifted.
+        player_spec.load_pinned()
     fixtures = tuple(sorted(fixtures, key=lambda x: x.fixture_id))
     observed: set[int] = set()
     completed: list[dict[str, Any] | None] = [None] * len(fixtures)
@@ -110,7 +164,7 @@ def collect_real_combat_batch(
         max_workers=workers, mp_context=multiprocessing.get_context("spawn"),
         initializer=_initialize,
         initargs=(emulator_command, str(emulator_bindings.resolve()),
-                  emulator_revision),
+                  emulator_revision, player_spec),
     ) as pool:
         jobs = {
             pool.submit(_execute_job, i, fixture, nature.dump()): fixture
@@ -142,7 +196,22 @@ def collect_real_combat_batch(
         "schema": REPORT_SCHEMA,
         "emulator_revision": emulator_revision,
         "nature": nature.dump(),
-        "player_policy": "fair-strike-defend-then-end-turn-v1",
+        "player_policy": (
+            player_spec.policy_id if player_spec is not None else
+            "fair-strike-defend-then-end-turn-v1"
+        ),
+        "player_checkpoint_sha256": (
+            player_spec.model_sha256 if player_spec is not None else None
+        ),
+        "player_actor_seed": (
+            player_spec.actor_seed if player_spec is not None else None
+        ),
+        "player_temperature": (
+            player_spec.temperature if player_spec is not None else None
+        ),
+        "player_action_scope": (
+            player_spec.action_scope if player_spec is not None else None
+        ),
         "workers_requested": workers,
         "worker_processes_observed": len(observed),
         "fixture_count": len(records),
@@ -166,6 +235,7 @@ def train_real_nature_batches(
     emulator_revision: str, workers: int = 15,
     start_index: int = 0, output: Path | None = None,
     nature_mix: float = 0.75,
+    player_spec: FrozenPlayerSpec | None = None,
 ) -> dict[str, Any]:
     """Run a *smoke* for opponent learning; no native strength verdict.
 
@@ -189,6 +259,7 @@ def train_real_nature_batches(
             fixtures, nature=nature, emulator_command=emulator_command,
             emulator_bindings=emulator_bindings,
             emulator_revision=emulator_revision, workers=workers,
+            player_spec=player_spec,
         )
         episodes = tuple(
             PilotEpisode(
@@ -220,6 +291,8 @@ def train_real_nature_batches(
                 json.dumps({
                     "schema": "sts2-ai-real-two-site-nature-smoke-v1",
                     "emulator_revision": emulator_revision,
+                    "player_policy": report["player_policy"],
+                    "player_checkpoint_sha256": report["player_checkpoint_sha256"],
                     "nature_checkpoint": nature.dump(),
                     "history": history,
                     "evidence_level": "smoke-only",
@@ -228,6 +301,10 @@ def train_real_nature_batches(
             )
     return {
         "emulator_revision": emulator_revision,
+        "player_policy": (
+            player_spec.policy_id if player_spec is not None else
+            "fair-strike-defend-then-end-turn-v1"
+        ),
         "nature_checkpoint": nature.dump(),
         "history": history,
         "evidence_level": "smoke-only",
