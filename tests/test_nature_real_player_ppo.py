@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import math
 from dataclasses import dataclass
 
@@ -102,6 +103,46 @@ def test_public_observation_tampering_rejected():
     with pytest.raises(RealPlayerPpoError, match="private state"):
         validate_recorded_action(
             tampered, expected_model_id="source-public-policy-v1",
+            expected_temperature=0.85, expected_scope="silent-basic-v1",
+        )
+
+
+@pytest.mark.parametrize("mutation,match", [
+    ("source_digest", "provenance digest"),
+    ("source_menu", "provenance digest"),
+    ("restricted_menu", "differs from issued source menu"),
+    ("public_observation", "differs from issued source menu"),
+    ("fully_rehashed_source", "differs from issued source menu"),
+])
+def test_complete_source_legal_menu_and_observation_attestation(mutation, match):
+    from sts2_ai.nature.protocol import canonical_sha256
+
+    raw, _ = sample()
+    corrupted = copy.deepcopy(raw)
+    if mutation == "source_digest":
+        corrupted["source_support_identity"] = "incorrect"
+    elif mutation == "source_menu":
+        # Change an *unchosen* source action, preserving the chosen ID.
+        corrupted["source_legal_actions"][1]["kind"] = "use_potion"
+    elif mutation == "restricted_menu":
+        corrupted["legal_actions"][1]["kind"] = "play_card"
+    elif mutation == "public_observation":
+        visible = json.loads(corrupted["observation"]["payload_json"])
+        visible["hp"] += 1
+        corrupted["observation"]["payload_json"] = json.dumps(
+            visible, sort_keys=True, separators=(",", ":")
+        )
+        corrupted["observation"]["observation_hash"] = canonical_sha256(visible)
+    elif mutation == "fully_rehashed_source":
+        # A self-consistently rehashed forged source is still compared
+        # with the separately recorded projected public observation.
+        corrupted["source_legal_actions"][1]["kind"] = "use_potion"
+        corrupted["source_support_identity"] = canonical_sha256([
+            corrupted["source_observation"], corrupted["source_legal_actions"]
+        ])
+    with pytest.raises(RealPlayerPpoError, match=match):
+        validate_recorded_action(
+            corrupted, expected_model_id="source-public-policy-v1",
             expected_temperature=0.85, expected_scope="silent-basic-v1",
         )
 
