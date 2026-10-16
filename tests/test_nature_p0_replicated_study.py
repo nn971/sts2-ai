@@ -86,6 +86,8 @@ def replica(seed: int, *, steps_nature: int = 12):
             "schema": EVAL_SCHEMA, "decision_grade": False,
             "research_verdict": "NOT_ESTABLISHED",
             "source_chance_law": "UNVERIFIED",
+            "source_run_count": 2,
+            "ordinary_score_delta": 0.115 + 0.01 * seed,
             "experiment": experiment, "rows": rows,
         },
     }
@@ -156,6 +158,17 @@ def test_mismatched_checkpoint_config_and_source_partitions_rejected():
     mismatch[1]["holdout"]["experiment"]["holdout_sha256"] = "x" * 64
     with pytest.raises(ValueError, match="Held-out source groups"):
         analyze(mismatch)
+
+
+def test_reported_score_or_fingerprint_forgery_rejected():
+    altered = replica(2)
+    altered["holdout"]["ordinary_score_delta"] += 0.1
+    with pytest.raises(ValueError, match="Recomputed holdout score"):
+        analyze([altered])
+    altered = replica(2)
+    altered["holdout"]["experiment"]["fingerprint"] = "forged"
+    with pytest.raises(ValueError, match="fingerprint"):
+        analyze([altered])
 
 
 def test_single_training_replica_explicitly_has_no_seed_uncertainty():
