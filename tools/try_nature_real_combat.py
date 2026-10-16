@@ -32,6 +32,12 @@ def main() -> None:
     parser.add_argument("--player-sampling", action="store_true",
                         help="Sample frozen player logits, otherwise greedy")
     parser.add_argument("--player-actor-seed", type=int, default=2026)
+    parser.add_argument(
+        "--player-action-scope",
+        choices=("silent-basic-v1", "all-legal-v1"),
+        default="silent-basic-v1",
+        help="Project frozen policy to audited basic cards for P0; full menu may abort",
+    )
     parser.add_argument("--seed", type=int, default=29)
     parser.add_argument("--episodes", type=int, default=30)
     parser.add_argument("--rounds", type=int, default=2)
@@ -50,6 +56,7 @@ def main() -> None:
             args.player_model, seed=args.player_actor_seed,
             temperature=args.player_temperature,
             greedy=not args.player_sampling,
+            action_scope=args.player_action_scope,
         ) if args.player_model is not None else None
     )
     command = (
