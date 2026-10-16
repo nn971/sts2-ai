@@ -189,15 +189,15 @@ both ordinary/Nature arms for a matched-compute, replicated study.
 
 The follow-up research instrument comprises these files:
 
-- \`src/sts2_ai/nature/research_p0.py\`: homogeneous partitions,
+- `src/sts2_ai/nature/research_p0.py`: homogeneous partitions,
   disjoint *source seeds across all regions*, production HP-preservation
   scores, full replay/menu provenance, and source-run-clustered bootstrap
   comparison on the ordinary comparator.
-- \`tools/make_nature_p0_source_splits.py\`: reproducible, region-balanced
+- `tools/make_nature_p0_source_splits.py`: reproducible, region-balanced
   train/development/evaluation **candidate** JSONLs and integrity manifest.
   Candidate generation is **not** source-support or fidelity verification:
   selected C# scenes must finish in the pinned emulator.
-- \`tools/evaluate_nature_p0_player_ppo.py\`: immutable two-checkpoint
+- `tools/evaluate_nature_p0_player_ppo.py`: immutable two-checkpoint
   source-run-disjoint holdout using the same sampled-action scope and a fixed
   untrained zero-mix Nature stress policy. The ordinary emulator arm is the
   **primary** outcome; the Nature arm is diagnostic. All actions are replay
@@ -205,7 +205,7 @@ The follow-up research instrument comprises these files:
 
 Fish shell usage:
 
-\`\`\`fish
+```fish
 python -u tools/make_nature_p0_source_splits.py \
   --seed 1731 --train 12800 --development 256 --evaluation 512 \
   --output results/nature/p0-source-splits-1731
@@ -221,7 +221,7 @@ python -u tools/evaluate_nature_p0_player_ppo.py \
   --emulator-dll "$dll" --emulator-bindings "$emulator/bindings/python" \
   --emulator-revision "$rev" --workers 15 \
   --output-root results/nature/p0-holdout-seed29
-\`\`\`
+```
 
 The holdout difference is paired by *source-run seed*. Its bootstrap
 reports conditional source-run uncertainty. Retraining-seed uncertainty,
@@ -230,8 +230,8 @@ multiple independent actor sampling replicates and matched total compute
 The actor RNG seed includes its checkpoint digest: source scenes match,
 but sampled player action noise is not common-random-number coupled.
 The underlying source chance law and native-game fidelity remain
-\`UNVERIFIED\`; reports explicitly set \`decision_grade: false\` and
-\`research_verdict: NOT_ESTABLISHED\`.
+`UNVERIFIED`; reports explicitly set `decision_grade: false` and
+`research_verdict: NOT_ESTABLISHED`.
 
 CI exercises two previously unused C# routes and untrained test models
 only to validate this protocol's plumbing, never to judge Nature.
@@ -240,10 +240,10 @@ only to validate this protocol's plumbing, never to judge Nature.
 ## Replicated experiment launcher and two-axis analysis (2026-10-17)
 
 The next step after the frozen source-run holdout is a **pre-registered,
-independently seeded paired PPO study**, implemented entirely in \`sts2-ai\`:
+independently seeded paired PPO study**, implemented entirely in `sts2-ai`:
 
-- \`tools/run_nature_p0_replicas.py\` creates a non-destructive plan by
-  default; \`--execute\` launches 5 independent pairs, each initialized
+- `tools/run_nature_p0_replicas.py` creates a non-destructive plan by
+  default; `--execute` launches 5 independent pairs, each initialized
   from the exact same pretrained portable v15 bytes and a shared *train-only*
   source file. Nature and ordinary get the same learning rate, temperature,
   sample cap, PPO epochs, rounds, episode budgets and worker count.
@@ -252,21 +252,21 @@ independently seeded paired PPO study**, implemented entirely in \`sts2-ai\`:
   **same untouched evaluation source runs**, with a distinct evaluation
   actor RNG seed. Jobs are sequential and resume through the production
   optimizer checkpoints, with an immutable experiment plan.
-- \`tools/analyze_nature_p0_replicas.py\` audits final model hashes,
+- `tools/analyze_nature_p0_replicas.py` audits final model hashes,
   source corpus identity, emulator revision and DLL/binding hashes,
   PPO settings, source opening identity and each arm's **actual**
   collected player actions, optimizer steps and elapsed time.
   It recomputes holdout score deltas from source-level rows and rejects
   altered experiment fingerprints and mismatched claims.
-- \`src/sts2_ai/nature/replicated_study.py\` performs a paired **two-axis
+- `src/sts2_ai/nature/replicated_study.py` performs a paired **two-axis
   bootstrap**: resample training-restart pairs and held-out source-run
   groups, preserving the same source sample across all resampled training
-  pairs. It reports per-seed effects, training-seed SD, an uncertainty
-  interval, and an explicit budget-parity ledger.
+  pairs. It reports per-seed effects, between-replica SD (which includes
+  player-action randomness), an uncertainty interval, and a budget ledger.
 
 Fish example with a genuine pretrained portable v15 checkpoint:
 
-\`\`\`fish
+```fish
 python -u tools/run_nature_p0_replicas.py \
   --initial-model /path/to/pretrained-v15.json \
   --train-corpus results/nature/p0-source-splits-1731/train.jsonl \
@@ -281,11 +281,11 @@ python -u tools/run_nature_p0_replicas.py \
 # Review the emitted plan; then repeat with --execute to launch jobs.
 # It prints every training round and each evaluation cohort.
 # The plan and completed holdout cohorts are immutable.
-\`\`\`
+```
 
 A completed study has:
 
-\`\`\`text
+```text
 p0-replicated-study/
   study-plan.json
   seed-29/
@@ -296,7 +296,7 @@ p0-replicated-study/
     holdout/holdout-report.json
   seed-101/...  seed-211/...  seed-307/...  seed-401/...
   replicated-analysis.json
-\`\`\`
+```
 
 The study's planned budgets have *equal episodes and PPO hyperparameters*.
 Actual action counts and PPO update steps can differ when policies produce
@@ -305,15 +305,21 @@ total computation remains unestablished** even when PPO-step counts match.
 The audit displays both actual PPO-step ratios and wall-time ratios; any
 necessary computation-normalized comparison requires its own protocol.
 The test-only synthetic v15 CI model is refused by default
-(\`--allow-untrained-smoke\` is restricted to explicitly labeled engineering
+(`--allow-untrained-smoke` is restricted to explicitly labeled engineering
 tests).
 
 All generated source routes remain **candidates** until they successfully
 replay in the pinned C# emulator; unsupported routes fail closed. Do not
 select or discard evaluation seeds based on observed player performance.
-The current study scope is restricted \`silent-basic-v1\` weak Act 1
-combats, with native reference chance law \`UNVERIFIED\`; the analyzer
-reports \`decision_grade=false\` and \`research_verdict=NOT_ESTABLISHED\`.
+The current study scope is restricted `silent-basic-v1` weak Act 1
+combats, with native reference chance law `UNVERIFIED`; the analyzer
+reports `decision_grade=false` and `research_verdict=NOT_ESTABLISHED`.
 Further research still needs a mature pretrained v15 model, a substantial
 source-supported sample, real 15-worker saturation, well-matched *total*
 compute, more actor RNG replicates, and native/reference Chance Law audit.
+With only one evaluation actor RNG seed per trained replica, the
+two-axis bootstrap mixes independent *training* and *player-action sampling*
+variability. Its between-replica SD cannot identify training-seed variance
+alone. A subsequent study should evaluate each frozen checkpoint under
+multiple independent actor RNG seeds and aggregate within each training
+replica before estimating retraining-seed uncertainty.
