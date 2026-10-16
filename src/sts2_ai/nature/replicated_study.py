@@ -253,7 +253,7 @@ def analyze_replicated_study(
         "replica_count": len(rows),
         "heldout_source_run_count": len(ordered_sources),
         "ordinary_mean_score_delta": observed,
-        "between_training_seed_sd": (
+        "between_replica_sd_including_actor_sampling": (
             stdev(run_deltas) if len(run_deltas) >= 2 else None
         ),
         "paired_training_seed_and_source_bootstrap_95pct": [lower, upper],
@@ -269,8 +269,11 @@ def analyze_replicated_study(
         "total_compute_matching": "NOT_ESTABLISHED",
         "research_replication_floor_met": len(rows) >= MIN_RESEARCH_REPLICAS,
         "source_chance_law": "UNVERIFIED",
+        "actor_sampling_repeats_per_training_seed": 1,
+        "training_seed_variance_separately_identified": False,
         "training_seed_uncertainty": (
-            "TWO_AXIS_BOOTSTRAP" if len(rows) >= 2 else "NOT_ESTIMATED"
+            "REPLICA_VARIATION_CONFOUNDED_WITH_ACTOR_RNG"
+            if len(rows) >= 2 else "NOT_ESTIMATED"
         ),
         "decision_grade": False,
         "research_verdict": "NOT_ESTABLISHED",
