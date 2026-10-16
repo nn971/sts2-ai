@@ -222,6 +222,8 @@ def main() -> None:
             temperature=args.temperature, action_scope=spec.action_scope,
             gamma=args.gamma, gae_lambda=args.gae_lambda,
         )
+        preparation_seconds = time.perf_counter() - start
+        ppo_start = time.perf_counter()
         optimization = ppo_update_pooled(
             head, samples, optimizer,
             temperature=args.temperature,
@@ -229,6 +231,8 @@ def main() -> None:
             batch_size=args.batch_size, sample_limit=args.sample_limit,
             seed=args.seed + 1000003 * i, diagnostics=True,
         )
+        ppo_seconds = time.perf_counter() - ppo_start
+        nature_start = time.perf_counter()
         nature_update = None
         if args.nature_update:
             rows = tuple(PilotEpisode(
@@ -236,6 +240,7 @@ def main() -> None:
                 tuple(PilotChoice(**raw) for raw in row["nature"]["nature_choices"]),
             ) for row, score in zip(report["records"], scores, strict=True))
             nature_update = nature.update(rows)
+        nature_update_seconds = time.perf_counter() - nature_start
         round_record = {
             "round": i, "source_run_count": len(chosen_fixtures),
             "sample_count": len(samples), "completed": len(scores),
@@ -247,6 +252,9 @@ def main() -> None:
             "source_digest": report["records_digest"],
             "behavior_sha256": spec.model_sha256,
             "rollout_seconds": rollout_seconds,
+            "sample_preparation_seconds": preparation_seconds,
+            "player_ppo_seconds": ppo_seconds,
+            "nature_update_seconds": nature_update_seconds,
             "optimizer_seconds": time.perf_counter() - start,
             "worker_processes_observed": report["worker_processes_observed"],
             "training_arm": args.training_arm,
