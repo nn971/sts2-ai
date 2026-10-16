@@ -6,6 +6,8 @@ on:
       - 'src/sts2_ai/emulator/controlled_chance.py'
       - 'src/sts2_ai/emulator/playable_chance.py'
       - 'src/sts2_ai/emulator/semantic_chance.py'
+      - 'src/sts2_ai/emulator/semantic_p0_combat.py'
+      - 'tools/try_nature_real_combat.py'
       - 'src/sts2_ai/training/chance_importance.py'
       - 'src/sts2_ai/training/nature_oracle.py'
       - 'src/sts2_ai/training/two_site_combat_toy.py'
@@ -29,6 +31,8 @@ on:
       - 'src/sts2_ai/emulator/controlled_chance.py'
       - 'src/sts2_ai/emulator/playable_chance.py'
       - 'src/sts2_ai/emulator/semantic_chance.py'
+      - 'src/sts2_ai/emulator/semantic_p0_combat.py'
+      - 'tools/try_nature_real_combat.py'
       - 'src/sts2_ai/training/chance_importance.py'
       - 'src/sts2_ai/training/nature_oracle.py'
       - 'src/sts2_ai/training/two_site_combat_toy.py'
@@ -64,6 +68,7 @@ jobs:
           src/sts2_ai/training/two_site_combat_toy.py
           tools/try_two_site_nature_toy.py
           tests/test_nature_two_site_pilot.py
+          tests/test_nature_real_p0.py
           tools/collect_nature_isolated.py
           tools/benchmark_nature_workers.py
           tests/test_nature_corpus_n3.py
@@ -72,6 +77,9 @@ jobs:
           src/sts2_ai/emulator/playable_chance.py
           tests/test_nature_playable_fixture.py
           src/sts2_ai/emulator/semantic_chance.py
+          src/sts2_ai/emulator/semantic_p0_combat.py
+          tools/try_nature_real_combat.py
+          tests/test_nature_real_p0.py
           tests/test_nature_semantic_n1n2.py
           tests/test_nature_semantic_oracle.py
           src/sts2_ai/training/chance_importance.py
