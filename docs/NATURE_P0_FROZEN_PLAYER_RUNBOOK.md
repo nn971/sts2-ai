@@ -106,3 +106,37 @@ and untouched holdouts, per
 
 **Evidence level:** all initial pinned-emulator trials are structural
 smoke/integration only. No 20-round experiment is a feature verdict.
+
+
+## Verified implementation acceptance (2026-10-16)
+
+[Cross-repository workflow #38881116199](https://github.com/nn971/sts2-ai/actions/runs/38881116199)
+**passed** after building the independently checked-out pinned C#
+emulator `22e6114`:
+
+- Focused P0 contract and frozen-player unit tests green (public
+  action types, SHA-256 mismatch detection, seeded sampling, supported
+  source-action projection).
+- **15/15 real Act 1 victories** under the existing structural player,
+  observed across 15 independently owned emulator processes with
+  scripted Nature/player replay.
+- **4/4 complete real Act 1 victories** using an **untrained**
+  zero-weight phase-split `model.json` through the actual frozen-player
+  evaluation path and source-issued restricted legal actions, with
+  independently verified scripted replay in four emulator processes.
+- The two-round, four-episode-per-round Nature optimizer plumbing
+  smoke still passes.
+
+An earlier full-action-menu trial correctly stopped when the model
+chose an unaudited card effect. The exact error was
+`UNSUPPORTED_SEMANTIC_DECK site=combat.player_action
+operation=card_effect_requires_semantic_audit`, which motivated
+the explicitly recorded `silent-basic-v1` restriction. The
+source-emulator issue #143 now contains that coverage finding.
+
+**Interpretation:** successful **Level 1 mechanical integration** of
+the portable v15-compatible fair policy adapter. The CI checkpoint
+was synthetically untrained; no actual trained v15 model or ordinary-RNG
+comparison was used for this acceptance. Nature's strategic utility
+remains unevaluated until decision-grade research under the evidence
+standard.
