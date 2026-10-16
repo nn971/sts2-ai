@@ -4,6 +4,8 @@ on:
   push:
     paths:
       - 'src/sts2_ai/emulator/semantic_p0_frozen_player.py'
+      - 'src/sts2_ai/emulator/semantic_p0_public_projection.py'
+      - 'src/sts2_ai/models/object_instances.py'
       - 'src/sts2_ai/nature/paired_real_workers.py'
       - 'src/sts2_ai/training/nature_real_combat_ppo.py'
       - 'tools/train_nature_two_site_player_ppo.py'
@@ -13,6 +15,8 @@ on:
   pull_request:
     paths:
       - 'src/sts2_ai/emulator/semantic_p0_frozen_player.py'
+      - 'src/sts2_ai/emulator/semantic_p0_public_projection.py'
+      - 'src/sts2_ai/models/object_instances.py'
       - 'src/sts2_ai/nature/paired_real_workers.py'
       - 'src/sts2_ai/training/nature_real_combat_ppo.py'
       - 'tools/train_nature_two_site_player_ppo.py'
@@ -47,7 +51,7 @@ jobs:
       - name: Validate sampled fair player action and on-policy PPO provenance
         working-directory: ai
         run: |
-          python -m ruff check src/sts2_ai/emulator/semantic_p0_frozen_player.py src/sts2_ai/nature/paired_real_workers.py src/sts2_ai/training/nature_real_combat_ppo.py tools/train_nature_two_site_player_ppo.py tools/make_nature_ppo_test_model.py tests/test_nature_real_player_ppo.py
+          python -m ruff check src/sts2_ai/emulator/semantic_p0_frozen_player.py src/sts2_ai/emulator/semantic_p0_public_projection.py src/sts2_ai/models/object_instances.py src/sts2_ai/nature/paired_real_workers.py src/sts2_ai/training/nature_real_combat_ppo.py tools/train_nature_two_site_player_ppo.py tools/make_nature_ppo_test_model.py tests/test_nature_real_player_ppo.py
           python -m pytest -q tests/test_nature_real_player_ppo.py
       - name: Build pinned ordinary-policy comparator emulator
         working-directory: emulator
