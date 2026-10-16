@@ -139,3 +139,39 @@ same input features. This projection should eventually become a
 native, versioned public-observation schema agreed with the user's
 unified emulator stochastic interface. It is deliberately confined
 to AI and does not alter the emulator game mechanics.
+
+
+## Verified real-emulator PPO integration (2026-10-16)
+
+[Focused cross-repository CI #38937309541](https://github.com/nn971/sts2-ai/actions/runs/38937309541)
+**passed** with CPU Torch and independently built source-pinned C#
+emulator `8cbb15a`:
+
+- The new sampled public-PPO action collector and strict stale
+  model/temperature/action-support tests passed. The P0 public projection
+  tests verified the genuine hidden draw pile is **count-only**, with
+  no invented card identities. Legacy v15 count/instance invariants
+  remain enforced outside the projection.
+- A **test-only, UNTRAINED** portable v15c pooled model with
+  deliberately **nonzero residual policy/value gates** completed five
+  genuinely simulated paired Nature/ordinary Act 1 combats, through
+  five independently owned emulator processes. Nonzero gates force the
+  portable v15 object encoder to exercise our public projection; the
+  previous zero-gate test could bypass the encoder entirely.
+- The Nature-arm cohort produced **123 actual player actions**, all
+  verified against the source-issued action IDs and the *same*
+  exported pre-update Torch residual policy. The production
+  `ppo_update_pooled` performed **12 optimizer steps** with a finite
+  reported loss. A separate Nature REINFORCE update completed on the
+  same terminal HP-preservation scores. A new portable player checkpoint
+  and atomic resumable Torch optimizer state were saved and validated.
+- The observed five-combat mean v15 preservation target was **0.3886**;
+  paired Nature-minus-ordinary pilot score was **−0.0080**. These are
+  irrelevant as performance estimates at this scale. They are
+  printed only to verify terminal reward plumbing and finite updates.
+
+This is **Level 1 engineering/optimizer smoke**; no trained policy was
+evaluated and no claimed player-strength improvement is supported.
+The next research task is creating a substantial, strictly partitioned
+source-run corpus and feeding an actual trained v15 checkpoint through
+both ordinary/Nature arms for a matched-compute, replicated study.
