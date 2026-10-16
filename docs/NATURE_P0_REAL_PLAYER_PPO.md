@@ -235,3 +235,85 @@ The underlying source chance law and native-game fidelity remain
 
 CI exercises two previously unused C# routes and untrained test models
 only to validate this protocol's plumbing, never to judge Nature.
+
+
+## Replicated experiment launcher and two-axis analysis (2026-10-17)
+
+The next step after the frozen source-run holdout is a **pre-registered,
+independently seeded paired PPO study**, implemented entirely in \`sts2-ai\`:
+
+- \`tools/run_nature_p0_replicas.py\` creates a non-destructive plan by
+  default; \`--execute\` launches 5 independent pairs, each initialized
+  from the exact same pretrained portable v15 bytes and a shared *train-only*
+  source file. Nature and ordinary get the same learning rate, temperature,
+  sample cap, PPO epochs, rounds, episode budgets and worker count.
+  Nature alone receives its independently accounted chance-opponent update.
+  Each seed gets its own frozen ordinary-comparator evaluation on the
+  **same untouched evaluation source runs**, with a distinct evaluation
+  actor RNG seed. Jobs are sequential and resume through the production
+  optimizer checkpoints, with an immutable experiment plan.
+- \`tools/analyze_nature_p0_replicas.py\` audits final model hashes,
+  source corpus identity, emulator revision and DLL/binding hashes,
+  PPO settings, source opening identity and each arm's **actual**
+  collected player actions, optimizer steps and elapsed time.
+  It recomputes holdout score deltas from source-level rows and rejects
+  altered experiment fingerprints and mismatched claims.
+- \`src/sts2_ai/nature/replicated_study.py\` performs a paired **two-axis
+  bootstrap**: resample training-restart pairs and held-out source-run
+  groups, preserving the same source sample across all resampled training
+  pairs. It reports per-seed effects, training-seed SD, an uncertainty
+  interval, and an explicit budget-parity ledger.
+
+Fish example with a genuine pretrained portable v15 checkpoint:
+
+\`\`\`fish
+python -u tools/run_nature_p0_replicas.py \
+  --initial-model /path/to/pretrained-v15.json \
+  --train-corpus results/nature/p0-source-splits-1731/train.jsonl \
+  --evaluation-corpus results/nature/p0-source-splits-1731/evaluation.jsonl \
+  --emulator-dll "$dll" \
+  --emulator-bindings "$emulator/bindings/python" \
+  --emulator-revision "$rev" \
+  --seeds 29,101,211,307,401 \
+  --rounds 100 --episodes-per-round 128 --workers 15 \
+  --study-root results/nature/p0-replicated-study
+
+# Review the emitted plan; then repeat with --execute to launch jobs.
+# It prints every training round and each evaluation cohort.
+# The plan and completed holdout cohorts are immutable.
+\`\`\`
+
+A completed study has:
+
+\`\`\`text
+p0-replicated-study/
+  study-plan.json
+  seed-29/
+    nature/history.json
+    nature/final-model.json
+    ordinary/history.json
+    ordinary/final-model.json
+    holdout/holdout-report.json
+  seed-101/...  seed-211/...  seed-307/...  seed-401/...
+  replicated-analysis.json
+\`\`\`
+
+The study's planned budgets have *equal episodes and PPO hyperparameters*.
+Actual action counts and PPO update steps can differ when policies produce
+different combat lengths. Nature has additional optimizer cost, so **equal
+total computation remains unestablished** even when PPO-step counts match.
+The audit displays both actual PPO-step ratios and wall-time ratios; any
+necessary computation-normalized comparison requires its own protocol.
+The test-only synthetic v15 CI model is refused by default
+(\`--allow-untrained-smoke\` is restricted to explicitly labeled engineering
+tests).
+
+All generated source routes remain **candidates** until they successfully
+replay in the pinned C# emulator; unsupported routes fail closed. Do not
+select or discard evaluation seeds based on observed player performance.
+The current study scope is restricted \`silent-basic-v1\` weak Act 1
+combats, with native reference chance law \`UNVERIFIED\`; the analyzer
+reports \`decision_grade=false\` and \`research_verdict=NOT_ESTABLISHED\`.
+Further research still needs a mature pretrained v15 model, a substantial
+source-supported sample, real 15-worker saturation, well-matched *total*
+compute, more actor RNG replicates, and native/reference Chance Law audit.
