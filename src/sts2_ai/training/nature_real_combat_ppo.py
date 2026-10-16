@@ -5,8 +5,9 @@ its architecture. This conversion rejects stale policies, censored combats,
 greedy/off-policy behavior, forged action menus and divergent q/logits.
 Nature-only events are never treated as player decisions.
 
-The target is the restricted P0 experiment's declared completed-combat score
-(victory + positive exit HP/100), not the whole-run v15 HP target.
+The training target is precisely v15's within-combat HP-preservation
+objective, requiring public entry HP/max HP and genuine terminal exit HP.
+The older P0 combat score is independently checked for provenance only.
 """
 from __future__ import annotations
 
@@ -145,12 +146,27 @@ def prepare_real_combat_ppo_samples(
             ]
             if len(player_steps) != len(rows):
                 raise RealPlayerPpoError("Player PPO record count differs from transcript")
-            score = float(arm_trace["player_return"])
-            if not math.isfinite(score) or not math.isclose(
-                score, float(arm_trace["outcome"] == "victory")
+            # Verify the legacy P0 published outcome/exit-HP reward,
+            # then use the production v15 hp_preservation critic objective.
+            published_score = float(arm_trace["player_return"])
+            if not math.isfinite(published_score) or not math.isclose(
+                published_score, float(arm_trace["outcome"] == "victory")
                 + max(0, arm_trace["exit_hp"]) / 100.0, abs_tol=1e-10,
             ):
                 raise RealPlayerPpoError("Combat terminal reward provenance mismatch")
+            first_public = json.loads(rows[0]["observation"]["payload_json"])
+            entry_hp, max_hp = first_public.get("hp"), first_public.get("max_hp")
+            if (type(entry_hp) is not int or type(max_hp) is not int
+                    or max_hp <= 0 or type(arm_trace["exit_hp"]) is not int):
+                raise RealPlayerPpoError(
+                    "v15 HP-preservation target requires public entry/max HP"
+                )
+            score = (
+                1.0 - 0.5 * min(
+                    1.0, max(0.0, (entry_hp - arm_trace["exit_hp"]) / max_hp)
+                )
+                if arm_trace["outcome"] == "victory" else 0.0
+            )
             cache: list[tuple[Any, ...]] = []
             values: list[float] = []
             for raw, step in zip(rows, player_steps, strict=True):
