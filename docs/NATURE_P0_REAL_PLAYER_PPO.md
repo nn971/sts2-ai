@@ -15,7 +15,8 @@ phase-split** model. It records, for every actual player decision:
 
 - The *fair public* observation and its content checksum;
 - The exact **restricted source-issued** legal `action_id/kind/payload_json`
-  menu evaluated by the actor (`silent-basic-v1`);
+  menu evaluated by the actor (`silent-basic-v1`), together with the
+  full original *public* source observation/menu and its replay support digest;
 - Chosen action ID/index, temperature, behavior log-probability,
   critic value and behavior-model ID;
 - Full separate Nature / ordinary-comparator source-state replay transcript,
@@ -27,10 +28,14 @@ original-game conditional reference `p` is **UNVERIFIED**.
 
 `prepare_real_combat_ppo_samples` requires exact behavior-model SHA-256,
 behavior model ID, matching action scope, temperature, original public
-observations and legal menus. It recomputes the head's pre-update log-probs
-and values in Torch and compares them with the saved behavior, failing
-closed on stale policy parameters, policy architecture mismatch or
-portable-vs-Torch inference discrepancy (tolerance 0.002). It requires
+observations and legal menus. It independently recomputes the complete source replay support digest
+and checks it against the emulator's decision transcript, then reconstructs
+the projected fair observation and restricted menu from the full
+source-issued public inputs (including unchosen actions). It recomputes the
+head's pre-update log-probs and values in Torch and compares them with the
+saved behavior, failing closed on altered menus, stale policy parameters,
+policy architecture mismatch or portable-vs-Torch inference discrepancy
+(tolerance 0.002). It requires
 complete terminal source-combat trajectories and rejects any unsupported,
 censored or missing player-decision segment. The training target is
 **the production v15 hp_preservation combat target**: defeat → 0;
