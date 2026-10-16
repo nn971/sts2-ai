@@ -1,0 +1,102 @@
+name: nature-real-player-ppo
+
+on:
+  push:
+    paths:
+      - 'src/sts2_ai/emulator/semantic_p0_frozen_player.py'
+      - 'src/sts2_ai/nature/paired_real_workers.py'
+      - 'src/sts2_ai/training/nature_real_combat_ppo.py'
+      - 'tools/train_nature_two_site_player_ppo.py'
+      - 'tools/make_nature_ppo_test_model.py'
+      - 'tests/test_nature_real_player_ppo.py'
+      - '.github/workflows/nature-real-player-ppo.yml'
+  pull_request:
+    paths:
+      - 'src/sts2_ai/emulator/semantic_p0_frozen_player.py'
+      - 'src/sts2_ai/nature/paired_real_workers.py'
+      - 'src/sts2_ai/training/nature_real_combat_ppo.py'
+      - 'tools/train_nature_two_site_player_ppo.py'
+      - 'tools/make_nature_ppo_test_model.py'
+      - 'tests/test_nature_real_player_ppo.py'
+      - '.github/workflows/nature-real-player-ppo.yml'
+  workflow_dispatch:
+
+jobs:
+  source-backed-player-ppo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ai
+      - uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: 8cbb15ab32ba50dff5d40c214ef7a85266761694
+          path: emulator
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install AI and CPU Torch for real residual PPO update
+        working-directory: ai
+        run: |
+          python -m pip install -e '.[dev]'
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Validate sampled fair player action and on-policy PPO provenance
+        working-directory: ai
+        run: |
+          python -m ruff check src/sts2_ai/emulator/semantic_p0_frozen_player.py src/sts2_ai/nature/paired_real_workers.py src/sts2_ai/training/nature_real_combat_ppo.py tools/train_nature_two_site_player_ppo.py tools/make_nature_ppo_test_model.py tests/test_nature_real_player_ppo.py
+          python -m pytest -q tests/test_nature_real_player_ppo.py
+      - name: Build pinned ordinary-policy comparator emulator
+        working-directory: emulator
+        run: |
+          dotnet restore Sts2Emulator.sln
+          dotnet build Sts2Emulator.sln -c Release --no-restore
+      - name: Generate five source-split training smoke fixtures and untrained v15 pooled model
+        working-directory: ai
+        run: |
+          python -u tools/make_nature_ppo_test_model.py --output /tmp/p0-test-only-pooled.json
+          cat > /tmp/p0-train-source-fixtures.jsonl <<'EOF'
+          {"fixture_id":"overgrowth-default","seed":"nature-p0-weak-real-victory","region":"Overgrowth","partition":"train"}
+          {"fixture_id":"overgrowth-beetle","seed":"route-audit-01","region":"Overgrowth","partition":"train"}
+          {"fixture_id":"overgrowth-wurm","seed":"route-audit-02","region":"Overgrowth","partition":"train"}
+          {"fixture_id":"underdocks-toad","seed":"route-audit-01","region":"Underdocks","partition":"train"}
+          {"fixture_id":"underdocks-sludge","seed":"route-audit-02","region":"Underdocks","partition":"train"}
+          EOF
+      - name: Real Nature-combat on-policy v15 PPO + Nature optimizer smoke
+        working-directory: ai
+        run: >-
+          python -u tools/train_nature_two_site_player_ppo.py
+          --initial-model /tmp/p0-test-only-pooled.json
+          --source-fixtures /tmp/p0-train-source-fixtures.jsonl
+          --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll
+          --emulator-bindings ../emulator/bindings/python
+          --emulator-revision 8cbb15ab32ba50dff5d40c214ef7a85266761694
+          --training-arm nature --nature-update
+          --rounds 1 --episodes-per-round 5 --workers 5 --seed 29
+          --output-root /tmp/p0-nature-player-ppo-smoke
+      - name: Verify source-authentic training artifacts and genuine optimizer step
+        working-directory: ai
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from sts2_ai.models.phase_split import PhaseSplitNeuralModel
+          root = Path('/tmp/p0-nature-player-ppo-smoke')
+          doc = json.loads((root / 'history.json').read_text())
+          assert doc['schema'] == 'sts2-ai-p0-real-combat-v15-ppo-training-v1'
+          assert len(doc['metrics']) == 1
+          row = doc['metrics'][0]
+          assert row['completed'] == 5
+          assert row['sample_count'] > 0
+          assert row['player_ppo_steps'] > 0
+          assert row['nature_update'] is not None
+          assert row['nature_update']['nature_revision'] == 1
+          assert row['training_arm'] == 'nature'
+          model = PhaseSplitNeuralModel.load(root / 'final-model.json')
+          assert model.combat_value_objective == 'hp_preservation'
+          assert (root / 'trainer-state.pt').is_file()
+          print('[nature-real-ppo] PASS source-backed v15 PPO and separate Nature optimizer smoke')
+          PY
