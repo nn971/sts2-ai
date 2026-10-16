@@ -100,6 +100,7 @@ class FrozenP0Player:
         self, model: PublicPolicy, *, actor_seed: int,
         temperature: float = 1.0, greedy: bool = True,
         action_scope: str = "all-legal-v1",
+        capture_training: bool = False,
     ):
         if type(actor_seed) is not int:
             raise ValueError("Actor seed must be an integer")
@@ -114,6 +115,8 @@ class FrozenP0Player:
         self.rng = random.Random(actor_seed)
         self.policy_id = f"frozen-v15-{action_scope}-{model.model_id}"
         self.decisions = 0
+        self.capture_training = capture_training
+        self.training_actions: list[dict[str, Any]] = []
 
     @staticmethod
     def _public_types(
@@ -197,4 +200,39 @@ class FrozenP0Player:
                     selected = index
                     break
         self.decisions += 1
+        if self.capture_training:
+            if self.greedy:
+                raise FrozenPolicyInferenceError(
+                    "PPO behavior collection requires stochastic policy sampling"
+                )
+            if not isinstance(estimate.value, (float, int)) or not math.isfinite(
+                estimate.value
+            ):
+                raise FrozenPolicyInferenceError("Invalid frozen PPO behavior value")
+            maximum = max(logits)
+            normalized = math.fsum(
+                math.exp((x - maximum) / self.temperature) for x in logits
+            )
+            logp = (
+                (logits[selected] - maximum) / self.temperature
+                - math.log(normalized)
+            )
+            self.training_actions.append({
+                "observation": {
+                    "policy_id": public.policy_id,
+                    "payload_json": public.payload_json,
+                    "observation_hash": public.observation_hash,
+                },
+                "legal_actions": [
+                    {"action_id": a.action_id, "kind": a.kind,
+                     "payload_json": a.payload_json} for a in actions
+                ],
+                "chosen_index": selected,
+                "selected_id": actions[selected].action_id,
+                "behavior_logprob": logp,
+                "behavior_value": float(estimate.value),
+                "temperature": self.temperature,
+                "action_scope": self.action_scope,
+                "behavior_model_id": self.model.model_id,
+            })
         return actions[selected].action_id
