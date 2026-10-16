@@ -82,10 +82,17 @@ def _ordinary_source_matrix(
     rows = report["rows"]
     # This recomputes per-checkpoint source matching and original-score deltas;
     # it rejects silently missing/mispaired ordinary scenes.
-    ordinary_policy_comparison(
+    comparison = ordinary_policy_comparison(
         rows["nature_trained"], rows["ordinary_trained"],
         bootstrap_replicates=100,
     )
+    if (report.get("source_run_count") != comparison["source_run_count"]
+            or type(report.get("ordinary_score_delta")) not in (int, float)
+            or not math.isclose(
+                report["ordinary_score_delta"], comparison["ordinary_score_delta"],
+                rel_tol=1e-10, abs_tol=1e-10,
+            )):
+        raise ValueError("Recomputed holdout score differs from published result")
     def grouped(dataset: list[dict[str, Any]]) -> dict[str, dict[tuple[str, str], dict]]:
         groups: dict[str, dict[tuple[str, str], dict]] = defaultdict(dict)
         for row in dataset:
@@ -175,6 +182,10 @@ def analyze_replicated_study(
                 or holdout.get("source_chance_law") != "UNVERIFIED"):
             raise ValueError("Invalid or overstated frozen holdout evidence")
         exp = holdout["experiment"]
+        if (exp.get("fingerprint") != canonical_sha256({
+                k: v for k, v in exp.items() if k != "fingerprint"
+        })):
+            raise ValueError("Held-out experiment fingerprint was altered")
         if (exp.get("reference_law") != "UNVERIFIED"
                 or exp.get("train_sha256") != nc["source_fixtures_sha256"]
                 or exp.get("emulator_revision") != nc["emulator_revision"]
