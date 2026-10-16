@@ -10,12 +10,12 @@ import argparse
 import json
 from pathlib import Path
 
+from sts2_ai.emulator.semantic_p0_combat import CombatFixture
 from sts2_ai.nature.corpus import atomic_write, file_sha256
 from sts2_ai.nature.real_combat_workers import (
     collect_real_combat_batch,
     train_real_nature_batches,
 )
-from sts2_ai.emulator.semantic_p0_combat import CombatFixture
 from sts2_ai.nature.two_site_opponent import TwoSiteNature
 
 
