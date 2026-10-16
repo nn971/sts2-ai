@@ -10,12 +10,10 @@ No Steam/native-game law, full Silent cards, or model-performance claims.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import tempfile
 import time
-from dataclasses import asdict
 from pathlib import Path
 
 from sts2_ai.emulator.semantic_p0_frozen_player import FrozenPlayerSpec
@@ -115,6 +113,8 @@ def main() -> None:
         p.error("Pinned C# emulator CLI DLL is missing")
     if not (args.emulator_bindings / "sts2_emulator" / "__init__.py").is_file():
         p.error("Pinned emulator bindings are missing")
+    if args.nature_update and args.episodes_per_round < 2:
+        p.error("Nature REINFORCE requires at least two terminal episodes per batch")
     source = _read_source_train(args.source_fixtures)
     if len(source) < args.rounds * args.episodes_per_round:
         p.error("Insufficient distinct training source groups for requested rounds")
@@ -157,7 +157,7 @@ def main() -> None:
         "epochs": args.epochs, "batch_size": args.batch_size,
         "sample_limit": args.sample_limit, "gamma": args.gamma,
         "gae_lambda": args.gae_lambda, "scope": "silent-basic-v1",
-        "reward": "declared-p0-victory-plus-exit-hp-over-100",
+        "reward": "production-v15-within-combat-hp-preservation",
         "source_law": "UNVERIFIED",
         "evidence_level": "research-training-not-feature-judgment",
     }
@@ -232,9 +232,9 @@ def main() -> None:
         nature_update = None
         if args.nature_update:
             rows = tuple(PilotEpisode(
-                row["nature"]["player_return"],
+                score,
                 tuple(PilotChoice(**raw) for raw in row["nature"]["nature_choices"]),
-            ) for row in report["records"])
+            ) for row, score in zip(report["records"], scores, strict=True))
             nature_update = nature.update(rows)
         round_record = {
             "round": i, "source_run_count": len(chosen_fixtures),
