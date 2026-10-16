@@ -133,7 +133,11 @@ count**, annotating `p0_opaque_public_fields`. It never invents
 card-instance IDs, types, ordering or unseen effects. The v15 object
 extractor recognizes this versioned marker and exposes
 `p0_opaque:combat.draw_pile` as a categorical public-information
-flag, preserving the original count as a scalar. The strict legacy
+flag, preserving the original count as a scalar. Public count-only
+discard/exhaust/play/choice zones likewise remain opaque, while their
+observed counts are available as global numeric features. Contradictory
+source count declarations fail closed. An older frozen checkpoint can
+only use new numeric feature keys already present in its vocabulary. The strict legacy
 invariant `draw_pile_count == len(draw_pile)` remains required outside
 this explicitly versioned P0 projection.
 
