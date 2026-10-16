@@ -1,0 +1,122 @@
+"""Real Nature player PPO probability/observation and freshness contract tests."""
+from __future__ import annotations
+
+import copy
+import math
+from dataclasses import dataclass
+
+import pytest
+
+from sts2_ai.emulator.semantic_p0_frozen_player import FrozenP0Player
+from sts2_ai.training.nature_real_combat_ppo import (
+    RealPlayerPpoError,
+    validate_recorded_action,
+)
+
+
+@dataclass(frozen=True)
+class Estimate:
+    action_logits: tuple[float, ...]
+    value: float
+
+
+class SimplePublicPolicy:
+    model_id = "source-public-policy-v1"
+
+    def evaluate(self, observation, actions):
+        assert observation.policy_id == "prototype-fair-v0"
+        assert len(actions) == 2
+        return Estimate((2.0, 0.5), 0.3)
+
+
+OBS = {
+    "hp": 58, "max_hp": 66,
+    "combat": {
+        "hand": [{"instance_id": 3, "card_id": "proto.silent.strike"}],
+        "enemies": [],
+    },
+}
+MENU = [
+    {"actionId": "strike:3", "kind": "play_card",
+     "payloadJson": '{"CardInstanceId":3}'},
+    {"actionId": "end_turn", "kind": "end_turn", "payloadJson": "{}"},
+]
+
+
+def sample():
+    actor = FrozenP0Player(
+        SimplePublicPolicy(), actor_seed=17, greedy=False,
+        temperature=0.85, action_scope="silent-basic-v1",
+        capture_training=True,
+    )
+    chosen = actor.choose(OBS, MENU)
+    assert actor.decisions == len(actor.training_actions) == 1
+    return actor.training_actions[0], chosen
+
+
+def test_sampled_behavior_exact_probability_and_public_menu():
+    raw, selected = sample()
+    decision, logprob, value = validate_recorded_action(
+        raw, expected_model_id="source-public-policy-v1",
+        expected_temperature=0.85, expected_scope="silent-basic-v1",
+    )
+    assert decision.legal_actions[decision.chosen_index].action_id == selected
+    assert len(decision.legal_actions) == 2
+    weights = [math.exp(x / 0.85) for x in (2.0, 0.5)]
+    expected = math.log(weights[decision.chosen_index] / sum(weights))
+    assert logprob == pytest.approx(expected)
+    assert value == pytest.approx(0.3)
+    assert "pending" not in decision.observation.payload_json
+    assert "semanticDeck" not in decision.observation.payload_json
+
+
+@pytest.mark.parametrize("corrupt,match", [
+    ({"behavior_model_id": "stale"}, "Stale"),
+    ({"temperature": 1.2}, "temperature"),
+    ({"action_scope": "all-legal-v1"}, "scope"),
+    ({"selected_id": "not-issued"}, "identity drift"),
+    ({"chosen_index": 111}, "Chosen action index"),
+    ({"behavior_logprob": float("nan")}, "Nonfinite"),
+    ({"behavior_logprob": 2.0}, "exceeds zero"),
+])
+def test_wrong_behavior_or_forged_action_is_rejected(corrupt, match):
+    raw, _ = sample()
+    with pytest.raises(RealPlayerPpoError, match=match):
+        validate_recorded_action(
+            {**raw, **corrupt}, expected_model_id="source-public-policy-v1",
+            expected_temperature=0.85, expected_scope="silent-basic-v1",
+        )
+
+
+def test_public_observation_tampering_rejected():
+    raw, _ = sample()
+    tampered = copy.deepcopy(raw)
+    tampered["observation"]["payload_json"] = '{"pending":{"secret":42}}'
+    with pytest.raises(RealPlayerPpoError, match="private state"):
+        validate_recorded_action(
+            tampered, expected_model_id="source-public-policy-v1",
+            expected_temperature=0.85, expected_scope="silent-basic-v1",
+        )
+
+
+def test_greedy_rollout_not_used_as_on_policy_ppo():
+    actor = FrozenP0Player(
+        SimplePublicPolicy(), actor_seed=17, greedy=True,
+        action_scope="silent-basic-v1", capture_training=True,
+    )
+    with pytest.raises(ValueError, match="stochastic"):
+        actor.choose(OBS, MENU)
+
+
+def test_source_action_scope_masks_unimplemented_card():
+    actor = FrozenP0Player(
+        SimplePublicPolicy(), actor_seed=19, greedy=False,
+        action_scope="silent-basic-v1", capture_training=True,
+    )
+    menu = MENU + [
+        {"actionId": "survivor:7", "kind": "play_card",
+         "payloadJson": '{"CardInstanceId":7}'},
+    ]
+    chosen = actor.choose(OBS, menu)
+    assert chosen in {"strike:3", "end_turn"}
+    assert len(actor.training_actions[0]["legal_actions"]) == 2
