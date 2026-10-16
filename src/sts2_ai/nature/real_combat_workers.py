@@ -13,6 +13,7 @@ import multiprocessing
 import os
 import sys
 import time
+import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict
 from multiprocessing.util import Finalize
@@ -66,7 +67,7 @@ def _initialize(
     Finalize(None, _close_worker, exitpriority=10)
 
 
-def _execute_job(
+def _execute_job_inner(
     index: int, fixture: CombatFixture, nature_state: dict[str, Any],
 ) -> tuple[int, dict[str, Any], int]:
     if _worker_session is None:
@@ -118,6 +119,22 @@ def _execute_job(
         "replay_verified": True,
     }
     return index, result, os.getpid()
+
+def _execute_job(
+    index: int, fixture: CombatFixture, nature_state: dict[str, Any],
+) -> tuple[int, dict[str, Any], int]:
+    try:
+        return _execute_job_inner(index, fixture, nature_state)
+    except Exception:
+        # Vendor-defined sts2_emulator.EmulatorError cannot be unpickled
+        # by the main Python process (which intentionally does not load
+        # the external Python binding). Transport a built-in exception,
+        # preserving the originating stack as plain diagnostic text.
+        raise RuntimeError(
+            f"Nature real-combat worker fixture={fixture.fixture_id} failed:\n"
+            + traceback.format_exc()
+        ) from None
+
 
 
 def collect_real_combat_batch(
