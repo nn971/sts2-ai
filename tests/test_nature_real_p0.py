@@ -10,8 +10,11 @@ from dataclasses import dataclass
 import pytest
 
 from sts2_ai.emulator.semantic_p0_combat import (
-    CombatFixture, P0SemanticInterfaceError, _pending_event,
-    check_capabilities, play_real_two_site,
+    CombatFixture,
+    P0SemanticInterfaceError,
+    _pending_event,
+    check_capabilities,
+    play_real_two_site,
 )
 from sts2_ai.nature.two_site_opponent import TwoSiteNature
 
