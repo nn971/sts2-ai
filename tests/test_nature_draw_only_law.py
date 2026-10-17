@@ -52,6 +52,7 @@ def pending(kind="draw_card", *, weights=(1, 1)):
     result["chanceLaw"] = {
         "schemaId": CHANCE_LAW_SCHEMA, "lawId": "law", "eventId": "event",
         "siteId": result["siteId"], "operationKind": "choose_index",
+        "ownerId": result["ownerId"], "ordinal": result["ordinal"],
         "supportFingerprint": "law-support",
         "conditioningPolicyId": "test-policy",
         "conditioningFingerprint": condition,
@@ -66,6 +67,16 @@ def pending(kind="draw_card", *, weights=(1, 1)):
     return result
 
 
+def event_number(raw, ordinal):
+    modified = copy.deepcopy(raw)
+    modified["eventId"] = f"event-{ordinal}"
+    modified["ordinal"] = ordinal
+    modified["chanceLaw"]["eventId"] = modified["eventId"]
+    modified["chanceLaw"]["ordinal"] = ordinal
+    modified["chanceLaw"]["lawId"] = f"law-{ordinal}"
+    return modified
+
+
 def test_intents_sample_only_declared_weighted_law_and_do_not_update_nature():
     raw = pending("enemy_intent", weights=(1, 3))
     law = DeclaredLaw.from_pending(raw)
@@ -73,7 +84,8 @@ def test_intents_sample_only_declared_weighted_law_and_do_not_update_nature():
     nature = TwoSiteNature(seed=5)
     router = DrawOnlyRouter(nature, SeededLawSampler(22))
     choices = [
-        router.choose(raw, fingerprint="parent", episode_key="one", ordinal=i)
+        router.choose(event_number(raw, i), fingerprint="parent",
+                      episode_key="one", ordinal=i)
         for i in range(400)
     ]
     assert all(row.operation == "enemy_intent" for row in choices)
@@ -85,7 +97,8 @@ def test_intents_sample_only_declared_weighted_law_and_do_not_update_nature():
     assert nature.revision == 0
     again = DrawOnlyRouter(nature, SeededLawSampler(22))
     assert choices == [
-        again.choose(raw, fingerprint="parent", episode_key="one", ordinal=i)
+        again.choose(event_number(raw, i), fingerprint="parent",
+                     episode_key="one", ordinal=i)
         for i in range(400)
     ]
 
@@ -98,8 +111,8 @@ def test_exact_reference_draws_use_declared_law_and_ignore_learned_weights():
     nature.weights["draw_card|context|proto.silent.strike"] = 100.0
     router = DrawOnlyRouter(nature, SeededLawSampler(5))
     choices = [
-        router.choose(raw, fingerprint="parent", episode_key="check",
-                      ordinal=i, draw_mode="reference")
+        router.choose(event_number(raw, i), fingerprint="parent",
+                      episode_key="check", ordinal=i, draw_mode="reference")
         for i in range(400)
     ]
     assert router.reference.calls == 400
@@ -110,6 +123,21 @@ def test_exact_reference_draws_use_declared_law_and_ignore_learned_weights():
     with pytest.raises(DrawOnlyContractError, match="Nonuniform physical draw"):
         router.choose(raw, fingerprint="parent", episode_key="check",
                       ordinal=0, draw_mode="learned")
+
+
+def test_reference_intent_randomness_unaffected_by_inserted_draw_samples():
+    intent = DeclaredLaw.from_pending(event_number(
+        pending("enemy_intent", weights=(1, 3)), 7
+    ))
+    draw = DeclaredLaw.from_pending(event_number(pending("draw_card"), 5))
+    plain = SeededLawSampler(99)
+    mixed = SeededLawSampler(99)
+    expected = plain.sample(intent)
+    mixed.sample(draw)
+    assert mixed.sample(intent) == expected
+    assert mixed.sample(intent) == expected  # Stable after replay/fork
+    assert plain.calls == 1
+    assert mixed.calls == 3
 
 
 def test_draw_choices_are_physical_instances_not_models_or_new_shuffle():
