@@ -29,6 +29,8 @@ class DrawOnlySession(Protocol):
         native_policy_baseline: bool,
     ) -> Any: ...
 
+    def begin_seeded_semantic_combat(self, seed: str, **kwargs: Any) -> Any: ...
+
     def load_semantic_snapshot(self, snapshot: str) -> Any: ...
     def release_semantic_many(self, states: list[Any]) -> int: ...
 
@@ -113,6 +115,7 @@ def play_draw_only_episode(
         strike_first_player,
     player_model_id: str = "test-only-strike-first",
     region: str = "Overgrowth", max_boundaries: int = 600,
+    entry_mode: str = "source-route",
     replay: tuple[DrawOnlyStep, ...] | None = None,
 ) -> DrawOnlyEpisode:
     """Run actual supported first-room mechanics until a genuine terminal.
@@ -122,14 +125,29 @@ def play_draw_only_episode(
     Reference RNG is a separate declared-law sampler, never the native cursor.
     """
     check_draw_only_capabilities(session.capabilities)
-    if (region not in ("Overgrowth", "Underdocks") or not source_seed
+    if (entry_mode not in ("source-route", "seeded-fixed-shrinker")
+            or region not in ("Overgrowth", "Underdocks") or not source_seed
             or not emulator_revision or not player_model_id
             or max_boundaries <= 0):
         raise ValueError("Invalid draw-only fixture configuration")
     router = DrawOnlyRouter(nature, SeededLawSampler(reference_seed))
-    state = session.begin_seeded_semantic_route(
-        source_seed, region=region, native_policy_baseline=False,
-    )
+    if entry_mode == "seeded-fixed-shrinker":
+        if region != "Overgrowth":
+            raise ValueError("Fixed Shrinker Beetle fixture requires Overgrowth")
+        # Exact previously tested real-source mechanical starter fixture.
+        # This starts a conditioned single combat, not a full-map native route.
+        state = session.begin_seeded_semantic_combat(
+            source_seed, act=1,
+            encounter_id="proto.encounter.shrinker_beetle_weak",
+            native_entry="ShrinkerBeetleWeak",
+            total_floor=2, ascension=0, first_monster_combat_id=1,
+            map_column=3, map_row=1, replay_opening_draw_hooks=True,
+            native_policy_baseline=False,
+        )
+    else:
+        state = session.begin_seeded_semantic_route(
+            source_seed, region=region, native_policy_baseline=False,
+        )
     held = [state]
     decisions: list[DrawOnlyStep] = []
     choices: list[PilotChoice] = []
