@@ -36,6 +36,37 @@ def source_seed(partition: str, index: int, *, training_seed: int) -> str:
     return f"nature-draw-h1-train-{training_seed}-{index:08d}"
 
 
+def _draw_statistics(episodes) -> dict:
+    """Exact per-event categorical entropy/KL to the declared reference law."""
+    distributions = [
+        choice for episode in episodes for choice in episode.nature_choices
+        if choice.operation == "draw_card"
+    ]
+    if not distributions:
+        return {"draw_kl_q_to_p": None, "draw_entropy": None,
+                "nature_draw_decision_count": 0}
+    kls = []
+    entropies = []
+    for choice in distributions:
+        pairs = zip(choice.probabilities, choice.baseline, strict=True)
+        kl = 0.0
+        entropy = 0.0
+        for q, p in pairs:
+            if q <= 0:
+                continue
+            if p <= 0:
+                raise ValueError("Learned Nature escaped reference draw support")
+            kl += q * math.log(q / p)
+            entropy -= q * math.log(q)
+        kls.append(kl)
+        entropies.append(entropy)
+    return {
+        "draw_kl_q_to_p": statistics.mean(kls),
+        "draw_entropy": statistics.mean(entropies),
+        "nature_draw_decision_count": len(distributions),
+    }
+
+
 def paired_holdout_metrics(nature_episodes, reference_episodes, *,
                            bootstrap_seed: int, replicates: int = 2000) -> dict:
     if (not nature_episodes or len(nature_episodes) != len(reference_episodes)
@@ -75,6 +106,7 @@ def paired_holdout_metrics(nature_episodes, reference_episodes, *,
     }
     return {
         **means,
+        **_draw_statistics(nature_episodes),
         "source_count": len(gaps),
         "paired_nature_minus_reference_score": statistics.mean(gaps),
         "paired_source_bootstrap_95pct": [
@@ -234,6 +266,7 @@ def main() -> None:
             "wall_seconds": batch["elapsed_seconds"],
             "behavior_nature_revision": nature.revision,
             "source_group_sha256": canonical_sha256(seeds),
+            **_draw_statistics(episodes),
         }
         optimization = nature.update(tuple(x.for_nature_training() for x in episodes))
         metrics.append({**metrics_before, **optimization})
@@ -276,8 +309,24 @@ def main() -> None:
         primary["episodes"], control["episodes"],
         bootstrap_seed=991 + args.training_seed,
     )
+    learned_path = args.output_root / "evaluation-learned.jsonl"
+    reference_path = args.output_root / "evaluation-reference.jsonl"
+    if learned_path.exists() or reference_path.exists():
+        parser.error("Existing evaluation traces are immutable")
+    atomic_write(
+        learned_path,
+        "".join(json.dumps(asdict(row), sort_keys=True) + "\\n"
+                for row in primary["episodes"]),
+    )
+    atomic_write(
+        reference_path,
+        "".join(json.dumps(asdict(row), sort_keys=True) + "\\n"
+                for row in control["episodes"]),
+    )
     report = {
         "schema": SCHEMA, "config": config, "config_digest": fingerprint,
+        "evaluation_learned_sha256": file_sha256(learned_path),
+        "evaluation_reference_sha256": file_sha256(reference_path),
         "final_nature_checkpoint_sha256": canonical_sha256(nature.dump()),
         "evaluation_source_sha256": canonical_sha256(evaluation_seeds),
         "metrics": analysis,
