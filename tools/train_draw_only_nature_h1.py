@@ -72,15 +72,24 @@ def paired_holdout_metrics(nature_episodes, reference_episodes, *,
             or replicates < 100):
         raise ValueError("Incomplete paired H1 holdout")
     gaps = []
+    seen_sources: set[str] = set()
     for nature, reference in zip(nature_episodes, reference_episodes, strict=True):
+        if nature.source_seed in seen_sources:
+            raise ValueError("Repeated H1 holdout source seed")
+        seen_sources.add(nature.source_seed)
         if (nature.source_seed != reference.source_seed
                 or nature.reference_seed != reference.reference_seed
                 or nature.source_opening_fingerprint !=
                 reference.source_opening_fingerprint
+                or nature.first_public_fingerprint !=
+                reference.first_public_fingerprint
                 or nature.player_model_id != reference.player_model_id
                 or nature.draw_mode != "learned"
                 or reference.draw_mode != "reference"):
             raise ValueError("H1 arms differ in source opening/player/intent seed")
+        if (not nature.terminal_replay_verified
+                or not reference.terminal_replay_verified):
+            raise ValueError("Unverified terminal source replay in H1 holdout")
         gaps.append(nature.score - reference.score)
     rng = random.Random(bootstrap_seed)
     draws = sorted(
