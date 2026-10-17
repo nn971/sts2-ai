@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import math
 import random
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 from sts2_ai.emulator.semantic_p0_combat import _pending_event
 from sts2_ai.nature.two_site_opponent import PilotChoice, TwoSiteNature
