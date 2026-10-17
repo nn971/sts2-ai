@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from sts2_ai.emulator.semantic_p0_combat import _pending_event
+from sts2_ai.nature.protocol import canonical_sha256
 from sts2_ai.nature.two_site_opponent import PilotChoice, TwoSiteNature
 
 CHANCE_LAW_SCHEMA = "sts2-v111-chance-law-v1"
@@ -58,6 +59,13 @@ class DeclaredLaw:
         if (law.get("probabilityStatus") != REFERENCE_STATUS
                 or pending.get("probabilityStatus") != REFERENCE_STATUS):
             raise DrawOnlyContractError("Unexpected native probability provenance")
+        if (law.get("ownerId") != pending.get("ownerId")
+                or law.get("ordinal") != pending.get("ordinal")
+                or type(law.get("ordinal")) is not int
+                or law["ordinal"] < 0):
+            raise DrawOnlyContractError("Chance Law owner/ordinal differs from pending event")
+        if law.get("operationKind") != pending.get("operationKind"):
+            raise DrawOnlyContractError("Chance Law operation identity changed")
         if law.get("siteId") != pending.get("siteId"):
             raise DrawOnlyContractError("Chance Law site differs from pending request")
         event_id = pending.get("eventId")
@@ -153,13 +161,23 @@ class SeededLawSampler:
         if type(seed) is not int:
             raise ValueError("Reference RNG seed must be an integer")
         self.seed = seed
-        self._random = random.Random(seed)
         self.calls = 0
 
     def sample(self, law: DeclaredLaw) -> int:
+        """Event-keyed RNG: resolving a draw cannot shift future intent RNG.
+
+        Stable within the same supported event, independent of process
+        scheduling, replay order and unrelated stochastic site consumption.
+        This couples identical event IDs across arms where possible, without
+        claiming native RNG cursor equivalence.
+        """
         if law.total_weight <= 0:
             raise DrawOnlyContractError("Empty reference distribution")
-        ticket = self._random.randrange(law.total_weight)
+        event_key = canonical_sha256([
+            DRAW_ONLY_SCHEMA, self.seed, law.site_id, law.event_id,
+            law.conditioning_fingerprint, law.outcome_ids, law.weights,
+        ])
+        ticket = random.Random(int(event_key, 16)).randrange(law.total_weight)
         self.calls += 1
         for index, weight in enumerate(law.weights):
             if ticket < weight:
