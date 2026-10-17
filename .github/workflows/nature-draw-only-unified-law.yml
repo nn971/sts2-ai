@@ -29,7 +29,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: nn971/sts2-emulator
-          ref: 90253aee9a62da76585a9b515d73aef6a0b7330b
+          ref: efd5f917d1a46b1196ee4cff8e3237700a3cb93d
           path: emulator
       - uses: actions/setup-dotnet@v4
         with:
@@ -56,7 +56,7 @@ jobs:
           python -u tools/probe_nature_draw_only.py \
             --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
             --emulator-bindings ../emulator/bindings/python \
-            --emulator-revision 90253aee9a62da76585a9b515d73aef6a0b7330b \
+            --emulator-revision efd5f917d1a46b1196ee4cff8e3237700a3cb93d \
             --source-seed nature-p0-weak-real-victory \
             --entry-mode seeded-fixed-shrinker \
             --region Overgrowth --min-draw-choices 1 \
