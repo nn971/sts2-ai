@@ -315,12 +315,12 @@ def main() -> None:
         parser.error("Existing evaluation traces are immutable")
     atomic_write(
         learned_path,
-        "".join(json.dumps(asdict(row), sort_keys=True) + "\\n"
+        "".join(json.dumps(asdict(row), sort_keys=True) + "\n"
                 for row in primary["episodes"]),
     )
     atomic_write(
         reference_path,
-        "".join(json.dumps(asdict(row), sort_keys=True) + "\\n"
+        "".join(json.dumps(asdict(row), sort_keys=True) + "\n"
                 for row in control["episodes"]),
     )
     report = {
