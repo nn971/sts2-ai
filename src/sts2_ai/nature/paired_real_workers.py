@@ -65,10 +65,16 @@ def _initialize(
 def _job_inner(
     index: int, fixture: PairedSourceFixture,
     nature_checkpoint: dict[str, Any], max_boundaries: int,
+    capture_player_ppo: bool,
 ) -> tuple[int, dict[str, Any], int]:
     if _worker_session is None:
         raise RuntimeError("Worker has no emulator session")
     nature = TwoSiteNature.restore(nature_checkpoint)
+    if capture_player_ppo and (
+        _worker_player_spec is None or _worker_player_spec.greedy
+    ):
+        raise ValueError("Player PPO requires a real exported sampled player model")
+    actors: dict[str, FrozenP0Player] = {}
 
     def factory(_arm: str):
         if _worker_player_spec is None:
@@ -76,7 +82,7 @@ def _job_inner(
             return strike_first_player
         if _worker_player_model is None:
             raise RuntimeError("Missing frozen player model")
-        return FrozenP0Player(
+        actor = FrozenP0Player(
             _worker_player_model,
             actor_seed=_worker_player_spec.episode_seed(
                 fixture_seed=fixture.seed, fixture_id=fixture.fixture_id,
@@ -84,7 +90,11 @@ def _job_inner(
             temperature=_worker_player_spec.temperature,
             greedy=_worker_player_spec.greedy,
             action_scope=_worker_player_spec.action_scope,
-        ).choose
+            capture_training=capture_player_ppo and _arm not in actors,
+        )
+        if _arm not in actors:
+            actors[_arm] = actor
+        return actor.choose
 
     nature_result, ordinary_result = play_paired_source_combat(
         _worker_session, fixture, nature=nature, choose_factory=factory,
@@ -102,6 +112,19 @@ def _job_inner(
         _worker_player_spec.actor_seed if _worker_player_spec else None
     )
     row["nature_policy_sha256"] = canonical_sha256(nature_checkpoint)
+    if capture_player_ppo:
+        for arm, result in (("nature", nature_result),
+                            ("ordinary", ordinary_result)):
+            actor = actors[arm]
+            if len(actor.training_actions) != sum(
+                decision.phase == "player" for decision in result.decisions
+            ):
+                raise ValueError("Incomplete player PPO action sequence")
+        row["player_ppo"] = {
+            arm: actors[arm].training_actions
+            for arm in ("nature", "ordinary")
+        }
+        row["ppo_behavior_model_sha256"] = _worker_player_spec.model_sha256
     row["pair_digest"] = canonical_sha256(row)
     return index, row, os.getpid()
 
@@ -109,9 +132,13 @@ def _job_inner(
 def _job(
     index: int, fixture: PairedSourceFixture,
     nature_checkpoint: dict[str, Any], max_boundaries: int,
+    capture_player_ppo: bool,
 ) -> tuple[int, dict[str, Any], int]:
     try:
-        return _job_inner(index, fixture, nature_checkpoint, max_boundaries)
+        return _job_inner(
+            index, fixture, nature_checkpoint, max_boundaries,
+            capture_player_ppo,
+        )
     except Exception:
         # Vendor binding exceptions may not unpickle in the parent process.
         raise RuntimeError(
@@ -127,6 +154,7 @@ def paired_batch(
     nature: TwoSiteNature, player_spec: FrozenPlayerSpec | None = None,
     workers: int = 15, max_boundaries: int = 600,
     progress_every: int = 10,
+    capture_player_ppo: bool = False,
 ) -> dict[str, Any]:
     if not fixtures or len({f.fixture_id for f in fixtures}) != len(fixtures):
         raise ValueError("Paired source fixtures must be nonempty with unique IDs")
@@ -139,6 +167,8 @@ def paired_batch(
         raise ValueError("Explicit pinned emulator executable/revision required")
     if not (emulator_bindings / "sts2_emulator" / "__init__.py").is_file():
         raise FileNotFoundError("External emulator Python bindings are missing")
+    if capture_player_ppo and (player_spec is None or player_spec.greedy):
+        raise ValueError("PPO collection requires a sampled frozen player checkpoint")
     if player_spec is not None:
         player_spec.load_pinned()
     ordered = tuple(sorted(fixtures, key=lambda x: x.fixture_id))
@@ -153,7 +183,10 @@ def paired_batch(
         initargs=(emulator_command, str(emulator_bindings.resolve()), player_spec),
     ) as pool:
         pending = {
-            pool.submit(_job, i, fixture, checkpoint, max_boundaries): fixture
+            pool.submit(
+                _job, i, fixture, checkpoint, max_boundaries,
+                capture_player_ppo,
+            ): fixture
             for i, fixture in enumerate(ordered)
         }
         for n, future in enumerate(as_completed(pending), 1):
@@ -197,6 +230,7 @@ def paired_batch(
         "player_checkpoint_sha256": (
             player_spec.model_sha256 if player_spec else None
         ),
+        "player_ppo_captured": capture_player_ppo,
         "worker_count_requested": workers,
         "worker_processes_observed": len(pids),
         "source_group_count": len(records),
