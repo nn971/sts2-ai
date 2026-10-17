@@ -90,6 +90,28 @@ def test_intents_sample_only_declared_weighted_law_and_do_not_update_nature():
     ]
 
 
+def test_exact_reference_draws_use_declared_law_and_ignore_learned_weights():
+    raw = pending("draw_card", weights=(3, 1))
+    law = DeclaredLaw.from_pending(raw)
+    assert law.probabilities == (0.75, 0.25)
+    nature = TwoSiteNature(seed=18)
+    nature.weights["draw_card|context|proto.silent.strike"] = 100.0
+    router = DrawOnlyRouter(nature, SeededLawSampler(5))
+    choices = [
+        router.choose(raw, fingerprint="parent", episode_key="check",
+                      ordinal=i, draw_mode="reference")
+        for i in range(400)
+    ]
+    assert router.reference.calls == 400
+    assert all(ch.controller == "engine-law-reference" and
+               ch.nature_choice is None and ch.log_q == ch.log_p
+               for ch in choices)
+    assert sum(ch.selected_index == 0 for ch in choices) in range(260, 340)
+    with pytest.raises(DrawOnlyContractError, match="Nonuniform physical draw"):
+        router.choose(raw, fingerprint="parent", episode_key="check",
+                      ordinal=0, draw_mode="learned")
+
+
 def test_draw_choices_are_physical_instances_not_models_or_new_shuffle():
     raw = pending("draw_card")
     law = DeclaredLaw.from_pending(raw)
