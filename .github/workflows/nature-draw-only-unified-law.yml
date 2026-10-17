@@ -5,16 +5,22 @@ on:
     paths:
       - 'src/sts2_ai/nature/draw_only_p0.py'
       - 'src/sts2_ai/nature/draw_only_episode.py'
+      - 'src/sts2_ai/nature/draw_only_workers.py'
       - 'tools/probe_nature_draw_only.py'
+      - 'tools/train_draw_only_nature_h1.py'
       - 'tests/test_nature_draw_only_law.py'
+      - 'tests/test_nature_draw_only_h1.py'
       - 'docs/NATURE_DRAW_ONLY_SERIOUS_COMBAT_PLAN.md'
       - '.github/workflows/nature-draw-only-unified-law.yml'
   pull_request:
     paths:
       - 'src/sts2_ai/nature/draw_only_p0.py'
       - 'src/sts2_ai/nature/draw_only_episode.py'
+      - 'src/sts2_ai/nature/draw_only_workers.py'
       - 'tools/probe_nature_draw_only.py'
+      - 'tools/train_draw_only_nature_h1.py'
       - 'tests/test_nature_draw_only_law.py'
+      - 'tests/test_nature_draw_only_h1.py'
       - 'docs/NATURE_DRAW_ONLY_SERIOUS_COMBAT_PLAN.md'
       - '.github/workflows/nature-draw-only-unified-law.yml'
   workflow_dispatch:
@@ -43,8 +49,8 @@ jobs:
       - name: Ruff and independent declared-law tests
         working-directory: ai
         run: |
-          python -m ruff check src/sts2_ai/nature/draw_only_p0.py src/sts2_ai/nature/draw_only_episode.py tools/probe_nature_draw_only.py tests/test_nature_draw_only_law.py
-          python -m pytest -q tests/test_nature_draw_only_law.py
+          python -m ruff check src/sts2_ai/nature/draw_only_p0.py src/sts2_ai/nature/draw_only_episode.py src/sts2_ai/nature/draw_only_workers.py tools/probe_nature_draw_only.py tools/train_draw_only_nature_h1.py tests/test_nature_draw_only_law.py tests/test_nature_draw_only_h1.py
+          python -m pytest -q tests/test_nature_draw_only_law.py tests/test_nature_draw_only_h1.py
       - name: Build exactly pinned unified-Chance-Law emulator
         working-directory: emulator
         run: |
@@ -71,4 +77,28 @@ jobs:
           assert row['trace_digest'] == row['replay_digest']
           assert row['outcome'] in ('victory', 'defeat')
           print('[nature-draw-only] PASS real C# integration, no performance claim')
+          PY
+      - name: Independent source replay with pure Reference draw law
+        working-directory: ai
+        run: |
+          python -u tools/probe_nature_draw_only.py \
+            --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings ../emulator/bindings/python \
+            --emulator-revision efd5f917d1a46b1196ee4cff8e3237700a3cb93d \
+            --source-seed nature-p0-weak-real-victory \
+            --entry-mode seeded-fixed-shrinker --draw-mode reference \
+            --region Overgrowth --min-draw-choices 1 \
+            --output /tmp/nature-draw-only-reference-probe.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          control = json.loads(Path('/tmp/nature-draw-only-reference-probe.json').read_text())
+          nature = json.loads(Path('/tmp/nature-draw-only-unified-probe.json').read_text())
+          assert control['draw_mode'] == 'reference'
+          assert nature['draw_mode'] == 'learned'
+          assert control['source_opening_fingerprint'] == nature['source_opening_fingerprint']
+          assert control['reference_intent_count'] > 0
+          assert control['nontrivial_draw_count'] > 0
+          assert control['trace_digest'] == control['replay_digest']
+          print('[nature-draw-only] PASS exact-law reference vs learned source opening')
           PY
