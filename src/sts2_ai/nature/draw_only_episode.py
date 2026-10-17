@@ -53,6 +53,7 @@ class DrawOnlyEpisode:
     emulator_revision: str
     source_seed: str
     reference_seed: int
+    draw_mode: str
     player_model_id: str
     nature_revision: int
     source_opening_fingerprint: str
@@ -116,6 +117,7 @@ def play_draw_only_episode(
     player_model_id: str = "test-only-strike-first",
     region: str = "Overgrowth", max_boundaries: int = 600,
     entry_mode: str = "source-route",
+    draw_mode: str = "learned",
     replay: tuple[DrawOnlyStep, ...] | None = None,
 ) -> DrawOnlyEpisode:
     """Run actual supported first-room mechanics until a genuine terminal.
@@ -125,7 +127,8 @@ def play_draw_only_episode(
     Reference RNG is a separate declared-law sampler, never the native cursor.
     """
     check_draw_only_capabilities(session.capabilities)
-    if (entry_mode not in ("source-route", "seeded-fixed-shrinker")
+    if (draw_mode not in ("learned", "reference")
+            or entry_mode not in ("source-route", "seeded-fixed-shrinker")
             or region not in ("Overgrowth", "Underdocks") or not source_seed
             or not emulator_revision or not player_model_id
             or max_boundaries <= 0):
@@ -154,7 +157,7 @@ def play_draw_only_episode(
     opening = state.status().get("sourceOpeningFingerprint")
     first_public = None
     entry_hp = max_hp = None
-    draw_count = nontrivial_count = 0
+    draw_count = nontrivial_count = reference_intent_count = 0
     try:
         if not isinstance(opening, str) or not opening:
             raise DrawOnlyContractError("Missing source-authentic opening")
@@ -167,14 +170,16 @@ def play_draw_only_episode(
                 picked = router.choose(
                     state.pending, fingerprint=state.fingerprint,
                     episode_key=source_seed, ordinal=ordinal,
+                    draw_mode=draw_mode,
                 )
-                if picked.nature_choice is not None:
-                    choices.append(picked.nature_choice)
-                    draw_count += 1
-                    nontrivial_count += len(state.pending["candidates"]) > 1
                 if picked.operation == "enemy_intent":
+                    reference_intent_count += 1
                     child = state.resolve_intent(picked.selected_outcome_id)
                 else:
+                    draw_count += 1
+                    nontrivial_count += len(state.pending["candidates"]) > 1
+                    if picked.nature_choice is not None:
+                        choices.append(picked.nature_choice)
                     instance = int(picked.selected_outcome_id.removeprefix("card_instance:"))
                     child = state.resolve_draw_card(instance)
                 decision = DrawOnlyStep(
@@ -234,11 +239,12 @@ def play_draw_only_episode(
         return DrawOnlyEpisode(
             schema=DRAW_ONLY_SCHEMA, emulator_revision=emulator_revision,
             source_seed=source_seed, reference_seed=reference_seed,
+            draw_mode=draw_mode,
             player_model_id=player_model_id, nature_revision=nature.revision,
             source_opening_fingerprint=opening,
             first_public_fingerprint=first_public,
             decisions=tuple(decisions), nature_choices=tuple(choices),
-            reference_intent_count=router.reference.calls,
+            reference_intent_count=reference_intent_count,
             controlled_draw_count=draw_count,
             nontrivial_draw_count=nontrivial_count,
             outcome=state.outcome, exit_hp=state.exit_hp,
