@@ -80,3 +80,36 @@ An additional Gate 0 entry uses exactly the previously tested C# `SemanticSeeded
 However, the same pinned unified-emulator build now rejects this independently with `InvalidOperationException: Map-generated active combat room has no encounter-history entry.` ([CI #39022089161](https://github.com/nn971/sts2-ai/actions/runs/39022089161)). This happens *before* the AI draws any chance outcome; the latest run-state validation appears incompatible with a previously supported seeded combat fixture. Both failures are tracked under [emulator issue #143](https://github.com/nn971/sts2-emulator/issues/143#issuecomment-6232430740).
 
 **Gate 0 remains blocked on emulator startup invariants across both tested entry modes.** Do not silently soften the C# invariants or construct a fabricated player state in Python. Once upstream provides a stable externally playable fixed combat or fixes the source-route validation, rerun the pinned C# probe and verify real draw decisions, terminal replay and legality before starting Nature learning.
+
+
+## AI-side H1 training infrastructure added (2026-10-17)
+
+New AI-only implementation, independent from the older two-site PPO experiments:
+
+- `src/sts2_ai/nature/draw_only_p0.py`: validates typed emulator law support and weighs ordinary `enemy_intent` using an independently seeded reference sampler. Accepts `draw_mode=learned` for physical draws controlled by `TwoSiteNature`, or `draw_mode=reference` for a second independently sampled law-conforming draw arm. For the current pilot, reference physical draw weights **must be uniform** before its existing uniform-mixed softmax is admissible; fail closed on any changed law instead of silently changing the adversary's KL reference.
+- `src/sts2_ai/nature/draw_only_episode.py` + `src/sts2_ai/nature/draw_only_workers.py`: complete actual C# combat, SHA-pinned frozen model, source-authored fair observation/legal action menu, exact reported law fingerprints/proposal likelihoods, terminal hidden-snapshot round-trip, and spawn-isolated 15-process batches. Neither the C# game state nor the player's observation is synthesized from Python.
+- `tools/probe_nature_draw_only.py` accepts explicit `--entry-mode=source-route|seeded-fixed-shrinker` and `--draw-mode=learned|reference`; a second full scripted replay checks the complete actual choice/action sequence and resulting state fingerprints.
+- `tools/train_draw_only_nature_h1.py` is the **opt-in, resumable H1 protocol**. Default is a read-only immutable plan, *not execution*. Given a competent frozen portable v15 checkpoint, `--execute` runs 40 × 256=10,240 genuine single-combat episodes for one training seed, updating **Nature only** between frozen-policy cohorts, then evaluates against the same model in 1,000 unseen source runs **per draw mode**. Separate `--training-seed` runs support 5 independent initializations. Train/evaluation source IDs use distinct namespaces; all holdout rows, episode digests, player/emulator SHA256, per-decision law IDs and log p/q, exact draw entropy/KL, exit HP, victory and source-resampled uncertainty are recorded. Actor RNG variance and native law calibration remain explicitly unresolved. Full-game-trained player checkpoint competence must be established separately; test-only checkpoints are rejected unless `--allow-untrained-smoke` is explicitly supplied.
+
+Suggested fish commands *after the pinned fixed-combat emulator successfully reaches a terminal draw decision* (the current S3/S4 validation regression prevents it):
+
+```fish
+set dll /path/to/sts2-emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll
+set bindings /path/to/sts2-emulator/bindings/python
+set rev (git -C /path/to/sts2-emulator rev-parse HEAD)
+set model /path/to/genuinely-pretrained-v15.json
+
+# Explicitly review the immutable plan before opting in:
+python -u tools/train_draw_only_nature_h1.py \
+  --player-model $model --emulator-dll $dll \
+  --emulator-bindings $bindings --emulator-revision $rev \
+  --training-seed 29 --rounds 40 --episodes-per-round 256 \
+  --eval-episodes 1000 --workers 15 \
+  --output-root results/nature/draw-h1-seed29
+
+# Repeat with --execute once Gate 0 and initial player competence pass.
+# Re-run identically with --resume after a saved round checkpoint.
+# Independent Nature seeds: 29, 101, 211, 307, 401.
+```
+
+**H1 inference gate:** both arms must show source-compatible openings, actual legal draw selections, nontrivial deferred draws and complete terminal traces; a learned Nature should improve its adverse effect on *out-of-sample* score relative to the independent law-sampled control, with uncertainty reported across independent Nature training seeds. One benchmark/smoke, one PPO update, or zero observed draw opportunities cannot establish H1. The draw-only adversary currently uses a modest feature-table policy and supports conditioning on the physical candidate card model, so a richer contextual Nature model is a later extension.
