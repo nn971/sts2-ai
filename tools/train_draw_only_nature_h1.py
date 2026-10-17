@@ -18,7 +18,6 @@ from dataclasses import asdict
 from pathlib import Path
 
 from sts2_ai.emulator.semantic_p0_frozen_player import FrozenPlayerSpec
-from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.nature.corpus import atomic_write, file_sha256
 from sts2_ai.nature.draw_only_workers import draw_only_batch
 from sts2_ai.nature.protocol import canonical_sha256
