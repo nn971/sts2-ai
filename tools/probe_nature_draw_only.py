@@ -28,6 +28,8 @@ def main() -> None:
     parser.add_argument("--reference-seed", type=int, default=718)
     parser.add_argument("--nature-seed", type=int, default=79)
     parser.add_argument("--region", default="Overgrowth")
+    parser.add_argument("--draw-mode", choices=("learned", "reference"),
+                        default="learned")
     parser.add_argument("--entry-mode",
                         choices=("source-route", "seeded-fixed-shrinker"),
                         default="source-route")
@@ -80,6 +82,7 @@ def main() -> None:
             player_model_id=player_model_id,
             **({"player_choose": player_choose} if player_choose else {}),
             region=args.region, entry_mode=args.entry_mode,
+            draw_mode=args.draw_mode,
         )
         replay = play_draw_only_episode(
             session, source_seed=args.source_seed,
@@ -100,6 +103,7 @@ def main() -> None:
         "schema": first.schema, "emulator_revision": args.emulator_revision,
         "source_seed": args.source_seed, "reference_seed": args.reference_seed,
         "entry_mode": args.entry_mode,
+        "draw_mode": args.draw_mode,
         "nature_seed": args.nature_seed,
         "player_model_id": player_model_id,
         "player_model_sha256": player_model_sha256,
@@ -122,6 +126,7 @@ def main() -> None:
         args.output.write_text(json.dumps(row, indent=2, sort_keys=True) + "\n")
     print(
         "[nature-draw-only] PASS full C# source replay "
+        f"draw_mode={args.draw_mode} "
         f"intent_p={row['reference_intent_count']} "
         f"nature_draws={row['controlled_draw_count']} "
         f"nontrivial_draws={row['nontrivial_draw_count']} "
