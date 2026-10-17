@@ -137,10 +137,10 @@ class RoutedChoice:
 
     def __post_init__(self) -> None:
         if (self.controller not in ("engine-law-reference", "learned-draw")
-                or (self.operation == "draw_card") !=
-                (self.controller == "learned-draw")
                 or (self.controller == "learned-draw") !=
-                (self.nature_choice is not None)):
+                (self.operation == "draw_card" and self.nature_choice is not None)
+                or (self.controller == "engine-law-reference"
+                    and self.nature_choice is not None)):
             raise DrawOnlyContractError("Wrong Nature/reference site routing")
         if not (math.isfinite(self.log_p) and math.isfinite(self.log_q)):
             raise DrawOnlyContractError("Nonfinite proposal/reference likelihood")
@@ -176,9 +176,12 @@ class DrawOnlyRouter:
     def choose(
         self, pending: Mapping[str, Any], *, fingerprint: str,
         episode_key: str, ordinal: int,
+        draw_mode: str = "learned",
     ) -> RoutedChoice:
+        if draw_mode not in ("learned", "reference"):
+            raise DrawOnlyContractError("Unsupported draw routing mode")
         law = DeclaredLaw.from_pending(pending)
-        if law.operation == "enemy_intent":
+        if law.operation == "enemy_intent" or draw_mode == "reference":
             chosen = self.reference.sample(law)
             q = law.probabilities[chosen]
             return RoutedChoice(
@@ -193,6 +196,14 @@ class DrawOnlyRouter:
         event, features, ids = _pending_event(pending, fingerprint)
         if tuple(f"card_instance:{value}" for value in ids) != law.outcome_ids:
             raise DrawOnlyContractError("AI event adapter disagrees with Chance Law")
+        # The pilot's exploratory base is uniform physical-card support.
+        # If the emulator declares a different conditional law, upgrade q's
+        # base distribution first; otherwise the KL/readout would be false.
+        if any(not math.isclose(prob, 1 / len(ids), abs_tol=1e-12)
+               for prob in law.probabilities):
+            raise DrawOnlyContractError(
+                "Nonuniform physical draw law needs an explicit updated Nature base"
+            )
         proposal, choice = self.nature.propose(
             event, context_key=f"{law.site_id}|{event.owner_id}",
             candidate_features=features,
