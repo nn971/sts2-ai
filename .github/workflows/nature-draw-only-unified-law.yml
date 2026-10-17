@@ -58,6 +58,7 @@ jobs:
             --emulator-bindings ../emulator/bindings/python \
             --emulator-revision 90253aee9a62da76585a9b515d73aef6a0b7330b \
             --source-seed nature-p0-weak-real-victory \
+            --entry-mode seeded-fixed-shrinker \
             --region Overgrowth --min-draw-choices 1 \
             --output /tmp/nature-draw-only-unified-probe.json
           python - <<'PY'
