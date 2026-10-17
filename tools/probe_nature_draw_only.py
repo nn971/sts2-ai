@@ -28,6 +28,9 @@ def main() -> None:
     parser.add_argument("--reference-seed", type=int, default=718)
     parser.add_argument("--nature-seed", type=int, default=79)
     parser.add_argument("--region", default="Overgrowth")
+    parser.add_argument("--entry-mode",
+                        choices=("source-route", "seeded-fixed-shrinker"),
+                        default="source-route")
     parser.add_argument("--min-draw-choices", type=int, default=1)
     parser.add_argument("--player-model", type=Path,
                         help="Optional SHA256-pinned frozen exported v15 JSON")
@@ -76,14 +79,15 @@ def main() -> None:
             nature=nature, emulator_revision=args.emulator_revision,
             player_model_id=player_model_id,
             **({"player_choose": player_choose} if player_choose else {}),
-            region=args.region,
+            region=args.region, entry_mode=args.entry_mode,
         )
         replay = play_draw_only_episode(
             session, source_seed=args.source_seed,
             reference_seed=args.reference_seed,
             nature=nature, emulator_revision=args.emulator_revision,
             player_model_id=player_model_id,
-            region=args.region, replay=first.decisions,
+            region=args.region, entry_mode=args.entry_mode,
+            replay=first.decisions,
         )
     if first.digest != replay.digest:
         raise RuntimeError("Draw-only source replay digest drift")
@@ -95,6 +99,7 @@ def main() -> None:
     row = {
         "schema": first.schema, "emulator_revision": args.emulator_revision,
         "source_seed": args.source_seed, "reference_seed": args.reference_seed,
+        "entry_mode": args.entry_mode,
         "nature_seed": args.nature_seed,
         "player_model_id": player_model_id,
         "player_model_sha256": player_model_sha256,
