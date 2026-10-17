@@ -14,6 +14,7 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
+from sts2_ai.emulator.semantic_p0_frozen_player import FrozenP0Player, FrozenPlayerSpec
 from sts2_ai.nature.draw_only_episode import play_draw_only_episode
 from sts2_ai.nature.two_site_opponent import TwoSiteNature
 
@@ -28,6 +29,15 @@ def main() -> None:
     parser.add_argument("--nature-seed", type=int, default=79)
     parser.add_argument("--region", default="Overgrowth")
     parser.add_argument("--min-draw-choices", type=int, default=1)
+    parser.add_argument("--player-model", type=Path,
+                        help="Optional SHA256-pinned frozen exported v15 JSON")
+    parser.add_argument("--player-actor-seed", type=int, default=837)
+    parser.add_argument("--player-temperature", type=float, default=0.85)
+    parser.add_argument("--player-action-scope",
+                        choices=("silent-basic-v1", "all-legal-v1"),
+                        default="silent-basic-v1")
+    parser.add_argument("--sample-player", action="store_true",
+                        help="Sample legal player actions from frozen v15 policy")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     if not args.emulator_dll.is_file():
@@ -37,17 +47,42 @@ def main() -> None:
     sys.path.insert(0, str(args.emulator_bindings.resolve()))
     Session = importlib.import_module("sts2_emulator").Session
     nature = TwoSiteNature(seed=args.nature_seed)
+    player_choose = None
+    player_model_id = "test-only-strike-first"
+    player_model_sha256 = None
+    if args.player_model is not None:
+        spec = FrozenPlayerSpec.from_file(
+            args.player_model, seed=args.player_actor_seed,
+            temperature=args.player_temperature,
+            greedy=not args.sample_player,
+            action_scope=args.player_action_scope,
+        )
+        actor = FrozenP0Player(
+            spec.load_pinned(),
+            actor_seed=spec.episode_seed(
+                fixture_seed=args.source_seed,
+                fixture_id=f"draw-only:{args.region}",
+            ),
+            greedy=spec.greedy, temperature=spec.temperature,
+            action_scope=spec.action_scope,
+        )
+        player_choose = actor.choose
+        player_model_id = spec.policy_id
+        player_model_sha256 = spec.model_sha256
     with Session(["dotnet", str(args.emulator_dll.resolve()), "prototype-ai-jsonl"]) as session:
         first = play_draw_only_episode(
             session, source_seed=args.source_seed,
             reference_seed=args.reference_seed,
             nature=nature, emulator_revision=args.emulator_revision,
+            player_model_id=player_model_id,
+            **({"player_choose": player_choose} if player_choose else {}),
             region=args.region,
         )
         replay = play_draw_only_episode(
             session, source_seed=args.source_seed,
             reference_seed=args.reference_seed,
             nature=nature, emulator_revision=args.emulator_revision,
+            player_model_id=player_model_id,
             region=args.region, replay=first.decisions,
         )
     if first.digest != replay.digest:
@@ -61,6 +96,9 @@ def main() -> None:
         "schema": first.schema, "emulator_revision": args.emulator_revision,
         "source_seed": args.source_seed, "reference_seed": args.reference_seed,
         "nature_seed": args.nature_seed,
+        "player_model_id": player_model_id,
+        "player_model_sha256": player_model_sha256,
+        "player_training": False,
         "outcome": first.outcome, "exit_hp": first.exit_hp, "score": first.score,
         "reference_intent_count": first.reference_intent_count,
         "controlled_draw_count": first.controlled_draw_count,
