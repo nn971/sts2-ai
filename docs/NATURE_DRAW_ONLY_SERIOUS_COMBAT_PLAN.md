@@ -113,3 +113,10 @@ python -u tools/train_draw_only_nature_h1.py \
 ```
 
 **H1 inference gate:** both arms must show source-compatible openings, actual legal draw selections, nontrivial deferred draws and complete terminal traces; a learned Nature should improve its adverse effect on *out-of-sample* score relative to the independent law-sampled control, with uncertainty reported across independent Nature training seeds. One benchmark/smoke, one PPO update, or zero observed draw opportunities cannot establish H1. The draw-only adversary currently uses a modest feature-table policy and supports conditioning on the physical candidate card model, so a richer contextual Nature model is a later extension.
+
+
+### Sampling correctness refinement
+
+The AI-side `SeededLawSampler` uses a **stable event-keyed** reference RNG derived from its declared law/site/event/conditioning identity and a separately pinned seed. Consequently, consuming an arbitrary number of reference `draw_card` tickets leaves the choice for an otherwise identical `enemy_intent` event unchanged. This improves paired evaluation and cross-process replay and avoids a spurious sequential-RNG ticket shift between learned-draw and reference-draw arms. It is an *AI experiment coupling*, not a claim of emulator `ReferenceNature` cursor equivalence or native RNG parity.
+
+The H1 paired evaluation additionally requires matching source-opening and first fair-public fingerprints, exact frozen player identity, identical initial reference RNG seed, unique holdout source IDs, and validated terminal snapshots. Training checkpoints and immutable per-arm heldout JSONLs contain each actual law choice and `log p/log q`.
