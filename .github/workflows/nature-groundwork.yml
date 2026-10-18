@@ -8,11 +8,13 @@ on:
       - 'src/sts2_ai/emulator/semantic_chance.py'
       - 'src/sts2_ai/training/chance_importance.py'
       - 'src/sts2_ai/training/nature_oracle.py'
+      - 'src/sts2_ai/training/two_site_combat_toy.py'
       - 'tests/test_nature_*.py'
       - 'tests/test_chance_importance.py'
       - 'tools/inspect_nature_rollout.py'
       - 'tools/inspect_nature_playable.py'
       - 'tools/collect_nature_playable_coverage.py'
+      - 'tools/try_two_site_nature_toy.py'
       - 'tests/test_nature_playable_corpus.py'
       - 'tests/fixtures/fake_nature_playable_jsonl.py'
       - 'tools/collect_nature_isolated.py'
@@ -29,11 +31,13 @@ on:
       - 'src/sts2_ai/emulator/semantic_chance.py'
       - 'src/sts2_ai/training/chance_importance.py'
       - 'src/sts2_ai/training/nature_oracle.py'
+      - 'src/sts2_ai/training/two_site_combat_toy.py'
       - 'tests/test_nature_*.py'
       - 'tests/test_chance_importance.py'
       - 'tools/inspect_nature_rollout.py'
       - 'tools/inspect_nature_playable.py'
       - 'tools/collect_nature_playable_coverage.py'
+      - 'tools/try_two_site_nature_toy.py'
       - 'tests/test_nature_playable_corpus.py'
       - 'tests/fixtures/fake_nature_playable_jsonl.py'
       - 'tools/collect_nature_isolated.py'
@@ -57,6 +61,9 @@ jobs:
         run: >-
           python -m ruff check
           src/sts2_ai/nature
+          src/sts2_ai/training/two_site_combat_toy.py
+          tools/try_two_site_nature_toy.py
+          tests/test_nature_two_site_pilot.py
           tools/collect_nature_isolated.py
           tools/benchmark_nature_workers.py
           tests/test_nature_corpus_n3.py
@@ -90,4 +97,11 @@ jobs:
           tests/test_nature_semantic_oracle.py
           tests/test_nature_playable_fixture.py
           tests/test_nature_playable_corpus.py
-      - run: python -m compileall -q tools/collect_nature_playable_coverage.py tests/fixtures/fake_nature_playable_jsonl.py tools/inspect_nature_rollout.py tools/inspect_nature_playable.py tools/collect_nature_isolated.py tools/benchmark_nature_workers.py src/sts2_ai/nature
+          tests/test_nature_two_site_pilot.py
+      - name: Toy intent/draw Nature combat A/B smoke
+        run: >-
+          python -u tools/try_two_site_nature_toy.py
+          --rounds 20 --episodes-per-batch 24
+          --evaluation-episodes 256 --seeds 29 30 31
+          --output /tmp/nature-two-site-toy.json
+      - run: python -m compileall -q tools/try_two_site_nature_toy.py src/sts2_ai/training/two_site_combat_toy.py tools/collect_nature_playable_coverage.py tests/fixtures/fake_nature_playable_jsonl.py tools/inspect_nature_rollout.py tools/inspect_nature_playable.py tools/collect_nature_isolated.py tools/benchmark_nature_workers.py src/sts2_ai/nature
