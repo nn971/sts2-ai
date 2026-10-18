@@ -38,6 +38,12 @@ from .jsonl_backend import (
     JsonlBridgeError,
     JsonlEmulatorBackend,
 )
+from .semantic_chance import (
+    PlayableSemanticCombatBridge,
+    SemanticBoundary,
+    SemanticCapabilityUnavailable,
+    SemanticNatureBridge,
+)
 from .particle_posterior import (
     FINITE_COHORT_PRIOR_ID,
     FiniteSeedPosteriorSampler,
@@ -94,9 +100,13 @@ __all__ = [
     "OBSERVATION_SCHEMA_ID",
     "ParticlePosteriorExhausted",
     "ParticlePosteriorStats",
+    "PlayableSemanticCombatBridge",
     "Observation",
     "RULESET_ID",
     "SEED_PRIOR_ID",
+    "SemanticBoundary",
+    "SemanticCapabilityUnavailable",
+    "SemanticNatureBridge",
     "FairHistoryRejectionSampler",
     "HistoryConditioningExhausted",
     "RejectionStats",

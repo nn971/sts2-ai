@@ -52,6 +52,7 @@ class SemanticEvent:
     raw_weights: tuple[float, ...] | None = None
     weight_total: float | None = None
     schema: str = SEMANTIC_SCHEMA
+    candidate_features: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         for label, value in (
@@ -77,6 +78,12 @@ class SemanticEvent:
                 or any(not isinstance(x, str) or not x for x in self.candidate_ids)
                 or len(set(self.candidate_ids)) != len(self.candidate_ids)):
             raise ValueError("Semantic candidates must be unique stable identities")
+        if self.candidate_features is not None and (
+            len(self.candidate_features) != len(self.candidate_ids)
+            or any(not isinstance(x, str) or not x
+                   for x in self.candidate_features)
+        ):
+            raise ValueError("Semantic candidate features must match the support")
         if self.probability_status not in CHANCE_LAW_STATUSES:
             raise ValueError("Unsupported semantic probability status")
         if self.probability_status == "UNVERIFIED" and self.reference_law_id is not None:
@@ -145,12 +152,16 @@ class SemanticEvent:
             reference_law_id=data.get("referenceLawId"),
             raw_weights=tuple(weights) if weights is not None else None,
             weight_total=data.get("weightTotal"),
+            candidate_features=(
+                tuple(data["candidateFeatures"])
+                if isinstance(data.get("candidateFeatures"), list) else None
+            ),
         )
 
     @property
     def replay_identity(self) -> str:
         """Hash the complete public-to-Nature support contract, not game state."""
-        return canonical_sha256([
+        identity: list[object] = [
             self.schema, self.event_id, self.boundary_fingerprint,
             self.site_id, self.owner_id, self.ordinal, self.operation,
             self.candidate_ids, self.support_fingerprint,
@@ -158,7 +169,10 @@ class SemanticEvent:
             self.representation, self.source_version,
             self.raw_weights, self.weight_total,
             self.probability_status, self.reference_law_id,
-        ])
+        ]
+        if self.candidate_features is not None:
+            identity.append(("candidate_features", self.candidate_features))
+        return canonical_sha256(identity)
 
     @property
     def normalized_intent_weights(self) -> tuple[float, ...]:

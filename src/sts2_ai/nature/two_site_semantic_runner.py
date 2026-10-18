@@ -13,7 +13,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from sts2_ai.emulator.semantic_chance import SemanticNatureBridge
+from sts2_ai.emulator.semantic_chance import (
+    PlayableSemanticCombatBridge,
+    SemanticNatureBridge,
+)
 
 from .semantic import SemanticEvent, SemanticProposal
 from .semantic_trajectory import (
@@ -25,6 +28,17 @@ from .two_site_opponent import PILOT_OPERATIONS, PilotChoice, PilotEpisode, TwoS
 
 class TwoSitePilotUnavailable(RuntimeError):
     """Mechanically legal trial cannot proceed with only intent and draw control."""
+
+
+def describe_source_candidate_features(
+    event: SemanticEvent,
+) -> tuple[str, tuple[str, ...]]:
+    """Use emulator-supplied owner/site context and intent/card model IDs."""
+    if not event.candidate_features:
+        raise TwoSitePilotUnavailable(
+            "Semantic event has no source-backed candidate model labels"
+        )
+    return f"{event.site_id}|{event.owner_id}", event.candidate_features
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +79,8 @@ class _NaturePolicyAdapter:
 
 
 def play_semantic_two_site(
-    bridge: SemanticNatureBridge, nature: TwoSiteNature, *,
+    bridge: SemanticNatureBridge | PlayableSemanticCombatBridge,
+    nature: TwoSiteNature, *,
     fixture_id: str, seed: str, episode_key: str,
     describe_event: Callable[[SemanticEvent], tuple[str, tuple[str, ...]]],
     player_choose: Callable[[dict[str, Any], tuple[str, ...]], str],

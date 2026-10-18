@@ -10,7 +10,10 @@ from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
-    from sts2_ai.emulator.semantic_chance import SemanticNatureBridge
+    from sts2_ai.emulator.semantic_chance import (
+        PlayableSemanticCombatBridge,
+        SemanticNatureBridge,
+    )
 
 from .protocol import canonical_sha256
 from .semantic import PROPOSED_WIRE_SCHEMA, SemanticEvent, SemanticProposal
@@ -51,10 +54,14 @@ class SemanticTrajectory:
     terminal_outcome: str
     schema: str = SEMANTIC_TRAJECTORY_SCHEMA
     chance_schema: str = PROPOSED_WIRE_SCHEMA
+    terminal_exit_hp: int | None = None
 
     @property
     def fingerprint(self) -> str:
-        return canonical_sha256(asdict(self))
+        record = asdict(self)
+        if self.terminal_exit_hp is None:
+            record.pop("terminal_exit_hp")
+        return canonical_sha256(record)
 
     def nature_script(self) -> tuple[tuple[str, str], ...]:
         return tuple(
@@ -75,7 +82,8 @@ class SemanticTrajectory:
 
 
 def collect_semantic_trajectory(
-    bridge: SemanticNatureBridge, policy: SemanticPolicy, *,
+    bridge: SemanticNatureBridge | PlayableSemanticCombatBridge,
+    policy: SemanticPolicy, *,
     fixture_id: str, seed: str,
     player_choose: Callable[[dict[str, Any], tuple[str, ...]], str],
     max_boundaries: int = 512,
@@ -129,6 +137,10 @@ def collect_semantic_trajectory(
             decisions=tuple(rows),
             terminal_fingerprint=frame.fingerprint,
             terminal_outcome=frame.terminal,
+            chance_schema=getattr(
+                bridge, "chance_schema_id", PROPOSED_WIRE_SCHEMA
+            ),
+            terminal_exit_hp=frame.exit_hp,
         )
     finally:
         bridge.release(*handles)

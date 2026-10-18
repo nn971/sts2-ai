@@ -11,12 +11,11 @@ isolated N3 branch and its earlier Nature contracts.
 
 ## Implementation status and compatibility
 
-This is an **AI-only preparatory adapter, tested with a synthetic wire**.
-As of PR #156, the new emulator deck kernel is **pure provider state**:
-its `DrawCards`/turn hooks and JSONL capability are not integrated.
-Accordingly the new client refuses the actual legacy emulator `hello`;
-it can be used live only after the emulator advertises and implements
-the negotiated semantic interface. No emulator code or gitlink is changed.
+The initial `SemanticNatureBridge` in this document is an **AI-only
+preparatory adapter tested with a synthetic wire**. Its proposed schema is
+retained for old contract fixtures. The emulator now has a separate current
+playable semantic API; `PlayableSemanticCombatBridge` is the live adapter
+for that API and does not negotiate this proposed schema.
 
 Existing `ChanceEvent`, isolated HP/intent `nature_begin`, N3 fixture
 corpora, and playable legacy `controlled-...-fixture-v1` shuffle-swap
@@ -51,12 +50,13 @@ both representations for a single randomization.
   middle-placement constraints. Those toy deck enumerations are *not*
   native chance-law calibration.
 
-## Proposed JSONL contract (requires emulator implementation)
+## Original proposed JSONL contract (synthetic compatibility only)
 
-These are **future AI adapter names and field shapes**, not existing
-emulator endpoints. The emulator team may adopt these names or agree a
-versioned translation layer; do not route through legacy `controlled_*`
-with silent semantic reinterpretation.
+These were the **future AI adapter names and field shapes** when this
+contract was written. They remain useful for synthetic compatibility tests,
+but are not the current live emulator endpoints. The live adapter translates
+the current versioned `SemanticCombat` binding and Nature-choice view; it
+does not route through legacy `controlled_*` with silent reinterpretation.
 
 ```json
 {
@@ -102,23 +102,21 @@ Events carry source instance IDs, `candidateIds`, `eventId`,
 `weightTotal`. These are source-derived **eligibility/proposal inputs**,
 not automatically independently audited conditional reference laws.
 
-## Emulator dependency and next acceptance gate
+## Current live adapter and remaining acceptance gate
 
-The current semantic deck kernel needs opt-in **gameplay + JSONL** wiring
-and a versioned handshake before `SemanticNatureBridge` can run against
-an actual .NET session. Further dependencies include committed,
-player-visible weighted enemy intents with source move-history filtering;
-CardDrawn hook timing, forced top/bottom/middle inserts, peek/scry
-information constraints, and fresh shuffle epoch transitions. The engine
-owns all of these mechanics; AI code does not mutate deck/intent state.
+The emulator advertises
+`sts2-v111-semantic-playable-p0-v1` for a restricted seeded Silent source
+route and exposes a versioned Nature-only choice view. The AI adapter
+`PlayableSemanticCombatBridge` consumes that binding, maps the current
+source-authored weighted intent and physical-card draw supports to
+`SemanticEvent`, and retains emulator-provided model labels as
+`candidate_features`. It supplies player policies only the fair observation
+and legal action IDs, uses the current intent/draw resolvers, and requires a
+classified terminal outcome. It rejects other Nature sites.
 
-For live acceptance, run an externally selected `draw_card` followed
-by ordinary drawing hooks, a forced-top known-card draw with *no* new
-chance event, a different subsequent unknown card, and a weighted
-`enemy_intent` becoming visible at the next player boundary. Fork,
-serialize and replay the entire sequence; compare 1/15-worker runs.
-Keep source native RNG cursor/stream parity as a separate test.
-
-**No Nature training or native `p/q` inference is enabled** by this PR.
-Use the prior pure N4 reference tests for exact synthetic chance laws and
-wait for explicitly audited native conditional laws for N5/N6.
+The adapter is wired to the two-site terminal trajectory runner, but the
+real consumer rollout and 1/15-worker consistency have not been demonstrated.
+The emulator's source-route and ordinary-chance providers remain marked
+unverified, and Native conditional law calibration remains separate work.
+See [`NATURE_TWO_SITE_COMBAT_PILOT.md`](NATURE_TWO_SITE_COMBAT_PILOT.md) for
+the current API example and the #143 acceptance gates.

@@ -60,10 +60,14 @@ separately after the N5 reference-law gate.
   complete-terminal REINFORCE with a leave-one-episode-out baseline.
   Stores actual chosen `log q`, behavioral revision, and checkpoint
   provenance; stale/censored episodes cannot update.
-- `nature/two_site_semantic_runner.py`: future real-emulator binding of
-  `SemanticNatureBridge` with explicit `describe_event` (source-backed
-  card-model labels/context), public-only `player_choose`, and an
-  externally validated terminal-return decoder. A bare terminal Boolean
+- `nature/two_site_semantic_runner.py`: real-emulator trajectory binding
+  for either the original synthetic wire or the current
+  `PlayableSemanticCombatBridge`. The live adapter starts a configured
+  seeded source route, reads Nature support through the versioned Nature-only
+  view, and gives player policies only the fair observation and legal action
+  IDs. `describe_source_candidate_features` uses source owner/site context
+  and emulator-supplied intent/card model IDs. The runner still requires an
+  externally validated terminal-return decoder; a bare terminal Boolean
   and unclassified outcomes are insufficient training labels.
 - `training/two_site_combat_toy.py`: **explicitly synthetic** three-turn
   finite combat: visible light/heavy enemy intents, draw-on-demand from
@@ -110,50 +114,55 @@ performance, and 3 toy seeds are a machinery smoke, not a confidence interval.
 
 ## Live emulator integration gate (issue #143)
 
-[Emulator PR #162](https://github.com/nn971/sts2-emulator/pull/162)
-implements a genuine restricted end-turn continuation through controlled
-intents and deferred card draws. Subsequently,
-[PR #163](https://github.com/nn971/sts2-emulator/pull/163)
-persists the unresolved semantic deck through supported basic Silent
-Strike/Defend actions and multiple end turns, including a subsequent
-nonempty draw pile. Initial entry still requires an honestly new
-source-time shuffle state. Full externally playable **semantic JSONL**,
-source-weighted intent metadata, broader card actions and complete
-terminal combat episodes remain outstanding. These are P0 blockers in
-[emulator issue #143](https://github.com/nn971/sts2-emulator/issues/143).
+The emulator now advertises
+`sts2-v111-semantic-playable-p0-v1` for a restricted seeded Silent source
+route. `PlayableSemanticCombatBridge` consumes the current Python
+`SemanticCombat` API and its `sts2-v111-semantic-nature-choice-view-v2`
+projection. It resolves only source-authored `enemy_intent` and deferred
+physical-instance `draw_card` events, keeps player observations separate,
+and rejects other Nature boundaries or unclassified terminal outcomes.
+The trajectory retains terminal exit HP when the emulator provides it.
+The previous `sts2-v111-semantic-chance-v1` adapter remains available for
+synthetic-wire contract work; it is not the live emulator schema.
 
-To connect the above training loop to actual combat, the emulator must
-supply a **new, opt-in, versioned two-site playable semantic capability**:
+Example setup, after building the emulator Release CLI and making its Python
+binding importable:
 
-- **Start/step/resolve/terminal:** return a fair public player
-  observation, legal player action IDs, or pending semantic `enemy_intent`
-  / `draw_card` choice; resume to the next boundary/terminal through
-  original engine hooks, persisting the semantic deck across steps.
-- **Current eligible intent metadata:** source AI move-history/phase
-  filtering, stable intent identity, raw weights/total, and the already
-  committed public intent on the next player observation.
-- **Eligible physical card metadata:** stable instance IDs **plus**
-  card-model descriptor for generalizable Nature learning; the hidden
-  position constraints remain authoritative inside the emulator.
-  Known-top draws should not create a redundant Nature event.
-- **RNG outside the two sites:** continue under a separately specified,
-  mechanically source-correct native/default provider. Never silently
-  substitute legacy Fisher–Yates swaps for semantic deferred draws.
-- **Terminal outcome:** explicitly identify combat victory/defeat and
-  player exit HP, with source run/snapshot partition and reward provenance.
-  Preserve fork/save/load, deterministic replay, and fail-closed
-  unsupported-event classification.
-- **15-process rollout support:** independent handles, event context,
-  q-version and experiment manifest per worker. Verify identical
-  transcripts across 1 and 15 workers.
+```python
+from sts2_emulator import Session
+from sts2_ai.emulator import PlayableSemanticCombatBridge
+from sts2_ai.nature.two_site_semantic_runner import (
+    describe_source_candidate_features,
+    play_semantic_two_site,
+)
 
-The current AI semantic bridge `sts2-v111-semantic-chance-v1` expects
-its negotiated capability; it deliberately rejects today's legacy
-`controlled_*` shuffle interface. The toy game is a learning test while
-the emulator supplies the missing semantic gameplay boundary. Real
-StS2 combat is therefore **not yet a reported experimental result**.
+session = Session(["dotnet", str(emulator_cli)], cwd=emulator_root)
+bridge = PlayableSemanticCombatBridge(
+    session,
+    emulator_revision=emulator_sha,
+    region="Overgrowth",
+    ascension=0,
+)
+result = play_semantic_two_site(
+    bridge,
+    nature,
+    fixture_id=bridge.fixture_id,
+    seed=seed,
+    episode_key=episode_key,
+    describe_event=describe_source_candidate_features,
+    player_choose=frozen_player.choose,
+    score_terminal=validated_combat_score,
+)
+```
 
-## Pilot rollout design after the bridge lands
+This adapter makes the earlier real-combat consumer work implementable, but
+does not close #143. The emulator's ordinary-chance control provider and
+source-route entry are still marked unverified; Native conditional `p` laws
+remain open. A real A/B training integration, terminal-reward audit,
+unsupported-boundary coverage, and transcript consistency across 1 and 15
+workers have not been demonstrated. No StS2 training result is claimed.
+
+## Pilot rollout design after bridge integration
 
 Start with a small set of source-supported Silent combat snapshots from
 Overgrowth/Hive, at appropriate deck progression, excluding unsupported
@@ -176,12 +185,12 @@ Nature policy establish supported multi-turn terminal replays. Then:
 
 ### Explicit constraints
 
-No emulator source code, main branch, emulator gitlink, frozen v15
-checkpoints, or existing PPO trainer changed. This branch introduces a
-standalone Nature learning pilot and toy experiment. Actual native
-chance-law calibration and calibrated importance-weighted PPO are later
-work packages. The first experiment uses no map, rewards, shops,
-formations, or other discretionary Nature-controlled RNG.
+No frozen v15 checkpoints or existing PPO trainer changed. This branch
+adds the consumer adapter and toy experiment, while the emulator change is
+tracked separately. Actual native chance-law calibration and calibrated
+importance-weighted PPO are later work packages. The first experiment uses
+no map, rewards, shops, formations, or other discretionary
+Nature-controlled RNG.
 
 ## First CI observation — synthetic combat only (2026-10-15)
 

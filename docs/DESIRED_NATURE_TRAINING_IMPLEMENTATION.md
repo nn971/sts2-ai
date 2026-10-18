@@ -12,9 +12,10 @@ Work on [AI PR #72](https://github.com/nn971/sts2-ai/pull/72)
 adds **N3 isolated corpus collection**, a 15-process worker runner,
 strict run/partition provenance, resumable records and deterministic
 replay; see the [N3 runbook](NATURE_N3_CORPUS_RUNBOOK.md).
-Full playable controlled combat, 15-worker **native emulator benchmark
+Broad playable controlled combat, 15-worker **native emulator benchmark
 acceptance**, original chance-law calibration, PPO Nature integration
-and learned Nature training remain future stages.
+and learned Nature training remain future stages. The 2026-10-18 note
+below records the restricted playable API and its current AI adapter.
 
 
 **Status:** proposed `sts2-ai` implementation roadmap, documentation only; 2026-10-12.  
@@ -22,7 +23,7 @@ and learned Nature training remain future stages.
 **Development base:** v15q combat importance-sampling/diagnostics branch; do not reinterpret existing checkpoint fingerprints.  
 **Scope:** single-player Silent combat first; later generalize to whole-run macro stochasticity. Multiplayer-only and cross-character mechanics are outside this initial milestone.
 
-**AI implementation note (2026-10-15):** A new opt-in `SemanticEvent` / `SemanticNatureBridge` and joint trajectory driver are implemented on `feature/nature-semantic-adapter-n1n2`. See [semantic N1/N2 adapter contract](NATURE_SEMANTIC_ADAPTER_N1N2.md). The emulator semantic deck-state kernel is presently pure, so the new bridge has synthetic contract tests and deliberately refuses the legacy JSONL handshake; live semantic gameplay requires a separately advertised emulator capability. Existing N3 fixture and v15 paths remain intact.
+**AI implementation note (2026-10-18):** The original opt-in `SemanticEvent` / `SemanticNatureBridge` remains a synthetic-wire contract. The emulator now advertises a restricted playable semantic combat API, and `PlayableSemanticCombatBridge` adapts its seeded source-route, Nature-only support view, fair player observation, and terminal outcome into the joint trajectory driver. See [semantic N1/N2 adapter contract](NATURE_SEMANTIC_ADAPTER_N1N2.md) and the [two-site combat pilot](NATURE_TWO_SITE_COMBAT_PILOT.md). Real A/B training, 1/15-worker replay consistency, ordinary-RNG control, and native law calibration remain open acceptance work. Existing N3 fixture and v15 paths remain intact.
 
 ## 0A. Nature semantic-state interface update (2026-10-15)
 

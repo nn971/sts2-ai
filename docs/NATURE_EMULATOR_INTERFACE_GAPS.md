@@ -4,6 +4,21 @@
 to `sts2-emulator` code or to the emulator submodule pin are included.
 See [desired Nature design](DESIRED_NATURE_TRAINING_IMPLEMENTATION.md).
 
+## Update: restricted playable semantic API (2026-10-18)
+
+The emulator now advertises
+`sts2-v111-semantic-playable-p0-v1` for seeded source-route Silent combat,
+including fair player actions, physical-card draw choices, weighted intent
+choices, and classified terminal state. The current AI consumer is
+`PlayableSemanticCombatBridge` in the two-site pilot PR. This supersedes the
+earlier claim below that no playable semantic JSONL capability exists.
+
+The remaining gaps are broader supported-combat coverage, reproducible
+ordinary-RNG control, complete consumer A/B integration and 1/15-worker
+transcript evidence, plus Native/source-law calibration. The adapter
+rejects Nature events outside its two-site intent/draw scope; those gaps do
+not become supported by the existence of the restricted API.
+
 ## Update: revised semantic RNG architecture (2026-10-15)
 
 The original gap table below describes the **initial isolated #137/#140
