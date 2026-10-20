@@ -152,11 +152,27 @@ def extract_combat_objects(state: dict[str, Any]) -> ObjectSet:
     for k in ("hp", "max_hp", "act", "floor", "gold"):
         if k in state and state[k] is not None:
             global_num[k] = _number(state[k], k)
-    for k in ("turn", "energy", "player_block", "draw_pile_count"):
+    for k in (
+        "turn", "energy", "player_block", "draw_pile_count",
+        "discard_pile_count", "exhaust_pile_count", "play_pile_count",
+        "choice_pool_count",
+    ):
         if k in combat and combat[k] is not None:
             global_num[k] = _number(combat[k], k)
     if isinstance(state.get("character_id"), str):
         global_cat.append("character=" + state["character_id"])
+    # P0 fair observations may provide counts for private piles while
+    # withholding physical card identities. Encode the omission explicitly;
+    # never create pretend card objects or interpret unknown as empty.
+    if state.get("p0_public_projection") == (
+        "sts2-ai-p0-public-count-piles-v1"
+    ):
+        opaque = state.get("p0_opaque_public_fields")
+        if (not isinstance(opaque, list) or
+                any(not isinstance(x, str) or not x for x in opaque) or
+                len(opaque) != len(set(opaque))):
+            raise ValueError("Invalid explicit P0 opaque-public-field manifest")
+        global_cat.extend("p0_opaque:" + name for name in sorted(opaque))
     objects.append(_token(
         "global", "player", "combat", ObjectRef("global", "player"),
         global_num, global_cat,
@@ -186,7 +202,17 @@ def extract_combat_objects(state: dict[str, Any]) -> ObjectSet:
             objects.append(_token("card", ident, zone, ObjectRef("card", instance), num, cat))
     if "draw_pile_count" in combat:
         count = combat["draw_pile_count"]
-        if type(count) is not int or count != len(combat["draw_pile"]):
+        if type(count) is not int or count < 0:
+            raise ValueError("Invalid public draw_pile count")
+        if combat.get("draw_pile_opaque") is True:
+            if (state.get("p0_public_projection") !=
+                    "sts2-ai-p0-public-count-piles-v1"
+                    or combat["draw_pile"]
+                    or "combat.draw_pile" not in state.get(
+                        "p0_opaque_public_fields", []
+                    )):
+                raise ValueError("Invalid opaque P0 draw-pile projection")
+        elif count != len(combat["draw_pile"]):
             raise ValueError("Public draw_pile count does not match visible card instances")
 
     relic_counters: dict[str, object] = {}

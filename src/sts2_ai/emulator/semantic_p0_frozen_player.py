@@ -16,6 +16,10 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from sts2_ai.emulator.protocol import LegalAction, Observation
+from sts2_ai.emulator.semantic_p0_public_projection import (
+    CARD_ZONES,
+    project_public_p0_observation,
+)
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.nature.protocol import canonical_sha256
 
@@ -100,6 +104,7 @@ class FrozenP0Player:
         self, model: PublicPolicy, *, actor_seed: int,
         temperature: float = 1.0, greedy: bool = True,
         action_scope: str = "all-legal-v1",
+        capture_training: bool = False,
     ):
         if type(actor_seed) is not int:
             raise ValueError("Actor seed must be an integer")
@@ -114,6 +119,8 @@ class FrozenP0Player:
         self.rng = random.Random(actor_seed)
         self.policy_id = f"frozen-v15-{action_scope}-{model.model_id}"
         self.decisions = 0
+        self.capture_training = capture_training
+        self.training_actions: list[dict[str, Any]] = []
 
     @staticmethod
     def _public_types(
@@ -144,38 +151,62 @@ class FrozenP0Player:
                 raise FrozenPolicyInferenceError("Invalid public action payload") from exc
             actions.append(LegalAction(ident, kind, payload))
             seen.add(ident)
-        # JSON source semantics are preserved (all fields are from a fair
-        # observation). The value is the public content's own stable hash,
-        # not a hidden/full-state fingerprint.
-        text = json.dumps(observation, separators=(",", ":"), sort_keys=True)
+        # The P0 engine may reveal a pile COUNT while hiding card IDs.
+        # Convert to an explicitly opaque v15 public representation, never
+        # to guessed card identities. Keep the minimal old-fixture format.
+        combat = observation.get("combat", {})
+        needs_p0_projection = (
+            isinstance(combat, dict)
+            and (
+                any(type(combat.get(zone)) is int for zone in CARD_ZONES)
+                or ("draw_pile_count" in combat
+                    and not isinstance(combat.get("draw_pile"), list))
+            )
+        )
+        visible = (
+            project_public_p0_observation(observation)
+            if needs_p0_projection else observation
+        )
+        text = json.dumps(visible, separators=(",", ":"), sort_keys=True)
         public = Observation(
-            PUBLIC_POLICY_ID, text, canonical_sha256(observation),
+            PUBLIC_POLICY_ID, text, canonical_sha256(visible),
         )
         return public, tuple(actions)
+
+    @staticmethod
+    def scoped_actions(
+        observation: dict[str, Any], actions: tuple[LegalAction, ...],
+        scope: str,
+    ) -> tuple[LegalAction, ...]:
+        """Apply the same public source-menu restriction in rollout and audit."""
+        if scope not in PLAYER_ACTION_SCOPES:
+            raise FrozenPolicyInferenceError("Unsupported player action scope")
+        if scope == "all-legal-v1":
+            return actions
+        hand = {
+            str(card["instance_id"]): card["card_id"]
+            for card in observation.get("combat", {}).get("hand", [])
+        }
+        filtered: list[LegalAction] = []
+        for action in actions:
+            if action.kind == "end_turn":
+                filtered.append(action)
+            elif action.kind == "play_card":
+                card_id = json.loads(action.payload_json).get("CardInstanceId")
+                if hand.get(str(card_id)) in SUPPORTED_BASIC_CARDS:
+                    filtered.append(action)
+        if not filtered:
+            raise FrozenPolicyInferenceError(
+                "No supported basic Silent action in the fair legal menu"
+            )
+        return tuple(filtered)
 
     def choose(
         self, observation: dict[str, Any],
         raw_actions: list[dict[str, Any]],
     ) -> str:
-        public, actions = self._public_types(observation, raw_actions)
-        if self.action_scope == "silent-basic-v1":
-            hand = {
-                str(card["instance_id"]): card["card_id"]
-                for card in observation.get("combat", {}).get("hand", [])
-            }
-            filtered: list[LegalAction] = []
-            for action in actions:
-                if action.kind == "end_turn":
-                    filtered.append(action)
-                elif action.kind == "play_card":
-                    card_id = json.loads(action.payload_json).get("CardInstanceId")
-                    if hand.get(str(card_id)) in SUPPORTED_BASIC_CARDS:
-                        filtered.append(action)
-            actions = tuple(filtered)
-            if not actions:
-                raise FrozenPolicyInferenceError(
-                    "No supported basic Silent action in the fair legal menu"
-                )
+        public, source_actions = self._public_types(observation, raw_actions)
+        actions = self.scoped_actions(observation, source_actions, self.action_scope)
         estimate = self.model.evaluate(public, actions)
         logits = estimate.action_logits
         if len(logits) != len(actions) or any(
@@ -197,4 +228,45 @@ class FrozenP0Player:
                     selected = index
                     break
         self.decisions += 1
+        if self.capture_training:
+            if self.greedy:
+                raise FrozenPolicyInferenceError(
+                    "PPO behavior collection requires stochastic policy sampling"
+                )
+            if not isinstance(estimate.value, (float, int)) or not math.isfinite(
+                estimate.value
+            ):
+                raise FrozenPolicyInferenceError("Invalid frozen PPO behavior value")
+            maximum = max(logits)
+            normalized = math.fsum(
+                math.exp((x - maximum) / self.temperature) for x in logits
+            )
+            logp = (
+                (logits[selected] - maximum) / self.temperature
+                - math.log(normalized)
+            )
+            # Retain the exact *public* inputs sent by the source emulator.
+            # Together with the replay's support_identity these certify the
+            # full source menu and projection, including unselected actions.
+            self.training_actions.append({
+                "source_observation": json.loads(json.dumps(observation)),
+                "source_legal_actions": json.loads(json.dumps(raw_actions)),
+                "source_support_identity": canonical_sha256([observation, raw_actions]),
+                "observation": {
+                    "policy_id": public.policy_id,
+                    "payload_json": public.payload_json,
+                    "observation_hash": public.observation_hash,
+                },
+                "legal_actions": [
+                    {"action_id": a.action_id, "kind": a.kind,
+                     "payload_json": a.payload_json} for a in actions
+                ],
+                "chosen_index": selected,
+                "selected_id": actions[selected].action_id,
+                "behavior_logprob": logp,
+                "behavior_value": float(estimate.value),
+                "temperature": self.temperature,
+                "action_scope": self.action_scope,
+                "behavior_model_id": self.model.model_id,
+            })
         return actions[selected].action_id
