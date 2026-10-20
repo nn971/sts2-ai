@@ -90,7 +90,7 @@ def main() -> None:
             nature=nature, emulator_revision=args.emulator_revision,
             player_model_id=player_model_id,
             region=args.region, entry_mode=args.entry_mode,
-            replay=first.decisions,
+            draw_mode=args.draw_mode, replay=first.decisions,
         )
     if first.digest != replay.digest:
         raise RuntimeError("Draw-only source replay digest drift")
