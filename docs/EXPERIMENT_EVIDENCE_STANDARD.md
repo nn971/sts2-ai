@@ -4,6 +4,30 @@
 and Nature changes. **Status:** project policy, 2026-10-16. This document
 governs the wording of future PRs, experiment reports and assistant summaries.
 
+## Training is independent of original-game fidelity (binding policy)
+
+**Never make installed-game fidelity, exact native RNG reproduction,
+Fidelity Inspector issue #122, N5 source-law calibration, or broad S3/S4
+equivalence prerequisites for agent training.** A declared-law emulator
+experiment may proceed when the chosen mechanical subset compiles, plays to
+real terminal states, uses legal supported outcomes and fair observations,
+fails closed on unsupported stochastic sites, and replays exactly.
+
+For all training and decision-grade *emulator-relative* claims below,
+"native-RNG" or "ordinary/reference-RNG" evaluation means held-out trials
+using the **emulator's engine-owned reference stochastic policy** (including
+`ReferenceNature` for declared Chance Laws); it does not imply verified
+agreement with the installed game's RNG. Keep uncalibrated laws labeled
+`UNVERIFIED` as probability provenance; that status is **not a training
+failure or stop condition**. Internal support/weight consistency is still
+required. Original-game accuracy and unbiased native-game importance-weighting
+are *separate, later claims* requiring appropriate source evidence.
+
+The evidence-level rules below (multi-seed evaluation, meaningful budgets,
+holdout separation, uncertainty) remain mandatory **within the chosen
+declared emulator environment**, irrespective of its original-game
+fidelity status.
+
 ## Core rule: an integration smoke test is not an assessment of a new feature
 
 **Never judge, accept, reject, or promote a training or algorithmic feature
@@ -24,7 +48,7 @@ cover these sources of uncertainty.
 | --- | --- | --- | --- |
 | **0. Contract/unit** | Finite oracle, exact replay, CI, lint, short synthetic test | Interfaces, algebra, test invariants or replay work in the tested setting | Feature improves/worsens real gameplay |
 | **1. Smoke/integration** | 1–20 rounds or similarly small compute; a few supported combats | Mechanisms execute; logs/checkpoints/metrics are well formed; obvious bugs and blockers identified | Training convergence; feature utility; promotion/rejection |
-| **2. Diagnostic pilot** | Expanded multi-seed runs, learning curves and representative native holdout | Preliminary signals and plausible hypotheses explicitly tagged *provisional* | Definitive improvement or generalization |
+| **2. Diagnostic pilot** | Expanded multi-seed runs, learning curves and representative engine-owned reference-policy holdout | Preliminary signals and plausible hypotheses explicitly tagged *provisional* | Definitive improvement or generalization |
 | **3. Decision-grade experiment** | Predeclared substantial training budget, independent replicas, matched control, confidence analysis and untouched evaluation | Supported comparison for the declared environment, scope and compute | Claims beyond tested game fidelity, mechanics or heldout distribution |
 | **4. Promotion** | Repeated decision-grade result, fresh independent holdout and engineering/regression acceptance | Deploy/promote the feature within the validated scope | Blanket performance guarantees |
 
@@ -41,7 +65,7 @@ substitutes for substantial training.
 Before calling a new training feature better or worse:
 
 1. **Predeclare the comparison.** State the primary metric (normally
-   native-RNG player survival/win and exit HP), chosen environment/game
+   engine-owned reference-RNG player survival/win and exit HP), chosen environment/game
    revision, source-run-disjoint evaluation corpus, training checkpoints,
    reward objective, controlled variables, and minimum detectable effect
    or practical target. Separate source-authentic game evidence from
@@ -66,7 +90,7 @@ Before calling a new training feature better or worse:
    sampled decisions, optimizer steps and wall/GPU time. Document
    unavoidable asymmetries rather than hiding them.
 5. **Evaluate only under the intended target distribution.** For player
-   strength, use independent **native RNG**, with frozen public-only
+   strength, use independent **emulator reference RNG**, with frozen public-only
    player observations and a fresh source-run-disjoint holdout. Report
    weak/normal/elite/boss and relevant Act/floor/deck stages rather than
    relying only on an overall aggregate. Keep training/development/test
@@ -80,8 +104,8 @@ Before calling a new training feature better or worse:
 7. **Check correctness and leakage.** Audit replay, legality, chance
    support, hidden-player-information boundaries, censoring, checkpoint
    provenance, chance-law calibration status and unsupported mechanics.
-   Treat truncated episodes as censored, never defeats; never substitute
-   toy stochastic laws for native-game validation.
+   Treat truncated episodes as censored, never defeats; label toy/declared-law results as emulator-relative and
+   validate original-game accuracy as a separate claim.
 8. **Report uncertainty and failure honestly.** Include negative and
    inconclusive outcomes, seed variance, confidence intervals, benchmark
    scope, known emulator fidelity gaps, and what remains untested.
@@ -101,8 +125,8 @@ Three questions must be reported **separately**:
   return compared with an untrained Nature proposal under the same
   mechanics? This tests adversarial learning, *not player improvement*.
 - **Player benefit:** does Nature-trained player improve relative to
-  **equal-compute native-trained** player on a fresh, independent,
-  **native-RNG** holdout? This is the primary strength claim.
+  **equal-compute reference-trained** player on a fresh, independent,
+  **engine-owned reference-RNG** holdout? This is the primary strength claim.
 - **Probability validity (if applicable):** does Nature have an audited
   conditional reference law `p` and a full-support `q`, permitting
   a justified importance-weighted original-game estimator? Without
@@ -122,7 +146,7 @@ terminal returns are available.
 Every future training PR/experiment summary should identify its
 **evidence level**, exact environment/revision and training budget,
 independent training-seed count, source-run-disjoint holdout, primary
-native-evaluation metric, uncertainty calculation, compute accounting,
+reference-evaluation metric, uncertainty calculation, compute accounting,
 CI/unit-test status, and any supported-mechanics or fidelity limitations.
 
 If evidence is Level 0/1, use language such as **“smoke passed”, “API
