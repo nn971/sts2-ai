@@ -35,7 +35,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: nn971/sts2-emulator
-          ref: 5ef3e87f5f2705c8b403ea94a6a1a7c77545b354
+          ref: da847bf17c01feba66e833a22e0986d2f906c619
           path: emulator
       - uses: actions/setup-dotnet@v4
         with:
@@ -62,7 +62,7 @@ jobs:
           python -u tools/probe_nature_draw_only.py \
             --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
             --emulator-bindings ../emulator/bindings/python \
-            --emulator-revision 5ef3e87f5f2705c8b403ea94a6a1a7c77545b354 \
+            --emulator-revision da847bf17c01feba66e833a22e0986d2f906c619 \
             --source-seed nature-p0-weak-real-victory \
             --entry-mode seeded-fixed-shrinker \
             --region Overgrowth --min-draw-choices 1 \
@@ -84,7 +84,7 @@ jobs:
           python -u tools/probe_nature_draw_only.py \
             --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
             --emulator-bindings ../emulator/bindings/python \
-            --emulator-revision 5ef3e87f5f2705c8b403ea94a6a1a7c77545b354 \
+            --emulator-revision da847bf17c01feba66e833a22e0986d2f906c619 \
             --source-seed nature-p0-weak-real-victory \
             --entry-mode seeded-fixed-shrinker --draw-mode reference \
             --region Overgrowth --min-draw-choices 1 \
