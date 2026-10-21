@@ -248,12 +248,12 @@ Chance Law:
 - `cubex-a10` / `proto.encounter.cubex_construct_normal` / `CubexConstructNormal`
 - `vine-shambler-a10` / `proto.encounter.vine_shambler_normal` / `VineShamblerNormal`
 
-The AI H2 branch pins emulator `f76260263d5bc2c72df8301504f84bdf38d00eb1`.
+The AI H2 branch pins emulator `9588c0c7d8c96310ac2300308dc19fb9a68e2aef`.
 For a separate checkout with `$model`, `$dll`, and `$bindings`
 defined as in the preceding section, run:
 
 ```fish
-set rev f76260263d5bc2c72df8301504f84bdf38d00eb1
+set rev 9588c0c7d8c96310ac2300308dc19fb9a68e2aef
 python -u tools/benchmark_nature_h1_frozen_players.py \
     --candidate "v8=$model" \
     --expected-v8-sha256 df0808503416fc85384e430a1cd609d5fb8cb5c9f55bfa6a9c2e8bfc568237d5 \
@@ -276,3 +276,9 @@ training combats plus 1,000 held-out worlds per seed, 15 workers).
 
 A0 compatibility and H1 training remain separate. Native-game RNG fidelity
 is UNVERIFIED and is not a Nature-training gate.
+
+The fixed-normal follow-up uses the canonical `ChanceLaw` probability status,
+provenance and operation identity for suspended enemy intents. `SOURCE_VERIFIED`
+intent weights are exact Native 53-bit draw-grid masses, checked independently
+against the declared raw weighted support; existing `UNVERIFIED` physical
+draw decisions remain controlled only by draw-only Nature.
