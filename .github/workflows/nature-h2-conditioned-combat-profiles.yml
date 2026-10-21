@@ -4,9 +4,11 @@ on:
   push:
     paths:
       - 'src/sts2_ai/nature/combat_scenarios.py'
+      - 'src/sts2_ai/nature/h2_benchmark.py'
       - 'src/sts2_ai/nature/draw_only_episode.py'
       - 'src/sts2_ai/nature/draw_only_workers.py'
       - 'tests/test_nature_h2_challenge_profiles.py'
+      - 'tests/test_nature_h2_benchmark_strata.py'
       - 'tools/probe_nature_h2_combat_profiles.py'
       - 'tools/train_draw_only_nature_h1.py'
       - 'tools/benchmark_nature_h1_frozen_players.py'
@@ -14,9 +16,11 @@ on:
   pull_request:
     paths:
       - 'src/sts2_ai/nature/combat_scenarios.py'
+      - 'src/sts2_ai/nature/h2_benchmark.py'
       - 'src/sts2_ai/nature/draw_only_episode.py'
       - 'src/sts2_ai/nature/draw_only_workers.py'
       - 'tests/test_nature_h2_challenge_profiles.py'
+      - 'tests/test_nature_h2_benchmark_strata.py'
       - 'tools/probe_nature_h2_combat_profiles.py'
       - 'tools/train_draw_only_nature_h1.py'
       - 'tools/benchmark_nature_h1_frozen_players.py'
@@ -47,8 +51,8 @@ jobs:
       - name: Python layout, source partitions, replay tests
         working-directory: ai
         run: |
-          python -m ruff check src/sts2_ai/nature/combat_scenarios.py src/sts2_ai/nature/draw_only_episode.py src/sts2_ai/nature/draw_only_workers.py tools/probe_nature_h2_combat_profiles.py tools/benchmark_nature_h1_frozen_players.py tools/train_draw_only_nature_h1.py tests/test_nature_h2_challenge_profiles.py
-          python -m pytest -q tests/test_nature_h2_challenge_profiles.py tests/test_nature_draw_only_player_choice.py tests/test_nature_h1_frozen_model_reuse.py tests/test_nature_draw_only_h1.py
+          python -m ruff check src/sts2_ai/nature/combat_scenarios.py src/sts2_ai/nature/h2_benchmark.py src/sts2_ai/nature/draw_only_episode.py src/sts2_ai/nature/draw_only_workers.py tools/probe_nature_h2_combat_profiles.py tools/benchmark_nature_h1_frozen_players.py tools/train_draw_only_nature_h1.py tests/test_nature_h2_challenge_profiles.py tests/test_nature_h2_benchmark_strata.py
+          python -m pytest -q tests/test_nature_h2_challenge_profiles.py tests/test_nature_h2_benchmark_strata.py tests/test_nature_draw_only_player_choice.py tests/test_nature_h1_frozen_model_reuse.py tests/test_nature_draw_only_h1.py
       - name: Build source-pinned emulator
         working-directory: emulator
         run: |
@@ -75,14 +79,33 @@ jobs:
           from sts2_ai.emulator.semantic_p0_combat import strike_first_player
           cmd = ['dotnet', '../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll', 'prototype-ai-jsonl']
           with Session(cmd) as session:
-              for deck in DECK_PRESETS:
-                  opts = dict(source_seed='h2-ci-deck-'+deck, reference_seed=88,
-                              nature=TwoSiteNature(seed=7), emulator_revision='5a332c2caa889b9b3f6e326bc054d6dcec019289',
-                              player_choose=strike_first_player, player_model_id='test-only-strike-first',
-                              entry_mode='seeded-fixed-shrinker', draw_mode='reference',
-                              scenario=SCENARIOS['shrinker-a10'], deck_preset_id=deck)
-                  one = play_draw_only_episode(session, **opts)
-                  two = play_draw_only_episode(session, **{**opts, 'replay': one.decisions})
-                  assert one.digest == two.digest and one.nontrivial_draw_count > 0
-                  print(f'[nature-h2] deck={deck} outcome={one.outcome} hp={one.exit_hp} draws={one.nontrivial_draw_count} replay=PASS', flush=True)
+              for scenario_id in ('shrinker-a10', 'nibbits-a10'):
+                  for deck in DECK_PRESETS:
+                      opts = dict(
+                          source_seed='h2-ci-'+scenario_id+'-'+deck,
+                          reference_seed=88,
+                          nature=TwoSiteNature(seed=7),
+                          emulator_revision='5a332c2caa889b9b3f6e326bc054d6cec019289',
+                          player_choose=strike_first_player,
+                          player_model_id='test-only-strike-first',
+                          entry_mode='seeded-fixed-shrinker',
+                          draw_mode='reference',
+                          scenario=SCENARIOS[scenario_id],
+                          deck_preset_id=deck,
+                      )
+                      one = play_draw_only_episode(session, **opts)
+                      two = play_draw_only_episode(
+                          session, **{**opts, 'replay': one.decisions},
+                      )
+                      assert one.digest == two.digest
+                      assert one.terminal_replay_verified and two.terminal_replay_verified
+                      assert one.nontrivial_draw_count > 0
+                      assert one.scenario_id == scenario_id
+                      assert one.deck_preset_id == deck
+                      print(
+                          f'[nature-h2] scenario={scenario_id} deck={deck} '
+                          f'outcome={one.outcome} hp={one.exit_hp} '
+                          f'draws={one.nontrivial_draw_count} replay=PASS',
+                          flush=True,
+                      )
           PY
