@@ -222,3 +222,141 @@ training schedule remains 40 x 256 combats per seed, with 1,000 held-out
 worlds and 15 workers. Repeat with multiple independent Nature seeds.
 The native-game Chance Law calibration remains `UNVERIFIED`; it is a
 separate fidelity project and does not block this experiment.
+
+## H2 normal-encounter difficulty screen — October 21, 2026
+
+Actual historical v8 benchmark (1,024 source worlds × 2 replicates) completed
+2,048 A10 weak combats with **100% victories** over both enemies and all
+four decks. Mean score 0.87360; mean exit HP 61.15. The highest draw
+sensitivity was Defend-heavy/Nibbits (93.0% changed scores) and
+Defend-heavy/Shrinker (92.2%); Nibbits/Poison-kit had 0% score changes
+across reference replicates. Stochastic intent count was zero.
+
+**Provenance note:** The report's manually supplied emulator revision string
+`5a332c2caa889b9b3f6e326bc054d6cec019289` has only 39 characters.
+The original PR #178 commit is the full
+`5a332c2caa889b9b3f6e326bc054d6dcec019289`. Preserve the
+historical report unchanged. Its DLL and binding SHA-256 records remain
+available. Subsequent v8 benchmark runs reject malformed Git revision values.
+
+The isolated companion emulator PR #179 exposes the following already
+source-audited, fixed single-enemy normal encounters through the existing
+draw-only fixture, with unchanged original engine HP, moves, cards, and
+Chance Law:
+
+- `mawler-a10` / `proto.encounter.mawler_normal` / `MawlerNormal`
+- `cubex-a10` / `proto.encounter.cubex_construct_normal` / `CubexConstructNormal`
+- `vine-shambler-a10` / `proto.encounter.vine_shambler_normal` / `VineShamblerNormal`
+
+The AI H2 branch pins emulator `9588c0c7d8c96310ac2300308dc19fb9a68e2aef`.
+For a separate checkout with `$model`, `$dll`, and `$bindings`
+defined as in the preceding section, run:
+
+```fish
+set rev 9588c0c7d8c96310ac2300308dc19fb9a68e2aef
+python -u tools/benchmark_nature_h1_frozen_players.py \
+    --candidate "v8=$model" \
+    --expected-v8-sha256 df0808503416fc85384e430a1cd609d5fb8cb5c9f55bfa6a9c2e8bfc568237d5 \
+    --emulator-dll $dll --emulator-bindings $bindings \
+    --emulator-revision $rev --workers 15 \
+    --action-scope all-legal-v1 \
+    --scenario-pool mawler-a10,cubex-a10,vine-shambler-a10 \
+    --deck-pool silent-starter-v1,silent-strike-heavy-v1,silent-defend-heavy-v1,silent-poison-kit-v1 \
+    --balance-h2-configurations --split selection \
+    --episodes 768 --reference-replicates 2 \
+    --output-dir results/nature/h2-a10-normal-v8-selection
+```
+
+This is a **1,536-combat difficulty screen** (64 source worlds × 2 draw
+replicates in each of 12 cells), not evidence of adversarial learning.
+Verify actual-v8 terminal replay and physical draw decisions, then retain
+combat configurations with meaningful loss probability and score sensitivity.
+Only after that selection should the multi-seed Nature run start (40 × 256
+training combats plus 1,000 held-out worlds per seed, 15 workers).
+
+A0 compatibility and H1 training remain separate. Native-game RNG fidelity
+is UNVERIFIED and is not a Nature-training gate.
+
+The fixed-normal follow-up uses the canonical `ChanceLaw` probability status,
+provenance and operation identity for suspended enemy intents. `SOURCE_VERIFIED`
+intent weights are exact Native 53-bit draw-grid masses, checked independently
+against the declared raw weighted support; existing `UNVERIFIED` physical
+draw decisions remain controlled only by draw-only Nature.
+
+## Frozen v8 selection result and authorized H2 Nature run (2026-10-21)
+
+Actual locally executed `report(4).json` selected the historical, unmodified
+v8 player (SHA-256
+`df0808503416fc85384e430a1cd609d5fb8cb5c9f55bfa6a9c2e8bfc568237d5`)
+against normal A10 Mawler, Cubex Construct, and Vine Shambler × four
+engine-owned deck presets. **768 distinct source worlds, two independent
+reference-draw replicates/world, 1,536 complete combats, all won.** Mean
+score `0.58327753` (source-bootstrap 95% CI `[0.57444, 0.59181]`),
+mean remaining HP `40.8294` (vs `61.1519` for prior weak encounters).
+Changing reference draws changed final score in **88.67%** of paired source
+worlds, with mean absolute delta `0.09754`. Mean nontrivial physical draws
+were `17.3431` per combat and stochastic intents `1.7826` per combat.
+
+The strongest challenged cell was Cubex/Defend-heavy (score `0.35446`,
+HP `24.8125`, score changed in `96.875%` of paired source worlds,
+mean absolute reference-replicate score delta `0.12634`).
+Defend-heavy across Mawler and Vine Shambler was also highly sensitive.
+**Decision:** This is enough HP-score signal to start first serious H2
+draw-only Nature training now. Victory remains saturated; any future
+Nature-induced defeats are an additional result, not a precondition for
+training. Preserve all twelve cells to test generality.
+
+Preflight corrective change: the H2 trainer's historical held-out reference
+arm previously omitted `scenario_pool` and `deck_pool`, which would compare
+different worlds. Both arms now receive the **same shared context** and
+check counts before paired evaluation. Training now uses a deterministic,
+resume-safe, per-round balanced source selector for challenge conditions,
+assigning 21–22 source worlds to each of 12 cells per 256-combat update
+(and rotating the extra 4 slots). H1's original defaults and seeds are
+unchanged. Newly initiated H2 checkpoints pin this changed source
+sampling policy in their configuration digest; do not mix with
+checkpoints from the older unbalanced experiment.
+
+Local instructions reuse the **existing** `~/projects/sts2-ai-h2` worktree
+(no new worktree), using its usual Python venv. Fetch and check out the
+H2 PR branch, update gitlink `emulator`, then rebuild it before training.
+
+```fish
+cd ~/projects/sts2-ai-h2
+git status --short
+git fetch origin
+git switch --detach origin/research/nature-h2-single-normal-a10-20261021
+git submodule update --init --recursive emulator
+source .venv/bin/activate.fish
+dotnet build emulator/Sts2Emulator.sln -c Release
+set model ~/projects/sts2-ai/results/ppo-v8-batched-40/models/stage-0120.json
+set dll (pwd)/emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll
+set bindings (pwd)/emulator/bindings/python
+set rev 9588c0c7d8c96310ac2300308dc19fb9a68e2aef
+for seed in 29 101 173
+    python -u tools/train_draw_only_nature_h1.py \
+        --player-model $model --emulator-dll $dll \
+        --emulator-bindings $bindings --emulator-revision $rev \
+        --player-action-scope all-legal-v1 \
+        --scenario-pool mawler-a10,cubex-a10,vine-shambler-a10 \
+        --deck-pool silent-starter-v1,silent-strike-heavy-v1,silent-defend-heavy-v1,silent-poison-kit-v1 \
+        --training-seed $seed --actor-seed 31337 --reference-seed 23387 \
+        --workers 15 --rounds 40 --episodes-per-round 256 \
+        --eval-episodes 1000 \
+        --output-root results/nature/h2-a10-normal-v8-seed$seed \
+        --execute 2>&1 | tee h2-a10-normal-v8-seed$seed.log
+    if test $pipestatus[1] -ne 0
+        break
+    end
+end
+```
+
+Run three **independent** Nature seeds, with 40 × 256 substantive training
+combats and 1,000 source-paired held-out worlds per seed, both learned and
+reference arms. Reports and per-cell paired differences are under each
+seed's output root. Logs print all rounds including `score` and
+`nature_grad`. An interrupted seed can resume by rerunning the same
+command with `--resume` and unchanged config. Holdout source namespace
+remains disjoint from the earlier v8 difficulty selection worlds.
+Native game fidelity status `UNVERIFIED` is independent of this experiment
+and is never a training gate.

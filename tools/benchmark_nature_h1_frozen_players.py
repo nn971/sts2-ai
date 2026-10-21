@@ -242,6 +242,8 @@ def main() -> None:
     except ValueError as exc:
         parser.error(str(exc))
 
+    if not re.fullmatch(r"[0-9a-f]{40}", args.emulator_revision):
+        parser.error("--emulator-revision must be a full 40-character Git SHA")
     if (args.episodes < 2 or args.reference_replicates < 2
             or args.workers < 1 or args.temperature <= 0
             or not math.isfinite(args.temperature)

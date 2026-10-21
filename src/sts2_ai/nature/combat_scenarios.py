@@ -50,6 +50,19 @@ SCENARIOS: dict[str, CombatScenario] = {
     "nibbits-a10": CombatScenario(
         "nibbits-a10", "proto.encounter.nibbits_weak", "NibbitsWeak", 10,
     ),
+    # Explicit source-conditioned fixed Act 1 NORMAL formations. Each is one
+    # physical enemy and is eligible for the legacy frozen-v8 target adapter.
+    "mawler-a10": CombatScenario(
+        "mawler-a10", "proto.encounter.mawler_normal", "MawlerNormal", 10,
+    ),
+    "cubex-a10": CombatScenario(
+        "cubex-a10", "proto.encounter.cubex_construct_normal",
+        "CubexConstructNormal", 10,
+    ),
+    "vine-shambler-a10": CombatScenario(
+        "vine-shambler-a10", "proto.encounter.vine_shambler_normal",
+        "VineShamblerNormal", 10,
+    ),
 }
 
 

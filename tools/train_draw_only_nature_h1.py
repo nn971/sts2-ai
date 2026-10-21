@@ -27,6 +27,7 @@ from sts2_ai.nature.combat_scenarios import (
 )
 from sts2_ai.nature.corpus import atomic_write, file_sha256
 from sts2_ai.nature.draw_only_workers import draw_only_batch
+from sts2_ai.nature.h2_benchmark import balanced_h2_training_source_seeds
 from sts2_ai.nature.protocol import canonical_sha256
 from sts2_ai.nature.two_site_opponent import TwoSiteNature
 
@@ -263,6 +264,35 @@ def paired_holdout_metrics(nature_episodes, reference_episodes, *,
     }
 
 
+def collect_paired_holdout(
+    seeds: tuple[str, ...], *, nature: TwoSiteNature, spec: FrozenPlayerSpec,
+    emulator_command: tuple[str, ...], emulator_bindings: Path,
+    emulator_revision: str, reference_seed: int, workers: int,
+    max_boundaries: int, scenario_pool: tuple[str, ...],
+    deck_pool: tuple[str, ...],
+) -> tuple[dict, dict]:
+    """Use identical source-conditioned worlds in learned/reference arms.
+
+    Keep configuration in a single shared argument dictionary: omitting a
+    context in either arm silently changes the experiment distribution.
+    """
+    common = dict(
+        nature=nature, spec=spec,
+        emulator_command=emulator_command, emulator_bindings=emulator_bindings,
+        emulator_revision=emulator_revision, reference_seed=reference_seed,
+        workers=workers, max_boundaries=max_boundaries,
+        scenario_pool=scenario_pool, deck_pool=deck_pool,
+    )
+    learned = draw_only_batch(seeds, draw_mode="learned", **common)
+    reference = draw_only_batch(seeds, draw_mode="reference", **common)
+    for key in ("source_count", "scenario_counts", "deck_preset_counts"):
+        if learned[key] != reference[key]:
+            raise RuntimeError(
+                f"Draw-only holdout reference context disagrees on {key}"
+            )
+    return learned, reference
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--player-model", type=Path, required=True)
@@ -366,6 +396,7 @@ def main() -> None:
         config["scenario_pool"] = sorted(scenario_pool)
         config["deck_pool"] = sorted(deck_pool)
         config["holdout_namespace"] = "nature-draw-h2-eval-context-pool"
+        config["training_source_sampling"] = "balanced-h2-round-v1"
     fingerprint = canonical_sha256(config)
     print(
         f"[draw-h1] plan={fingerprint[:16]} train_seed={args.training_seed} "
@@ -405,10 +436,15 @@ def main() -> None:
     command = ("dotnet", str(args.emulator_dll.resolve()), "prototype-ai-jsonl")
     for round_index in range(first_round, args.rounds):
         source_start = round_index * args.episodes_per_round
-        seeds = tuple(
-            source_seed("train", source_start + i,
-                        training_seed=args.training_seed, challenge=challenge)
-            for i in range(args.episodes_per_round)
+        seeds = (
+            balanced_h2_training_source_seeds(
+                args.training_seed, round_index, args.episodes_per_round,
+                scenario_pool, deck_pool,
+            ) if challenge else tuple(
+                source_seed("train", source_start + i,
+                            training_seed=args.training_seed, challenge=False)
+                for i in range(args.episodes_per_round)
+            )
         )
         batch = draw_only_batch(
             seeds, nature=nature, spec=spec,
@@ -438,6 +474,15 @@ def main() -> None:
             "source_group_sha256": canonical_sha256(seeds),
             **_draw_statistics(episodes),
         }
+        if challenge:
+            metrics_before["configuration_counts"] = {
+                f"{scenario}::{deck}": sum(
+                    e.scenario_id == scenario and e.deck_preset_id == deck
+                    for e in episodes
+                )
+                for scenario in sorted(scenario_pool)
+                for deck in sorted(deck_pool)
+            }
         optimization = nature.update(tuple(x.for_nature_training() for x in episodes))
         metrics.append({**metrics_before, **optimization})
         record = {
@@ -460,22 +505,13 @@ def main() -> None:
                     challenge=challenge)
         for i in range(args.eval_episodes)
     )
-    primary = draw_only_batch(
+    primary, control = collect_paired_holdout(
         evaluation_seeds, nature=nature, spec=spec,
         emulator_command=command, emulator_bindings=args.emulator_bindings,
         emulator_revision=args.emulator_revision,
         reference_seed=args.reference_seed + 987654321,
-        draw_mode="learned", workers=args.workers,
-        max_boundaries=args.max_boundaries, scenario_pool=scenario_pool,
-        deck_pool=deck_pool,
-    )
-    control = draw_only_batch(
-        evaluation_seeds, nature=nature, spec=spec,
-        emulator_command=command, emulator_bindings=args.emulator_bindings,
-        emulator_revision=args.emulator_revision,
-        reference_seed=args.reference_seed + 987654321,
-        draw_mode="reference", workers=args.workers,
-        max_boundaries=args.max_boundaries,
+        workers=args.workers, max_boundaries=args.max_boundaries,
+        scenario_pool=scenario_pool, deck_pool=deck_pool,
     )
     analysis = paired_holdout_metrics(
         primary["episodes"], control["episodes"],
