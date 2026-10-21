@@ -255,6 +255,7 @@ class DrawOnlyRouter:
         self, pending: Mapping[str, Any], *, fingerprint: str,
         episode_key: str, ordinal: int,
         draw_mode: str = "learned",
+        public_observation: dict[str, Any] | None = None,
     ) -> RoutedChoice:
         if draw_mode not in ("learned", "reference"):
             raise DrawOnlyContractError("Unsupported draw routing mode")
@@ -286,6 +287,7 @@ class DrawOnlyRouter:
             event, context_key=f"{law.site_id}|{event.owner_id}",
             candidate_features=features,
             episode_key=f"{episode_key}:{ordinal}",
+            public_observation=public_observation,
         )
         if (proposal.selected_id != ids[proposal.selected_index]
                 or law.outcome_ids[proposal.selected_index] not in law.outcome_ids):
