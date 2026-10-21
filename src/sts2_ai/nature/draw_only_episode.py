@@ -108,6 +108,50 @@ def _score(outcome: str, entry_hp: int, max_hp: int, exit_hp: int) -> float:
     return 1.0 - max(0, entry_hp - exit_hp) / max_hp
 
 
+
+def fair_player_choice_actions(
+    pending: dict[str, Any] | None, public_actions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Restrict a player's continuation to the *source* public choice menu.
+
+    The engine owns a suspended card/hand-draw decision and publishes its
+    exact action IDs. Player inference receives only fair action payloads,
+    never the Nature-private event or its hidden deck state. Reject a mismatch
+    between the pending source choice and the fair menu.
+    """
+    if not isinstance(pending, dict):
+        raise DrawOnlyContractError("Player-choice boundary lacks pending choice")
+    kind = pending.get("kind")
+    if kind == "player_card_selection":
+        candidates = pending.get("actions")
+    elif kind == "draw_hook_action_choice":
+        candidates = pending.get("candidates")
+    else:
+        raise DrawOnlyContractError(
+            f"Unsupported semantic player-choice kind: {kind}"
+        )
+    if not isinstance(candidates, list) or not candidates:
+        raise DrawOnlyContractError("Player-choice support is missing")
+    if not isinstance(public_actions, list):
+        raise DrawOnlyContractError("Fair player-choice action menu is missing")
+    action_ids = [c.get("actionId") for c in candidates if isinstance(c, dict)]
+    if (len(action_ids) != len(candidates)
+            or any(not isinstance(x, str) or not x for x in action_ids)
+            or len(set(action_ids)) != len(action_ids)):
+        raise DrawOnlyContractError("Malformed player-choice candidate action IDs")
+    fair_ids = [a.get("actionId") for a in public_actions if isinstance(a, dict)]
+    if (len(fair_ids) != len(public_actions)
+            or any(not isinstance(x, str) or not x for x in fair_ids)
+            or len(set(fair_ids)) != len(fair_ids)):
+        raise DrawOnlyContractError("Malformed fair player-choice action IDs")
+    wanted = set(action_ids)
+    if not wanted.issubset(fair_ids):
+        raise DrawOnlyContractError(
+            "Player-choice support is absent from the genuine fair action menu"
+        )
+    return [a for a in public_actions if a["actionId"] in wanted]
+
+
 def play_draw_only_episode(
     session: DrawOnlySession, *, source_seed: str, reference_seed: int,
     nature: TwoSiteNature,
@@ -191,16 +235,22 @@ def play_draw_only_episode(
                     conditioning_fingerprint=picked.conditioning_fingerprint,
                     log_p=picked.log_p, log_q=picked.log_q,
                 )
-            elif state.boundary == "player":
-                if state.pending is not None:
+            elif state.boundary in ("player", "player_choice"):
+                phase = state.boundary
+                if phase == "player" and state.pending is not None:
                     raise DrawOnlyContractError("Player boundary retained hidden chance")
                 obs, actions = state.observe(), state.actions()
+                if phase == "player_choice":
+                    actions = fair_player_choice_actions(state.pending, actions)
                 if first_public is None:
                     first_public = canonical_sha256(obs)
                     entry_hp, max_hp = obs.get("hp"), obs.get("max_hp")
-                menu_hash = canonical_sha256([obs, actions])
+                menu_hash = canonical_sha256(
+                    [obs, actions] if phase == "player" else
+                    [obs, actions, state.pending]
+                )
                 if replay is not None:
-                    if ordinal >= len(replay) or replay[ordinal].phase != "player":
+                    if ordinal >= len(replay) or replay[ordinal].phase != phase:
                         raise DrawOnlyContractError("Player replay phase drift")
                     action_id = replay[ordinal].selected_id
                 else:
@@ -209,7 +259,7 @@ def play_draw_only_episode(
                     raise DrawOnlyContractError("Player action outside genuine legal menu")
                 child = state.step(action_id)
                 decision = DrawOnlyStep(
-                    phase="player", support_id=menu_hash,
+                    phase=phase, support_id=menu_hash,
                     selected_id=action_id, result_fingerprint=child.fingerprint,
                 )
             else:
