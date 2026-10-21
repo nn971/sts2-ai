@@ -10,7 +10,7 @@ from pathlib import Path
 
 from sts2_ai.emulator.semantic_p0_combat import strike_first_player
 from sts2_ai.nature.combat_scenarios import SCENARIOS, parse_scenario_pool
-from sts2_ai.nature.contextual_draw import ContextualDrawNature
+from sts2_ai.nature.contextual_draw import ContextualDrawNature, restore_nature
 from sts2_ai.nature.draw_only_episode import play_draw_only_episode
 from sts2_ai.nature.two_site_opponent import TwoSiteNature
 
@@ -31,14 +31,15 @@ def main() -> None:
     sys.path.insert(0, str(args.emulator_bindings.resolve()))
     Session = importlib.import_module("sts2_emulator").Session
     with Session(["dotnet", str(args.emulator_dll.resolve()), "prototype-ai-jsonl"]) as session:
+        contextual = (ContextualDrawNature(seed=1)
+                      if args.nature_model == "contextual" else None)
+        training_episodes = []
         for key in scenarios:
             scenario = SCENARIOS[key]
             options = dict(
                 source_seed="nature-h2-scenario-replay-" + key,
                 reference_seed=779,
-                nature=(ContextualDrawNature(seed=1)
-                        if args.nature_model == "contextual"
-                        else TwoSiteNature(seed=1)),
+                nature=contextual if contextual is not None else TwoSiteNature(seed=1),
                 emulator_revision=args.emulator_revision,
                 player_choose=strike_first_player,
                 player_model_id="test-only-strike-first",
@@ -58,6 +59,8 @@ def main() -> None:
                 raise RuntimeError(f"No nontrivial draw choices for {key}")
             if actual.scenario_id != key:
                 raise RuntimeError("Scenario provenance lost during replay")
+            if contextual is not None:
+                training_episodes.append(actual.for_nature_training())
             print(json.dumps({
                 "scenario_id": key,
                 "nature_model": args.nature_model,
@@ -67,6 +70,28 @@ def main() -> None:
                 "nontrivial_draws": actual.nontrivial_draw_count,
                 "reference_intents": actual.reference_intent_count,
                 "replay_verified": True,
+            }, sort_keys=True), flush=True)
+        if contextual is not None:
+            if len(training_episodes) < 2:
+                raise RuntimeError("Contextual update smoke requires two real combats")
+            update = contextual.update(tuple(training_episodes))
+            restored = restore_nature(contextual.dump())
+            if restored.revision != contextual.revision:
+                raise RuntimeError("Contextual checkpoint failed to restore revision")
+            repeated = dict(options)
+            repeated["nature"] = restored
+            repeated["source_seed"] = "nature-h2-post-update-replay"
+            learned = play_draw_only_episode(session, **repeated)
+            again = play_draw_only_episode(
+                session, **{**repeated, "replay": learned.decisions}
+            )
+            if learned.digest != again.digest:
+                raise RuntimeError("Post-update contextual Nature replay mismatch")
+            print(json.dumps({
+                "training_smoke": "PASS",
+                "nature_gradient_norm": update["nature_gradient_norm"],
+                "nature_revision": restored.revision,
+                "post_update_replay": True,
             }, sort_keys=True), flush=True)
 
 
