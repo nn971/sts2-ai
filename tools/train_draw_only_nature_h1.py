@@ -18,17 +18,31 @@ from dataclasses import asdict
 from pathlib import Path
 
 from sts2_ai.emulator.semantic_p0_frozen_player import FrozenPlayerSpec
+from sts2_ai.nature.combat_scenarios import (
+    BASELINE_SCENARIO,
+    SCENARIO_SCHEMA,
+    parse_scenario_pool,
+)
 from sts2_ai.nature.corpus import atomic_write, file_sha256
 from sts2_ai.nature.draw_only_workers import draw_only_batch
 from sts2_ai.nature.protocol import canonical_sha256
 from sts2_ai.nature.two_site_opponent import TwoSiteNature
 
 SCHEMA = "sts2-ai-nature-h1-draw-only-fixed-combat-v1"
+CHALLENGE_SCHEMA = "sts2-ai-nature-h2-conditioned-combat-pool-v1"
 
 
-def source_seed(partition: str, index: int, *, training_seed: int) -> str:
+def source_seed(
+    partition: str, index: int, *, training_seed: int,
+    challenge: bool = False,
+) -> str:
     if partition not in ("train", "evaluation") or type(index) is not int or index < 0:
         raise ValueError("Invalid H1 source split")
+    if challenge:
+        # Immutable H2 world assignment independent of Nature training seed.
+        return (f"nature-draw-h2-eval-context-pool-{index:08d}"
+                if partition == "evaluation" else
+                f"nature-draw-h2-train-{training_seed}-{index:08d}")
     if partition == "evaluation":
         # Evaluation worlds remain identical across independently trained Natures.
         return f"nature-draw-h1-eval-fixed-shrinker-{index:08d}"
@@ -83,6 +97,7 @@ def paired_holdout_metrics(nature_episodes, reference_episodes, *,
                 reference.source_opening_fingerprint
                 or nature.first_public_fingerprint !=
                 reference.first_public_fingerprint
+                or nature.scenario_id != reference.scenario_id
                 or nature.player_model_id != reference.player_model_id
                 or nature.draw_mode != "learned"
                 or reference.draw_mode != "reference"):
@@ -96,6 +111,40 @@ def paired_holdout_metrics(nature_episodes, reference_episodes, *,
         statistics.mean(gaps[rng.randrange(len(gaps))] for _ in gaps)
         for _ in range(replicates)
     )
+    # Both arms share exactly the same source-conditioned context. Report
+    # per-scenario estimates so changes in encounter mix cannot masquerade as
+    # Nature optimization or obscure a failure on one enemy.
+    scenario_ids = sorted(set(x.scenario_id for x in nature_episodes))
+    paired_by_scenario = {}
+    for key in scenario_ids:
+        paired = [
+            (a, b) for a, b in zip(
+                nature_episodes, reference_episodes, strict=True
+            ) if a.scenario_id == key
+        ]
+        local_gaps = tuple(a.score - b.score for a, b in paired)
+        local_rng = random.Random(bootstrap_seed + sum(ord(c) for c in key))
+        local_draws = sorted(
+            statistics.mean(local_gaps[local_rng.randrange(len(local_gaps))]
+                            for _ in local_gaps)
+            for _ in range(replicates)
+        )
+        paired_by_scenario[key] = {
+            "source_count": len(paired),
+            "nature_mean_score": statistics.mean(a.score for a, _ in paired),
+            "reference_mean_score": statistics.mean(b.score for _, b in paired),
+            "nature_victory_rate": statistics.mean(
+                a.outcome == "victory" for a, _ in paired
+            ),
+            "reference_victory_rate": statistics.mean(
+                b.outcome == "victory" for _, b in paired
+            ),
+            "mean_nature_minus_reference_score": statistics.mean(local_gaps),
+            "paired_source_bootstrap_95pct": [
+                local_draws[int(0.025 * replicates)],
+                local_draws[min(replicates - 1, int(0.975 * replicates))],
+            ],
+        }
     means = {
         "nature_mean_score": statistics.mean(x.score for x in nature_episodes),
         "reference_mean_score": statistics.mean(x.score for x in reference_episodes),
@@ -116,6 +165,7 @@ def paired_holdout_metrics(nature_episodes, reference_episodes, *,
         **means,
         **_draw_statistics(nature_episodes),
         "source_count": len(gaps),
+        "paired_by_scenario": paired_by_scenario,
         "paired_nature_minus_reference_score": statistics.mean(gaps),
         "paired_source_bootstrap_95pct": [
             draws[int(0.025 * replicates)],
@@ -152,10 +202,18 @@ def main() -> None:
                         default="silent-basic-v1")
     parser.add_argument("--sample-player", action="store_true")
     parser.add_argument("--allow-untrained-smoke", action="store_true")
+    parser.add_argument("--scenario-pool", default=BASELINE_SCENARIO,
+                        help="Comma-separated source-conditioned combat profiles")
     parser.add_argument("--execute", action="store_true",
                         help="Actually execute C# combat and optimizer steps")
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
+    try:
+        scenario_pool = parse_scenario_pool(args.scenario_pool)
+    except ValueError as exc:
+        parser.error(str(exc))
+    challenge = scenario_pool != (BASELINE_SCENARIO,)
+    schema = CHALLENGE_SCHEMA if challenge else SCHEMA
     if (min(args.rounds, args.episodes_per_round, args.eval_episodes,
             args.workers, args.max_boundaries) < 1
             or args.episodes_per_round < 2):
@@ -188,7 +246,7 @@ def main() -> None:
                     for word in ("untrained", "test-only", "synthetic"))):
         parser.error("Cannot call a test-only/untrained checkpoint a competent player")
     config = {
-        "schema": SCHEMA,
+        "schema": schema,
         "emulator_revision": args.emulator_revision,
         "emulator_dll_sha256": file_sha256(args.emulator_dll),
         "emulator_bindings_sha256": file_sha256(binding_file),
@@ -215,6 +273,10 @@ def main() -> None:
         "allow_untrained_smoke": args.allow_untrained_smoke,
         "holdout_namespace": "nature-draw-h1-eval-fixed-shrinker",
     }
+    if challenge:
+        config["scenario_pool_schema"] = SCENARIO_SCHEMA
+        config["scenario_pool"] = sorted(scenario_pool)
+        config["holdout_namespace"] = "nature-draw-h2-eval-context-pool"
     fingerprint = canonical_sha256(config)
     print(
         f"[draw-h1] plan={fingerprint[:16]} train_seed={args.training_seed} "
@@ -235,7 +297,7 @@ def main() -> None:
         if not checkpoint.is_file():
             parser.error("No H1 checkpoint found for resume")
         saved = json.loads(checkpoint.read_text(encoding="utf-8"))
-        if saved.get("schema") != SCHEMA or saved.get("config_digest") != fingerprint:
+        if saved.get("schema") != schema or saved.get("config_digest") != fingerprint:
             parser.error("Cannot resume against changed emulator/model/source budget")
         nature = TwoSiteNature.restore(saved["nature"])
         metrics = saved["metrics"]
@@ -256,7 +318,7 @@ def main() -> None:
         source_start = round_index * args.episodes_per_round
         seeds = tuple(
             source_seed("train", source_start + i,
-                        training_seed=args.training_seed)
+                        training_seed=args.training_seed, challenge=challenge)
             for i in range(args.episodes_per_round)
         )
         batch = draw_only_batch(
@@ -266,12 +328,14 @@ def main() -> None:
             reference_seed=args.reference_seed + source_start * 1000003,
             draw_mode="learned", workers=args.workers,
             max_boundaries=args.max_boundaries,
+            scenario_pool=scenario_pool,
         )
         if batch["nontrivial_draws"] <= 0:
             raise RuntimeError("No nontrivial physical draws: invalid H1 training fixture")
         episodes = batch["episodes"]
         metrics_before = {
             "round": round_index,
+            "scenario_counts": batch["scenario_counts"],
             "mean_player_score": statistics.mean(x.score for x in episodes),
             "victory_rate": statistics.mean(x.outcome == "victory" for x in episodes),
             "combat_count": len(episodes),
@@ -287,7 +351,7 @@ def main() -> None:
         optimization = nature.update(tuple(x.for_nature_training() for x in episodes))
         metrics.append({**metrics_before, **optimization})
         record = {
-            "schema": SCHEMA, "config": config, "config_digest": fingerprint,
+            "schema": schema, "config": config, "config_digest": fingerprint,
             "nature": nature.dump(), "metrics": metrics,
             "next_round": round_index + 1,
             "research_verdict": "NOT_ESTABLISHED",
@@ -302,7 +366,8 @@ def main() -> None:
             f"emulator_pids={batch['process_count']}", flush=True,
         )
     evaluation_seeds = tuple(
-        source_seed("evaluation", i, training_seed=args.training_seed)
+        source_seed("evaluation", i, training_seed=args.training_seed,
+                    challenge=challenge)
         for i in range(args.eval_episodes)
     )
     primary = draw_only_batch(
@@ -311,7 +376,7 @@ def main() -> None:
         emulator_revision=args.emulator_revision,
         reference_seed=args.reference_seed + 987654321,
         draw_mode="learned", workers=args.workers,
-        max_boundaries=args.max_boundaries,
+        max_boundaries=args.max_boundaries, scenario_pool=scenario_pool,
     )
     control = draw_only_batch(
         evaluation_seeds, nature=nature, spec=spec,
@@ -340,12 +405,13 @@ def main() -> None:
                 for row in control["episodes"]),
     )
     report = {
-        "schema": SCHEMA, "config": config, "config_digest": fingerprint,
+        "schema": schema, "config": config, "config_digest": fingerprint,
         "evaluation_learned_sha256": file_sha256(learned_path),
         "evaluation_reference_sha256": file_sha256(reference_path),
         "final_nature_checkpoint_sha256": canonical_sha256(nature.dump()),
         "evaluation_source_sha256": canonical_sha256(evaluation_seeds),
         "metrics": analysis,
+        "evaluation_scenario_counts": primary["scenario_counts"],
         "train_rounds": len(metrics),
         "training_seed": args.training_seed,
         "research_verdict": "NOT_ESTABLISHED",

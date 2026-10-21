@@ -20,6 +20,11 @@ from dataclasses import asdict
 from pathlib import Path
 
 from sts2_ai.emulator.semantic_p0_frozen_player import FrozenPlayerSpec
+from sts2_ai.nature.combat_scenarios import (
+    BASELINE_SCENARIO,
+    parse_scenario_pool,
+    scenario_for_seed,
+)
 from sts2_ai.nature.corpus import atomic_write, file_sha256
 from sts2_ai.nature.draw_only_workers import draw_only_batch
 from sts2_ai.nature.protocol import canonical_sha256
@@ -74,6 +79,10 @@ def summarize_reference_cohorts(cohorts: list[tuple]) -> dict:
                for e in cohort):
             raise ValueError("Reference cohort contains unverified combat")
         openings.append(tuple(e.source_opening_fingerprint for e in cohort))
+        if tuple(e.scenario_id for e in cohort) != tuple(
+            e.scenario_id for e in cohorts[0]
+        ):
+            raise ValueError("Reference cohorts disagree in scenario assignment")
     if any(opening != openings[0] for opening in openings[1:]):
         raise ValueError("Reference RNG changed a source opening across replicates")
 
@@ -102,7 +111,25 @@ def summarize_reference_cohorts(cohorts: list[tuple]) -> dict:
                        if x.phase == "nature:draw_card")
         draw_changed += first != second
 
+    scenario_counts = {
+        key: sum(e.scenario_id == key for e in cohorts[0])
+        for key in sorted({e.scenario_id for e in cohorts[0]})
+    }
+    scenario_metrics = {}
+    for key, count in scenario_counts.items():
+        members = [e for c in cohorts for e in c if e.scenario_id == key]
+        scenario_metrics[key] = {
+            "sources": count,
+            "win_rate": statistics.mean(e.outcome == "victory" for e in members),
+            "mean_score": statistics.mean(e.score for e in members),
+            "mean_exit_hp": statistics.mean(e.exit_hp for e in members),
+            "nontrivial_draws_per_combat": statistics.mean(
+                e.nontrivial_draw_count for e in members
+            ),
+        }
     return {
+        "scenario_counts": scenario_counts,
+        "by_scenario": scenario_metrics,
         "source_count": n,
         "reference_replicates": len(cohorts),
         "combat_count": len(scores),
@@ -147,6 +174,7 @@ def compare_source_matched_scores(
             ea, eb = ca[i], cb[i]
             if (ea.source_seed != eb.source_seed
                     or ea.reference_seed != eb.reference_seed
+                    or ea.scenario_id != eb.scenario_id
                     or ea.source_opening_fingerprint !=
                     eb.source_opening_fingerprint
                     or ea.first_public_fingerprint != eb.first_public_fingerprint):
@@ -183,9 +211,15 @@ def main() -> None:
                         default="silent-basic-v1")
     parser.add_argument("--sample-player", action="store_true")
     parser.add_argument("--temperature", type=float, default=0.85)
+    parser.add_argument("--scenario-pool", default=BASELINE_SCENARIO,
+                        help="Comma-separated pinned single-enemy Act 1 contexts")
     parser.add_argument("--allow-test-models", action="store_true",
                         help="Engineering-only: admit explicitly untrained test JSONs")
     args = parser.parse_args()
+    try:
+        scenario_pool = parse_scenario_pool(args.scenario_pool)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     if (args.episodes < 2 or args.reference_replicates < 2
             or args.workers < 1 or args.temperature <= 0
@@ -251,6 +285,7 @@ def main() -> None:
                 reference_seed=reference_seed,
                 draw_mode="reference",
                 workers=args.workers, progress_every=max(1, len(seeds) // 10),
+                scenario_pool=scenario_pool,
             )
             if batch["source_count"] != len(seeds):
                 raise RuntimeError("Model evaluation produced censored combats")
@@ -275,6 +310,12 @@ def main() -> None:
         "emulator_bindings_sha256": file_sha256(
             args.emulator_bindings / "sts2_emulator" / "__init__.py"
         ),
+        "conditioned_scenario_pool": sorted(scenario_pool),
+        "source_scenario_counts": {
+            key: sum(scenario_for_seed(seed, scenario_pool).scenario_id == key
+                     for seed in seeds)
+            for key in sorted(scenario_pool)
+        },
         "sampling": {
             "reference_replicates": args.reference_replicates,
             "reference_seed": args.reference_seed,
