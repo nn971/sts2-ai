@@ -19,7 +19,9 @@ from sts2_ai.emulator.protocol import LegalAction, Observation
 from sts2_ai.emulator.semantic_p0_public_projection import (
     CARD_ZONES,
     project_public_p0_observation,
+    project_public_enemy_slot_for_legacy_instances,
 )
+from sts2_ai.models.neural import TACTICAL_ATTENTION_FORMAT, TACTICAL_INSTANCES_FORMAT
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.nature.protocol import canonical_sha256
 
@@ -125,6 +127,7 @@ class FrozenP0Player:
     @staticmethod
     def _public_types(
         observation: dict[str, Any], raw_actions: list[dict[str, Any]],
+        *, need_legacy_instance_slot: bool = False,
     ) -> tuple[Observation, tuple[LegalAction, ...]]:
         if not isinstance(observation, dict) or not isinstance(raw_actions, list):
             raise FrozenPolicyInferenceError("Malformed fair player boundary")
@@ -167,6 +170,8 @@ class FrozenP0Player:
             project_public_p0_observation(observation)
             if needs_p0_projection else observation
         )
+        if need_legacy_instance_slot:
+            visible = project_public_enemy_slot_for_legacy_instances(visible)
         text = json.dumps(visible, separators=(",", ":"), sort_keys=True)
         public = Observation(
             PUBLIC_POLICY_ID, text, canonical_sha256(visible),
@@ -205,7 +210,13 @@ class FrozenP0Player:
         self, observation: dict[str, Any],
         raw_actions: list[dict[str, Any]],
     ) -> str:
-        public, source_actions = self._public_types(observation, raw_actions)
+        public, source_actions = self._public_types(
+            observation, raw_actions,
+            need_legacy_instance_slot=(
+                getattr(getattr(self.model, "combat", None), "format_id", None)
+                in (TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT)
+            ),
+        )
         actions = self.scoped_actions(observation, source_actions, self.action_scope)
         estimate = self.model.evaluate(public, actions)
         logits = estimate.action_logits
