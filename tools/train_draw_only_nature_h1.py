@@ -263,6 +263,35 @@ def paired_holdout_metrics(nature_episodes, reference_episodes, *,
     }
 
 
+def collect_paired_holdout(
+    seeds: tuple[str, ...], *, nature: TwoSiteNature, spec: FrozenPlayerSpec,
+    emulator_command: tuple[str, ...], emulator_bindings: Path,
+    emulator_revision: str, reference_seed: int, workers: int,
+    max_boundaries: int, scenario_pool: tuple[str, ...],
+    deck_pool: tuple[str, ...],
+) -> tuple[dict, dict]:
+    """Use identical source-conditioned worlds in learned/reference arms.
+
+    Keep configuration in a single shared argument dictionary: omitting a
+    context in either arm silently changes the experiment distribution.
+    """
+    common = dict(
+        nature=nature, spec=spec,
+        emulator_command=emulator_command, emulator_bindings=emulator_bindings,
+        emulator_revision=emulator_revision, reference_seed=reference_seed,
+        workers=workers, max_boundaries=max_boundaries,
+        scenario_pool=scenario_pool, deck_pool=deck_pool,
+    )
+    learned = draw_only_batch(seeds, draw_mode="learned", **common)
+    reference = draw_only_batch(seeds, draw_mode="reference", **common)
+    for key in ("source_count", "scenario_counts", "deck_preset_counts"):
+        if learned[key] != reference[key]:
+            raise RuntimeError(
+                f"Draw-only holdout reference context disagrees on {key}"
+            )
+    return learned, reference
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--player-model", type=Path, required=True)
@@ -460,22 +489,13 @@ def main() -> None:
                     challenge=challenge)
         for i in range(args.eval_episodes)
     )
-    primary = draw_only_batch(
+    primary, control = collect_paired_holdout(
         evaluation_seeds, nature=nature, spec=spec,
         emulator_command=command, emulator_bindings=args.emulator_bindings,
         emulator_revision=args.emulator_revision,
         reference_seed=args.reference_seed + 987654321,
-        draw_mode="learned", workers=args.workers,
-        max_boundaries=args.max_boundaries, scenario_pool=scenario_pool,
-        deck_pool=deck_pool,
-    )
-    control = draw_only_batch(
-        evaluation_seeds, nature=nature, spec=spec,
-        emulator_command=command, emulator_bindings=args.emulator_bindings,
-        emulator_revision=args.emulator_revision,
-        reference_seed=args.reference_seed + 987654321,
-        draw_mode="reference", workers=args.workers,
-        max_boundaries=args.max_boundaries,
+        workers=args.workers, max_boundaries=args.max_boundaries,
+        scenario_pool=scenario_pool, deck_pool=deck_pool,
     )
     analysis = paired_holdout_metrics(
         primary["episodes"], control["episodes"],
