@@ -80,3 +80,40 @@ def scenario_for_seed(source_seed: str, pool: tuple[str, ...]) -> CombatScenario
         ("h2-context-v1:" + source_seed).encode("utf-8")
     ).digest()[:8], "big")
     return SCENARIOS[canonical[bucket % len(canonical)]]
+
+
+# Source-conditioned RESEARCH deck presets. These are constructed by the C#
+# engine before the physical card registry and native-shaped opening shuffle.
+# No deck acquisition/reward probability is implied.
+BASELINE_DECK = "silent-starter-v1"
+DECK_PRESETS = (
+    BASELINE_DECK,
+    "silent-strike-heavy-v1",
+    "silent-defend-heavy-v1",
+    "silent-poison-kit-v1",
+)
+
+
+def parse_deck_pool(raw: str) -> tuple[str, ...]:
+    names = tuple(x.strip() for x in raw.split(","))
+    if (
+        not names or len(names) > len(DECK_PRESETS)
+        or any(x not in DECK_PRESETS for x in names)
+        or len(names) != len(set(names))
+    ):
+        raise ValueError("Unknown, duplicate or empty source-conditioned deck preset pool")
+    return names
+
+
+def deck_for_seed(source_seed: str, pool: tuple[str, ...]) -> str:
+    if not isinstance(source_seed, str) or not source_seed:
+        raise ValueError("Missing deck context source seed")
+    if not pool or any(x not in DECK_PRESETS for x in pool) or len(pool) != len(set(pool)):
+        raise ValueError("Invalid source deck preset pool")
+    # Different domain separation from encounter scenario; both are
+    # deterministic environmental labels, never Nature action sites.
+    canonical = sorted(pool)
+    bucket = int.from_bytes(hashlib.sha256(
+        ("h2-deck-v1:" + source_seed).encode("utf-8")
+    ).digest()[:8], "big")
+    return canonical[bucket % len(canonical)]
