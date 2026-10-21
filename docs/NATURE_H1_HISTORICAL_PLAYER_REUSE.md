@@ -108,6 +108,30 @@ The H1 player is always frozen. This experiment optimizes the small `TwoSiteNatu
 
 A clear player-quality result requires a meaningful source-replicated score, sufficiently frequent nontrivial card draws, and a measurable effect of reference draw outcomes on player reward. This selected fixed encounter may prove too easy; if scores saturate, choose a more discriminative supported combat before large-scale H1. Record that change as a distinct environment. Old all-Act win rates are context only.
 
+## All-legal player-choice continuations
+
+A real local v8 benchmark with `--action-scope all-legal-v1` reached
+`state.boundary == "player_choice"`, which the first H1 replay loop did not
+handle. The current branch now treats these as **genuine player-owned
+decisions**, calling `semantic_observe`, restricting to the pending source
+choice's action IDs, selecting through the frozen player's normal fair
+`choose` interface, and committing via `semantic_step`. Exact replay
+records `player_choice` as a separate phase, the source pending
+event/support together with the fair action menu, and the resulting state.
+
+Supported kinds are currently `player_card_selection` and
+`draw_hook_action_choice`. Unsupported player-choice kinds, missing menus,
+or mismatched candidate IDs remain explicit errors rather than silent
+fallbacks; Nature still controls **only** physical draws. Targeted
+`tests/test_nature_draw_only_player_choice.py` tests replay/menu integrity.
+`tools/check_nature_draw_only_player_choice.py` provides a real
+C# Survivor choice/replay regression case, included in H1 compatibility CI.
+
+For a previously failed benchmark, update the local `nature-h1-local`
+branch by fast-forwarding to the latest H1 PR branch and rerun with a
+**fresh** `--output-dir` (for example `h1-player-selection-choice-v2`);
+the benchmark deliberately does not overwrite partial results.
+
 ## H1 with the selected actual player
 
 The existing `tools/train_draw_only_nature_h1.py` now permits historical phase-split combat **policy** heads irrespective of their original value-training objective. It still pins the model, owns a frozen player during Nature REINFORCE optimization, validates supported emulator chance boundaries and writes disjoint holdout evaluations.
