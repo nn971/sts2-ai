@@ -12,6 +12,7 @@ from sts2_ai.emulator.semantic_p0_combat import strike_first_player
 from sts2_ai.nature.combat_scenarios import SCENARIOS, parse_scenario_pool
 from sts2_ai.nature.draw_only_episode import play_draw_only_episode
 from sts2_ai.nature.two_site_opponent import TwoSiteNature
+from sts2_ai.nature.contextual_draw import ContextualDrawNature
 
 
 def main() -> None:
@@ -23,6 +24,8 @@ def main() -> None:
         "--scenarios", default="shrinker-a0,shrinker-a10,nibbits-a0,nibbits-a10"
     )
     parser.add_argument("--max-boundaries", type=int, default=600)
+    parser.add_argument("--nature-model", choices=("tabular", "contextual"),
+                        default="tabular")
     args = parser.parse_args()
     scenarios = parse_scenario_pool(args.scenarios)
     sys.path.insert(0, str(args.emulator_bindings.resolve()))
@@ -33,12 +36,15 @@ def main() -> None:
             options = dict(
                 source_seed="nature-h2-scenario-replay-" + key,
                 reference_seed=779,
-                nature=TwoSiteNature(seed=1),
+                nature=(ContextualDrawNature(seed=1)
+                        if args.nature_model == "contextual"
+                        else TwoSiteNature(seed=1)),
                 emulator_revision=args.emulator_revision,
                 player_choose=strike_first_player,
                 player_model_id="test-only-strike-first",
                 entry_mode="seeded-fixed-shrinker",
-                draw_mode="reference",
+                draw_mode=("learned" if args.nature_model == "contextual"
+                           else "reference"),
                 max_boundaries=args.max_boundaries,
                 scenario=scenario,
             )
@@ -54,6 +60,7 @@ def main() -> None:
                 raise RuntimeError("Scenario provenance lost during replay")
             print(json.dumps({
                 "scenario_id": key,
+                "nature_model": args.nature_model,
                 "outcome": actual.outcome,
                 "score": actual.score,
                 "exit_hp": actual.exit_hp,
