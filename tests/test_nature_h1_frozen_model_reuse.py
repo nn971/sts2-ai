@@ -1,12 +1,13 @@
 """Historical v8/v13 JSON compatibility and source-matched player comparisons."""
 from __future__ import annotations
 
+import argparse
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
 
-from sts2_ai.emulator.semantic_p0_frozen_player import FrozenPlayerSpec
+from sts2_ai.emulator.semantic_p0_frozen_player import (\n    FrozenPlayerSpec,\n    FrozenPolicyInferenceError,\n)
 from sts2_ai.models.neural import (
     NEURAL_FORMAT, TACTICAL_ATTENTION_FORMAT, TACTICAL_INSTANCES_FORMAT,
     NeuralPolicyValueModel,
@@ -69,7 +70,7 @@ def test_old_portable_phase_split_weights_load_frozen(
     path.write_text(path.read_text().replace(
         "fixture-old-combat-policy", "changed-but-valid-id"
     ))
-    with pytest.raises(Exception, match="digest mismatch"):
+    with pytest.raises(FrozenPolicyInferenceError, match="digest mismatch"):
         frozen.load_pinned()
 
 
