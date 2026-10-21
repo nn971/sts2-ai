@@ -48,6 +48,12 @@ jobs:
         run: |
           dotnet restore Sts2Emulator.sln
           dotnet build Sts2Emulator.sln -c Release --no-restore
+      - name: Suspended Nature boundary public observation test
+        working-directory: emulator
+        run: |
+          dotnet test tests/Sts2Emulator.Core.Tests/Sts2Emulator.Core.Tests.csproj \
+            -c Release --no-build \
+            --filter "FullyQualifiedName~NatureBoundaryPublicViewReusesFairPlayerObservationWithoutHiddenDrawOrder"
       - name: Real contextual draws and exact terminal replay
         working-directory: ai
         run: |
