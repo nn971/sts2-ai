@@ -10,9 +10,9 @@ from pathlib import Path
 
 from sts2_ai.emulator.semantic_p0_combat import strike_first_player
 from sts2_ai.nature.combat_scenarios import SCENARIOS, parse_scenario_pool
+from sts2_ai.nature.contextual_draw import ContextualDrawNature
 from sts2_ai.nature.draw_only_episode import play_draw_only_episode
 from sts2_ai.nature.two_site_opponent import TwoSiteNature
-from sts2_ai.nature.contextual_draw import ContextualDrawNature
 
 
 def main() -> None:
