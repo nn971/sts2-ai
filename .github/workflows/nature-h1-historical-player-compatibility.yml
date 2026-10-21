@@ -4,12 +4,16 @@ on:
   push:
     paths:
       - 'tools/benchmark_nature_h1_frozen_players.py'
+      - 'src/sts2_ai/emulator/semantic_p0_public_projection.py'
+      - 'src/sts2_ai/emulator/semantic_p0_frozen_player.py'
       - 'tools/train_draw_only_nature_h1.py'
       - 'tests/test_nature_h1_frozen_model_reuse.py'
       - '.github/workflows/nature-h1-historical-player-compatibility.yml'
   pull_request:
     paths:
       - 'tools/benchmark_nature_h1_frozen_players.py'
+      - 'src/sts2_ai/emulator/semantic_p0_public_projection.py'
+      - 'src/sts2_ai/emulator/semantic_p0_frozen_player.py'
       - 'tools/train_draw_only_nature_h1.py'
       - 'tests/test_nature_h1_frozen_model_reuse.py'
       - '.github/workflows/nature-h1-historical-player-compatibility.yml'
@@ -39,7 +43,7 @@ jobs:
       - name: Check frozen legacy model benchmark code
         working-directory: ai
         run: |
-          python -m ruff check tools/benchmark_nature_h1_frozen_players.py tools/train_draw_only_nature_h1.py tests/test_nature_h1_frozen_model_reuse.py
+          python -m ruff check src/sts2_ai/emulator/semantic_p0_public_projection.py src/sts2_ai/emulator/semantic_p0_frozen_player.py tools/benchmark_nature_h1_frozen_players.py tools/train_draw_only_nature_h1.py tests/test_nature_h1_frozen_model_reuse.py
           python -m pytest -q tests/test_nature_h1_frozen_model_reuse.py
       - name: Build validated emulator revision
         working-directory: emulator
