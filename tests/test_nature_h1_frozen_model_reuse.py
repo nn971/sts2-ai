@@ -13,6 +13,7 @@ from sts2_ai.emulator.semantic_p0_frozen_player import (
 )
 from sts2_ai.emulator.semantic_p0_public_projection import (
     project_public_enemy_slot_for_legacy_instances,
+    project_public_p0_observation,
 )
 from sts2_ai.models.neural import (
     NEURAL_FORMAT,
@@ -21,6 +22,7 @@ from sts2_ai.models.neural import (
     NeuralPolicyValueModel,
 )
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
+from sts2_ai.models.tactical_state import public_resources_tactical_state_features
 from tools.benchmark_nature_h1_frozen_players import (
     bootstrap_ci,
     candidate_argument,
@@ -196,3 +198,32 @@ def test_legacy_enemy_slot_projection_rejects_privileged_state():
         project_public_enemy_slot_for_legacy_instances({
             "combat": {"enemies": []}, "semanticDeck": {"private": True}
         })
+
+
+def test_old_instance_model_handles_source_visible_opaque_draw_count():
+    source = {
+        "combat": {
+            "enemies": [],
+            "hand": [],
+            "draw_pile": 5,
+            "relic_counters": [],
+            "player_powers": [],
+        },
+    }
+    projected = project_public_p0_observation(source)
+    assert projected["combat"]["draw_pile"] == []
+    assert projected["combat"]["draw_pile_count"] == 5
+    assert projected["combat"]["draw_pile_opaque"] is True
+    assert isinstance(public_resources_tactical_state_features(projected, 64), dict)
+    unmarked = {"combat": {**projected["combat"], "draw_pile_opaque": False}}
+    with pytest.raises(ValueError, match="Draw-pile count disagrees"):
+        public_resources_tactical_state_features(unmarked, 64)
+    malformed = {
+        **projected,
+        "combat": {
+            **projected["combat"],
+            "draw_pile": [{"card_id": "privately_invented"}],
+        },
+    }
+    with pytest.raises(ValueError, match="Opaque public P0 draw pile"):
+        public_resources_tactical_state_features(malformed, 64)
