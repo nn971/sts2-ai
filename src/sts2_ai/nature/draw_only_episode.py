@@ -11,6 +11,11 @@ from dataclasses import asdict, dataclass
 from typing import Any, Protocol
 
 from sts2_ai.emulator.semantic_p0_combat import strike_first_player
+from sts2_ai.nature.combat_scenarios import (
+    BASELINE_SCENARIO,
+    SCENARIOS,
+    CombatScenario,
+)
 from sts2_ai.nature.draw_only_p0 import (
     DRAW_ONLY_SCHEMA,
     DrawOnlyContractError,
@@ -68,6 +73,7 @@ class DrawOnlyEpisode:
     score: float
     terminal_fingerprint: str
     terminal_replay_verified: bool
+    scenario_id: str = BASELINE_SCENARIO
 
     @property
     def digest(self) -> str:
@@ -163,6 +169,7 @@ def play_draw_only_episode(
     entry_mode: str = "source-route",
     draw_mode: str = "learned",
     replay: tuple[DrawOnlyStep, ...] | None = None,
+    scenario: CombatScenario | None = None,
 ) -> DrawOnlyEpisode:
     """Run actual supported first-room mechanics until a genuine terminal.
 
@@ -177,19 +184,28 @@ def play_draw_only_episode(
             or not emulator_revision or not player_model_id
             or max_boundaries <= 0):
         raise ValueError("Invalid draw-only fixture configuration")
+    selected = SCENARIOS[BASELINE_SCENARIO] if scenario is None else scenario
+    if selected.scenario_id not in SCENARIOS or SCENARIOS[selected.scenario_id] != selected:
+        raise DrawOnlyContractError("Unpinned challenge-combat scenario")
+    if entry_mode == "source-route" and selected.scenario_id != BASELINE_SCENARIO:
+        raise DrawOnlyContractError(
+            "Source-route entries do not support conditioned encounter overrides"
+        )
     router = DrawOnlyRouter(nature, SeededLawSampler(reference_seed))
     if entry_mode == "seeded-fixed-shrinker":
         if region != "Overgrowth":
             raise ValueError("Fixed Shrinker Beetle fixture requires Overgrowth")
-        # Exact previously tested real-source mechanical starter fixture.
-        # This starts a conditioned single combat, not a full-map native route.
+        # Engine-owned source-shaped conditioned formation; no external
+        # deck/HP/RNG mutation and no native encounter-probability claim.
         state = session.begin_seeded_semantic_combat(
-            source_seed, act=1,
-            encounter_id="proto.encounter.shrinker_beetle_weak",
-            native_entry="ShrinkerBeetleWeak",
-            total_floor=2, ascension=0, first_monster_combat_id=1,
-            map_column=3, map_row=1, replay_opening_draw_hooks=True,
-            native_policy_baseline=False,
+            source_seed, act=selected.act,
+            encounter_id=selected.encounter_id,
+            native_entry=selected.native_entry,
+            total_floor=selected.total_floor,
+            ascension=selected.ascension,
+            first_monster_combat_id=selected.first_monster_combat_id,
+            map_column=selected.map_column, map_row=selected.map_row,
+            replay_opening_draw_hooks=True, native_policy_baseline=False,
         )
     else:
         state = session.begin_seeded_semantic_route(
@@ -301,6 +317,7 @@ def play_draw_only_episode(
             score=_score(state.outcome, entry_hp, max_hp, state.exit_hp),
             terminal_fingerprint=state.fingerprint,
             terminal_replay_verified=True,
+            scenario_id=selected.scenario_id,
         )
     finally:
         session.release_semantic_many(held)
