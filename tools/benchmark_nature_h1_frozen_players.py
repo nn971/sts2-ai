@@ -30,6 +30,11 @@ from sts2_ai.nature.combat_scenarios import (
 )
 from sts2_ai.nature.corpus import atomic_write, file_sha256
 from sts2_ai.nature.draw_only_workers import draw_only_batch
+from sts2_ai.nature.h2_benchmark import (
+    balanced_h2_source_seeds,
+    configuration_key,
+    reference_by_configuration,
+)
 from sts2_ai.nature.protocol import canonical_sha256
 from sts2_ai.nature.two_site_opponent import TwoSiteNature
 
@@ -224,6 +229,8 @@ def main() -> None:
                         help="Comma-separated pinned single-enemy Act 1 contexts")
     parser.add_argument("--deck-pool", default=BASELINE_DECK,
                         help="Comma-separated source-conditioned C# Silent deck presets")
+    parser.add_argument("--balance-h2-configurations", action="store_true",
+                        help="Exactly equal A10 source counts per enemy/deck pair")
     parser.add_argument("--allow-test-models", action="store_true",
                         help="Engineering-only: admit explicitly untrained test JSONs")
     args = parser.parse_args()
@@ -275,7 +282,10 @@ def main() -> None:
             flush=True,
         )
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    seeds = source_seeds(args.split, args.episodes)
+    seeds = (balanced_h2_source_seeds(
+        args.split, args.episodes, scenario_pool, deck_pool
+    ) if args.balance_h2_configurations else
+        source_seeds(args.split, args.episodes))
     command = ("dotnet", str(args.emulator_dll.resolve()), "prototype-ai-jsonl")
     baseline = TwoSiteNature(seed=1)
     all_results: dict[str, list[tuple]] = {}
@@ -310,7 +320,11 @@ def main() -> None:
             )
             print(f"[h1-player] wrote {output}", flush=True)
         all_results[label] = cohorts
-        model_data[label]["summary"] = summarize_reference_cohorts(cohorts)
+        summary = summarize_reference_cohorts(cohorts)
+        if (scenario_pool != (BASELINE_SCENARIO,)
+                or deck_pool != (BASELINE_DECK,)):
+            summary["by_configuration"] = reference_by_configuration(cohorts)
+        model_data[label]["summary"] = summary
 
     labels = [label for label, _ in args.candidate]
     report = {
@@ -324,6 +338,13 @@ def main() -> None:
         ),
         "conditioned_scenario_pool": sorted(scenario_pool),
         "conditioned_deck_pool": sorted(deck_pool),
+        "source_configuration_counts": {
+            configuration_key(scenario, deck): sum(
+                scenario_for_seed(seed, scenario_pool).scenario_id == scenario
+                and deck_for_seed(seed, deck_pool) == deck for seed in seeds
+            )
+            for scenario in sorted(scenario_pool) for deck in sorted(deck_pool)
+        },
         "source_deck_counts": {
             key: sum(deck_for_seed(seed, deck_pool) == key for seed in seeds)
             for key in sorted(deck_pool)
@@ -341,6 +362,7 @@ def main() -> None:
             "actor_seed": args.actor_seed,
             "player_temperature": args.temperature,
             "source_count": args.episodes,
+            "balanced_h2_configurations": args.balance_h2_configurations,
             "workers": args.workers,
         },
         "candidates": model_data,
@@ -367,6 +389,15 @@ def main() -> None:
             f"score_draw_variation={summary['score_changed_pair_fraction']:.3f}",
             flush=True,
         )
+        for key, row in summary.get("by_configuration", {}).items():
+            print(
+                f"[h2-v8] {label} {key} n={row['source_count']} "
+                f"win={row['win_rate']:.3f} hp={row['mean_exit_hp']:.2f} "
+                f"score={row['mean_score']:.5f} "
+                f"draws={row['nontrivial_draws_per_combat']:.2f} "
+                f"score_draw_changed={row['score_changed_pair_fraction']:.3f}",
+                flush=True,
+            )
     print(f"[h1-player] COMPLETE report={output}", flush=True)
 
 
