@@ -79,3 +79,39 @@ def project_public_p0_observation(source: dict[str, Any]) -> dict[str, Any]:
     public["p0_public_projection"] = PROJECTION
     public["p0_opaque_public_fields"] = sorted(set(opaque))
     return public
+
+
+def project_public_enemy_slot_for_legacy_instances(source: dict[str, Any]) -> dict[str, Any]:
+    """Recover the unambiguous HUD slot in a single-enemy combat.
+
+    The restricted P0 observation publishes the ordered living-enemy list
+    with visible instance IDs, species and intents but omits the v8 name
+    `formation_position`. In the selected single-enemy H1 fixture its
+    only public slot is exactly 0. Do not manufacture multi-enemy formation
+    positions: source P0 currently lacks the necessary public slot data.
+    """
+    if not isinstance(source, dict) or not isinstance(source.get("combat"), dict):
+        raise ValueError("Legacy instance projection requires fair combat observation")
+    if "semanticDeck" in source or "pending" in source:
+        raise ValueError("Hidden chance state cannot enter legacy policy projection")
+    enemies = source["combat"].get("enemies")
+    if not isinstance(enemies, list):
+        raise ValueError("Legacy instance projection requires a visible enemy list")
+    if all(
+        isinstance(enemy, dict) and type(enemy.get("formation_position")) is int
+        for enemy in enemies
+    ):
+        return source
+    if len(enemies) != 1 or not isinstance(enemies[0], dict):
+        raise ValueError(
+            "P0 has no formation positions for multiple living enemies; "
+            "legacy instance policy projection unsupported"
+        )
+    enemy = enemies[0]
+    if (type(enemy.get("instance_id")) is not int or
+            not isinstance(enemy.get("enemy_id"), str) or
+            not enemy.get("enemy_id")):
+        raise ValueError("Cannot derive public slot for malformed enemy identity")
+    projected = json.loads(json.dumps(source))
+    projected["combat"]["enemies"][0]["formation_position"] = 0
+    return projected

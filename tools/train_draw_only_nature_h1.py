@@ -175,8 +175,14 @@ def main() -> None:
         action_scope=args.player_action_scope,
     )
     model = spec.load_pinned()
-    if model.combat_value_objective != "hp_preservation":
-        parser.error("Frozen v15 model must use production HP-preservation objective")
+    # H1 freezes the player's action policy. Historic v8/v13 checkpoints
+    # trained with a different value target remain valid policy candidates.
+    # Combat scoring is computed independently from emulator terminal HP.
+    print(
+        f"[draw-h1] frozen_policy_original_value_objective="
+        f"{model.combat_value_objective} (inference only)",
+        flush=True,
+    )
     if (not args.allow_untrained_smoke
             and any(word in model.model_id.lower()
                     for word in ("untrained", "test-only", "synthetic"))):
@@ -188,6 +194,8 @@ def main() -> None:
         "emulator_bindings_sha256": file_sha256(binding_file),
         "player_model_sha256": spec.model_sha256,
         "player_model_id": model.model_id,
+        "player_combat_head_format": model.combat.format_id,
+        "player_original_value_objective": model.combat_value_objective,
         "player_action_scope": args.player_action_scope,
         "player_greedy": spec.greedy,
         "player_temperature": spec.temperature,
