@@ -103,6 +103,7 @@ class Episode:
     terminal_replay_verified: bool = True
     decisions: tuple = ()
     scenario_id: str = "shrinker-a0"
+    deck_preset_id: str = "silent-starter-v1"
 
 
 def _cohort(scores, *, seed=500):
