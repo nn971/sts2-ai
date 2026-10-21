@@ -25,6 +25,7 @@ from sts2_ai.nature.combat_scenarios import (
     scenario_for_seed,
 )
 from sts2_ai.nature.draw_only_episode import DrawOnlyEpisode, play_draw_only_episode
+from sts2_ai.nature.contextual_draw import restore_nature
 from sts2_ai.nature.two_site_opponent import TwoSiteNature
 
 _worker_session: Any = None
@@ -74,7 +75,7 @@ def _one(
     spec = _worker_spec
     chosen = scenario_for_seed(seed, scenario_pool)
     deck = deck_for_seed(seed, deck_pool)
-    nature = TwoSiteNature.restore(nature_checkpoint)
+    nature = restore_nature(nature_checkpoint)
     actor = FrozenP0Player(
         _worker_model, greedy=spec.greedy, temperature=spec.temperature,
         action_scope=spec.action_scope,
