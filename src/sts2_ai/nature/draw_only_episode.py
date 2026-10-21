@@ -18,6 +18,7 @@ from sts2_ai.nature.combat_scenarios import (
     SCENARIOS,
     CombatScenario,
 )
+from sts2_ai.nature.contextual_draw import ContextualDrawNature
 from sts2_ai.nature.draw_only_p0 import (
     DRAW_ONLY_SCHEMA,
     DrawOnlyContractError,
@@ -240,10 +241,21 @@ def play_draw_only_episode(
             if state.boundary == "nature":
                 if state.pending is None:
                     raise DrawOnlyContractError("Nature boundary lacks an event")
+                # Nature sees precisely the player's public state *before*
+                # this unresolved draw, plus its own legal Chance Law support.
+                # The existing tabular baseline keeps its old protocol.
+                public_observation = (
+                    state.observe_for_nature()
+                    if isinstance(nature, ContextualDrawNature)
+                    and draw_mode == "learned"
+                    and state.pending.get("kind") == "draw_card"
+                    else None
+                )
                 picked = router.choose(
                     state.pending, fingerprint=state.fingerprint,
                     episode_key=source_seed, ordinal=ordinal,
                     draw_mode=draw_mode,
+                    public_observation=public_observation,
                 )
                 if picked.operation == "enemy_intent":
                     reference_intent_count += 1
