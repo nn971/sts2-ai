@@ -124,7 +124,7 @@ def test_disjoint_source_splits_and_safe_candidate_labels():
     )
     assert candidate_argument("v8=/tmp/one.json")[0] == "v8"
     for bad in ("../v8=/a.json", "v8", "v8=", "=something", "a/b=c"):
-        with pytest.raises(Exception):
+        with pytest.raises(argparse.ArgumentTypeError):
             candidate_argument(bad)
 
 
