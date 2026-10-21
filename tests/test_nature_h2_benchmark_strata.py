@@ -15,6 +15,7 @@ from sts2_ai.nature.combat_scenarios import (
 )
 from sts2_ai.nature.h2_benchmark import (
     balanced_h2_source_seeds,
+    balanced_h2_training_source_seeds,
     configuration_key,
     reference_by_configuration,
 )
@@ -58,6 +59,39 @@ def test_h2_balanced_source_generation_is_exact_and_reproducible():
 def test_h2_balanced_screen_rejects_invalid_design(split, count, scenarios):
     with pytest.raises(ValueError):
         balanced_h2_source_seeds(split, count, scenarios, DECK_PRESETS)
+
+
+
+
+def test_h2_training_rounds_have_balanced_12_cell_contexts():
+    pool = ("mawler-a10", "cubex-a10", "vine-shambler-a10")
+    counts_total = {}
+    all_seeds = set()
+    for round_index in range(3):
+        seeds = balanced_h2_training_source_seeds(
+            29, round_index, 256, pool, DECK_PRESETS,
+        )
+        assert len(seeds) == len(set(seeds)) == 256
+        assert not all_seeds.intersection(seeds)
+        all_seeds.update(seeds)
+        assert seeds == balanced_h2_training_source_seeds(
+            29, round_index, 256, tuple(reversed(pool)),
+            tuple(reversed(DECK_PRESETS)),
+        )
+        counts = {}
+        for seed in seeds:
+            key = configuration_key(
+                scenario_for_seed(seed, pool).scenario_id,
+                deck_for_seed(seed, DECK_PRESETS),
+            )
+            counts[key] = counts.get(key, 0) + 1
+            counts_total[key] = counts_total.get(key, 0) + 1
+        assert len(counts) == 12
+        assert sorted(counts.values()) == [21] * 8 + [22] * 4
+    assert set(counts_total.values()) == {64}
+    assert not all_seeds.intersection(
+        balanced_h2_training_source_seeds(101, 0, 256, pool, DECK_PRESETS)
+    )
 
 
 def _row(i, scenario, deck, score, draw):
