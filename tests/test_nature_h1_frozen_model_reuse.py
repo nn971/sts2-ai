@@ -7,12 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from sts2_ai.emulator.semantic_p0_public_projection import (
-    project_public_enemy_slot_for_legacy_instances,
-)
 from sts2_ai.emulator.semantic_p0_frozen_player import (
     FrozenPlayerSpec,
     FrozenPolicyInferenceError,
+)
+from sts2_ai.emulator.semantic_p0_public_projection import (
+    project_public_enemy_slot_for_legacy_instances,
 )
 from sts2_ai.models.neural import (
     NEURAL_FORMAT,
