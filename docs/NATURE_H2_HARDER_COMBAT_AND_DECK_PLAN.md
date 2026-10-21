@@ -168,3 +168,57 @@ draw decisions, and show useful difficulty. Source/native law calibration is
 not a requirement. If these weak encounters still have saturated victories,
 extend the conditioned emulator encounter catalog to normal/elite combats
 and rerun the player benchmark before expensive H2 training.
+
+
+## H2 v8 A10 balanced screening (follow-up, October 21)
+
+An isolated implementation branch adds an **optional** `--balance-h2-configurations`
+mode to the frozen-player reference benchmark. It rejects any non-A10 scenario,
+uses a separate `nature-h2-v8-{selection,confirmation}` namespace, and selects
+source seeds until **each of the eight enemy/deck cells has the same number
+of sources**. Acceptance/rejection uses only a deterministic scenario/deck
+hash before combat, and never examines outcome, initial draw, or Nature choice.
+Omitting this option preserves the original H1 source corpus.
+
+The actual frozen historical v8 checkpoint must be supplied from the
+original local training checkout. Its SHA256, previously recorded in the
+real H1 reference selection and holdout reports, is:
+
+`df0808503416fc85384e430a1cd609d5fb8cb5c9f55bfa6a9c2e8bfc568237d5`
+
+In the independent H2 checkout (with `$dll`, `$bindings`, `$rev`, and
+`$model` set to the emulator at `5a332c2caa889b9b3f6e326bc054d6cec019289`
+and the actual historical portable checkpoint), run:
+
+```fish
+python -u tools/benchmark_nature_h1_frozen_players.py \
+  --candidate "v8=$model" \
+  --expected-v8-sha256 df0808503416fc85384e430a1cd609d5fb8cb5c9f55bfa6a9c2e8bfc568237d5 \
+  --emulator-dll $dll --emulator-bindings $bindings \
+  --emulator-revision $rev --workers 15 \
+  --action-scope all-legal-v1 \
+  --scenario-pool shrinker-a10,nibbits-a10 \
+  --deck-pool silent-starter-v1,silent-strike-heavy-v1,silent-defend-heavy-v1,silent-poison-kit-v1 \
+  --balance-h2-configurations \
+  --split selection --episodes 1024 --reference-replicates 2 \
+  --output-dir results/nature/h2-a10-v8-balanced-selection
+```
+
+This executes **2,048 reference combats, 256 per configuration**, with
+128 independent source seeds per configuration. For every cell the report
+includes victory rate, remaining HP, score and source-bootstrap confidence
+interval, physical/nontrivial draws, fraction of changed draw transcripts
+across two reference replicates, and the fraction and magnitude of score
+changes. The report pins the emulator DLL, binding, player checkpoint,
+source seed set, player action scope, and scenario/deck IDs. All encounters
+are Ascension 10. Compare each cell individually before selecting challenging
+supported encounters. Engineering CI with test-only policies is not a
+substitute for these real v8 measurements.
+
+Held-out learned-vs-reference Nature evaluation also provides
+`paired_by_configuration`, including per-cell paired score confidence
+intervals, win-rate changes, remaining HP, and draw KL divergence. The
+training schedule remains 40 x 256 combats per seed, with 1,000 held-out
+worlds and 15 workers. Repeat with multiple independent Nature seeds.
+The native-game Chance Law calibration remains `UNVERIFIED`; it is a
+separate fidelity project and does not block this experiment.
