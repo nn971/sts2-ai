@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+from test_nature_draw_only_player_choice import FakeSession
 
 from sts2_ai.nature.combat_scenarios import (
     BASELINE_SCENARIO,
@@ -13,7 +14,6 @@ from sts2_ai.nature.combat_scenarios import (
 )
 from sts2_ai.nature.draw_only_episode import play_draw_only_episode
 from sts2_ai.nature.two_site_opponent import TwoSiteNature
-from test_nature_draw_only_player_choice import FakeSession
 from tools.train_draw_only_nature_h1 import (
     CHALLENGE_SCHEMA,
     SCHEMA,
