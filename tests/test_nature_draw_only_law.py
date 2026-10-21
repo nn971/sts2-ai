@@ -132,6 +132,7 @@ def test_source_verified_native_intent_grid_support_and_stale_pending_status():
     # status, while ChanceLaw is authoritative and SOURCE_VERIFIED.
     raw = pending("enemy_intent", weights=(1, 3))
     raw["chanceLaw"]["probabilityStatus"] = "SOURCE_VERIFIED"
+    raw["chanceLaw"]["conditioningPolicyId"] = "source-filtered-intent-weights-v1"
     raw["chanceLaw"]["probabilityProvenance"] = "source-nextdouble-grid"
     raw["chanceLaw"]["totalWeight"] = 1 << 53
     raw["chanceLaw"]["outcomes"][0]["weight"] = 1 << 51
