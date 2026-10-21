@@ -19,8 +19,10 @@ from pathlib import Path
 
 from sts2_ai.emulator.semantic_p0_frozen_player import FrozenPlayerSpec
 from sts2_ai.nature.combat_scenarios import (
+    BASELINE_DECK,
     BASELINE_SCENARIO,
     SCENARIO_SCHEMA,
+    parse_deck_pool,
     parse_scenario_pool,
 )
 from sts2_ai.nature.corpus import atomic_write, file_sha256
@@ -98,6 +100,7 @@ def paired_holdout_metrics(nature_episodes, reference_episodes, *,
                 or nature.first_public_fingerprint !=
                 reference.first_public_fingerprint
                 or nature.scenario_id != reference.scenario_id
+                or nature.deck_preset_id != reference.deck_preset_id
                 or nature.player_model_id != reference.player_model_id
                 or nature.draw_mode != "learned"
                 or reference.draw_mode != "reference"):
@@ -204,15 +207,19 @@ def main() -> None:
     parser.add_argument("--allow-untrained-smoke", action="store_true")
     parser.add_argument("--scenario-pool", default=BASELINE_SCENARIO,
                         help="Comma-separated source-conditioned combat profiles")
+    parser.add_argument("--deck-pool", default=BASELINE_DECK,
+                        help="Comma-separated engine-owned conditioned starter deck presets")
     parser.add_argument("--execute", action="store_true",
                         help="Actually execute C# combat and optimizer steps")
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
     try:
         scenario_pool = parse_scenario_pool(args.scenario_pool)
+        deck_pool = parse_deck_pool(args.deck_pool)
     except ValueError as exc:
         parser.error(str(exc))
-    challenge = scenario_pool != (BASELINE_SCENARIO,)
+    challenge = (scenario_pool != (BASELINE_SCENARIO,)
+                 or deck_pool != (BASELINE_DECK,))
     schema = CHALLENGE_SCHEMA if challenge else SCHEMA
     if (min(args.rounds, args.episodes_per_round, args.eval_episodes,
             args.workers, args.max_boundaries) < 1
@@ -276,6 +283,7 @@ def main() -> None:
     if challenge:
         config["scenario_pool_schema"] = SCENARIO_SCHEMA
         config["scenario_pool"] = sorted(scenario_pool)
+        config["deck_pool"] = sorted(deck_pool)
         config["holdout_namespace"] = "nature-draw-h2-eval-context-pool"
     fingerprint = canonical_sha256(config)
     print(
@@ -328,7 +336,7 @@ def main() -> None:
             reference_seed=args.reference_seed + source_start * 1000003,
             draw_mode="learned", workers=args.workers,
             max_boundaries=args.max_boundaries,
-            scenario_pool=scenario_pool,
+            scenario_pool=scenario_pool, deck_pool=deck_pool,
         )
         if batch["nontrivial_draws"] <= 0:
             raise RuntimeError("No nontrivial physical draws: invalid H1 training fixture")
@@ -336,6 +344,7 @@ def main() -> None:
         metrics_before = {
             "round": round_index,
             "scenario_counts": batch["scenario_counts"],
+            "deck_preset_counts": batch["deck_preset_counts"],
             "mean_player_score": statistics.mean(x.score for x in episodes),
             "victory_rate": statistics.mean(x.outcome == "victory" for x in episodes),
             "combat_count": len(episodes),
@@ -377,6 +386,7 @@ def main() -> None:
         reference_seed=args.reference_seed + 987654321,
         draw_mode="learned", workers=args.workers,
         max_boundaries=args.max_boundaries, scenario_pool=scenario_pool,
+        deck_pool=deck_pool,
     )
     control = draw_only_batch(
         evaluation_seeds, nature=nature, spec=spec,
@@ -412,6 +422,7 @@ def main() -> None:
         "evaluation_source_sha256": canonical_sha256(evaluation_seeds),
         "metrics": analysis,
         "evaluation_scenario_counts": primary["scenario_counts"],
+        "evaluation_deck_preset_counts": primary["deck_preset_counts"],
         "train_rounds": len(metrics),
         "training_seed": args.training_seed,
         "research_verdict": "NOT_ESTABLISHED",
