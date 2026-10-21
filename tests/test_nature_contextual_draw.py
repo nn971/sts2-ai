@@ -4,6 +4,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 import pytest
+from test_nature_draw_only_law import pending
 
 from sts2_ai.emulator.semantic_p0_combat import _pending_event
 from sts2_ai.nature.contextual_draw import (
@@ -14,7 +15,6 @@ from sts2_ai.nature.contextual_draw import (
 )
 from sts2_ai.nature.draw_only_p0 import DrawOnlyRouter, SeededLawSampler
 from sts2_ai.nature.two_site_opponent import PilotEpisode, TwoSiteNature
-from test_nature_draw_only_law import pending
 
 
 def visible():
