@@ -124,3 +124,31 @@ def test_paired_holdout_refuses_different_challenge_world_ids():
                 scenario_id="shrinker-a0")
     with pytest.raises(ValueError, match="differ"):
         paired_holdout_metrics([a], [b], bootstrap_seed=1, replicates=100)
+
+
+def test_h2_holdout_reports_source_paired_deltas_by_enemy():
+    from test_nature_draw_only_h1 import episode
+
+    nature = [
+        replace(episode("source-n", mode="learned", score=0.2),
+                scenario_id="nibbits-a10"),
+        replace(episode("source-s", mode="learned", score=0.5),
+                scenario_id="shrinker-a10"),
+    ]
+    reference = [
+        replace(episode("source-n", mode="reference", score=0.7),
+                scenario_id="nibbits-a10"),
+        replace(episode("source-s", mode="reference", score=0.8),
+                scenario_id="shrinker-a10"),
+    ]
+    result = paired_holdout_metrics(
+        nature, reference, bootstrap_seed=991, replicates=100,
+    )
+    assert result["paired_nature_minus_reference_score"] == pytest.approx(-0.4)
+    assert set(result["paired_by_scenario"]) == {"nibbits-a10", "shrinker-a10"}
+    assert result["paired_by_scenario"]["nibbits-a10"][
+        "mean_nature_minus_reference_score"
+    ] == pytest.approx(-0.5)
+    assert result["paired_by_scenario"]["shrinker-a10"][
+        "mean_nature_minus_reference_score"
+    ] == pytest.approx(-0.3)
