@@ -27,6 +27,7 @@ from sts2_ai.nature.combat_scenarios import (
 )
 from sts2_ai.nature.corpus import atomic_write, file_sha256
 from sts2_ai.nature.draw_only_workers import draw_only_batch
+from sts2_ai.nature.h2_benchmark import balanced_h2_training_source_seeds
 from sts2_ai.nature.protocol import canonical_sha256
 from sts2_ai.nature.two_site_opponent import TwoSiteNature
 
@@ -395,6 +396,7 @@ def main() -> None:
         config["scenario_pool"] = sorted(scenario_pool)
         config["deck_pool"] = sorted(deck_pool)
         config["holdout_namespace"] = "nature-draw-h2-eval-context-pool"
+        config["training_source_sampling"] = "balanced-h2-round-v1"
     fingerprint = canonical_sha256(config)
     print(
         f"[draw-h1] plan={fingerprint[:16]} train_seed={args.training_seed} "
@@ -434,10 +436,15 @@ def main() -> None:
     command = ("dotnet", str(args.emulator_dll.resolve()), "prototype-ai-jsonl")
     for round_index in range(first_round, args.rounds):
         source_start = round_index * args.episodes_per_round
-        seeds = tuple(
-            source_seed("train", source_start + i,
-                        training_seed=args.training_seed, challenge=challenge)
-            for i in range(args.episodes_per_round)
+        seeds = (
+            balanced_h2_training_source_seeds(
+                args.training_seed, round_index, args.episodes_per_round,
+                scenario_pool, deck_pool,
+            ) if challenge else tuple(
+                source_seed("train", source_start + i,
+                            training_seed=args.training_seed, challenge=False)
+                for i in range(args.episodes_per_round)
+            )
         )
         batch = draw_only_batch(
             seeds, nature=nature, spec=spec,
@@ -467,6 +474,15 @@ def main() -> None:
             "source_group_sha256": canonical_sha256(seeds),
             **_draw_statistics(episodes),
         }
+        if challenge:
+            metrics_before["configuration_counts"] = {
+                f"{scenario}::{deck}": sum(
+                    e.scenario_id == scenario and e.deck_preset_id == deck
+                    for e in episodes
+                )
+                for scenario in sorted(scenario_pool)
+                for deck in sorted(deck_pool)
+            }
         optimization = nature.update(tuple(x.for_nature_training() for x in episodes))
         metrics.append({**metrics_before, **optimization})
         record = {
