@@ -12,13 +12,18 @@ from sts2_ai.emulator.semantic_p0_frozen_player import (
     FrozenPolicyInferenceError,
 )
 from sts2_ai.models.neural import (
-    NEURAL_FORMAT, TACTICAL_ATTENTION_FORMAT, TACTICAL_INSTANCES_FORMAT,
+    NEURAL_FORMAT,
+    TACTICAL_ATTENTION_FORMAT,
+    TACTICAL_INSTANCES_FORMAT,
     NeuralPolicyValueModel,
 )
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from tools.benchmark_nature_h1_frozen_players import (
-    bootstrap_ci, candidate_argument, compare_source_matched_scores,
-    source_seeds, summarize_reference_cohorts,
+    bootstrap_ci,
+    candidate_argument,
+    compare_source_matched_scores,
+    source_seeds,
+    summarize_reference_cohorts,
 )
 
 
