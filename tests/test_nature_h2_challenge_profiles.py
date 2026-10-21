@@ -28,8 +28,11 @@ from tools.train_draw_only_nature_h1 import (
 
 def test_h2_explicit_eligible_single_enemy_encounters_and_ascension():
     assert set(SCENARIOS) == {
-        "shrinker-a0", "shrinker-a10", "nibbits-a0", "nibbits-a10"
+        "shrinker-a0", "shrinker-a10", "nibbits-a0", "nibbits-a10",
+        "mawler-a10", "cubex-a10", "vine-shambler-a10",
     }
+    for key in ("mawler-a10", "cubex-a10", "vine-shambler-a10"):
+        assert SCENARIOS[key].ascension == 10
     assert SCENARIOS[BASELINE_SCENARIO].ascension == 0
     assert SCENARIOS["nibbits-a10"].native_entry == "NibbitsWeak"
     assert SCENARIOS["nibbits-a10"].ascension == 10
