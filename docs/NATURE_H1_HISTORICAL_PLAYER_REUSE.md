@@ -23,15 +23,17 @@ The comparison uses the **same actual emulator** source seeds, fair public obser
 Run in the **isolated AI branch checkout**, with the frozen model paths adjusted to your own files. The source splits do **not** overlap H1 Nature training or held-out H1 evaluation.
 
 ```fish
-set emulator /path/to/sts2-emulator
+set emulator_repo /path/to/sts2-emulator-active
+set emulator /path/to/sts2-emulator-h1-isolated
+set revision 3636d274cb5c0160d0b0e358b768dec83705201f
+# Dedicated detached worktree: keep all active emulator branches untouched.
+git -C $emulator_repo worktree add --detach $emulator $revision
 set dll $emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll
 set bindings $emulator/bindings/python
-set revision 3636d274cb5c0160d0b0e358b768dec83705201f
 set v8 results/ppo-v8-batched-40/models/stage-0120.json
 set v13 results/ppo-enemy-attention-v13/r1/attn/models/stage-0080.json
 
-# Build exactly the revision that passed the focused real-combat gate.
-git -C $emulator checkout $revision
+# Build the independent worktree, never switch the active emulator checkout.
 dotnet build $emulator/Sts2Emulator.sln -c Release
 
 # Same real fixtures, reference draws, two independent reference RNG replicas,
