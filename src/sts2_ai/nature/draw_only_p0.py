@@ -20,6 +20,43 @@ from sts2_ai.nature.two_site_opponent import PilotChoice, TwoSiteNature
 CHANCE_LAW_SCHEMA = "sts2-v111-chance-law-v1"
 DRAW_ONLY_SCHEMA = "sts2-ai-nature-draw-only-law-router-v1"
 REFERENCE_STATUS = "UNVERIFIED"
+SOURCE_VERIFIED_STATUS = "SOURCE_VERIFIED"
+NATIVE_DOUBLE_GRID = 1 << 53
+
+
+def _native_intent_grid_weights(raw_weights: tuple[int, ...]) -> tuple[int, ...]:
+    """Mirror C# NativeNextIntBoundaryGridIndex with exact integer math.
+
+    The emulator's SOURCE_VERIFIED enemy-intent law assigns 53-bit Native
+    NextDouble grid masses, not legacy raw-ticket counts.
+    """
+    if (not raw_weights or any(type(w) is not int or w <= 0
+                               for w in raw_weights)):
+        raise DrawOnlyContractError("Invalid source intent raw ticket weights")
+    bound = sum(raw_weights)
+
+    def boundary_index(boundary: int) -> int:
+        if boundary == 0:
+            return 0
+        exponent = boundary.bit_length() - 1
+        power_of_two = boundary & (boundary - 1) == 0
+        shift = 53 - exponent + int(power_of_two)
+        scale = 1 << shift
+        numerator = (boundary * scale - 1) * NATIVE_DOUBLE_GRID
+        denominator = scale * bound
+        return (numerator + denominator - 1) // denominator
+
+    results = []
+    start = 0
+    previous = 0
+    for count in raw_weights:
+        start += count
+        stop = boundary_index(start)
+        results.append(stop - previous)
+        previous = stop
+    if previous != NATIVE_DOUBLE_GRID or any(w <= 0 for w in results):
+        raise DrawOnlyContractError("Source intent grid does not cover Native RNG")
+    return tuple(results)
 
 
 class DrawOnlyContractError(ValueError):
@@ -56,13 +93,18 @@ class DeclaredLaw:
         law = pending.get("chanceLaw")
         if not isinstance(law, dict) or law.get("schemaId") != CHANCE_LAW_SCHEMA:
             raise DrawOnlyContractError("Emulator Chance Law schema absent or changed")
-        if (law.get("probabilityStatus") != REFERENCE_STATUS
-                or pending.get("probabilityStatus") != REFERENCE_STATUS):
+        status = law.get("probabilityStatus")
+        metadata_status = pending.get("probabilityStatus")
+        if not (
+            status == REFERENCE_STATUS and metadata_status == REFERENCE_STATUS
+            or (kind == "enemy_intent"
+                and status == SOURCE_VERIFIED_STATUS
+                and metadata_status in (REFERENCE_STATUS, SOURCE_VERIFIED_STATUS))
+        ):
             raise DrawOnlyContractError(
                 "Unexpected native probability provenance: "
                 f"kind={kind!r} site={pending.get('siteId')!r} "
-                f"pending={pending.get('probabilityStatus')!r} "
-                f"law={law.get('probabilityStatus')!r}"
+                f"pending={metadata_status!r} law={status!r}"
             )
         if (law.get("ownerId") != pending.get("ownerId")
                 or law.get("ordinal") != pending.get("ordinal")
@@ -103,9 +145,22 @@ class DeclaredLaw:
             if (not isinstance(candidates, list) or not candidates
                     or [row.get("intentId") for row in candidates] != ids):
                 raise DrawOnlyContractError("Law intents differ from legal move IDs")
-            if (law.get("operationKind") != pending.get("operationKind")
-                    or any(row.get("rawWeight") != weight
-                           for row, weight in zip(candidates, weights, strict=True))):
+            if law.get("operationKind") != pending.get("operationKind"):
+                raise DrawOnlyContractError("Law operation differs from eligible intents")
+            raw_weights = tuple(row.get("rawWeight") for row in candidates)
+            if (any(type(w) is not int or w <= 0 for w in raw_weights)
+                    or pending.get("totalRawWeight") != sum(raw_weights)):
+                raise DrawOnlyContractError("Malformed weighted intent support")
+            if status == SOURCE_VERIFIED_STATUS:
+                if (law.get("conditioningPolicyId") !=
+                        "source-filtered-intent-weights-v1"
+                        or tuple(weights) != _native_intent_grid_weights(
+                            raw_weights
+                        )):
+                    raise DrawOnlyContractError(
+                        "Source-verified Native intent grid disagrees with support"
+                    )
+            elif tuple(weights) != raw_weights:
                 raise DrawOnlyContractError("Law weights differ from eligible intents")
         else:
             candidates = pending.get("candidates")
