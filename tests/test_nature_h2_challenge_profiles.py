@@ -202,3 +202,53 @@ def test_h2_holdout_rejects_deck_identity_mismatch():
                 deck_preset_id="silent-starter-v1")
     with pytest.raises(ValueError, match="differ"):
         paired_holdout_metrics([a], [b], bootstrap_seed=1, replicates=100)
+
+
+def test_h2_holdout_batch_runs_identical_scenario_and_deck_pools(monkeypatch):
+    """Learned and reference worlds must keep identical A10 context arms."""
+    import tools.train_draw_only_nature_h1 as trainer
+
+    seeds = ("holdout-a", "holdout-b")
+    scenario_pool = ("mawler-a10", "cubex-a10", "vine-shambler-a10")
+    deck_pool = ("silent-defend-heavy-v1", "silent-poison-kit-v1")
+    calls = []
+
+    def fake_batch(received_seeds, *, draw_mode, **kwargs):
+        calls.append((received_seeds, draw_mode, kwargs))
+        return {
+            "source_count": len(received_seeds),
+            "scenario_counts": {"mawler-a10": 2},
+            "deck_preset_counts": {"silent-defend-heavy-v1": 2},
+        }
+
+    monkeypatch.setattr(trainer, "draw_only_batch", fake_batch)
+    left, right = trainer.collect_paired_holdout(
+        seeds, nature=TwoSiteNature(seed=1), spec=None,
+        emulator_command=("dotnet", "pinned-emulator.dll"),
+        emulator_bindings=None, emulator_revision="pinned",
+        reference_seed=42, workers=15, max_boundaries=600,
+        scenario_pool=scenario_pool, deck_pool=deck_pool,
+    )
+    assert left == right
+    assert [mode for _, mode, _ in calls] == ["learned", "reference"]
+    for seen_seeds, _, options in calls:
+        assert seen_seeds == seeds
+        assert options["scenario_pool"] == scenario_pool
+        assert options["deck_pool"] == deck_pool
+        assert options["reference_seed"] == 42
+
+    def shifted_reference(received_seeds, *, draw_mode, **kwargs):
+        result = fake_batch(received_seeds, draw_mode=draw_mode, **kwargs)
+        if draw_mode == "reference":
+            result["deck_preset_counts"] = {"silent-starter-v1": 2}
+        return result
+
+    monkeypatch.setattr(trainer, "draw_only_batch", shifted_reference)
+    with pytest.raises(RuntimeError, match="reference context disagrees"):
+        trainer.collect_paired_holdout(
+            seeds, nature=TwoSiteNature(seed=1), spec=None,
+            emulator_command=("dotnet", "pinned-emulator.dll"),
+            emulator_bindings=None, emulator_revision="pinned",
+            reference_seed=42, workers=15, max_boundaries=600,
+            scenario_pool=scenario_pool, deck_pool=deck_pool,
+        )
