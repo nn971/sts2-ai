@@ -24,8 +24,8 @@ from sts2_ai.nature.combat_scenarios import (
     deck_for_seed,
     scenario_for_seed,
 )
-from sts2_ai.nature.draw_only_episode import DrawOnlyEpisode, play_draw_only_episode
 from sts2_ai.nature.contextual_draw import restore_nature
+from sts2_ai.nature.draw_only_episode import DrawOnlyEpisode, play_draw_only_episode
 from sts2_ai.nature.two_site_opponent import TwoSiteNature
 
 _worker_session: Any = None
