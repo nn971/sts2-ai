@@ -25,8 +25,8 @@ from sts2_ai.nature.combat_scenarios import (
     parse_deck_pool,
     parse_scenario_pool,
 )
-from sts2_ai.nature.corpus import atomic_write, file_sha256
 from sts2_ai.nature.contextual_draw import ContextualDrawNature, restore_nature
+from sts2_ai.nature.corpus import atomic_write, file_sha256
 from sts2_ai.nature.draw_only_workers import draw_only_batch
 from sts2_ai.nature.h2_benchmark import balanced_h2_training_source_seeds
 from sts2_ai.nature.protocol import canonical_sha256
@@ -312,7 +312,8 @@ def main() -> None:
     parser.add_argument("--nature-mix", type=float, default=0.75)
     parser.add_argument("--nature-lr", type=float, default=0.08)
     parser.add_argument("--nature-model", choices=("tabular", "contextual"),
-                        default="tabular", help="H2 contextual neural Nature or H1 tabular baseline")
+                        default="tabular",
+                        help="H2 contextual neural Nature or H1 tabular baseline")
     parser.add_argument("--player-temperature", type=float, default=0.85)
     parser.add_argument("--player-action-scope",
                         choices=("silent-basic-v1", "all-legal-v1"),
