@@ -114,7 +114,4 @@ def project_public_enemy_slot_for_legacy_instances(source: dict[str, Any]) -> di
         raise ValueError("Cannot derive public slot for malformed enemy identity")
     projected = json.loads(json.dumps(source))
     projected["combat"]["enemies"][0]["formation_position"] = 0
-    projected["p0_legacy_enemy_slot_projection"] = (
-        "single-public-enemy-slot-v1"
-    )
     return projected
