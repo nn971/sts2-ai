@@ -253,9 +253,10 @@ class ContextualDrawNature:
             "schema": CONTEXTUAL_SCHEMA, "seed": self.seed,
             "mix": self.mix, "learning_rate": self.learning_rate,
             "score_clip": self.score_clip, "revision": self.revision,
-            "state_weight": self.state_weight,
-            "candidate_vectors": self.candidate_vectors,
-            "candidate_bias": self.candidate_bias,
+            "state_weight": [list(row) for row in self.state_weight],
+            "candidate_vectors": {key: list(vector)
+                                  for key, vector in self.candidate_vectors.items()},
+            "candidate_bias": dict(self.candidate_bias),
             "training_objective": "minimize_frozen_player_hp_preservation",
             "reference_law_fidelity_gate": False,
         }
