@@ -9,7 +9,9 @@ import random
 import statistics
 
 from sts2_ai.nature.combat_scenarios import (
-    SCENARIOS, deck_for_seed, scenario_for_seed,
+    SCENARIOS,
+    deck_for_seed,
+    scenario_for_seed,
 )
 
 
