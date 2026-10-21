@@ -329,9 +329,19 @@ def public_resources_tactical_state_features(
     if not isinstance(draw_pile, list) or not isinstance(relic_counters, list):
         raise ValueError("Resource encoder requires visible draw_pile and relic_counters")
     visible_count = combat.get("draw_pile_count")
+    # The selected P0 semantic Nature fixture exposes only the public NUMBER
+    # of unobserved draw-pile cards. Its fair projection intentionally does
+    # not invent identities for the old model's known-card list.
+    opaque_p0 = (
+        state.get("p0_public_projection")
+        == "sts2-ai-p0-public-count-piles-v1"
+        and combat.get("draw_pile_opaque") is True
+    )
+    if opaque_p0 and draw_pile:
+        raise ValueError("Opaque public P0 draw pile must not contain card identities")
     if (
         isinstance(visible_count, int) and not isinstance(visible_count, bool)
-        and len(draw_pile) != visible_count
+        and len(draw_pile) != visible_count and not opaque_p0
     ):
         raise ValueError("Draw-pile count disagrees with public draw-pile contents")
 
