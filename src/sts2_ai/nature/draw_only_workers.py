@@ -105,6 +105,7 @@ def _job(
     index: int, seed: str, reference_seed: int,
     nature_checkpoint: dict, draw_mode: str, entry_mode: str,
     max_boundaries: int, scenario_pool: tuple[str, ...],
+    deck_pool: tuple[str, ...],
 ) -> tuple[int, DrawOnlyEpisode, int]:
     try:
         return _one(
