@@ -125,6 +125,42 @@ def test_exact_reference_draws_use_declared_law_and_ignore_learned_weights():
                       ordinal=0, draw_mode="learned")
 
 
+
+
+def test_source_verified_native_intent_grid_support_and_stale_pending_status():
+    # The current emulator keeps a conservative UNVERIFIED event metadata
+    # status, while ChanceLaw is authoritative and SOURCE_VERIFIED.
+    raw = pending("enemy_intent", weights=(1, 3))
+    raw["chanceLaw"]["probabilityStatus"] = "SOURCE_VERIFIED"
+    raw["chanceLaw"]["probabilityProvenance"] = "source-nextdouble-grid"
+    raw["chanceLaw"]["totalWeight"] = 1 << 53
+    raw["chanceLaw"]["outcomes"][0]["weight"] = 1 << 51
+    raw["chanceLaw"]["outcomes"][1]["weight"] = 3 << 51
+    law = DeclaredLaw.from_pending(raw)
+    assert law.probabilities == (0.25, 0.75)
+    assert law.total_weight == 1 << 53
+    router = DrawOnlyRouter(TwoSiteNature(seed=1), SeededLawSampler(3))
+    choice = router.choose(raw, fingerprint="parent",
+                           episode_key="normal", ordinal=0)
+    assert choice.controller == "engine-law-reference"
+    assert choice.nature_choice is None
+
+    corrupt = copy.deepcopy(raw)
+    corrupt["chanceLaw"]["outcomes"][0]["weight"] += 1
+    corrupt["chanceLaw"]["outcomes"][1]["weight"] -= 1
+    with pytest.raises(DrawOnlyContractError, match="grid disagrees"):
+        DeclaredLaw.from_pending(corrupt)
+
+    wrong_raw = copy.deepcopy(raw)
+    wrong_raw["semanticCandidates"][0]["rawWeight"] = 2
+    with pytest.raises(DrawOnlyContractError):
+        DeclaredLaw.from_pending(wrong_raw)
+
+    draw = pending("draw_card")
+    draw["chanceLaw"]["probabilityStatus"] = "SOURCE_VERIFIED"
+    with pytest.raises(DrawOnlyContractError, match="provenance"):
+        DeclaredLaw.from_pending(draw)
+
 def test_reference_intent_randomness_unaffected_by_inserted_draw_samples():
     intent = DeclaredLaw.from_pending(event_number(
         pending("enemy_intent", weights=(1, 3)), 7
