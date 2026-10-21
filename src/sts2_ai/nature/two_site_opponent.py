@@ -37,6 +37,7 @@ class PilotChoice:
     probabilities: tuple[float, ...]
     selected_index: int
     policy_revision: int
+    state_features: tuple[tuple[int, float], ...] = ()
 
     def __post_init__(self) -> None:
         if (self.operation not in PILOT_OPERATIONS or not self.context_key
@@ -131,6 +132,7 @@ class TwoSiteNature:
         self, event: SemanticEvent, *,
         context_key: str, candidate_features: tuple[str, ...],
         episode_key: str,
+        public_observation: dict | None = None,
     ) -> tuple[SemanticProposal, PilotChoice]:
         self._keys(event, context_key, candidate_features)
         base = self.legal_baseline(event)
