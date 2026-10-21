@@ -148,6 +148,24 @@ def paired_holdout_metrics(nature_episodes, reference_episodes, *,
                 local_draws[min(replicates - 1, int(0.975 * replicates))],
             ],
         }
+    # Distinguish adverse draw effects from deck-composition changes.
+    paired_by_deck = {}
+    for deck in sorted(set(x.deck_preset_id for x in nature_episodes)):
+        by_deck = [
+            (a, b) for a, b in zip(nature_episodes, reference_episodes, strict=True)
+            if a.deck_preset_id == deck
+        ]
+        deltas = tuple(a.score - b.score for a, b in by_deck)
+        paired_by_deck[deck] = {
+            "source_count": len(by_deck),
+            "mean_nature_minus_reference_score": statistics.mean(deltas),
+            "nature_victory_rate": statistics.mean(
+                a.outcome == "victory" for a, _ in by_deck
+            ),
+            "reference_victory_rate": statistics.mean(
+                b.outcome == "victory" for _, b in by_deck
+            ),
+        }
     means = {
         "nature_mean_score": statistics.mean(x.score for x in nature_episodes),
         "reference_mean_score": statistics.mean(x.score for x in reference_episodes),
@@ -169,6 +187,7 @@ def paired_holdout_metrics(nature_episodes, reference_episodes, *,
         **_draw_statistics(nature_episodes),
         "source_count": len(gaps),
         "paired_by_scenario": paired_by_scenario,
+        "paired_by_deck": paired_by_deck,
         "paired_nature_minus_reference_score": statistics.mean(gaps),
         "paired_source_bootstrap_95pct": [
             draws[int(0.025 * replicates)],
