@@ -118,38 +118,53 @@ draws **within each scenario**, in addition to the pooled result. Do not
 compare aggregate Nature scores across experiments with different encounter
 mixes as evidence of learning.
 
-## Proposed engine-owned deck variation (not yet implemented)
+## Experimental engine-owned deck variation (H2 deck branch)
 
-`ControlledPlayableCombatEngineV111.Begin` currently creates
-`player.Deck` from `PrototypeGameFactory.Create(...)/start_run` and builds
-both the combat card-instance registry and draw pile from those card IDs.
-Overwriting only the fair observation, opening hand, or Nature's draw
-candidates would create a false deck and inconsistent hidden state.
+This follow-up is implemented in isolated **emulator PR #178** and **AI
+PR #87**; integration is acceptance-gated by the new deck-pool CI.
 
-For genuine deck-build diversity, implement a separate, source-conditioned
-**initial deck preset** at this earlier C# owner boundary:
+- `silent-starter-v1`: actual 12-card starter (5 Strike, 5 Defend,
+  1 Neutralize, 1 Survivor).
+- `silent-strike-heavy-v1`: 7 Strike, 3 Defend, Neutralize, Survivor.
+- `silent-defend-heavy-v1`: 3 Strike, 7 Defend, Neutralize, Survivor.
+- `silent-poison-kit-v1`: 4 Strike, 4 Defend, Poisoned Stab, Deadly
+  Poison, Neutralize, Survivor.
 
-1. Define named, allowed Silent deck recipes (e.g. starter, attack-heavy,
-   defense-heavy, poison) with explicit card IDs/upgrades/counts. Verify card
-   content and combat mechanics support, and represent each physical copy by
-   a distinct persistent/physical instance ID.
-2. Inject the chosen *run player deck* **before** C# creates the combat-card
-   registry, draw pile, initial native shuffle, or opening draw hooks. Keep
-   relic, persistent card, zone counts and next-instance indices synchronized.
-3. Record the deck-preset ID and its full card-instance list in the private
-   source-conditioned seed entry and snapshot. Expose only appropriately
-   public deck/hand/count information to the player; the hidden draw order
-   stays private and is unaffected by Nature except at deferred draws.
-4. Choose deck presets from the source seed independently of Nature using
-   a declared **research scenario law**, with explicit nonnative provenance.
-   Do not claim the mixture is native-game deck-building probability.
-5. Reject unsupported card mechanics/unknown chance sites explicitly.
-   Include card-instance uniqueness, real full combat to terminal,
-   replay across subprocesses, nontrivial draws and reference-vs-learned
-   matched-world tests.
-6. Only then extend H2 source selection to `(encounter, ascension, deck)`
-   tuples and report **stratified** results by difficulty and deck build.
+Each persistent physical ID is unchanged from the corresponding starter slot.
+The engine creates the deck **before** constructing combat card instances or
+consuming opening shuffle randomness. The original source seed and selected
+deck-preset identity reproduce the same state and opening transcript.
+No player-observation data is forged. These are research-conditioned decks,
+not native reward distributions.
 
-The player must still be frozen across Nature training; variable decks expand
-Nature's distribution of contexts, not the scope of its actions. No
-game-native fidelity check is required for this training experiment.
+Use a **separate checkout** of branch
+`origin/research/nature-h2-deck-context-pool-20261021`. Pin its
+`emulator` submodule to `5a332c2c` and rebuild there. With `$dll`,
+`$bindings`, `$rev`, and `$model` set as above (set `rev` to the new
+submodule SHA), first benchmark with:
+
+```fish
+python -u tools/benchmark_nature_h1_frozen_players.py \
+  --candidate "v8=$model" \
+  --emulator-dll $dll --emulator-bindings $bindings \
+  --emulator-revision $rev --workers 15 \
+  --action-scope all-legal-v1 \
+  --scenario-pool shrinker-a10,nibbits-a10 \
+  --deck-pool silent-starter-v1,silent-strike-heavy-v1,silent-defend-heavy-v1,silent-poison-kit-v1 \
+  --split selection --episodes 256 --reference-replicates 2 \
+  --output-dir results/nature/h2-deck-player-selection
+```
+
+The `--deck-pool` flag uses a separate deterministic source-seed hash,
+so enemy and deck selection are independent and fixed before any chance
+sample. The trainer accepts the same `--scenario-pool` and `--deck-pool`
+flags. Its H2 config digest pins both, with separate source/holdout namespaces.
+Evaluation emits per-encounter and per-deck learned-minus-reference scores;
+genuinely paired arms share the same exact source opening.
+
+**Acceptance criterion:** real v8 reference combats must complete and replay
+on each selected encounter/deck combination, preserve nontrivial physical
+draw decisions, and show useful difficulty. Source/native law calibration is
+not a requirement. If these weak encounters still have saturated victories,
+extend the conditioned emulator encounter catalog to normal/elite combats
+and rerun the player benchmark before expensive H2 training.
