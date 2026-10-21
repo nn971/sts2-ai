@@ -79,14 +79,33 @@ jobs:
           from sts2_ai.emulator.semantic_p0_combat import strike_first_player
           cmd = ['dotnet', '../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll', 'prototype-ai-jsonl']
           with Session(cmd) as session:
-              for deck in DECK_PRESETS:
-                  opts = dict(source_seed='h2-ci-deck-'+deck, reference_seed=88,
-                              nature=TwoSiteNature(seed=7), emulator_revision='5a332c2caa889b9b3f6e326bc054d6dcec019289',
-                              player_choose=strike_first_player, player_model_id='test-only-strike-first',
-                              entry_mode='seeded-fixed-shrinker', draw_mode='reference',
-                              scenario=SCENARIOS['shrinker-a10'], deck_preset_id=deck)
-                  one = play_draw_only_episode(session, **opts)
-                  two = play_draw_only_episode(session, **{**opts, 'replay': one.decisions})
-                  assert one.digest == two.digest and one.nontrivial_draw_count > 0
-                  print(f'[nature-h2] deck={deck} outcome={one.outcome} hp={one.exit_hp} draws={one.nontrivial_draw_count} replay=PASS', flush=True)
+              for scenario_id in ('shrinker-a10', 'nibbits-a10'):
+                  for deck in DECK_PRESETS:
+                      opts = dict(
+                          source_seed='h2-ci-'+scenario_id+'-'+deck,
+                          reference_seed=88,
+                          nature=TwoSiteNature(seed=7),
+                          emulator_revision='5a332c2caa889b9b3f6e326bc054d6cec019289',
+                          player_choose=strike_first_player,
+                          player_model_id='test-only-strike-first',
+                          entry_mode='seeded-fixed-shrinker',
+                          draw_mode='reference',
+                          scenario=SCENARIOS[scenario_id],
+                          deck_preset_id=deck,
+                      )
+                      one = play_draw_only_episode(session, **opts)
+                      two = play_draw_only_episode(
+                          session, **{**opts, 'replay': one.decisions},
+                      )
+                      assert one.digest == two.digest
+                      assert one.terminal_replay_verified and two.terminal_replay_verified
+                      assert one.nontrivial_draw_count > 0
+                      assert one.scenario_id == scenario_id
+                      assert one.deck_preset_id == deck
+                      print(
+                          f'[nature-h2] scenario={scenario_id} deck={deck} '
+                          f'outcome={one.outcome} hp={one.exit_hp} '
+                          f'draws={one.nontrivial_draw_count} replay=PASS',
+                          flush=True,
+                      )
           PY
