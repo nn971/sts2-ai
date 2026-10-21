@@ -18,8 +18,8 @@ from typing import Any, Protocol
 from sts2_ai.emulator.protocol import LegalAction, Observation
 from sts2_ai.emulator.semantic_p0_public_projection import (
     CARD_ZONES,
-    project_public_p0_observation,
     project_public_enemy_slot_for_legacy_instances,
+    project_public_p0_observation,
 )
 from sts2_ai.models.neural import TACTICAL_ATTENTION_FORMAT, TACTICAL_INSTANCES_FORMAT
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
