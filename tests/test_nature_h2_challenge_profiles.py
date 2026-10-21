@@ -13,7 +13,7 @@ from sts2_ai.nature.combat_scenarios import (
 )
 from sts2_ai.nature.draw_only_episode import play_draw_only_episode
 from sts2_ai.nature.two_site_opponent import TwoSiteNature
-from tests.test_nature_draw_only_player_choice import FakeSession
+from test_nature_draw_only_player_choice import FakeSession
 from tools.train_draw_only_nature_h1 import (
     CHALLENGE_SCHEMA,
     SCHEMA,
@@ -116,7 +116,7 @@ def test_source_route_rejects_altered_conditioned_fixture():
 
 
 def test_paired_holdout_refuses_different_challenge_world_ids():
-    from tests.test_nature_draw_only_h1 import episode
+    from test_nature_draw_only_h1 import episode
 
     a = replace(episode("same", mode="learned", score=0.4),
                 scenario_id="nibbits-a10")
