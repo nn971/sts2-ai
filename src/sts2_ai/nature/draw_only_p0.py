@@ -58,7 +58,12 @@ class DeclaredLaw:
             raise DrawOnlyContractError("Emulator Chance Law schema absent or changed")
         if (law.get("probabilityStatus") != REFERENCE_STATUS
                 or pending.get("probabilityStatus") != REFERENCE_STATUS):
-            raise DrawOnlyContractError("Unexpected native probability provenance")
+            raise DrawOnlyContractError(
+                "Unexpected native probability provenance: "
+                f"kind={kind!r} site={pending.get('siteId')!r} "
+                f"pending={pending.get('probabilityStatus')!r} "
+                f"law={law.get('probabilityStatus')!r}"
+            )
         if (law.get("ownerId") != pending.get("ownerId")
                 or law.get("ordinal") != pending.get("ordinal")
                 or type(law.get("ordinal")) is not int
