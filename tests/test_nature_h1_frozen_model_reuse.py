@@ -27,7 +27,7 @@ from tools.benchmark_nature_h1_frozen_players import (
 )
 
 
-def _head(fmt: str, *, dimension: int = 32, hidden: int = 8):
+def _head(fmt: str, *, dimension: int = 64, hidden: int = 8):
     raw = {
         "format": fmt, "dimension": dimension, "hidden": hidden,
         "model_id": "synthetic-fixture",
