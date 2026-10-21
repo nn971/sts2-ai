@@ -20,7 +20,6 @@ from sts2_ai.nature.h2_benchmark import (
 )
 from tools.train_draw_only_nature_h1 import paired_holdout_metrics
 
-
 POOL = ("shrinker-a10", "nibbits-a10")
 
 
