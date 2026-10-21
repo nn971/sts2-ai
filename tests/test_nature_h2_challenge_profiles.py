@@ -7,7 +7,11 @@ import pytest
 from test_nature_draw_only_player_choice import FakeSession
 
 from sts2_ai.nature.combat_scenarios import (
+    BASELINE_DECK,
     BASELINE_SCENARIO,
+    DECK_PRESETS,
+    deck_for_seed,
+    parse_deck_pool,
     SCENARIOS,
     parse_scenario_pool,
     scenario_for_seed,
@@ -152,3 +156,46 @@ def test_h2_holdout_reports_source_paired_deltas_by_enemy():
     assert result["paired_by_scenario"]["shrinker-a10"][
         "mean_nature_minus_reference_score"
     ] == pytest.approx(-0.3)
+
+
+def test_h2_deck_and_encounter_worlds_are_reproducible_and_independent():
+    pool = parse_deck_pool("silent-poison-kit-v1,silent-strike-heavy-v1")
+    assert len(DECK_PRESETS) == 4
+    assert deck_for_seed("world", (BASELINE_DECK,)) == BASELINE_DECK
+    seeds = tuple(source_seed("evaluation", i, training_seed=29, challenge=True)
+                  for i in range(120))
+    selected = tuple(deck_for_seed(seed, pool) for seed in seeds)
+    assert set(selected) == set(pool)
+    assert selected == tuple(deck_for_seed(seed, tuple(reversed(pool)))
+                             for seed in seeds)
+    for bad in ("", "silent-starter-v1,", "unknown", "silent-starter-v1,silent-starter-v1"):
+        with pytest.raises(ValueError):
+            parse_deck_pool(bad)
+
+
+def test_h2_engine_receives_true_persistent_deck_preset_before_shuffle():
+    session = CapturingSession()
+    kw = dict(
+        source_seed="choice", reference_seed=10, nature=TwoSiteNature(seed=11),
+        emulator_revision="pinned", player_choose=lambda _, a: a[0]["actionId"],
+        draw_mode="reference", entry_mode="seeded-fixed-shrinker",
+        scenario=SCENARIOS["nibbits-a10"],
+        deck_preset_id="silent-poison-kit-v1",
+    )
+    a = play_draw_only_episode(session, **kw)
+    assert session.kwargs["fixture_deck_preset_id"] == "silent-poison-kit-v1"
+    assert a.deck_preset_id == "silent-poison-kit-v1"
+    assert a.digest == play_draw_only_episode(
+        session, replay=a.decisions, **kw
+    ).digest
+
+
+def test_h2_holdout_rejects_deck_identity_mismatch():
+    from test_nature_draw_only_h1 import episode
+
+    a = replace(episode("s", mode="learned", score=0.4),
+                deck_preset_id="silent-poison-kit-v1")
+    b = replace(episode("s", mode="reference", score=0.6),
+                deck_preset_id="silent-starter-v1")
+    with pytest.raises(ValueError, match="differ"):
+        paired_holdout_metrics([a], [b], bootstrap_seed=1, replicates=100)
