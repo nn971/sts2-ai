@@ -61,6 +61,51 @@ def balanced_h2_source_seeds(
     return tuple(chosen)
 
 
+def balanced_h2_training_source_seeds(
+    training_seed: int, round_index: int, count: int,
+    scenario_pool: tuple[str, ...], deck_pool: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Balanced source-context quota per training round, without outcome filtering.
+
+    Rotate extra slots so 256 episodes span 12 cells with counts 21/22;
+    consecutive rounds rotate which cells have 22. The namespace includes
+    the training seed and round for disjoint resumable workers.
+    """
+    if (type(training_seed) is not int or type(round_index) is not int
+            or round_index < 0 or count < 1 or not scenario_pool
+            or not deck_pool or len(scenario_pool) != len(set(scenario_pool))
+            or len(deck_pool) != len(set(deck_pool))
+            or any(key not in SCENARIOS for key in scenario_pool)):
+        raise ValueError("Invalid H2 training source configuration")
+    deck_for_seed("h2-train-deck-validation", deck_pool)
+    cells = sorted(
+        configuration_key(scenario, deck)
+        for scenario in scenario_pool for deck in deck_pool
+    )
+    per, extra = divmod(count, len(cells))
+    quota = dict.fromkeys(cells, per)
+    for i in range(extra):
+        quota[cells[(round_index * extra + i) % len(cells)]] += 1
+
+    selected = []
+    accepted = dict.fromkeys(cells, 0)
+    probe = 0
+    while len(selected) < count:
+        seed = (
+            f"nature-draw-h2-train-balanced-v1-{training_seed}-"
+            f"{round_index:05d}-{probe:08d}"
+        )
+        probe += 1
+        key = configuration_key(
+            scenario_for_seed(seed, scenario_pool).scenario_id,
+            deck_for_seed(seed, deck_pool),
+        )
+        if accepted[key] < quota[key]:
+            accepted[key] += 1
+            selected.append(seed)
+    return tuple(selected)
+
+
 def reference_by_configuration(
     cohorts: list[tuple], *, bootstrap_seed: int = 61673,
 ) -> dict[str, dict]:
