@@ -20,41 +20,89 @@ The historical model's `combat_value_objective` is descriptive metadata, not an 
 
 The comparison uses the **same actual emulator** source seeds, fair public observations, legal action menus, physical-card constraints and ordinary Chance Law in both candidate arms. The frozen old policy receives no Nature-private support. The first H1 benchmark uses the explicitly restricted `silent-basic-v1` action scope and a real fixed Shrinker Beetle encounter. The scope must be reported alongside competence. Both ordinary-draw replicates use different independent reference seeds, allowing us to measure whether draw randomness materially changes the player's returns.
 
-## Local evaluation commands (fish)
+## Local evaluation and training (fish; `~/projects/sts2-ai`)
 
-Run in the **isolated AI branch checkout**, with the frozen model paths adjusted to your own files. The source splits do **not** overlap H1 Nature training or held-out H1 evaluation.
+The H1 branch **pins its own emulator submodule** at `3636d274cb5c0160d0b0e358b768dec83705201f` (PR #85 commit `966a6893`), so there is no need to change your separate, active `sts2-emulator` working tree. Verify any uncommitted local AI changes before switching branches.
 
 ```fish
-set emulator_repo /path/to/sts2-emulator-active
-set emulator /path/to/sts2-emulator-h1-isolated
+cd ~/projects/sts2-ai
+git status --short
+git fetch origin
+git switch -c nature-h1-local --track origin/research/nature-h1-reuse-frozen-v8-v13-20261021
+git submodule update --init --recursive emulator
+git -C emulator rev-parse HEAD # must be 3636d274cb5c0160d0b0e358b768dec83705201f
+
+python3 --version # Python 3.12+
+python3 -m venv .venv
+source .venv/bin/activate.fish
+python -m pip install -e '.[dev]'
+dotnet build emulator/Sts2Emulator.sln -c Release
+
 set revision 3636d274cb5c0160d0b0e358b768dec83705201f
-# Dedicated detached worktree: keep all active emulator branches untouched.
-git -C $emulator_repo worktree add --detach $emulator $revision
-set dll $emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll
-set bindings $emulator/bindings/python
+set dll (pwd)/emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll
+set bindings (pwd)/emulator/bindings/python
 set v8 results/ppo-v8-batched-40/models/stage-0120.json
 set v13 results/ppo-enemy-attention-v13/r1/attn/models/stage-0080.json
+test -f $v8; and echo "v8 checkpoint present"; or echo "v8 checkpoint missing"
+test -f $v13; and echo "v13 checkpoint present"; or echo "v13 checkpoint missing"
+python -m pytest -q tests/test_nature_h1_frozen_model_reuse.py
+```
 
-# Build the independent worktree, never switch the active emulator checkout.
-dotnet build $emulator/Sts2Emulator.sln -c Release
+If a different local `nature-h1-local` branch already exists, switch to it after fetching and verify its SHA manually. The checkpoint files above are locally generated experiment outputs and may be absent. Move or copy **actual** portable phase-split JSON checkpoints into these paths, or substitute their exact absolute paths. Examine a candidate's `format` key: it must be `sts2-phase-split-policy-value-v1`.
 
-# Same real fixtures, reference draws, two independent reference RNG replicas,
-# source-level bootstrap, player policy frozen throughout.
+Run a short **technical** preflight (not research evidence) first:
+
+```fish
 python -u tools/benchmark_nature_h1_frozen_players.py \
-  --candidate v8=$v8 --candidate v13=$v13 \
+  --candidate "v8=$v8" --candidate "v13=$v13" \
   --emulator-dll $dll --emulator-bindings $bindings \
   --emulator-revision $revision --workers 15 \
+  --action-scope all-legal-v1 \
+  --split selection --episodes 16 --reference-replicates 2 \
+  --output-dir results/nature/h1-player-preflight
+```
+
+Then evaluate on enough independent sources to compare performance and draw sensitivity. Use the same action scope in player evaluation and Nature training:
+
+```fish
+python -u tools/benchmark_nature_h1_frozen_players.py \
+  --candidate "v8=$v8" --candidate "v13=$v13" \
+  --emulator-dll $dll --emulator-bindings $bindings \
+  --emulator-revision $revision --workers 15 \
+  --action-scope all-legal-v1 \
   --split selection --episodes 256 --reference-replicates 2 \
   --output-dir results/nature/h1-player-selection
 
-# Confirm the choice independently. Changing the split changes source seeds.
 python -u tools/benchmark_nature_h1_frozen_players.py \
-  --candidate v8=$v8 --candidate v13=$v13 \
+  --candidate "v8=$v8" --candidate "v13=$v13" \
   --emulator-dll $dll --emulator-bindings $bindings \
   --emulator-revision $revision --workers 15 \
+  --action-scope all-legal-v1 \
   --split confirmation --episodes 512 --reference-replicates 2 \
   --output-dir results/nature/h1-player-confirmation
 ```
+
+If `all-legal-v1` reveals a genuinely unsupported mechanical action, diagnose and document it; `silent-basic-v1` is a separately labeled restricted-policy alternative. Do not mix scopes in matched comparisons.
+
+After selecting the genuine checkpoint, set `model` to its path (example: `set model $v8`). A single full H1 Nature run:
+
+```fish
+set model $v8
+python -u tools/train_draw_only_nature_h1.py \
+  --player-model $model \
+  --emulator-dll $dll --emulator-bindings $bindings \
+  --emulator-revision $revision --workers 15 \
+  --player-action-scope all-legal-v1 \
+  --training-seed 29 --rounds 40 --episodes-per-round 256 \
+  --eval-episodes 1000 \
+  --output-root results/nature/h1-draw-v8-seed29 \
+  --execute
+```
+
+The script requires `--execute`; without it, it only prints its immutable plan. It produces `checkpoint.json`, `holdout-report.json` and two full held-out JSONL files. To resume an interrupted run, repeat the **identical command** with `--resume` appended and unchanged model/args. For five separate Nature initializations, run the same command with `--training-seed` in `29 101 211 307 401` and a different `--output-root` each time. Each full seed uses 40 × 256 actual C# combats plus 1,000 held-out source combats **per arm**.
+
+The H1 player is always frozen. This experiment optimizes the small `TwoSiteNature` REINFORCE policy, not the old neural player's weights. The 15 independent C# emulator workers primarily use CPU/RAM; Nature H1 does not benefit materially from the RTX GPU. Log output remains unbuffered via `python -u`. If the local system cannot sustain 15 concurrent emulator processes, rerun a fresh experiment with a smaller fixed `--workers` value and record it in the configuration.
+
 
 **Results** (immutable outputs per directory): `report.json` with each model's format, SHA, original value objective, win rate, exit HP, return, bootstrap interval, average deferred physical draw count, fraction of source-paired reference runs that select different draws, and fraction where the **player reward** changes; plus full real episode `NAME-reference-00.jsonl` / `NAME-reference-01.jsonl`. The report includes a paired candidate return difference clustered by source seed, preserving matching opening IDs and reference seeds.
 
