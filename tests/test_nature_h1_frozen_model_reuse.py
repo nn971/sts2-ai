@@ -7,7 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from sts2_ai.emulator.semantic_p0_frozen_player import (\n    FrozenPlayerSpec,\n    FrozenPolicyInferenceError,\n)
+from sts2_ai.emulator.semantic_p0_frozen_player import (
+    FrozenPlayerSpec,
+    FrozenPolicyInferenceError,
+)
 from sts2_ai.models.neural import (
     NEURAL_FORMAT, TACTICAL_ATTENTION_FORMAT, TACTICAL_INSTANCES_FORMAT,
     NeuralPolicyValueModel,
