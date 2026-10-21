@@ -57,7 +57,7 @@ jobs:
           root = Path('/tmp/h1-old-models')
           root.mkdir(exist_ok=True)
           def head(fmt):
-              n, h = 32, 8
+              n, h = 64, 8
               obj = dict(format=fmt, dimension=n, hidden=h,
                          model_id='test-only-compat',
                          state_weight=[[0.0]*n for _ in range(h)],
