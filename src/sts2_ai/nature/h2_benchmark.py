@@ -109,11 +109,15 @@ def reference_by_configuration(
         abs_score_delta = []
         for i in indices:
             a, b = cohorts[0][i], cohorts[1][i]
-            draw_trace = lambda ep: tuple(
-                d.selected_id for d in ep.decisions
+            trace_a = tuple(
+                d.selected_id for d in a.decisions
                 if d.phase == "nature:draw_card"
             )
-            changed_draws.append(draw_trace(a) != draw_trace(b))
+            trace_b = tuple(
+                d.selected_id for d in b.decisions
+                if d.phase == "nature:draw_card"
+            )
+            changed_draws.append(trace_a != trace_b)
             delta = abs(a.score - b.score)
             abs_score_delta.append(delta)
             changed_scores.append(delta > 1e-12)
