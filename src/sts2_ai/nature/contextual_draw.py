@@ -7,9 +7,7 @@ all consequences. A source-law mixture preserves the full reference support.
 from __future__ import annotations
 
 import hashlib
-import json
 import math
-import random
 from collections import defaultdict
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -75,7 +73,8 @@ def encode_public_observation(observation: dict[str, Any]) -> tuple[tuple[int, f
             # Continuous information and coarse buckets both matter.
             signed = math.copysign(math.log1p(abs(value)), value) / 7
             values[_bucket(f"{prefix}.number")] += signed
-            values[_bucket(f"{prefix}.bucket={math.copysign(int(math.log2(1 + abs(value))),value)}")] += 0.5
+            bucket = math.copysign(int(math.log2(1 + abs(value))), value)
+            values[_bucket(f"{prefix}.bucket={bucket}")] += 0.5
         else:
             raise ValueError(f"Unsupported public observation value: {prefix}")
 
