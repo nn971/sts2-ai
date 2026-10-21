@@ -102,6 +102,7 @@ class Episode:
     draw_mode: str = "reference"
     terminal_replay_verified: bool = True
     decisions: tuple = ()
+    scenario_id: str = "shrinker-a0"
 
 
 def _cohort(scores, *, seed=500):
