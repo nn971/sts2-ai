@@ -26,6 +26,7 @@ from sts2_ai.nature.combat_scenarios import (
     parse_scenario_pool,
 )
 from sts2_ai.nature.corpus import atomic_write, file_sha256
+from sts2_ai.nature.contextual_draw import ContextualDrawNature, restore_nature
 from sts2_ai.nature.draw_only_workers import draw_only_batch
 from sts2_ai.nature.h2_benchmark import balanced_h2_training_source_seeds
 from sts2_ai.nature.protocol import canonical_sha256
@@ -310,6 +311,8 @@ def main() -> None:
     parser.add_argument("--max-boundaries", type=int, default=600)
     parser.add_argument("--nature-mix", type=float, default=0.75)
     parser.add_argument("--nature-lr", type=float, default=0.08)
+    parser.add_argument("--nature-model", choices=("tabular", "contextual"),
+                        default="tabular", help="H2 contextual neural Nature or H1 tabular baseline")
     parser.add_argument("--player-temperature", type=float, default=0.85)
     parser.add_argument("--player-action-scope",
                         choices=("silent-basic-v1", "all-legal-v1"),
@@ -385,6 +388,7 @@ def main() -> None:
         "max_boundaries": args.max_boundaries,
         "nature_mix": args.nature_mix,
         "nature_lr": args.nature_lr,
+        "nature_model": args.nature_model,
         "entry_mode": "seeded-fixed-shrinker",
         "chance_distribution": "emulator-authored-v111-unverified",
         "player_training": False,
@@ -419,7 +423,9 @@ def main() -> None:
         saved = json.loads(checkpoint.read_text(encoding="utf-8"))
         if saved.get("schema") != schema or saved.get("config_digest") != fingerprint:
             parser.error("Cannot resume against changed emulator/model/source budget")
-        nature = TwoSiteNature.restore(saved["nature"])
+        nature = restore_nature(saved["nature"])
+        if (isinstance(nature, ContextualDrawNature) != (args.nature_model == "contextual")):
+            parser.error("Checkpoint Nature architecture differs from requested model")
         metrics = saved["metrics"]
         if len(metrics) != nature.revision or len(metrics) > args.rounds:
             parser.error("Inconsistent H1 round/Nature revision checkpoint")
@@ -427,7 +433,10 @@ def main() -> None:
     else:
         if any(args.output_root.iterdir()):
             parser.error("H1 output root is not empty; use explicit --resume")
-        nature = TwoSiteNature(
+        nature = (
+            ContextualDrawNature if args.nature_model == "contextual"
+            else TwoSiteNature
+        )(
             seed=args.training_seed + 100,
             mix=args.nature_mix, learning_rate=args.nature_lr,
         )
