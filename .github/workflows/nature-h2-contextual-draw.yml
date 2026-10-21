@@ -27,7 +27,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: nn971/sts2-emulator
-          ref: b3b26aa1cc2c929f66b346f913f6e5728bcd6b74
+          ref: c254bd99816ac2b89b350ec132fe1cfbb27dfac6
           path: emulator
       - uses: actions/setup-python@v5
         with:
@@ -62,4 +62,4 @@ jobs:
             --scenarios mawler-a10,cubex-a10,vine-shambler-a10 \
             --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
             --emulator-bindings ../emulator/bindings/python \
-            --emulator-revision b3b26aa1cc2c929f66b346f913f6e5728bcd6b74
+            --emulator-revision c254bd99816ac2b89b350ec132fe1cfbb27dfac6
