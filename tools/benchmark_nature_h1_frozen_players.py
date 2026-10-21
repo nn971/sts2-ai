@@ -231,6 +231,8 @@ def main() -> None:
                         help="Comma-separated source-conditioned C# Silent deck presets")
     parser.add_argument("--balance-h2-configurations", action="store_true",
                         help="Exactly equal A10 source counts per enemy/deck pair")
+    parser.add_argument("--expected-v8-sha256",
+                        help="Require exact historical v8 checkpoint bytes")
     parser.add_argument("--allow-test-models", action="store_true",
                         help="Engineering-only: admit explicitly untrained test JSONs")
     args = parser.parse_args()
@@ -281,6 +283,13 @@ def main() -> None:
             f"objective={model.combat_value_objective} sha={spec.model_sha256[:16]}",
             flush=True,
         )
+    if args.expected_v8_sha256 is not None:
+        expected = args.expected_v8_sha256.lower()
+        if (len(specs) != 1 or "v8" not in specs
+                or len(expected) != 64
+                or any(d not in "0123456789abcdef" for d in expected)
+                or specs["v8"].model_sha256 != expected):
+            parser.error("Historical frozen v8 SHA256 mismatch")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     seeds = (balanced_h2_source_seeds(
         args.split, args.episodes, scenario_pool, deck_pool
