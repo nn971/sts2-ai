@@ -10,9 +10,9 @@ from sts2_ai.nature.combat_scenarios import (
     BASELINE_DECK,
     BASELINE_SCENARIO,
     DECK_PRESETS,
+    SCENARIOS,
     deck_for_seed,
     parse_deck_pool,
-    SCENARIOS,
     parse_scenario_pool,
     scenario_for_seed,
 )
