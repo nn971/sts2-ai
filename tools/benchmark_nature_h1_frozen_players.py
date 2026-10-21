@@ -21,7 +21,10 @@ from pathlib import Path
 
 from sts2_ai.emulator.semantic_p0_frozen_player import FrozenPlayerSpec
 from sts2_ai.nature.combat_scenarios import (
+    BASELINE_DECK,
     BASELINE_SCENARIO,
+    deck_for_seed,
+    parse_deck_pool,
     parse_scenario_pool,
     scenario_for_seed,
 )
@@ -79,8 +82,8 @@ def summarize_reference_cohorts(cohorts: list[tuple]) -> dict:
                for e in cohort):
             raise ValueError("Reference cohort contains unverified combat")
         openings.append(tuple(e.source_opening_fingerprint for e in cohort))
-        if tuple(e.scenario_id for e in cohort) != tuple(
-            e.scenario_id for e in cohorts[0]
+        if tuple((e.scenario_id, e.deck_preset_id) for e in cohort) != tuple(
+            (e.scenario_id, e.deck_preset_id) for e in cohorts[0]
         ):
             raise ValueError("Reference cohorts disagree in scenario assignment")
     if any(opening != openings[0] for opening in openings[1:]):
@@ -111,6 +114,10 @@ def summarize_reference_cohorts(cohorts: list[tuple]) -> dict:
                        if x.phase == "nature:draw_card")
         draw_changed += first != second
 
+    deck_counts = {
+        key: sum(e.deck_preset_id == key for e in cohorts[0])
+        for key in sorted({e.deck_preset_id for e in cohorts[0]})
+    }
     scenario_counts = {
         key: sum(e.scenario_id == key for e in cohorts[0])
         for key in sorted({e.scenario_id for e in cohorts[0]})
@@ -129,6 +136,7 @@ def summarize_reference_cohorts(cohorts: list[tuple]) -> dict:
         }
     return {
         "scenario_counts": scenario_counts,
+        "deck_preset_counts": deck_counts,
         "by_scenario": scenario_metrics,
         "source_count": n,
         "reference_replicates": len(cohorts),
@@ -175,6 +183,7 @@ def compare_source_matched_scores(
             if (ea.source_seed != eb.source_seed
                     or ea.reference_seed != eb.reference_seed
                     or ea.scenario_id != eb.scenario_id
+                    or ea.deck_preset_id != eb.deck_preset_id
                     or ea.source_opening_fingerprint !=
                     eb.source_opening_fingerprint
                     or ea.first_public_fingerprint != eb.first_public_fingerprint):
@@ -213,11 +222,14 @@ def main() -> None:
     parser.add_argument("--temperature", type=float, default=0.85)
     parser.add_argument("--scenario-pool", default=BASELINE_SCENARIO,
                         help="Comma-separated pinned single-enemy Act 1 contexts")
+    parser.add_argument("--deck-pool", default=BASELINE_DECK,
+                        help="Comma-separated source-conditioned C# Silent deck presets")
     parser.add_argument("--allow-test-models", action="store_true",
                         help="Engineering-only: admit explicitly untrained test JSONs")
     args = parser.parse_args()
     try:
         scenario_pool = parse_scenario_pool(args.scenario_pool)
+        deck_pool = parse_deck_pool(args.deck_pool)
     except ValueError as exc:
         parser.error(str(exc))
 
@@ -285,7 +297,7 @@ def main() -> None:
                 reference_seed=reference_seed,
                 draw_mode="reference",
                 workers=args.workers, progress_every=max(1, len(seeds) // 10),
-                scenario_pool=scenario_pool,
+                scenario_pool=scenario_pool, deck_pool=deck_pool,
             )
             if batch["source_count"] != len(seeds):
                 raise RuntimeError("Model evaluation produced censored combats")
@@ -311,6 +323,11 @@ def main() -> None:
             args.emulator_bindings / "sts2_emulator" / "__init__.py"
         ),
         "conditioned_scenario_pool": sorted(scenario_pool),
+        "conditioned_deck_pool": sorted(deck_pool),
+        "source_deck_counts": {
+            key: sum(deck_for_seed(seed, deck_pool) == key for seed in seeds)
+            for key in sorted(deck_pool)
+        },
         "source_scenario_counts": {
             key: sum(scenario_for_seed(seed, scenario_pool).scenario_id == key
                      for seed in seeds)

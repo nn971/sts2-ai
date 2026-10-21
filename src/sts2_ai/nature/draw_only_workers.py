@@ -18,7 +18,12 @@ from pathlib import Path
 from typing import Any
 
 from sts2_ai.emulator.semantic_p0_frozen_player import FrozenP0Player, FrozenPlayerSpec
-from sts2_ai.nature.combat_scenarios import BASELINE_SCENARIO, scenario_for_seed
+from sts2_ai.nature.combat_scenarios import (
+    BASELINE_DECK,
+    BASELINE_SCENARIO,
+    deck_for_seed,
+    scenario_for_seed,
+)
 from sts2_ai.nature.draw_only_episode import DrawOnlyEpisode, play_draw_only_episode
 from sts2_ai.nature.two_site_opponent import TwoSiteNature
 
@@ -62,19 +67,22 @@ def _one(
     index: int, seed: str, reference_seed: int,
     nature_checkpoint: dict, draw_mode: str, entry_mode: str,
     max_boundaries: int, scenario_pool: tuple[str, ...],
+    deck_pool: tuple[str, ...],
 ) -> tuple[int, DrawOnlyEpisode, int]:
     if _worker_session is None or _worker_spec is None or _worker_model is None:
         raise RuntimeError("Draw-only worker was not initialized")
     spec = _worker_spec
     chosen = scenario_for_seed(seed, scenario_pool)
+    deck = deck_for_seed(seed, deck_pool)
     nature = TwoSiteNature.restore(nature_checkpoint)
     actor = FrozenP0Player(
         _worker_model, greedy=spec.greedy, temperature=spec.temperature,
         action_scope=spec.action_scope,
         actor_seed=spec.episode_seed(
             fixture_seed=seed, fixture_id=(
-                f"draw-only:{entry_mode}" if scenario_pool == (BASELINE_SCENARIO,)
-                else f"draw-only:{entry_mode}:{chosen.scenario_id}"
+                f"draw-only:{entry_mode}"
+                if scenario_pool == (BASELINE_SCENARIO,) and deck_pool == (BASELINE_DECK,)
+                else f"draw-only:{entry_mode}:{chosen.scenario_id}:{deck}"
             ),
         ),
     )
@@ -84,6 +92,7 @@ def _one(
         player_choose=actor.choose, player_model_id=spec.policy_id,
         draw_mode=draw_mode, entry_mode=entry_mode,
         max_boundaries=max_boundaries, scenario=chosen,
+        deck_preset_id=deck,
     )
     if not result.terminal_replay_verified:
         raise RuntimeError("Draw-only terminal snapshot failed")
@@ -96,11 +105,12 @@ def _job(
     index: int, seed: str, reference_seed: int,
     nature_checkpoint: dict, draw_mode: str, entry_mode: str,
     max_boundaries: int, scenario_pool: tuple[str, ...],
+    deck_pool: tuple[str, ...],
 ) -> tuple[int, DrawOnlyEpisode, int]:
     try:
         return _one(
             index, seed, reference_seed, nature_checkpoint, draw_mode,
-            entry_mode, max_boundaries, scenario_pool,
+            entry_mode, max_boundaries, scenario_pool, deck_pool,
         )
     except Exception:
         raise RuntimeError(
@@ -117,6 +127,7 @@ def draw_only_batch(
     workers: int = 15, max_boundaries: int = 600,
     progress_every: int = 20,
     scenario_pool: tuple[str, ...] = (BASELINE_SCENARIO,),
+    deck_pool: tuple[str, ...] = (BASELINE_DECK,),
 ) -> dict[str, Any]:
     """Return original ordered episodes with real C# process provenance."""
     if (not seeds or len(set(seeds)) != len(seeds)
@@ -135,10 +146,13 @@ def draw_only_batch(
         if spec.temperature <= 0:
             raise ValueError("Invalid sampled frozen-player temperature")
     spec.load_pinned()
-    if entry_mode != "seeded-fixed-shrinker" and scenario_pool != (BASELINE_SCENARIO,):
+    if entry_mode != "seeded-fixed-shrinker" and (
+        scenario_pool != (BASELINE_SCENARIO,) or deck_pool != (BASELINE_DECK,)
+    ):
         raise ValueError("Conditioned scenario pool requires fixed-combat entry")
     for seed in seeds:
         scenario_for_seed(seed, scenario_pool)
+        deck_for_seed(seed, deck_pool)
     elapsed = time.perf_counter()
     checkpoint = nature.dump()
     ordered: list[DrawOnlyEpisode | None] = [None] * len(seeds)
@@ -155,7 +169,8 @@ def draw_only_batch(
         futures = {
             pool.submit(
                 _job, index, seed, reference_seed + index * 1000003,
-                checkpoint, draw_mode, entry_mode, max_boundaries, scenario_pool,
+                checkpoint, draw_mode, entry_mode, max_boundaries,
+                scenario_pool, deck_pool,
             ): (index, seed)
             for index, seed in enumerate(seeds)
         }
@@ -191,6 +206,11 @@ def draw_only_batch(
         "source_count": len(results),
         "draw_mode": draw_mode,
         "scenario_pool": scenario_pool,
+        "deck_pool": deck_pool,
+        "deck_preset_counts": {
+            key: sum(e.deck_preset_id == key for e in results)
+            for key in sorted(deck_pool)
+        },
         "scenario_counts": {
             key: sum(e.scenario_id == key for e in results)
             for key in sorted(scenario_pool)
