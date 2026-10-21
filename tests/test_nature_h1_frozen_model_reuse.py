@@ -175,7 +175,7 @@ def test_single_public_enemy_slot_projection_is_fair_and_idempotent():
     derived = project_public_enemy_slot_for_legacy_instances(raw)
     assert raw["combat"]["enemies"][0].get("formation_position") is None
     assert derived["combat"]["enemies"][0]["formation_position"] == 0
-    assert derived["p0_legacy_enemy_slot_projection"] == "single-public-enemy-slot-v1"
+    assert "p0_legacy_enemy_slot_projection" not in derived
     assert project_public_enemy_slot_for_legacy_instances(derived) is derived
 
 
