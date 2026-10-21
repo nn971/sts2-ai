@@ -166,6 +166,67 @@ def paired_holdout_metrics(nature_episodes, reference_episodes, *,
                 b.outcome == "victory" for _, b in by_deck
             ),
         }
+    # A marginal enemy or deck mean can hide a Nature policy that succeeds
+    # only on one of the eight joint combat configurations.
+    paired_by_configuration = {}
+    cells = sorted({
+        (e.scenario_id, e.deck_preset_id) for e in nature_episodes
+    })
+    for scenario, deck in cells:
+        paired = [
+            (a, b) for a, b in zip(
+                nature_episodes, reference_episodes, strict=True
+            ) if (a.scenario_id, a.deck_preset_id) == (scenario, deck)
+        ]
+        local_gaps = tuple(a.score - b.score for a, b in paired)
+        local_rng = random.Random(
+            bootstrap_seed + sum(map(ord, scenario + "::" + deck))
+        )
+        local_draws = sorted(
+            statistics.mean(
+                local_gaps[local_rng.randrange(len(local_gaps))]
+                for _ in local_gaps
+            ) for _ in range(replicates)
+        )
+        nature_cell = [a for a, _ in paired]
+        reference_cell = [b for _, b in paired]
+        paired_by_configuration[scenario + "::" + deck] = {
+            "scenario_id": scenario,
+            "deck_preset_id": deck,
+            "source_count": len(paired),
+            "nature_mean_score": statistics.mean(a.score for a in nature_cell),
+            "reference_mean_score": statistics.mean(
+                b.score for b in reference_cell
+            ),
+            "mean_nature_minus_reference_score": statistics.mean(local_gaps),
+            "paired_source_bootstrap_95pct": [
+                local_draws[int(0.025 * replicates)],
+                local_draws[min(replicates - 1, int(0.975 * replicates))],
+            ],
+            "nature_victory_rate": statistics.mean(
+                a.outcome == "victory" for a in nature_cell
+            ),
+            "reference_victory_rate": statistics.mean(
+                b.outcome == "victory" for b in reference_cell
+            ),
+            "paired_victory_rate_delta": statistics.mean(
+                (a.outcome == "victory") - (b.outcome == "victory")
+                for a, b in paired
+            ),
+            "nature_mean_exit_hp": statistics.mean(
+                a.exit_hp for a in nature_cell
+            ),
+            "reference_mean_exit_hp": statistics.mean(
+                b.exit_hp for b in reference_cell
+            ),
+            "paired_mean_exit_hp_delta": statistics.mean(
+                a.exit_hp - b.exit_hp for a, b in paired
+            ),
+            "nature_nontrivial_draws_per_combat": statistics.mean(
+                a.nontrivial_draw_count for a in nature_cell
+            ),
+            **_draw_statistics(nature_cell),
+        }
     means = {
         "nature_mean_score": statistics.mean(x.score for x in nature_episodes),
         "reference_mean_score": statistics.mean(x.score for x in reference_episodes),
@@ -188,6 +249,7 @@ def paired_holdout_metrics(nature_episodes, reference_episodes, *,
         "source_count": len(gaps),
         "paired_by_scenario": paired_by_scenario,
         "paired_by_deck": paired_by_deck,
+        "paired_by_configuration": paired_by_configuration,
         "paired_nature_minus_reference_score": statistics.mean(gaps),
         "paired_source_bootstrap_95pct": [
             draws[int(0.025 * replicates)],
