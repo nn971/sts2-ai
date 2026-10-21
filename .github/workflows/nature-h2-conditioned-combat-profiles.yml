@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: nn971/sts2-emulator
-          ref: 5a332c2caa889b9b3f6e326bc054d6dcec019289
+          ref: f76260263d5bc2c72df8301504f84bdf38d00eb1
           path: emulator
       - uses: actions/setup-python@v5
         with:
@@ -64,7 +64,7 @@ jobs:
           python -u tools/probe_nature_h2_combat_profiles.py \
             --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
             --emulator-bindings ../emulator/bindings/python \
-            --emulator-revision 5a332c2caa889b9b3f6e326bc054d6dcec019289
+            --emulator-revision f76260263d5bc2c72df8301504f84bdf38d00eb1
 
       - name: Real C# conditioned deck full-combat and replay gate
         working-directory: ai
@@ -79,13 +79,16 @@ jobs:
           from sts2_ai.emulator.semantic_p0_combat import strike_first_player
           cmd = ['dotnet', '../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll', 'prototype-ai-jsonl']
           with Session(cmd) as session:
-              for scenario_id in ('shrinker-a10', 'nibbits-a10'):
+              for scenario_id in (
+                  'shrinker-a10', 'nibbits-a10',
+                  'mawler-a10', 'cubex-a10', 'vine-shambler-a10',
+              ):
                   for deck in DECK_PRESETS:
                       opts = dict(
                           source_seed='h2-ci-'+scenario_id+'-'+deck,
                           reference_seed=88,
                           nature=TwoSiteNature(seed=7),
-                          emulator_revision='5a332c2caa889b9b3f6e326bc054d6cec019289',
+                          emulator_revision='f76260263d5bc2c72df8301504f84bdf38d00eb1',
                           player_choose=strike_first_player,
                           player_model_id='test-only-strike-first',
                           entry_mode='seeded-fixed-shrinker',
