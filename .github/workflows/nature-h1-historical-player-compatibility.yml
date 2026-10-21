@@ -1,0 +1,118 @@
+name: nature-h1-historical-frozen-player-compatibility
+
+on:
+  push:
+    paths:
+      - 'tools/benchmark_nature_h1_frozen_players.py'
+      - 'tools/train_draw_only_nature_h1.py'
+      - 'tests/test_nature_h1_frozen_model_reuse.py'
+      - '.github/workflows/nature-h1-historical-player-compatibility.yml'
+  pull_request:
+    paths:
+      - 'tools/benchmark_nature_h1_frozen_players.py'
+      - 'tools/train_draw_only_nature_h1.py'
+      - 'tests/test_nature_h1_frozen_model_reuse.py'
+      - '.github/workflows/nature-h1-historical-player-compatibility.yml'
+  workflow_dispatch:
+
+jobs:
+  old-frozen-player-real-combat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ai
+      - uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: 3636d274cb5c0160d0b0e358b768dec83705201f
+          path: emulator
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Install AI
+        working-directory: ai
+        run: python -m pip install -e '.[dev]'
+      - name: Check frozen legacy model benchmark code
+        working-directory: ai
+        run: |
+          python -m ruff check tools/benchmark_nature_h1_frozen_players.py tools/train_draw_only_nature_h1.py tests/test_nature_h1_frozen_model_reuse.py
+          python -m pytest -q tests/test_nature_h1_frozen_model_reuse.py
+      - name: Build validated emulator revision
+        working-directory: emulator
+        run: |
+          dotnet restore Sts2Emulator.sln
+          dotnet build Sts2Emulator.sln -c Release --no-restore
+      - name: Generate synthetic old-format players (compatibility only)
+        working-directory: ai
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from sts2_ai.models.neural import (NeuralPolicyValueModel, NEURAL_FORMAT,
+                                             TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT)
+          from sts2_ai.models.phase_split import PhaseSplitNeuralModel
+          root = Path('/tmp/h1-old-models')
+          root.mkdir(exist_ok=True)
+          def head(fmt):
+              n, h = 32, 8
+              obj = dict(format=fmt, dimension=n, hidden=h,
+                         model_id='test-only-compat',
+                         state_weight=[[0.0]*n for _ in range(h)],
+                         state_bias=[0.0]*h,
+                         action_weight=[[0.0]*n for _ in range(h)],
+                         action_bias=[0.0]*h,
+                         policy_weight=[0.0]*h, policy_bias=0.0,
+                         value_weight=[0.0]*h, value_bias=0.0)
+              if fmt in (TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT):
+                  obj.update(enemy_weight=[[0.0]*n for _ in range(h)],
+                             enemy_bias=[0.0]*h,
+                             enemy_context_weight=[0.0]*h,
+                             enemy_target_weight=[0.0]*h)
+              if fmt == TACTICAL_ATTENTION_FORMAT:
+                  obj.update(attn_query=[[0.0]*h for _ in range(h)],
+                             attn_key=[[0.0]*h for _ in range(h)],
+                             attn_value=[[0.0]*h for _ in range(h)],
+                             attn_output=[[0.0]*h for _ in range(h)],
+                             attn_gate=[0.0]*h)
+              return NeuralPolicyValueModel.from_dict(obj)
+          strategy = head(NEURAL_FORMAT)
+          for name, fmt, objective in [
+              ('v8', TACTICAL_INSTANCES_FORMAT, 'continuation'),
+              ('v13', TACTICAL_ATTENTION_FORMAT, 'hp_preservation'),
+          ]:
+              PhaseSplitNeuralModel(
+                  strategy, head(fmt), f'test-only-{name}-compat',
+                  combat_value_objective=objective,
+              ).save(root / (name + '.json'))
+              print(f'[h1-old-model] synthetic {name} format={fmt} '
+                    f'value_target={objective} PERFORMANCE_EVIDENCE=False', flush=True)
+          PY
+      - name: Real C# reference-draw combat through both historical policy formats
+        working-directory: ai
+        run: |
+          python -u tools/benchmark_nature_h1_frozen_players.py \
+            --candidate v8=/tmp/h1-old-models/v8.json \
+            --candidate v13=/tmp/h1-old-models/v13.json \
+            --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings ../emulator/bindings/python \
+            --emulator-revision 3636d274cb5c0160d0b0e358b768dec83705201f \
+            --episodes 2 --reference-replicates 2 --workers 2 \
+            --allow-test-models --output-dir /tmp/h1-historical-player-compat
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          d = json.loads(Path('/tmp/h1-historical-player-compat/report.json').read_text())
+          assert d['nature_training_status'] == 'NOT_STARTED'
+          assert d['native_probability_calibration'] == 'UNVERIFIED_NOT_REQUIRED'
+          assert set(d['candidates']) == {'v8', 'v13'}
+          for name, data in d['candidates'].items():
+              assert data['test_only'] is True
+              assert data['summary']['combat_count'] == 4
+              assert data['summary']['nontrivial_draw_count'] > 0
+              assert data['summary']['source_count'] == 2
+          print('[h1-old-model] PASS source-matched real C# interface '
+                'COMPATIBILITY_ONLY performance_evidence=False', flush=True)
+          PY
