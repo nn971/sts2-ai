@@ -94,7 +94,7 @@ dotnet build emulator/Sts2Emulator.sln -c Release
 set model ~/projects/sts2-ai/results/ppo-v8-batched-40/models/stage-0120.json
 set dll (pwd)/emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll
 set bindings (pwd)/emulator/bindings/python
-set rev b3b26aa1cc2c929f66b346f913f6e5728bcd6b74
+set rev c254bd99816ac2b89b350ec132fe1cfbb27dfac6
 
 # First smoke the C# Nature-read path and replay.
 python -u tools/probe_nature_h2_combat_profiles.py \
