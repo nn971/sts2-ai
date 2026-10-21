@@ -111,6 +111,40 @@ def paired_holdout_metrics(nature_episodes, reference_episodes, *,
         statistics.mean(gaps[rng.randrange(len(gaps))] for _ in gaps)
         for _ in range(replicates)
     )
+    # Both arms share exactly the same source-conditioned context. Report
+    # per-scenario estimates so changes in encounter mix cannot masquerade as
+    # Nature optimization or obscure a failure on one enemy.
+    scenario_ids = sorted(set(x.scenario_id for x in nature_episodes))
+    paired_by_scenario = {}
+    for key in scenario_ids:
+        paired = [
+            (a, b) for a, b in zip(
+                nature_episodes, reference_episodes, strict=True
+            ) if a.scenario_id == key
+        ]
+        local_gaps = tuple(a.score - b.score for a, b in paired)
+        local_rng = random.Random(bootstrap_seed + sum(ord(c) for c in key))
+        local_draws = sorted(
+            statistics.mean(local_gaps[local_rng.randrange(len(local_gaps))]
+                            for _ in local_gaps)
+            for _ in range(replicates)
+        )
+        paired_by_scenario[key] = {
+            "source_count": len(paired),
+            "nature_mean_score": statistics.mean(a.score for a, _ in paired),
+            "reference_mean_score": statistics.mean(b.score for _, b in paired),
+            "nature_victory_rate": statistics.mean(
+                a.outcome == "victory" for a, _ in paired
+            ),
+            "reference_victory_rate": statistics.mean(
+                b.outcome == "victory" for _, b in paired
+            ),
+            "mean_nature_minus_reference_score": statistics.mean(local_gaps),
+            "paired_source_bootstrap_95pct": [
+                local_draws[int(0.025 * replicates)],
+                local_draws[min(replicates - 1, int(0.975 * replicates))],
+            ],
+        }
     means = {
         "nature_mean_score": statistics.mean(x.score for x in nature_episodes),
         "reference_mean_score": statistics.mean(x.score for x in reference_episodes),
@@ -131,6 +165,7 @@ def paired_holdout_metrics(nature_episodes, reference_episodes, *,
         **means,
         **_draw_statistics(nature_episodes),
         "source_count": len(gaps),
+        "paired_by_scenario": paired_by_scenario,
         "paired_nature_minus_reference_score": statistics.mean(gaps),
         "paired_source_bootstrap_95pct": [
             draws[int(0.025 * replicates)],
