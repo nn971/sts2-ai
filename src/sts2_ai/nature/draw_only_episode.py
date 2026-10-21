@@ -12,7 +12,9 @@ from typing import Any, Protocol
 
 from sts2_ai.emulator.semantic_p0_combat import strike_first_player
 from sts2_ai.nature.combat_scenarios import (
+    BASELINE_DECK,
     BASELINE_SCENARIO,
+    DECK_PRESETS,
     SCENARIOS,
     CombatScenario,
 )
@@ -74,6 +76,7 @@ class DrawOnlyEpisode:
     terminal_fingerprint: str
     terminal_replay_verified: bool
     scenario_id: str = BASELINE_SCENARIO
+    deck_preset_id: str = BASELINE_DECK
 
     @property
     def digest(self) -> str:
@@ -170,6 +173,7 @@ def play_draw_only_episode(
     draw_mode: str = "learned",
     replay: tuple[DrawOnlyStep, ...] | None = None,
     scenario: CombatScenario | None = None,
+    deck_preset_id: str = BASELINE_DECK,
 ) -> DrawOnlyEpisode:
     """Run actual supported first-room mechanics until a genuine terminal.
 
@@ -185,8 +189,12 @@ def play_draw_only_episode(
             or max_boundaries <= 0):
         raise ValueError("Invalid draw-only fixture configuration")
     selected = SCENARIOS[BASELINE_SCENARIO] if scenario is None else scenario
+    if deck_preset_id not in DECK_PRESETS:
+        raise DrawOnlyContractError("Unsupported source-conditioned Silent deck preset")
     if selected.scenario_id not in SCENARIOS or SCENARIOS[selected.scenario_id] != selected:
         raise DrawOnlyContractError("Unpinned challenge-combat scenario")
+    if entry_mode == "source-route" and deck_preset_id != BASELINE_DECK:
+        raise DrawOnlyContractError("Route entry cannot use a research deck preset")
     if entry_mode == "source-route" and selected.scenario_id != BASELINE_SCENARIO:
         raise DrawOnlyContractError(
             "Source-route entries do not support conditioned encounter overrides"
@@ -197,6 +205,10 @@ def play_draw_only_episode(
             raise ValueError("Fixed Shrinker Beetle fixture requires Overgrowth")
         # Engine-owned source-shaped conditioned formation; no external
         # deck/HP/RNG mutation and no native encounter-probability claim.
+        deck_kwargs = (
+            {} if deck_preset_id == BASELINE_DECK else
+            {"fixture_deck_preset_id": deck_preset_id}
+        )
         state = session.begin_seeded_semantic_combat(
             source_seed, act=selected.act,
             encounter_id=selected.encounter_id,
@@ -206,6 +218,7 @@ def play_draw_only_episode(
             first_monster_combat_id=selected.first_monster_combat_id,
             map_column=selected.map_column, map_row=selected.map_row,
             replay_opening_draw_hooks=True, native_policy_baseline=False,
+            **deck_kwargs,
         )
     else:
         state = session.begin_seeded_semantic_route(
@@ -318,6 +331,7 @@ def play_draw_only_episode(
             terminal_fingerprint=state.fingerprint,
             terminal_replay_verified=True,
             scenario_id=selected.scenario_id,
+            deck_preset_id=deck_preset_id,
         )
     finally:
         session.release_semantic_many(held)
