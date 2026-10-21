@@ -7,6 +7,9 @@ from pathlib import Path
 
 import pytest
 
+from sts2_ai.emulator.semantic_p0_public_projection import (
+    project_public_enemy_slot_for_legacy_instances,
+)
 from sts2_ai.emulator.semantic_p0_frozen_player import (
     FrozenPlayerSpec,
     FrozenPolicyInferenceError,
@@ -162,3 +165,34 @@ def test_summary_refuses_wrong_replay_provenance():
     invalid = (replace(first[0], terminal_replay_verified=False), first[1])
     with pytest.raises(ValueError):
         summarize_reference_cohorts([invalid])
+
+
+def test_single_public_enemy_slot_projection_is_fair_and_idempotent():
+    raw = {"combat": {"enemies": [
+        {"instance_id": 3, "enemy_id": "proto.enemy.shrinker_beetle",
+         "statuses": {}, "hp": 21},
+    ]}}
+    derived = project_public_enemy_slot_for_legacy_instances(raw)
+    assert raw["combat"]["enemies"][0].get("formation_position") is None
+    assert derived["combat"]["enemies"][0]["formation_position"] == 0
+    assert derived["p0_legacy_enemy_slot_projection"] == "single-public-enemy-slot-v1"
+    assert project_public_enemy_slot_for_legacy_instances(derived) is derived
+
+
+def test_legacy_multi_enemy_position_must_come_from_emulator():
+    raw = {"combat": {"enemies": [
+        {"instance_id": 3, "enemy_id": "one"},
+        {"instance_id": 4, "enemy_id": "two"},
+    ]}}
+    with pytest.raises(ValueError, match="multiple living enemies"):
+        project_public_enemy_slot_for_legacy_instances(raw)
+    raw["combat"]["enemies"][0]["formation_position"] = 0
+    raw["combat"]["enemies"][1]["formation_position"] = 1
+    assert project_public_enemy_slot_for_legacy_instances(raw) is raw
+
+
+def test_legacy_enemy_slot_projection_rejects_privileged_state():
+    with pytest.raises(ValueError, match="Hidden chance"):
+        project_public_enemy_slot_for_legacy_instances({
+            "combat": {"enemies": []}, "semanticDeck": {"private": True}
+        })
