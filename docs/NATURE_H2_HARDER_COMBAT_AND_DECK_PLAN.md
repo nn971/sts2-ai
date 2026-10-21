@@ -282,3 +282,81 @@ provenance and operation identity for suspended enemy intents. `SOURCE_VERIFIED`
 intent weights are exact Native 53-bit draw-grid masses, checked independently
 against the declared raw weighted support; existing `UNVERIFIED` physical
 draw decisions remain controlled only by draw-only Nature.
+
+## Frozen v8 selection result and authorized H2 Nature run (2026-10-21)
+
+Actual locally executed `report(4).json` selected the historical, unmodified
+v8 player (SHA-256
+`df0808503416fc85384e430a1cd609d5fb8cb5c9f55bfa6a9c2e8bfc568237d5`)
+against normal A10 Mawler, Cubex Construct, and Vine Shambler × four
+engine-owned deck presets. **768 distinct source worlds, two independent
+reference-draw replicates/world, 1,536 complete combats, all won.** Mean
+score `0.58327753` (source-bootstrap 95% CI `[0.57444, 0.59181]`),
+mean remaining HP `40.8294` (vs `61.1519` for prior weak encounters).
+Changing reference draws changed final score in **88.67%** of paired source
+worlds, with mean absolute delta `0.09754`. Mean nontrivial physical draws
+were `17.3431` per combat and stochastic intents `1.7826` per combat.
+
+The strongest challenged cell was Cubex/Defend-heavy (score `0.35446`,
+HP `24.8125`, score changed in `96.875%` of paired source worlds,
+mean absolute reference-replicate score delta `0.12634`).
+Defend-heavy across Mawler and Vine Shambler was also highly sensitive.
+**Decision:** This is enough HP-score signal to start first serious H2
+draw-only Nature training now. Victory remains saturated; any future
+Nature-induced defeats are an additional result, not a precondition for
+training. Preserve all twelve cells to test generality.
+
+Preflight corrective change: the H2 trainer's historical held-out reference
+arm previously omitted `scenario_pool` and `deck_pool`, which would compare
+different worlds. Both arms now receive the **same shared context** and
+check counts before paired evaluation. Training now uses a deterministic,
+resume-safe, per-round balanced source selector for challenge conditions,
+assigning 21–22 source worlds to each of 12 cells per 256-combat update
+(and rotating the extra 4 slots). H1's original defaults and seeds are
+unchanged. Newly initiated H2 checkpoints pin this changed source
+sampling policy in their configuration digest; do not mix with
+checkpoints from the older unbalanced experiment.
+
+Local instructions reuse the **existing** `~/projects/sts2-ai-h2` worktree
+(no new worktree), using its usual Python venv. Fetch and check out the
+H2 PR branch, update gitlink `emulator`, then rebuild it before training.
+
+```fish
+cd ~/projects/sts2-ai-h2
+git status --short
+git fetch origin
+git switch --detach origin/research/nature-h2-single-normal-a10-20261021
+git submodule update --init --recursive emulator
+source .venv/bin/activate.fish
+dotnet build emulator/Sts2Emulator.sln -c Release
+set model ~/projects/sts2-ai/results/ppo-v8-batched-40/models/stage-0120.json
+set dll (pwd)/emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll
+set bindings (pwd)/emulator/bindings/python
+set rev 9588c0c7d8c96310ac2300308dc19fb9a68e2aef
+for seed in 29 101 173
+    python -u tools/train_draw_only_nature_h1.py \
+        --player-model $model --emulator-dll $dll \
+        --emulator-bindings $bindings --emulator-revision $rev \
+        --player-action-scope all-legal-v1 \
+        --scenario-pool mawler-a10,cubex-a10,vine-shambler-a10 \
+        --deck-pool silent-starter-v1,silent-strike-heavy-v1,silent-defend-heavy-v1,silent-poison-kit-v1 \
+        --training-seed $seed --actor-seed 31337 --reference-seed 23387 \
+        --workers 15 --rounds 40 --episodes-per-round 256 \
+        --eval-episodes 1000 \
+        --output-root results/nature/h2-a10-normal-v8-seed$seed \
+        --execute 2>&1 | tee h2-a10-normal-v8-seed$seed.log
+    if test $pipestatus[1] -ne 0
+        break
+    end
+end
+```
+
+Run three **independent** Nature seeds, with 40 × 256 substantive training
+combats and 1,000 source-paired held-out worlds per seed, both learned and
+reference arms. Reports and per-cell paired differences are under each
+seed's output root. Logs print all rounds including `score` and
+`nature_grad`. An interrupted seed can resume by rerunning the same
+command with `--resume` and unchanged config. Holdout source namespace
+remains disjoint from the earlier v8 difficulty selection worlds.
+Native game fidelity status `UNVERIFIED` is independent of this experiment
+and is never a training gate.
