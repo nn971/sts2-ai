@@ -4,13 +4,13 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+from test_nature_contextual_draw import event, visible
+from test_nature_draw_only_law import pending
 
 from sts2_ai.nature.contextual_draw import restore_nature
 from sts2_ai.nature.draw_only_p0 import DrawOnlyRouter, SeededLawSampler
 from sts2_ai.nature.ppo_draw import PPO_DRAW_SCHEMA, PpoDrawNature
 from sts2_ai.nature.two_site_opponent import PilotEpisode
-from test_nature_contextual_draw import event, visible
-from test_nature_draw_only_law import pending
 
 
 torch = pytest.importorskip("torch")
