@@ -175,6 +175,7 @@ def play_draw_only_episode(
     replay: tuple[DrawOnlyStep, ...] | None = None,
     scenario: CombatScenario | None = None,
     deck_preset_id: str = BASELINE_DECK,
+    score_reference_q: bool = False,
 ) -> DrawOnlyEpisode:
     """Run actual supported first-room mechanics until a genuine terminal.
 
@@ -247,7 +248,7 @@ def play_draw_only_episode(
                 public_observation = (
                     state.observe_for_nature()
                     if isinstance(nature, ContextualDrawNature)
-                    and draw_mode == "learned"
+                    and (draw_mode == "learned" or score_reference_q)
                     and state.pending.get("kind") == "draw_card"
                     else None
                 )
@@ -256,6 +257,7 @@ def play_draw_only_episode(
                     episode_key=source_seed, ordinal=ordinal,
                     draw_mode=draw_mode,
                     public_observation=public_observation,
+                    score_reference_q=score_reference_q,
                 )
                 if picked.operation == "enemy_intent":
                     reference_intent_count += 1
