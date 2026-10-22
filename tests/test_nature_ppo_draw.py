@@ -12,7 +12,6 @@ from sts2_ai.nature.draw_only_p0 import DrawOnlyRouter, SeededLawSampler
 from sts2_ai.nature.ppo_draw import PPO_DRAW_SCHEMA, PpoDrawNature
 from sts2_ai.nature.two_site_opponent import PilotEpisode
 
-
 torch = pytest.importorskip("torch")
 
 
