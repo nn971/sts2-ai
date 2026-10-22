@@ -126,3 +126,51 @@ def test_ppo_restoration_keeps_full_support_and_context_dependence():
     )[1].state_features
     restored = restore_nature(nature.dump())
     assert restored.propose(**args) == original
+
+
+def test_ppo_portable_actor_and_critic_match_torch_optimizer():
+    nature = PpoDrawNature(seed=57)
+    opts = dict(
+        event=event(), context_key="draw", episode_key="parity",
+        candidate_features=("strike", "defend"),
+        public_observation=visible(),
+    )
+    _, choice = nature.propose(**opts)
+    model = nature._parameters(torch)
+    value, probs = nature._forward_torch(
+        torch, model, choice.state_features, choice.features,
+        choice.baseline, nature.mix,
+    )
+    assert value.item() == pytest.approx(choice.behavior_value, abs=1e-12)
+    assert probs.detach().tolist() == pytest.approx(choice.probabilities, abs=1e-12)
+
+
+def test_ppo_learns_adversarial_draw_in_controlled_contextual_bandit():
+    # Validates the direction of the *actual clipped optimizer* with a
+    # known terminal outcome. This is a synthetic learning sanity check,
+    # not evidence of success against the frozen v8 player.
+    nature = PpoDrawNature(
+        seed=63, learning_rate=0.003, ppo_epochs=4,
+        ppo_batch_size=32, ppo_sample_limit=128,
+    )
+    common = dict(
+        event=event(), context_key="draw", candidate_features=("strike", "defend"),
+        public_observation=visible(),
+    )
+    _, initial = nature.propose(**{**common, "episode_key": "before"})
+    initial_bad = initial.probabilities[0]
+    for round_index in range(5):
+        episodes = []
+        for i in range(128):
+            _, choice = nature.propose(
+                **{**common, "episode_key": f"bandit:{round_index}:{i}"}
+            )
+            # Strike (index 0) has zero player return, so Nature should
+            # learn to draw it more frequently than Defend (index 1).
+            episodes.append(PilotEpisode(
+                player_return=float(choice.selected_index == 1),
+                choices=(choice,),
+            ))
+        nature.update(tuple(episodes))
+    _, final = nature.propose(**{**common, "episode_key": "after"})
+    assert final.probabilities[0] > initial_bad + 0.08
