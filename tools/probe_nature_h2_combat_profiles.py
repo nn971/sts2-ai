@@ -12,6 +12,7 @@ from sts2_ai.emulator.semantic_p0_combat import strike_first_player
 from sts2_ai.nature.combat_scenarios import SCENARIOS, parse_scenario_pool
 from sts2_ai.nature.contextual_draw import ContextualDrawNature, restore_nature
 from sts2_ai.nature.draw_only_episode import play_draw_only_episode
+from sts2_ai.nature.ppo_draw import PpoDrawNature
 from sts2_ai.nature.two_site_opponent import TwoSiteNature
 
 
@@ -24,15 +25,19 @@ def main() -> None:
         "--scenarios", default="shrinker-a0,shrinker-a10,nibbits-a0,nibbits-a10"
     )
     parser.add_argument("--max-boundaries", type=int, default=600)
-    parser.add_argument("--nature-model", choices=("tabular", "contextual"),
+    parser.add_argument("--nature-model", choices=("tabular", "contextual", "ppo"),
                         default="tabular")
     args = parser.parse_args()
     scenarios = parse_scenario_pool(args.scenarios)
     sys.path.insert(0, str(args.emulator_bindings.resolve()))
     Session = importlib.import_module("sts2_emulator").Session
     with Session(["dotnet", str(args.emulator_dll.resolve()), "prototype-ai-jsonl"]) as session:
-        contextual = (ContextualDrawNature(seed=1)
-                      if args.nature_model == "contextual" else None)
+        contextual = (
+            PpoDrawNature(seed=1, ppo_epochs=2, ppo_batch_size=16)
+            if args.nature_model == "ppo" else
+            ContextualDrawNature(seed=1)
+            if args.nature_model == "contextual" else None
+        )
         training_episodes = []
         for key in scenarios:
             scenario = SCENARIOS[key]
@@ -44,7 +49,7 @@ def main() -> None:
                 player_choose=strike_first_player,
                 player_model_id="test-only-strike-first",
                 entry_mode="seeded-fixed-shrinker",
-                draw_mode=("learned" if args.nature_model == "contextual"
+                draw_mode=("learned" if args.nature_model in ("contextual", "ppo")
                            else "reference"),
                 max_boundaries=args.max_boundaries,
                 scenario=scenario,
@@ -90,6 +95,7 @@ def main() -> None:
             print(json.dumps({
                 "training_smoke": "PASS",
                 "nature_gradient_norm": update["nature_gradient_norm"],
+                "ppo_minibatch_updates": update.get("nature_optimizer_steps", 0),
                 "nature_revision": restored.revision,
                 "post_update_replay": True,
             }, sort_keys=True), flush=True)

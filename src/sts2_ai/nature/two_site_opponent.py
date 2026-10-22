@@ -38,6 +38,7 @@ class PilotChoice:
     selected_index: int
     policy_revision: int
     state_features: tuple[tuple[int, float], ...] = ()
+    behavior_value: float | None = None
 
     def __post_init__(self) -> None:
         if (self.operation not in PILOT_OPERATIONS or not self.context_key

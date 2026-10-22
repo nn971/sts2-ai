@@ -1,0 +1,59 @@
+name: nature-h2-ppo-draw
+
+on:
+  push:
+    paths:
+      - 'src/sts2_ai/nature/ppo_draw.py'
+      - 'src/sts2_ai/nature/contextual_draw.py'
+      - 'src/sts2_ai/nature/two_site_opponent.py'
+      - 'tools/train_draw_only_nature_h1.py'
+      - 'tools/probe_nature_h2_combat_profiles.py'
+      - 'tests/test_nature_ppo_draw.py'
+      - '.github/workflows/nature-h2-ppo-draw.yml'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  nature-ppo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ai
+          submodules: false
+      - uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: c254bd99816ac2b89b350ec132fe1cfbb27dfac6
+          path: emulator
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Install lightweight PyTorch and AI
+        working-directory: ai
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e '.[dev]'
+      - name: Lint and Nature PPO regression
+        working-directory: ai
+        run: |
+          python -m ruff check src/sts2_ai/nature/ppo_draw.py src/sts2_ai/nature/contextual_draw.py src/sts2_ai/nature/two_site_opponent.py tools/train_draw_only_nature_h1.py tools/probe_nature_h2_combat_profiles.py tests/test_nature_ppo_draw.py
+          python -m pytest -q tests/test_nature_ppo_draw.py tests/test_nature_contextual_draw.py tests/test_nature_draw_only_law.py tests/test_nature_h2_challenge_profiles.py
+      - name: Build pinned isolated emulator
+        working-directory: emulator
+        run: |
+          dotnet restore Sts2Emulator.sln
+          dotnet build Sts2Emulator.sln -c Release --no-restore
+      - name: Real A10 combats, PPO updates, and terminal replay
+        working-directory: ai
+        run: |
+          python -u tools/probe_nature_h2_combat_profiles.py \
+            --nature-model ppo \
+            --scenarios mawler-a10,cubex-a10,vine-shambler-a10 \
+            --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings ../emulator/bindings/python \
+            --emulator-revision c254bd99816ac2b89b350ec132fe1cfbb27dfac6
