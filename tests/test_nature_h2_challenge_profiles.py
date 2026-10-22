@@ -30,6 +30,7 @@ def test_h2_explicit_eligible_single_enemy_encounters_and_ascension():
     assert set(SCENARIOS) == {
         "shrinker-a0", "shrinker-a10", "nibbits-a0", "nibbits-a10",
         "mawler-a10", "cubex-a10", "vine-shambler-a10",
+        "ceremonial-beast-boss-a10", "vantom-boss-a10",
     }
     for key in ("mawler-a10", "cubex-a10", "vine-shambler-a10"):
         assert SCENARIOS[key].ascension == 10
