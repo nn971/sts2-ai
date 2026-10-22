@@ -26,10 +26,10 @@ from sts2_ai.nature.combat_scenarios import (
     parse_scenario_pool,
 )
 from sts2_ai.nature.contextual_draw import ContextualDrawNature, restore_nature
-from sts2_ai.nature.ppo_draw import PpoDrawNature
 from sts2_ai.nature.corpus import atomic_write, file_sha256
 from sts2_ai.nature.draw_only_workers import draw_only_batch
 from sts2_ai.nature.h2_benchmark import balanced_h2_training_source_seeds
+from sts2_ai.nature.ppo_draw import PpoDrawNature
 from sts2_ai.nature.protocol import canonical_sha256
 from sts2_ai.nature.two_site_opponent import TwoSiteNature
 
