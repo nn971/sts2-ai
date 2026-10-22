@@ -112,6 +112,7 @@ def _job(
     max_boundaries: int, scenario_pool: tuple[str, ...],
     deck_pool: tuple[str, ...],
     capture_player_training: bool = False, reference_count: int = 0,
+    score_reference_q: bool = False,
 ) -> tuple[int, DrawOnlyEpisode, int, tuple[dict[str, Any], ...]]:
     try:
         return _one(
