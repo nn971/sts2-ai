@@ -65,6 +65,7 @@ class PreparedSample:
     old_logprob: float
     advantage: float
     target: float
+    importance_weight: float = 1.0
 
 
 def encode_decision(
@@ -229,8 +230,15 @@ def _prepare(
     params: dict[str, dict[str, Any]], dimension: int, encoding: str,
     temperature: float, gamma: float, gae_lambda: float,
     inference_batch_size: int = 128,
+    episode_weights: list[float] | None = None,
 ) -> dict[str, list[PreparedSample]]:
     """Encode the whole cohort ONCE, including old-policy logits and values."""
+    if episode_weights is not None and (
+        len(episode_weights) != len(run_targets)
+        or any(not math.isfinite(w) or w < 0 for w in episode_weights)
+        or not any(w > 0 for w in episode_weights)
+    ):
+        raise ValueError("Malformed reference-law importance weights")
     encoded_episodes = [
         [encode_decision(decision, dimension, encoding, torch) for decision in ep.decisions]
         for ep, _ in run_targets
@@ -288,6 +296,7 @@ def _prepare(
             ):
                 result["combat"].append(PreparedSample(
                     decisions[index], probabilities[index], advantage, value_target,
+                    1.0 if episode_weights is None else episode_weights[ep_index],
                 ))
         for index, decision in enumerate(decisions):
             if decision.phase == "combat":
@@ -311,6 +320,7 @@ def ppo_update_batched(
     temperature: float, gamma: float, gae_lambda: float, epochs: int,
     batch_size: int, sample_limit: int, clip_epsilon: float,
     value_weight: float, entropy_weight: float, seed: int,
+    episode_weights: list[float] | None = None,
 ) -> PpoDiagnostics:
     if min(epochs, batch_size, sample_limit) <= 0:
         raise ValueError("PPO epoch/batch/sample sizes must be positive")
@@ -322,6 +332,7 @@ def ppo_update_batched(
         torch=torch, run_targets=run_targets, local_targets=local_targets,
         params=params, dimension=dimension, encoding=encoding,
         temperature=temperature, gamma=gamma, gae_lambda=gae_lambda,
+        episode_weights=episode_weights,
     )
     rng = random.Random(seed)
     all_losses: list[float] = []
@@ -337,8 +348,17 @@ def ppo_update_batched(
         else:
             samples = all_samples
 
-        mean = sum(s.advantage for s in samples) / len(samples)
-        variance = sum((s.advantage - mean) ** 2 for s in samples) / len(samples)
+        # Normalize using the target reference-law distribution, not
+        # the adversarial sampler's action-state visitation frequencies.
+        mass = math.fsum(s.importance_weight for s in samples)
+        if mass <= 0:
+            continue
+        mean = math.fsum(
+            s.advantage * s.importance_weight for s in samples
+        ) / mass
+        variance = math.fsum(
+            (s.advantage - mean) ** 2 * s.importance_weight for s in samples
+        ) / mass
         std = math.sqrt(variance + 1e-8)
         normalized = [
             max(-5.0, min(5.0, (s.advantage - mean) / std))
@@ -375,9 +395,15 @@ def ppo_update_batched(
                 critic_loss = (values - targets).square()
                 # Padding contributes exactly zero entropy probability.
                 entropy = -(logprobs.exp() * logprobs).sum(dim=1)
+                importance = torch.tensor(
+                    [samples[i].importance_weight for i in chosen],
+                    dtype=torch.float32,
+                )
+                # Nature's importance weights correct the draw law.
+                # PPO's ratio separately corrects later player updates.
                 loss = (
-                    policy_loss + value_weight * critic_loss
-                    - entropy_weight * entropy
+                    importance * (policy_loss + value_weight * critic_loss
+                                  - entropy_weight * entropy)
                 ).mean()
                 optimizers[phase].zero_grad()
                 loss.backward()
@@ -390,9 +416,9 @@ def ppo_update_batched(
                 size = len(chosen)
                 phase_seen += size
                 phase_loss += float(loss.detach()) * size
-                phase_policy += float(policy_loss.mean().detach()) * size
-                phase_value += float(critic_loss.mean().detach()) * size
-                phase_entropy += float(entropy.mean().detach()) * size
+                phase_policy += float((importance * policy_loss).mean().detach()) * size
+                phase_value += float((importance * critic_loss).mean().detach()) * size
+                phase_entropy += float((importance * entropy).mean().detach()) * size
                 phase_kl += float((-log_ratio.detach()).sum())
                 phase_clip += int(
                     ((ratio.detach() - 1.0).abs() > clip_epsilon).sum()
