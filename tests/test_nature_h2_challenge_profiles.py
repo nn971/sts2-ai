@@ -30,6 +30,7 @@ def test_h2_explicit_eligible_single_enemy_encounters_and_ascension():
     assert set(SCENARIOS) == {
         "shrinker-a0", "shrinker-a10", "nibbits-a0", "nibbits-a10",
         "mawler-a10", "cubex-a10", "vine-shambler-a10",
+        "ceremonial-beast-boss-a10", "vantom-boss-a10",
     }
     for key in ("mawler-a10", "cubex-a10", "vine-shambler-a10"):
         assert SCENARIOS[key].ascension == 10
@@ -163,7 +164,7 @@ def test_h2_holdout_reports_source_paired_deltas_by_enemy():
 
 def test_h2_deck_and_encounter_worlds_are_reproducible_and_independent():
     pool = parse_deck_pool("silent-poison-kit-v1,silent-strike-heavy-v1")
-    assert len(DECK_PRESETS) == 4
+    assert len(DECK_PRESETS) == 6
     assert deck_for_seed("world", (BASELINE_DECK,)) == BASELINE_DECK
     seeds = tuple(source_seed("evaluation", i, training_seed=29, challenge=True)
                   for i in range(120))

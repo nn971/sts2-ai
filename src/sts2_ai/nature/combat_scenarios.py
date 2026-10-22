@@ -27,10 +27,11 @@ class CombatScenario:
 
     def __post_init__(self) -> None:
         if (
-            self.act != 1 or self.total_floor != 2
+            self.act != 1
+            or (self.total_floor, self.map_row) not in ((2, 1), (6, 5))
             or self.first_monster_combat_id != 1
             or not 0 <= self.ascension <= 10
-            or self.map_column != 3 or self.map_row != 1
+            or self.map_column != 3
         ):
             raise ValueError("Unsupported H2 conditioned encounter fixture")
 
@@ -62,6 +63,17 @@ SCENARIOS: dict[str, CombatScenario] = {
     "vine-shambler-a10": CombatScenario(
         "vine-shambler-a10", "proto.encounter.vine_shambler_normal",
         "VineShamblerNormal", 10,
+    ),
+    # The prototype's final boss map node is floor 6. The native game has a
+    # different floor count; these are engine-owned *research* combat fixtures.
+    "ceremonial-beast-boss-a10": CombatScenario(
+        "ceremonial-beast-boss-a10",
+        "proto.encounter.ceremonial_beast_boss", "CeremonialBeastBoss",
+        10, total_floor=6, map_row=5,
+    ),
+    "vantom-boss-a10": CombatScenario(
+        "vantom-boss-a10", "proto.encounter.vantom_boss",
+        "VantomBoss", 10, total_floor=6, map_row=5,
     ),
 }
 
@@ -104,6 +116,8 @@ DECK_PRESETS = (
     "silent-strike-heavy-v1",
     "silent-defend-heavy-v1",
     "silent-poison-kit-v1",
+    "silent-boss-cycle-20-v1",
+    "silent-boss-poison-20-v1",
 )
 
 
