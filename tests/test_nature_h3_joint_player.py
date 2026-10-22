@@ -5,12 +5,12 @@ from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
+from test_enemy_instances_v8 import build_model, combat_frame, targeted
 
 from sts2_ai.emulator.semantic_p0_frozen_player import FrozenP0Player
 from sts2_ai.models.neural import NEURAL_FORMAT, NeuralPolicyValueModel
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.nature.joint_player_ppo import JointPlayerPPO
-from test_enemy_instances_v8 import build_model, combat_frame, targeted
 
 torch = pytest.importorskip("torch")
 
