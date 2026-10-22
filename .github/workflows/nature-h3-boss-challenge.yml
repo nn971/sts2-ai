@@ -76,3 +76,33 @@ jobs:
           assert 0<record['player_is_effective_fraction']<=1.000001
           print('H3 boss real-combat training and replay PASS')
           PY
+      - name: Paired frozen policy boss benchmark smoke
+        working-directory: ai
+        run: |
+          python - <<'PY'
+          import json
+          from sts2_ai.nature.ppo_draw import PpoDrawNature
+          with open('ci-boss-nature.json', 'w') as f:
+              json.dump({'nature': PpoDrawNature(seed=29).dump()}, f)
+          PY
+          python -u tools/evaluate_nature_h3_boss_challenge.py \
+            --player-model ci-boss-v8-player.json \
+            --nature-checkpoint ci-boss-nature.json \
+            --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings ../emulator/bindings/python \
+            --emulator-revision acc46926758af5567f17549075d06fa27bb58422 \
+            --output-root ci-h3-boss-paired --workers 4 \
+            --eval-episodes 4 --max-boundaries 1200 --split selection
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          output=Path('ci-h3-boss-paired')
+          report=json.loads((output/'report.json').read_text())
+          metrics=report['metrics']
+          assert metrics['source_count']==4
+          assert len(metrics['paired_by_configuration'])==4
+          assert (output/'paired-worlds.jsonl').exists()
+          assert len((output/'paired-worlds.jsonl').read_text().splitlines())==4
+          print('H3 frozen boss paired evaluation PASS')
+          PY
+
