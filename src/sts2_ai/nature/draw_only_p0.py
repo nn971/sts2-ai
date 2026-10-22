@@ -256,6 +256,7 @@ class DrawOnlyRouter:
         episode_key: str, ordinal: int,
         draw_mode: str = "learned",
         public_observation: dict[str, Any] | None = None,
+        score_reference_q: bool = False,
     ) -> RoutedChoice:
         if draw_mode not in ("learned", "reference"):
             raise DrawOnlyContractError("Unsupported draw routing mode")
@@ -263,13 +264,37 @@ class DrawOnlyRouter:
         if law.operation == "enemy_intent" or draw_mode == "reference":
             chosen = self.reference.sample(law)
             q = law.probabilities[chosen]
+            # H3 reference-target multiple IS needs the frozen learned
+            # Nature probability along *reference* trajectories as well.
+            # This is an observation-only query: the chosen transition still
+            # follows p; it never adds a Nature learning decision.
+            log_behavior_q = math.log(q)
+            if score_reference_q and law.operation == "draw_card":
+                event, features, ids = _pending_event(pending, fingerprint)
+                if tuple(f"card_instance:{value}" for value in ids) != law.outcome_ids:
+                    raise DrawOnlyContractError("Counterfactual q support differs from p")
+                if any(not math.isclose(prob, 1 / len(ids), abs_tol=1e-12)
+                       for prob in law.probabilities):
+                    raise DrawOnlyContractError("Counterfactual q requires uniform draw base")
+                if not hasattr(self.nature, "propose"):
+                    raise DrawOnlyContractError("Nature policy cannot score reference draws")
+                _, scored = self.nature.propose(
+                    event, context_key=f"{law.site_id}|{event.owner_id}",
+                    candidate_features=features,
+                    episode_key=f"{episode_key}:{ordinal}",
+                    public_observation=public_observation,
+                )
+                if (len(scored.probabilities) != len(ids)
+                        or not 0 < scored.probabilities[chosen] <= 1):
+                    raise DrawOnlyContractError("Malformed frozen Nature reference q")
+                log_behavior_q = math.log(scored.probabilities[chosen])
             return RoutedChoice(
                 operation=law.operation, law_id=law.law_id,
                 event_id=law.event_id,
                 conditioning_fingerprint=law.conditioning_fingerprint,
                 selected_outcome_id=law.outcome_ids[chosen],
                 selected_index=chosen,
-                log_p=math.log(q), log_q=math.log(q),
+                log_p=math.log(q), log_q=log_behavior_q,
                 controller="engine-law-reference",
             )
         event, features, ids = _pending_event(pending, fingerprint)
