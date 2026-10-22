@@ -93,7 +93,7 @@ def test_source_likelihood_invariants_reject_missing_scores():
         ))
     with pytest.raises(NatureImportanceError, match="Missing physical"):
         log_q_over_p(replace(broken, controlled_draw_count=2))
-    with pytest.raises(NatureImportanceError, match="allocation"):
+    with pytest.raises(NatureImportanceError, match="mixed-arm"):
         reference_target_weights((broken, episode("learned", 1.0)),
                                  reference_count=0)
 
