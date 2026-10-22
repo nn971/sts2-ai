@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import json
 import statistics
-from dataclasses import asdict
 from pathlib import Path
 
 from sts2_ai.emulator.semantic_p0_frozen_player import FrozenPlayerSpec
