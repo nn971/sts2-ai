@@ -68,17 +68,20 @@ def _one(
     index: int, seed: str, reference_seed: int,
     nature_checkpoint: dict, draw_mode: str, entry_mode: str,
     max_boundaries: int, scenario_pool: tuple[str, ...],
-    deck_pool: tuple[str, ...],
-) -> tuple[int, DrawOnlyEpisode, int]:
+    deck_pool: tuple[str, ...], capture_player_training: bool = False,
+    reference_count: int = 0,
+) -> tuple[int, DrawOnlyEpisode, int, tuple[dict[str, Any], ...]]:
     if _worker_session is None or _worker_spec is None or _worker_model is None:
         raise RuntimeError("Draw-only worker was not initialized")
     spec = _worker_spec
     chosen = scenario_for_seed(seed, scenario_pool)
     deck = deck_for_seed(seed, deck_pool)
     nature = restore_nature(nature_checkpoint)
+    actual_draw_mode = "reference" if index < reference_count else draw_mode
     actor = FrozenP0Player(
         _worker_model, greedy=spec.greedy, temperature=spec.temperature,
         action_scope=spec.action_scope,
+        capture_training=capture_player_training,
         actor_seed=spec.episode_seed(
             fixture_seed=seed, fixture_id=(
                 f"draw-only:{entry_mode}"
@@ -91,7 +94,7 @@ def _one(
         _worker_session, source_seed=seed, reference_seed=reference_seed,
         nature=nature, emulator_revision=_worker_revision,
         player_choose=actor.choose, player_model_id=spec.policy_id,
-        draw_mode=draw_mode, entry_mode=entry_mode,
+        draw_mode=actual_draw_mode, entry_mode=entry_mode,
         max_boundaries=max_boundaries, scenario=chosen,
         deck_preset_id=deck,
     )
@@ -99,7 +102,7 @@ def _one(
         raise RuntimeError("Draw-only terminal snapshot failed")
     if result.player_model_id != spec.policy_id:
         raise RuntimeError("Draw-only frozen player checksum drift")
-    return index, result, os.getpid()
+    return index, result, os.getpid(), tuple(actor.training_actions)
 
 
 def _job(
@@ -112,6 +115,7 @@ def _job(
         return _one(
             index, seed, reference_seed, nature_checkpoint, draw_mode,
             entry_mode, max_boundaries, scenario_pool, deck_pool,
+            capture_player_training, reference_count,
         )
     except Exception:
         raise RuntimeError(
@@ -129,6 +133,7 @@ def draw_only_batch(
     progress_every: int = 20,
     scenario_pool: tuple[str, ...] = (BASELINE_SCENARIO,),
     deck_pool: tuple[str, ...] = (BASELINE_DECK,),
+    capture_player_training: bool = False, reference_count: int = 0,
 ) -> dict[str, Any]:
     """Return original ordered episodes with real C# process provenance."""
     if (not seeds or len(set(seeds)) != len(seeds)
@@ -136,6 +141,10 @@ def draw_only_batch(
         raise ValueError("Each source-run seed must be nonempty and distinct")
     if draw_mode not in ("learned", "reference"):
         raise ValueError("Unknown draw routing mode")
+    if (reference_count < 0 or reference_count >= len(seeds)
+            or (reference_count and draw_mode != "learned")
+            or (capture_player_training and spec.greedy)):
+        raise ValueError("Invalid mixed-Nature/player PPO cohort configuration")
     if workers <= 0 or max_boundaries <= 0 or progress_every <= 0:
         raise ValueError("Invalid emulator worker configuration")
     if not emulator_command or not emulator_revision:
@@ -158,6 +167,7 @@ def draw_only_batch(
     checkpoint = nature.dump()
     ordered: list[DrawOnlyEpisode | None] = [None] * len(seeds)
     process_ids: set[int] = set()
+    ordered_player: list[tuple[dict[str, Any], ...] | None] = [None] * len(seeds)
     with ProcessPoolExecutor(
         max_workers=workers,
         mp_context=multiprocessing.get_context("spawn"),
@@ -172,13 +182,14 @@ def draw_only_batch(
                 _job, index, seed, reference_seed + index * 1000003,
                 checkpoint, draw_mode, entry_mode, max_boundaries,
                 scenario_pool, deck_pool,
+                capture_player_training, reference_count,
             ): (index, seed)
             for index, seed in enumerate(seeds)
         }
         for completed, future in enumerate(as_completed(futures), 1):
             index, seed = futures[future]
             try:
-                resolved_index, episode, pid = future.result()
+                resolved_index, episode, pid, player_actions = future.result()
             except Exception as exc:
                 print(
                     f"[nature-draw-only] FAIL {seed}: {exc}",
@@ -188,6 +199,7 @@ def draw_only_batch(
             if resolved_index != index or episode.source_seed != seed:
                 raise RuntimeError("Shuffled cross-worker draw-only source result")
             ordered[index] = episode
+            ordered_player[index] = player_actions
             process_ids.add(pid)
             if completed % progress_every == 0 or completed == len(seeds):
                 print(
@@ -197,11 +209,13 @@ def draw_only_batch(
                     f"{time.perf_counter()-elapsed:.1f}",
                     flush=True,
                 )
-    if any(item is None for item in ordered):
+    if any(item is None for item in ordered) or any(x is None for x in ordered_player):
         raise RuntimeError("Missing an externally executed combat episode")
     results = tuple(item for item in ordered if item is not None)
     return {
         "episodes": results,
+        "player_rollouts": tuple(x for x in ordered_player if x is not None),
+        "reference_count": reference_count,
         "process_count": len(process_ids),
         "emulator_revision": emulator_revision,
         "source_count": len(results),
