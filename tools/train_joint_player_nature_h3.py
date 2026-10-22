@@ -8,10 +8,7 @@ Native-game fidelity is NOT a training dependency.
 from __future__ import annotations
 
 import argparse
-import hashlib
-import importlib
 import json
-import math
 import os
 import statistics
 import tempfile
