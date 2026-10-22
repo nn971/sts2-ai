@@ -61,7 +61,7 @@ git submodule update --init --recursive emulator
 # The AI parent submodule may point at the older emulator. Use the
 # isolated draft PR #183 code, NOT the active comparator branch.
 git -C emulator fetch origin feature/nature-h3-boss-decks-relics-20261022
-git -C emulator switch --detach 5328c676e57d228b66edada15d72b9362b89f705
+git -C emulator switch --detach acc46926758af5567f17549075d06fa27bb58422
 
 source .venv/bin/activate.fish
 python -m pip install -e '.[neural]'
@@ -71,7 +71,7 @@ set model ~/projects/sts2-ai/results/ppo-v8-batched-40/models/stage-0120.json
 set nature (pwd)/results/nature/h2-a10-ppo-v8-seed29/checkpoint.json
 set dll (pwd)/emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll
 set bindings (pwd)/emulator/bindings/python
-set rev 5328c676e57d228b66edada15d72b9362b89f705
+set rev acc46926758af5567f17549075d06fa27bb58422
 
 # Diagnose difficulty with a selection set first.
 python -u tools/evaluate_nature_h3_boss_challenge.py \
