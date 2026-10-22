@@ -1,0 +1,78 @@
+name: nature-h3-boss-challenge-smoke
+
+on:
+  push:
+    paths:
+      - 'src/sts2_ai/nature/combat_scenarios.py'
+      - 'tests/test_nature_h3_boss_profiles.py'
+      - '.github/workflows/nature-h3-boss-challenge.yml'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  boss-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ai
+          submodules: false
+      - uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: 083fe8de8dc35002f001c01b1de5d8164465c010
+          path: emulator
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Install dependencies
+        working-directory: ai
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e '.[dev]'
+      - name: Verify AI scenario registry and existing regressions
+        working-directory: ai
+        run: |
+          python -m ruff check src/sts2_ai/nature/combat_scenarios.py tests/test_nature_h3_boss_profiles.py
+          python -m pytest -q tests/test_nature_h3_boss_profiles.py tests/test_nature_h2_challenge_profiles.py
+      - name: Build emulator and test only new boss entry fixtures
+        working-directory: emulator
+        run: |
+          dotnet restore Sts2Emulator.sln
+          dotnet build Sts2Emulator.sln -c Release --no-restore
+          dotnet test tests/Sts2Emulator.Core.Tests/Sts2Emulator.Core.Tests.csproj -c Release --no-build --filter FullyQualifiedName~NatureH3BossResearchFixtureTests
+      - name: Real C# boss combats, shared PPO and paired reference evaluation
+        working-directory: ai
+        run: |
+          python - <<'PY'
+          import json, sys
+          sys.path.insert(0, 'tests')
+          from test_nature_h3_joint_player import specimen
+          with open('ci-boss-v8-player.json', 'w') as f:
+              json.dump(specimen().to_dict(), f)
+          PY
+          python -u tools/train_joint_player_nature_h3.py \
+            --player-model ci-boss-v8-player.json \
+            --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings ../emulator/bindings/python \
+            --emulator-revision 083fe8de8dc35002f001c01b1de5d8164465c010 \
+            --scenario-pool ceremonial-beast-boss-a10,vantom-boss-a10 \
+            --deck-pool silent-boss-cycle-20-v1,silent-boss-poison-20-v1 \
+            --output-root ci-h3-boss --workers 4 --player-target reference-is \
+            --rounds 1 --episodes-per-round 8 --eval-every 1 --eval-episodes 4 \
+            --max-boundaries 1200 --execute
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          record=json.loads(Path('ci-h3-boss/progress.json').read_text())['rows'][0]
+          assert record['reference_training_combats']==2
+          assert record['learned_nature_training_combats']==6
+          assert record['player_ppo_steps']>0 and record['nature_optimizer_steps']>0
+          assert record['holdout']['eval_source_count']==4
+          assert 0<record['player_is_effective_fraction']<=1.000001
+          print('H3 boss real-combat training and replay PASS')
+          PY
