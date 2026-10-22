@@ -26,6 +26,7 @@ from sts2_ai.nature.combat_scenarios import (
     parse_scenario_pool,
 )
 from sts2_ai.nature.contextual_draw import ContextualDrawNature, restore_nature
+from sts2_ai.nature.ppo_draw import PpoDrawNature
 from sts2_ai.nature.corpus import atomic_write, file_sha256
 from sts2_ai.nature.draw_only_workers import draw_only_batch
 from sts2_ai.nature.h2_benchmark import balanced_h2_training_source_seeds
@@ -311,9 +312,17 @@ def main() -> None:
     parser.add_argument("--max-boundaries", type=int, default=600)
     parser.add_argument("--nature-mix", type=float, default=0.75)
     parser.add_argument("--nature-lr", type=float, default=0.08)
-    parser.add_argument("--nature-model", choices=("tabular", "contextual"),
+    parser.add_argument("--nature-model", choices=("tabular", "contextual", "ppo"),
                         default="tabular",
                         help="H2 contextual neural Nature or H1 tabular baseline")
+    parser.add_argument("--ppo-epochs", type=int, default=4)
+    parser.add_argument("--ppo-batch-size", type=int, default=128)
+    parser.add_argument("--ppo-sample-limit", type=int, default=2048)
+    parser.add_argument("--ppo-clip-epsilon", type=float, default=0.2)
+    parser.add_argument("--ppo-value-weight", type=float, default=0.5)
+    parser.add_argument("--ppo-entropy-weight", type=float, default=0.001)
+    parser.add_argument("--ppo-gamma", type=float, default=1.0)
+    parser.add_argument("--ppo-gae-lambda", type=float, default=0.98)
     parser.add_argument("--player-temperature", type=float, default=0.85)
     parser.add_argument("--player-action-scope",
                         choices=("silent-basic-v1", "all-legal-v1"),
@@ -343,6 +352,15 @@ def main() -> None:
     if (not 0 <= args.nature_mix < 1 or args.nature_lr <= 0
             or not math.isfinite(args.nature_lr)):
         parser.error("Invalid Nature optimizer parameters")
+    if args.nature_model == "ppo":
+        if (min(args.ppo_epochs, args.ppo_batch_size,
+                args.ppo_sample_limit) < 1
+                or not 0 < args.ppo_clip_epsilon < 1
+                or not 0 < args.ppo_gamma <= 1
+                or not 0 <= args.ppo_gae_lambda <= 1
+                or not all(math.isfinite(x) and x >= 0 for x in
+                           (args.ppo_value_weight, args.ppo_entropy_weight))):
+            parser.error("Invalid Nature PPO optimizer parameters")
     if not args.emulator_dll.is_file():
         parser.error("Missing pinned emulator DLL")
     binding_file = args.emulator_bindings / "sts2_emulator" / "__init__.py"
@@ -390,6 +408,16 @@ def main() -> None:
         "nature_mix": args.nature_mix,
         "nature_lr": args.nature_lr,
         "nature_model": args.nature_model,
+        **({
+            "ppo_epochs": args.ppo_epochs,
+            "ppo_batch_size": args.ppo_batch_size,
+            "ppo_sample_limit": args.ppo_sample_limit,
+            "ppo_clip_epsilon": args.ppo_clip_epsilon,
+            "ppo_value_weight": args.ppo_value_weight,
+            "ppo_entropy_weight": args.ppo_entropy_weight,
+            "ppo_gamma": args.ppo_gamma,
+            "ppo_gae_lambda": args.ppo_gae_lambda,
+        } if args.nature_model == "ppo" else {}),
         "entry_mode": "seeded-fixed-shrinker",
         "chance_distribution": "emulator-authored-v111-unverified",
         "player_training": False,
@@ -425,7 +453,11 @@ def main() -> None:
         if saved.get("schema") != schema or saved.get("config_digest") != fingerprint:
             parser.error("Cannot resume against changed emulator/model/source budget")
         nature = restore_nature(saved["nature"])
-        if (isinstance(nature, ContextualDrawNature) != (args.nature_model == "contextual")):
+        expected_type = {
+            "tabular": TwoSiteNature, "contextual": ContextualDrawNature,
+            "ppo": PpoDrawNature,
+        }[args.nature_model]
+        if type(nature) is not expected_type:
             parser.error("Checkpoint Nature architecture differs from requested model")
         metrics = saved["metrics"]
         if len(metrics) != nature.revision or len(metrics) > args.rounds:
@@ -434,13 +466,26 @@ def main() -> None:
     else:
         if any(args.output_root.iterdir()):
             parser.error("H1 output root is not empty; use explicit --resume")
-        nature = (
-            ContextualDrawNature if args.nature_model == "contextual"
-            else TwoSiteNature
-        )(
-            seed=args.training_seed + 100,
-            mix=args.nature_mix, learning_rate=args.nature_lr,
-        )
+        if args.nature_model == "ppo":
+            nature = PpoDrawNature(
+                seed=args.training_seed + 100, mix=args.nature_mix,
+                learning_rate=args.nature_lr,
+                ppo_epochs=args.ppo_epochs,
+                ppo_batch_size=args.ppo_batch_size,
+                ppo_sample_limit=args.ppo_sample_limit,
+                clip_epsilon=args.ppo_clip_epsilon,
+                value_weight_factor=args.ppo_value_weight,
+                entropy_weight=args.ppo_entropy_weight,
+                gamma=args.ppo_gamma, gae_lambda=args.ppo_gae_lambda,
+            )
+        else:
+            nature = (
+                ContextualDrawNature if args.nature_model == "contextual"
+                else TwoSiteNature
+            )(
+                seed=args.training_seed + 100,
+                mix=args.nature_mix, learning_rate=args.nature_lr,
+            )
         metrics = []
         first_round = 0
     command = ("dotnet", str(args.emulator_dll.resolve()), "prototype-ai-jsonl")
@@ -507,6 +552,9 @@ def main() -> None:
             f"score={metrics_before['mean_player_score']:.4f} "
             f"nontrivial_draws={batch['nontrivial_draws']} "
             f"nature_grad={optimization['nature_gradient_norm']:.5f} "
+            f"ppo_steps={int(optimization.get('nature_optimizer_steps', 0))} "
+            f"ppo_kl={optimization.get('nature_ppo_approx_kl', 0):.5f} "
+            f"ppo_clip={optimization.get('nature_ppo_clip_fraction', 0):.3f} "
             f"nature_rev={nature.revision} "
             f"emulator_pids={batch['process_count']}", flush=True,
         )
