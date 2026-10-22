@@ -2,8 +2,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import replace
-from types import SimpleNamespace
+from dataclasses import dataclass, replace
 
 import pytest
 from test_nature_contextual_draw import visible
@@ -20,13 +19,21 @@ from sts2_ai.nature.reference_importance import (
 )
 
 
+@dataclass(frozen=True)
+class FakeEpisode:
+    draw_mode: str
+    terminal_replay_verified: bool
+    controlled_draw_count: int
+    decisions: tuple[DrawOnlyStep, ...]
+
+
 def episode(mode: str, q_over_p: float, *, draws: int = 1):
     step = DrawOnlyStep(
         phase="nature:draw_card", support_id="law",
         selected_id="card_instance:7", result_fingerprint="child",
         log_p=math.log(0.5), log_q=math.log(0.5 * q_over_p),
     )
-    return SimpleNamespace(
+    return FakeEpisode(
         draw_mode=mode, terminal_replay_verified=True,
         controlled_draw_count=draws,
         decisions=(step,) * draws,
