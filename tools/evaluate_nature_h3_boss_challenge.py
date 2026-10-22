@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import json
 import statistics
-import sys
 from pathlib import Path
 
 from sts2_ai.emulator.semantic_p0_frozen_player import FrozenPlayerSpec
@@ -21,10 +20,8 @@ from sts2_ai.nature.corpus import atomic_write, file_sha256
 from sts2_ai.nature.h2_benchmark import balanced_h2_source_seeds
 from sts2_ai.nature.ppo_draw import PpoDrawNature
 from sts2_ai.nature.protocol import canonical_sha256
-# Running this file as "python tools/<script>.py" places tools/ on sys.path,
-# not the repository root. The original H2 benchmark module is shared here.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from tools.train_draw_only_nature_h1 import (
+# Direct script invocation ("python tools/...") makes tools/ importable.
+from train_draw_only_nature_h1 import (
     collect_paired_holdout,
     paired_holdout_metrics,
 )
