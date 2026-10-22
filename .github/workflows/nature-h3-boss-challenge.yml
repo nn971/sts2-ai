@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: nn971/sts2-emulator
-          ref: 083fe8de8dc35002f001c01b1de5d8164465c010
+          ref: a172e428dad71a2574c3f49ae177ca233b421e13
           path: emulator
       - uses: actions/setup-python@v5
         with:
@@ -37,7 +37,7 @@ jobs:
       - name: Verify AI scenario registry and existing regressions
         working-directory: ai
         run: |
-          python -m ruff check src/sts2_ai/nature/combat_scenarios.py tests/test_nature_h3_boss_profiles.py
+          python -m ruff check src/sts2_ai/nature/combat_scenarios.py tests/test_nature_h3_boss_profiles.py tools/evaluate_nature_h3_boss_challenge.py
           python -m pytest -q tests/test_nature_h3_boss_profiles.py tests/test_nature_h2_challenge_profiles.py
       - name: Build emulator and test only new boss entry fixtures
         working-directory: emulator
@@ -59,7 +59,7 @@ jobs:
             --player-model ci-boss-v8-player.json \
             --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
             --emulator-bindings ../emulator/bindings/python \
-            --emulator-revision 083fe8de8dc35002f001c01b1de5d8164465c010 \
+            --emulator-revision a172e428dad71a2574c3f49ae177ca233b421e13 \
             --scenario-pool ceremonial-beast-boss-a10,vantom-boss-a10 \
             --deck-pool silent-boss-cycle-20-v1,silent-boss-poison-20-v1 \
             --output-root ci-h3-boss --workers 4 --player-target reference-is \
