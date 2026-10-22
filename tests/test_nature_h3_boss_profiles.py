@@ -11,7 +11,6 @@ from sts2_ai.nature.combat_scenarios import (
 )
 from sts2_ai.nature.h2_benchmark import balanced_h2_source_seeds
 
-
 BOSSES = (
     "ceremonial-beast-boss-a10",
     "vantom-boss-a10",
