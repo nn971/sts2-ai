@@ -7,7 +7,6 @@ byte-identical. No hidden game state enters training samples.
 from __future__ import annotations
 
 import math
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
