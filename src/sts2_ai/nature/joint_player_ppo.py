@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from sts2_ai.emulator.protocol import LegalAction, Observation
+from sts2_ai.emulator.semantic_p0_frozen_player import FrozenP0Player
 from sts2_ai.models.neural import (
     TACTICAL_ATTENTION_FORMAT,
     TACTICAL_INSTANCES_FORMAT,
@@ -145,6 +146,15 @@ class JointPlayerPPO:
                 LegalAction(a["action_id"], a["kind"], a["payload_json"])
                 for a in row["legal_actions"]
             )
+            from_source, all_source_actions = FrozenP0Player._public_types(
+                row["source_observation"], row["source_legal_actions"],
+                need_legacy_instance_slot=True,
+            )
+            scoped_source = FrozenP0Player.scoped_actions(
+                row["source_observation"], all_source_actions, "all-legal-v1",
+            )
+            if from_source != observation or scoped_source != legal:
+                raise ValueError("Player capture differs from fair source menu")
             idx = row["chosen_index"]
             if (not 0 <= idx < len(legal) or
                     legal[idx].action_id != step.selected_id or
@@ -181,6 +191,10 @@ class JointPlayerPPO:
         targets = []
         segments = []
         for episode, captured in samples:
+            if any(abs(row["temperature"] - self.temperature) > 1e-12
+                   or row["action_scope"] != "all-legal-v1"
+                   for row in captured):
+                raise ValueError("Player PPO behavior temperature/scope mismatch")
             choices = self.validate_capture(episode, captured, self.model)
             targets.append((
                 Episode(
