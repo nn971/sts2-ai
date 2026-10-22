@@ -347,6 +347,10 @@ def ppo_update_batched(
             samples = [all_samples[i] for i in indices]
         else:
             samples = all_samples
+        # The variance guard may explicitly select reference-only PPO.
+        # Skip zero-mass q samples rather than running zero-gradient
+        # minibatches with weight decay.
+        samples = [sample for sample in samples if sample.importance_weight > 0]
 
         # Normalize using the target reference-law distribution, not
         # the adversarial sampler's action-state visitation frequencies.
