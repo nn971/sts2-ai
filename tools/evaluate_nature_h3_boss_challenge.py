@@ -13,6 +13,12 @@ import json
 import statistics
 from pathlib import Path
 
+# Direct script invocation ("python tools/...") makes tools/ importable.
+from train_draw_only_nature_h1 import (
+    collect_paired_holdout,
+    paired_holdout_metrics,
+)
+
 from sts2_ai.emulator.semantic_p0_frozen_player import FrozenPlayerSpec
 from sts2_ai.nature.combat_scenarios import parse_deck_pool, parse_scenario_pool
 from sts2_ai.nature.contextual_draw import restore_nature
@@ -20,11 +26,6 @@ from sts2_ai.nature.corpus import atomic_write, file_sha256
 from sts2_ai.nature.h2_benchmark import balanced_h2_source_seeds
 from sts2_ai.nature.ppo_draw import PpoDrawNature
 from sts2_ai.nature.protocol import canonical_sha256
-# Direct script invocation ("python tools/...") makes tools/ importable.
-from train_draw_only_nature_h1 import (
-    collect_paired_holdout,
-    paired_holdout_metrics,
-)
 
 DEFAULT_BOSSES = "ceremonial-beast-boss-a10,vantom-boss-a10"
 DEFAULT_DECKS = "silent-boss-cycle-20-v1,silent-boss-poison-20-v1"
