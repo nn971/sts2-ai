@@ -69,7 +69,7 @@ def _one(
     nature_checkpoint: dict, draw_mode: str, entry_mode: str,
     max_boundaries: int, scenario_pool: tuple[str, ...],
     deck_pool: tuple[str, ...], capture_player_training: bool = False,
-    reference_count: int = 0,
+    reference_count: int = 0, score_reference_q: bool = False,
 ) -> tuple[int, DrawOnlyEpisode, int, tuple[dict[str, Any], ...]]:
     if _worker_session is None or _worker_spec is None or _worker_model is None:
         raise RuntimeError("Draw-only worker was not initialized")
@@ -97,6 +97,7 @@ def _one(
         draw_mode=actual_draw_mode, entry_mode=entry_mode,
         max_boundaries=max_boundaries, scenario=chosen,
         deck_preset_id=deck,
+        score_reference_q=score_reference_q,
     )
     if not result.terminal_replay_verified:
         raise RuntimeError("Draw-only terminal snapshot failed")
@@ -111,12 +112,13 @@ def _job(
     max_boundaries: int, scenario_pool: tuple[str, ...],
     deck_pool: tuple[str, ...],
     capture_player_training: bool = False, reference_count: int = 0,
+    score_reference_q: bool = False,
 ) -> tuple[int, DrawOnlyEpisode, int, tuple[dict[str, Any], ...]]:
     try:
         return _one(
             index, seed, reference_seed, nature_checkpoint, draw_mode,
             entry_mode, max_boundaries, scenario_pool, deck_pool,
-            capture_player_training, reference_count,
+            capture_player_training, reference_count, score_reference_q,
         )
     except Exception:
         raise RuntimeError(
@@ -135,6 +137,7 @@ def draw_only_batch(
     scenario_pool: tuple[str, ...] = (BASELINE_SCENARIO,),
     deck_pool: tuple[str, ...] = (BASELINE_DECK,),
     capture_player_training: bool = False, reference_count: int = 0,
+    score_reference_q: bool = False,
 ) -> dict[str, Any]:
     """Return original ordered episodes with real C# process provenance."""
     if (not seeds or len(set(seeds)) != len(seeds)
@@ -183,7 +186,7 @@ def draw_only_batch(
                 _job, index, seed, reference_seed + index * 1000003,
                 checkpoint, draw_mode, entry_mode, max_boundaries,
                 scenario_pool, deck_pool,
-                capture_player_training, reference_count,
+                capture_player_training, reference_count, score_reference_q,
             ): (index, seed)
             for index, seed in enumerate(seeds)
         }

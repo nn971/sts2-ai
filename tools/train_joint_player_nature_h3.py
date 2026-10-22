@@ -31,6 +31,7 @@ from sts2_ai.nature.h2_benchmark import (
 from sts2_ai.nature.joint_player_ppo import JointPlayerPPO
 from sts2_ai.nature.ppo_draw import PpoDrawNature
 from sts2_ai.nature.protocol import canonical_sha256
+from sts2_ai.nature.reference_importance import reference_target_weights
 
 SCHEMA = "sts2-ai-h3-joint-player-nature-ppo-v1"
 
@@ -133,6 +134,10 @@ def main() -> None:
     p.add_argument("--workers", type=int, default=15)
     p.add_argument("--max-boundaries", type=int, default=600)
     p.add_argument("--reference-fraction", type=float, default=0.25)
+    p.add_argument("--player-target", choices=("mixture", "reference-is"),
+                   default="mixture",
+                   help="Use balance-heuristic IS to target original draw law p")
+    p.add_argument("--is-min-ess-fraction", type=float, default=0.1)
     p.add_argument("--player-lr", type=float, default=0.0003)
     p.add_argument("--player-temperature", type=float, default=0.85)
     p.add_argument("--player-ppo-epochs", type=int, default=3)
@@ -159,6 +164,8 @@ def main() -> None:
             or int(args.episodes_per_round * (1-args.reference_fraction)) < 2
             or args.eval_episodes % (len(scenarios) * len(decks))):
         p.error("Invalid H3 cohort sizes, reference mix, or evaluation balance")
+    if not 0 < args.is_min_ess_fraction <= 1:
+        p.error("Invalid reference importance ESS threshold")
     if (not 0 < args.player_lr < 1
             or not 0 < args.nature_start_lr < 1
             or not 0 < args.player_temperature
@@ -182,6 +189,9 @@ def main() -> None:
         starter, torch=torch, learning_rate=args.player_lr,
         temperature=args.player_temperature,
         ppo_epochs=args.player_ppo_epochs,
+        # Full-return actor advantages and MC value targets, rather
+        # than bootstrapping through q-biased intermediate states.
+        gae_lambda=(1.0 if args.player_target == "reference-is" else 0.98),
         batch_size=args.player_ppo_batch_size,
         sample_limit=args.player_ppo_sample_limit,
     )
@@ -218,6 +228,8 @@ def main() -> None:
         "workers": args.workers,
         "max_boundaries": args.max_boundaries,
         "reference_fraction": args.reference_fraction,
+        "player_target": args.player_target,
+        "is_min_ess_fraction": args.is_min_ess_fraction,
         "player_lr": args.player_lr,
         "player_temperature": args.player_temperature,
         "player_ppo_epochs": args.player_ppo_epochs,
@@ -286,6 +298,7 @@ def main() -> None:
             scenario_pool=scenarios, deck_pool=decks,
             capture_player_training=True,
             reference_count=reference_count,
+            score_reference_q=args.player_target == "reference-is",
         )
         episodes = cohort["episodes"]
         records = cohort["player_rollouts"]
@@ -299,9 +312,17 @@ def main() -> None:
             ep.for_nature_training()
             for ep in episodes if ep.draw_mode == "learned"
         )
+        if args.player_target == "reference-is":
+            weights, weight_stats = reference_target_weights(
+                episodes, reference_count=reference_count,
+                min_effective_fraction=args.is_min_ess_fraction,
+            )
+        else:
+            weights, weight_stats = None, {}
         player_stats = player.update(
             tuple(zip(episodes, records, strict=True)),
             seed=args.training_seed*1000003+index,
+            episode_weights=weights,
         )
         nature_stats = nature.update(nature_episodes)
         if player.revision != index+1:
@@ -320,6 +341,7 @@ def main() -> None:
             "emulator_pids": cohort["process_count"],
             "rollout_seconds": cohort["elapsed_seconds"],
             **player_stats,
+            **weight_stats,
             **nature_stats,
         }
         if ((index+1) % args.eval_every == 0 or index+1 == args.rounds):
@@ -353,6 +375,9 @@ def main() -> None:
             f"nature_ppo_steps={int(nature_stats['nature_optimizer_steps'])} "
             f"player_kl={player_stats['player_ppo_kl']:.5f} "
             f"nature_kl={nature_stats['nature_ppo_approx_kl']:.5f} "
+            + (f"is_ess={weight_stats['player_is_effective_fraction']:.3f} "
+               f"is_fallback={int(weight_stats['player_is_reference_only_fallback'])} "
+               if args.player_target == "reference-is" else "")
             + (f"ref_eval={holdout['reference_score']:.4f} "
                f"nature_eval={holdout['nature_score']:.4f}"
                if holdout is not None else "") ,

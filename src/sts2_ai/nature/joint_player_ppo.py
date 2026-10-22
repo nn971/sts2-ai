@@ -184,8 +184,14 @@ class JointPlayerPPO:
 
     def update(
         self, samples: tuple[tuple[Any, tuple[dict[str, Any], ...]], ...],
-        *, seed: int,
+        *, seed: int, episode_weights: tuple[float, ...] | None = None,
     ) -> dict[str, float]:
+        if episode_weights is not None and (
+            len(episode_weights) != len(samples) or
+            any(not math.isfinite(w) or w < 0 for w in episode_weights)
+            or not any(w > 0 for w in episode_weights)
+        ):
+            raise ValueError("Invalid joint player reference-law IS weights")
         # Validate every trace BEFORE the first gradient update. Unlike
         # offline replay, all behavior records are from the same policy version.
         targets = []
@@ -222,6 +228,8 @@ class JointPlayerPPO:
             clip_epsilon=self.clip_epsilon,
             value_weight=self.value_weight,
             entropy_weight=self.entropy_weight, seed=seed,
+            episode_weights=(list(episode_weights) if episode_weights is not None
+                             else None),
         )
         self.revision += 1
         self.export()
