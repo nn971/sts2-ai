@@ -287,7 +287,11 @@ class ContextualDrawNature:
 
 
 def restore_nature(data: dict[str, Any]) -> TwoSiteNature | ContextualDrawNature:
-    """Versioned worker/optimizer checkpoint dispatch, preserving H1 baselines."""
+    """Versioned worker/optimizer dispatch, preserving older Nature baselines."""
+    # Lazy import avoids a dependency cycle: PPO uses this actor for rollout.
+    if data.get("schema") == "sts2-ai-nature-contextual-draw-ppo-v1":
+        from .ppo_draw import PpoDrawNature
+        return PpoDrawNature.restore(data)
     if data.get("schema") == CONTEXTUAL_SCHEMA:
         return ContextualDrawNature.restore(data)
     return TwoSiteNature.restore(data)
