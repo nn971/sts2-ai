@@ -15,7 +15,7 @@ another long joint-training run.
   - `silent-boss-cycle-20-v1`: 2 Acrobatics, 2 Backflip,
     2 Slice, Poisoned Stab, Deadly Poison.
   - `silent-boss-poison-20-v1`: 2 Deadly Poison,
-    2 Poisoned Stab, 2 Backflip, Bouncing Flask, Acrobatics.
+    2 Poisoned Stab, 2 Backflip, Catalyst, Acrobatics.
 - Starting HP 70/70, starter Ring of the Snake, 3 base energy,
   2 empty potion slots; add **two distinct seeded relics**
   from Lantern, Ink Bottle, Ornamental Fan, Orichalcum.
@@ -61,7 +61,7 @@ git submodule update --init --recursive emulator
 # The AI parent submodule may point at the older emulator. Use the
 # isolated draft PR #183 code, NOT the active comparator branch.
 git -C emulator fetch origin feature/nature-h3-boss-decks-relics-20261022
-git -C emulator switch --detach 083fe8de8dc35002f001c01b1de5d8164465c010
+git -C emulator switch --detach a172e428dad71a2574c3f49ae177ca233b421e13
 
 source .venv/bin/activate.fish
 python -m pip install -e '.[neural]'
@@ -71,7 +71,7 @@ set model ~/projects/sts2-ai/results/ppo-v8-batched-40/models/stage-0120.json
 set nature (pwd)/results/nature/h2-a10-ppo-v8-seed29/checkpoint.json
 set dll (pwd)/emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll
 set bindings (pwd)/emulator/bindings/python
-set rev 083fe8de8dc35002f001c01b1de5d8164465c010
+set rev a172e428dad71a2574c3f49ae177ca233b421e13
 
 # Diagnose difficulty with a selection set first.
 python -u tools/evaluate_nature_h3_boss_challenge.py \
