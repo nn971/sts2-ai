@@ -71,6 +71,7 @@ def _one(
     deck_pool: tuple[str, ...], capture_player_training: bool = False,
     reference_count: int = 0, score_reference_q: bool = False,
     reward_version: str = "hp_preservation_v1",
+    mcts_simulations: int = 0, mcts_max_boundaries: int = 1200,
 ) -> tuple[int, DrawOnlyEpisode, int, tuple[dict[str, Any], ...]]:
     if _worker_session is None or _worker_spec is None or _worker_model is None:
         raise RuntimeError("Draw-only worker was not initialized")
@@ -99,6 +100,8 @@ def _one(
         max_boundaries=max_boundaries, scenario=chosen,
         deck_preset_id=deck,
         score_reference_q=score_reference_q, reward_version=reward_version,
+        mcts_simulations=mcts_simulations,
+        mcts_max_boundaries=mcts_max_boundaries,
     )
     if not result.terminal_replay_verified:
         raise RuntimeError("Draw-only terminal snapshot failed")
@@ -115,13 +118,14 @@ def _job(
     capture_player_training: bool = False, reference_count: int = 0,
     score_reference_q: bool = False,
     reward_version: str = "hp_preservation_v1",
+    mcts_simulations: int = 0, mcts_max_boundaries: int = 1200,
 ) -> tuple[int, DrawOnlyEpisode, int, tuple[dict[str, Any], ...]]:
     try:
         return _one(
             index, seed, reference_seed, nature_checkpoint, draw_mode,
             entry_mode, max_boundaries, scenario_pool, deck_pool,
             capture_player_training, reference_count, score_reference_q,
-            reward_version,
+            reward_version, mcts_simulations, mcts_max_boundaries,
         )
     except Exception:
         raise RuntimeError(
@@ -142,6 +146,7 @@ def draw_only_batch(
     capture_player_training: bool = False, reference_count: int = 0,
     score_reference_q: bool = False,
     reward_version: str = "hp_preservation_v1",
+    mcts_simulations: int = 0, mcts_max_boundaries: int = 1200,
 ) -> dict[str, Any]:
     """Return original ordered episodes with real C# process provenance."""
     if (not seeds or len(set(seeds)) != len(seeds)
@@ -153,7 +158,9 @@ def draw_only_batch(
             or (reference_count and draw_mode != "learned")
             or (capture_player_training and spec.greedy)):
         raise ValueError("Invalid mixed-Nature/player PPO cohort configuration")
-    if workers <= 0 or max_boundaries <= 0 or progress_every <= 0:
+    if (workers <= 0 or max_boundaries <= 0 or progress_every <= 0
+            or mcts_simulations < 0 or mcts_max_boundaries < 1
+            or (capture_player_training and mcts_simulations)):
         raise ValueError("Invalid emulator worker configuration")
     if not emulator_command or not emulator_revision:
         raise ValueError("Must pin emulator executable and immutable SHA")
@@ -191,7 +198,7 @@ def draw_only_batch(
                 checkpoint, draw_mode, entry_mode, max_boundaries,
                 scenario_pool, deck_pool,
                 capture_player_training, reference_count, score_reference_q,
-                reward_version,
+                reward_version, mcts_simulations, mcts_max_boundaries,
             ): (index, seed)
             for index, seed in enumerate(seeds)
         }
@@ -242,6 +249,7 @@ def draw_only_batch(
         "frozen_player": spec.policy_id,
         "nature_revision": nature.revision,
         "elapsed_seconds": time.perf_counter() - elapsed,
+        "mcts_simulations_per_decision": mcts_simulations,
         "total_draws": sum(x.controlled_draw_count for x in results),
         "nontrivial_draws": sum(x.nontrivial_draw_count for x in results),
         "total_intents": sum(x.reference_intent_count for x in results),
