@@ -74,8 +74,20 @@ def educational_rewards(
 
     g_ref = torch.stack([policy_gradient(i) for i in reference]).mean(dim=0)
     ref_norm = float(torch.linalg.vector_norm(g_ref).item())
-    if not math.isfinite(ref_norm) or ref_norm < 1e-10:
-        raise ValueError("Reference policy gradient has insufficient signal")
+    if not math.isfinite(ref_norm):
+        raise ValueError("Nonfinite reference policy gradient")
+    if ref_norm < 1e-10:
+        # Under a genuinely zero-signal reference cohort the teacher has
+        # no principled direction to follow. Keep the step as reference-only.
+        return tuple(0.0 for _ in learned), {
+            "teacher_reference_grad_norm": ref_norm,
+            "teacher_mean_alignment": 0.0,
+            "teacher_positive_fraction": 0.0,
+            "teacher_max_alignment": 0.0,
+            "teacher_min_alignment": 0.0,
+            "teacher_reward_version": "reference_gradient_alignment_v1",
+            "teacher_degenerate_reference_grad": True,
+        }
     utilities = []
     for i in learned:
         grad = policy_gradient(i)
@@ -92,4 +104,5 @@ def educational_rewards(
         "teacher_max_alignment": max(utilities),
         "teacher_min_alignment": min(utilities),
         "teacher_reward_version": "reference_gradient_alignment_v1",
+        "teacher_degenerate_reference_grad": False,
     }
