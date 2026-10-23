@@ -19,6 +19,7 @@ from sts2_ai.nature.combat_scenarios import (
     CombatScenario,
 )
 from sts2_ai.nature.contextual_draw import ContextualDrawNature
+from sts2_ai.nature.h4_reward import H4_REWARD, boss_progress_score, opening_enemy_health
 from sts2_ai.nature.draw_only_p0 import (
     DRAW_ONLY_SCHEMA,
     DrawOnlyContractError,
@@ -78,6 +79,9 @@ class DrawOnlyEpisode:
     terminal_replay_verified: bool
     scenario_id: str = BASELINE_SCENARIO
     deck_preset_id: str = BASELINE_DECK
+    reward_version: str = "hp_preservation_v1"
+    opening_enemy_hp: int | None = None
+    terminal_enemy_hp: int | None = None
 
     @property
     def digest(self) -> str:
@@ -176,6 +180,7 @@ def play_draw_only_episode(
     scenario: CombatScenario | None = None,
     deck_preset_id: str = BASELINE_DECK,
     score_reference_q: bool = False,
+    reward_version: str = "hp_preservation_v1",
 ) -> DrawOnlyEpisode:
     """Run actual supported first-room mechanics until a genuine terminal.
 
@@ -184,6 +189,8 @@ def play_draw_only_episode(
     Reference RNG is a separate declared-law sampler, never the native cursor.
     """
     check_draw_only_capabilities(session.capabilities)
+    if reward_version not in ("hp_preservation_v1", H4_REWARD):
+        raise ValueError("Unknown draw-only reward version")
     if (draw_mode not in ("learned", "reference")
             or entry_mode not in ("source-route", "seeded-fixed-shrinker")
             or region not in ("Overgrowth", "Underdocks") or not source_seed
@@ -231,7 +238,7 @@ def play_draw_only_episode(
     choices: list[PilotChoice] = []
     opening = state.status().get("sourceOpeningFingerprint")
     first_public = None
-    entry_hp = max_hp = None
+    entry_hp = max_hp = opening_enemy_hp = None
     draw_count = nontrivial_count = reference_intent_count = 0
     try:
         if not isinstance(opening, str) or not opening:
@@ -288,6 +295,8 @@ def play_draw_only_episode(
                 if first_public is None:
                     first_public = canonical_sha256(obs)
                     entry_hp, max_hp = obs.get("hp"), obs.get("max_hp")
+                    if reward_version == H4_REWARD:
+                        opening_enemy_hp = opening_enemy_health(obs)
                 menu_hash = canonical_sha256(
                     [obs, actions] if phase == "player" else
                     [obs, actions, state.pending]
@@ -329,6 +338,14 @@ def play_draw_only_episode(
         held.append(restored)
         if restored.fingerprint != state.fingerprint:
             raise DrawOnlyContractError("Private terminal snapshot replay mismatch")
+        terminal_enemy_hp = (state.status().get("terminalEnemyHp")
+                             if reward_version == H4_REWARD else None)
+        score = (_score(state.outcome, entry_hp, max_hp, state.exit_hp)
+                 if reward_version == "hp_preservation_v1" else
+                 boss_progress_score(
+                     state.outcome, player_exit_hp=state.exit_hp,
+                     player_max_hp=max_hp, opening_enemy_hp=opening_enemy_hp,
+                     terminal_enemy_hp=terminal_enemy_hp))
         return DrawOnlyEpisode(
             schema=DRAW_ONLY_SCHEMA, emulator_revision=emulator_revision,
             source_seed=source_seed, reference_seed=reference_seed,
@@ -341,11 +358,14 @@ def play_draw_only_episode(
             controlled_draw_count=draw_count,
             nontrivial_draw_count=nontrivial_count,
             outcome=state.outcome, exit_hp=state.exit_hp,
-            score=_score(state.outcome, entry_hp, max_hp, state.exit_hp),
+            score=score,
             terminal_fingerprint=state.fingerprint,
             terminal_replay_verified=True,
             scenario_id=selected.scenario_id,
             deck_preset_id=deck_preset_id,
+            reward_version=reward_version,
+            opening_enemy_hp=opening_enemy_hp,
+            terminal_enemy_hp=terminal_enemy_hp,
         )
     finally:
         session.release_semantic_many(held)
