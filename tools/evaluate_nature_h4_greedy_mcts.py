@@ -18,7 +18,7 @@ import statistics
 from pathlib import Path
 
 from sts2_ai.emulator.semantic_p0_frozen_player import FrozenPlayerSpec
-from sts2_ai.nature.combat_scenarios import parse_scenario_pool, parse_deck_pool
+from sts2_ai.nature.combat_scenarios import parse_deck_pool, parse_scenario_pool
 from sts2_ai.nature.contextual_draw import restore_nature
 from sts2_ai.nature.corpus import atomic_write, file_sha256
 from sts2_ai.nature.draw_only_workers import draw_only_batch
