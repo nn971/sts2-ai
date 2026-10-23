@@ -13,7 +13,7 @@ def boss_progress_score(
     outcome: str, *, player_exit_hp: int, player_max_hp: int,
     opening_enemy_hp: int, terminal_enemy_hp: int | None,
 ) -> float:
-    """Return [0,1) for defeats, (1,2] for victories.
+    """Return [0,1] for defeats, (1,2] for victories.
 
     The capped HP fraction keeps victory strictly preferable to defeat.
     The opening boss/formation HP denominator is a snapshot of *actual*
