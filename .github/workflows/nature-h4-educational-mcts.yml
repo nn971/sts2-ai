@@ -1,0 +1,98 @@
+name: nature-h4-educational-mcts
+
+on:
+  push:
+    paths:
+      - 'src/sts2_ai/nature/h4_*.py'
+      - 'src/sts2_ai/nature/educational_nature.py'
+      - 'src/sts2_ai/nature/draw_only_episode.py'
+      - 'src/sts2_ai/nature/draw_only_workers.py'
+      - 'tools/train_educational_nature_h4.py'
+      - 'tools/evaluate_nature_h4_greedy_mcts.py'
+      - 'tests/test_nature_h4_*.py'
+      - '.github/workflows/nature-h4-educational-mcts.yml'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  real-h4-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ai
+          submodules: false
+      - uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: feature/h4-terminal-boss-hp-20261024
+          path: emulator
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Install Python dependencies
+        working-directory: ai
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e '.[dev]'
+      - name: Lint and unit regression
+        working-directory: ai
+        run: |
+          python -m ruff check src/sts2_ai/nature/h4_reward.py src/sts2_ai/nature/h4_mcts.py src/sts2_ai/nature/educational_nature.py src/sts2_ai/nature/draw_only_episode.py src/sts2_ai/nature/draw_only_workers.py tools/train_educational_nature_h4.py tools/evaluate_nature_h4_greedy_mcts.py tests/test_nature_h4_reward.py tests/test_nature_h4_mcts.py
+          python -m pytest -q tests/test_nature_h4_reward.py tests/test_nature_h4_mcts.py tests/test_nature_h3_joint_player.py tests/test_nature_h3_reference_importance.py
+      - name: Build emulator with terminal boss health
+        working-directory: emulator
+        run: |
+          dotnet restore Sts2Emulator.sln
+          dotnet build Sts2Emulator.sln -c Release --no-restore
+      - name: Real one-round educational training
+        working-directory: ai
+        run: |
+          python - <<'PY'
+          import json,sys
+          sys.path.insert(0, 'tests')
+          from test_nature_h3_joint_player import specimen
+          with open('ci-h4-player.json', 'w') as f:
+              json.dump(specimen().to_dict(), f)
+          PY
+          python -u tools/train_educational_nature_h4.py \
+            --player-model ci-h4-player.json \
+            --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings ../emulator/bindings/python \
+            --emulator-revision h4-ci-terminal-hp \
+            --output-root ci-h4-educational --workers 4 \
+            --rounds 1 --episodes-per-round 8 --eval-every 1 --eval-episodes 4 \
+            --max-boundaries 1200 --execute
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          row=json.loads(Path('ci-h4-educational/progress.json').read_text())['rows'][0]
+          assert row['reference_training_combats']==4
+          assert row['player_ppo_steps']>0
+          assert 'teacher_mean_alignment' in row
+          assert row['holdout']['eval_source_count']==4
+          assert Path('ci-h4-educational/joint-checkpoint.pt').exists()
+          PY
+      - name: Paired greedy and semantic UCT real-combat comparison
+        working-directory: ai
+        run: |
+          python -u tools/evaluate_nature_h4_greedy_mcts.py \
+            --player ci=ci-h4-player.json \
+            --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings ../emulator/bindings/python \
+            --emulator-revision h4-ci-terminal-hp \
+            --output ci-h4-greedy-uct.json --workers 4 \
+            --eval-episodes 4 --mcts-simulations 2 --max-boundaries 1200 \
+            --execute
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data=json.loads(Path('ci-h4-greedy-uct.json').read_text())
+          assert 'ci/greedy/reference' in data['results']
+          assert 'ci/uct-2/reference' in data['results']
+          assert 'ci/uct-minus-greedy/reference' in data['results']
+          PY
