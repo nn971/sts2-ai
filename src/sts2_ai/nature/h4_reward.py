@@ -6,8 +6,6 @@ then normalized survivor HP or damage to the original enemy formation.
 """
 from __future__ import annotations
 
-import math
-
 H4_REWARD = "boss_progress_v2"
 
 
