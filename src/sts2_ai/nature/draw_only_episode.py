@@ -82,6 +82,7 @@ class DrawOnlyEpisode:
     reward_version: str = "hp_preservation_v1"
     opening_enemy_hp: int | None = None
     terminal_enemy_hp: int | None = None
+    mcts_simulations: int = 0
 
     @property
     def digest(self) -> str:
@@ -181,6 +182,8 @@ def play_draw_only_episode(
     deck_preset_id: str = BASELINE_DECK,
     score_reference_q: bool = False,
     reward_version: str = "hp_preservation_v1",
+    mcts_simulations: int = 0,
+    mcts_max_boundaries: int = 1200,
 ) -> DrawOnlyEpisode:
     """Run actual supported first-room mechanics until a genuine terminal.
 
@@ -191,6 +194,10 @@ def play_draw_only_episode(
     check_draw_only_capabilities(session.capabilities)
     if reward_version not in ("hp_preservation_v1", H4_REWARD):
         raise ValueError("Unknown draw-only reward version")
+    if mcts_simulations < 0 or mcts_max_boundaries < 1:
+        raise ValueError("Invalid H4 MCTS simulation budget")
+    if mcts_simulations and (reward_version != H4_REWARD or replay is not None):
+        raise ValueError("MCTS evaluation needs H4 reward and non-replay mode")
     if (draw_mode not in ("learned", "reference")
             or entry_mode not in ("source-route", "seeded-fixed-shrinker")
             or region not in ("Overgrowth", "Underdocks") or not source_seed
@@ -305,6 +312,17 @@ def play_draw_only_episode(
                     if ordinal >= len(replay) or replay[ordinal].phase != phase:
                         raise DrawOnlyContractError("Player replay phase drift")
                     action_id = replay[ordinal].selected_id
+                elif mcts_simulations and len(actions) > 1:
+                    from sts2_ai.nature.h4_mcts import search_player_action
+                    action_id, _search_stats = search_player_action(
+                        state, observation=obs, legal_actions=actions,
+                        rollout_choose=player_choose,
+                        simulations=mcts_simulations,
+                        seed=f"{source_seed}:{reference_seed}:{ordinal}",
+                        opening_enemy_hp=opening_enemy_hp,
+                        player_max_hp=max_hp,
+                        max_boundaries=mcts_max_boundaries,
+                    )
                 else:
                     action_id = player_choose(obs, actions)
                 if action_id not in {a["actionId"] for a in actions}:
@@ -366,6 +384,7 @@ def play_draw_only_episode(
             reward_version=reward_version,
             opening_enemy_hp=opening_enemy_hp,
             terminal_enemy_hp=terminal_enemy_hp,
+            mcts_simulations=mcts_simulations,
         )
     finally:
         session.release_semantic_many(held)
