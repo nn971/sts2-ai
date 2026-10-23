@@ -83,8 +83,10 @@ class DrawOnlyEpisode:
     opening_enemy_hp: int | None = None
     terminal_enemy_hp: int | None = None
     mcts_simulations: int = 0
+    mcts_rollouts: int = 0
+    mcts_search_boundaries: int = 0
+    mcts_cutoff_rollouts: int = 0
 
-    @property
     def digest(self) -> str:
         return canonical_sha256(asdict(self))
 
@@ -246,6 +248,7 @@ def play_draw_only_episode(
     opening = state.status().get("sourceOpeningFingerprint")
     first_public = None
     entry_hp = max_hp = opening_enemy_hp = None
+    mcts_rollouts = mcts_search_boundaries = mcts_cutoff_rollouts = 0
     draw_count = nontrivial_count = reference_intent_count = 0
     try:
         if not isinstance(opening, str) or not opening:
@@ -314,7 +317,7 @@ def play_draw_only_episode(
                     action_id = replay[ordinal].selected_id
                 elif mcts_simulations and len(actions) > 1:
                     from sts2_ai.nature.h4_mcts import search_player_action
-                    action_id, _search_stats = search_player_action(
+                    action_id, search_stats = search_player_action(
                         state, observation=obs, legal_actions=actions,
                         rollout_choose=player_choose,
                         simulations=mcts_simulations,
@@ -323,6 +326,11 @@ def play_draw_only_episode(
                         player_max_hp=max_hp,
                         max_boundaries=mcts_max_boundaries,
                     )
+                    mcts_rollouts += int(search_stats["simulations"])
+                    mcts_search_boundaries += int(
+                        search_stats["simulated_boundaries"])
+                    mcts_cutoff_rollouts += int(
+                        search_stats["cutoff_rollouts"])
                 else:
                     action_id = player_choose(obs, actions)
                 if action_id not in {a["actionId"] for a in actions}:
@@ -385,6 +393,9 @@ def play_draw_only_episode(
             opening_enemy_hp=opening_enemy_hp,
             terminal_enemy_hp=terminal_enemy_hp,
             mcts_simulations=mcts_simulations,
+            mcts_rollouts=mcts_rollouts,
+            mcts_search_boundaries=mcts_search_boundaries,
+            mcts_cutoff_rollouts=mcts_cutoff_rollouts,
         )
     finally:
         session.release_semantic_many(held)
