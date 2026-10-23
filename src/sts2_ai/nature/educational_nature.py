@@ -15,7 +15,9 @@ from typing import Any
 
 from sts2_ai.nature.joint_player_ppo import JointPlayerPPO
 from sts2_ai.training.phase_split_ppo_batch import (
-    collate, encode_decision, forward_batch,
+    collate,
+    encode_decision,
+    forward_batch,
 )
 
 
