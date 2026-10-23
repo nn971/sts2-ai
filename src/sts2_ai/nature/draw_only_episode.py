@@ -19,13 +19,13 @@ from sts2_ai.nature.combat_scenarios import (
     CombatScenario,
 )
 from sts2_ai.nature.contextual_draw import ContextualDrawNature
-from sts2_ai.nature.h4_reward import H4_REWARD, boss_progress_score, opening_enemy_health
 from sts2_ai.nature.draw_only_p0 import (
     DRAW_ONLY_SCHEMA,
     DrawOnlyContractError,
     DrawOnlyRouter,
     SeededLawSampler,
 )
+from sts2_ai.nature.h4_reward import H4_REWARD, boss_progress_score, opening_enemy_health
 from sts2_ai.nature.protocol import canonical_sha256
 from sts2_ai.nature.two_site_opponent import PilotChoice, PilotEpisode, TwoSiteNature
 
