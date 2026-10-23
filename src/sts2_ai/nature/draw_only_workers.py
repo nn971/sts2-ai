@@ -70,6 +70,7 @@ def _one(
     max_boundaries: int, scenario_pool: tuple[str, ...],
     deck_pool: tuple[str, ...], capture_player_training: bool = False,
     reference_count: int = 0, score_reference_q: bool = False,
+    reward_version: str = "hp_preservation_v1",
 ) -> tuple[int, DrawOnlyEpisode, int, tuple[dict[str, Any], ...]]:
     if _worker_session is None or _worker_spec is None or _worker_model is None:
         raise RuntimeError("Draw-only worker was not initialized")
@@ -97,7 +98,7 @@ def _one(
         draw_mode=actual_draw_mode, entry_mode=entry_mode,
         max_boundaries=max_boundaries, scenario=chosen,
         deck_preset_id=deck,
-        score_reference_q=score_reference_q,
+        score_reference_q=score_reference_q, reward_version=reward_version,
     )
     if not result.terminal_replay_verified:
         raise RuntimeError("Draw-only terminal snapshot failed")
@@ -113,12 +114,14 @@ def _job(
     deck_pool: tuple[str, ...],
     capture_player_training: bool = False, reference_count: int = 0,
     score_reference_q: bool = False,
+    reward_version: str = "hp_preservation_v1",
 ) -> tuple[int, DrawOnlyEpisode, int, tuple[dict[str, Any], ...]]:
     try:
         return _one(
             index, seed, reference_seed, nature_checkpoint, draw_mode,
             entry_mode, max_boundaries, scenario_pool, deck_pool,
             capture_player_training, reference_count, score_reference_q,
+            reward_version,
         )
     except Exception:
         raise RuntimeError(
@@ -138,6 +141,7 @@ def draw_only_batch(
     deck_pool: tuple[str, ...] = (BASELINE_DECK,),
     capture_player_training: bool = False, reference_count: int = 0,
     score_reference_q: bool = False,
+    reward_version: str = "hp_preservation_v1",
 ) -> dict[str, Any]:
     """Return original ordered episodes with real C# process provenance."""
     if (not seeds or len(set(seeds)) != len(seeds)
@@ -187,6 +191,7 @@ def draw_only_batch(
                 checkpoint, draw_mode, entry_mode, max_boundaries,
                 scenario_pool, deck_pool,
                 capture_player_training, reference_count, score_reference_q,
+                reward_version,
             ): (index, seed)
             for index, seed in enumerate(seeds)
         }
