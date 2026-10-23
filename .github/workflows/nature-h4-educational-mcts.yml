@@ -49,6 +49,7 @@ jobs:
         run: |
           dotnet restore Sts2Emulator.sln
           dotnet build Sts2Emulator.sln -c Release --no-restore
+          dotnet test tests/Sts2Emulator.Core.Tests/Sts2Emulator.Core.Tests.csproj -c Release --no-build --filter FullyQualifiedName~NatureH4TerminalEnemyHpTests
       - name: Real one-round educational training
         working-directory: ai
         run: |
