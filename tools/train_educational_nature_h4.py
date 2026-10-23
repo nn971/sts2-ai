@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""H3 shared-rollout, alternating player/Nature PPO combat training.
+"""H4 educational Nature PPO with reference-policy-gradient alignment.
 
 One immutable cohort freezes both policies. Reference-law draws are mixed in
 for player robustness; only genuine learned-draw episodes train Nature.
@@ -34,7 +34,6 @@ from sts2_ai.nature.h4_reward import H4_REWARD
 from sts2_ai.nature.two_site_opponent import PilotEpisode
 from sts2_ai.nature.ppo_draw import PpoDrawNature
 from sts2_ai.nature.protocol import canonical_sha256
-from sts2_ai.nature.reference_importance import reference_target_weights
 
 SCHEMA = "sts2-ai-h4-educational-nature-ppo-v1"
 
@@ -329,9 +328,13 @@ def main() -> None:
             # Reference data anchors the true task; Nature is an auxiliary
             # curriculum signal and receives an explicit tunable weight.
             # These are deliberately NOT trajectory importance ratios.
+            informative = not teacher_stats["teacher_degenerate_reference_grad"]
+            if not informative:
+                nature_episodes = ()
             weights = tuple(
                 1.0 if ep.draw_mode == "reference" else
-                args.educational_weight for ep in episodes
+                (args.educational_weight if informative else 0.0)
+                for ep in episodes
             )
         else:
             nature_episodes = ()
