@@ -168,6 +168,9 @@ def main() -> None:
                 reports[key] = {
                     **_summarize(episodes),
                     "rollout_seconds": result["elapsed_seconds"],
+                    "mcts_rollouts": result["mcts_rollouts"],
+                    "mcts_search_boundaries": result["mcts_search_boundaries"],
+                    "mcts_cutoff_rollouts": result["mcts_cutoff_rollouts"],
                 }
                 trajectories[key] = episodes
                 print(f"[h4-mcts] {key}: score={reports[key]['score']:.4f} "
