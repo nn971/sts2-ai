@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import hashlib
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from sts2_ai.nature.draw_only_p0 import DeclaredLaw, SeededLawSampler
 from sts2_ai.nature.h4_reward import boss_progress_score
