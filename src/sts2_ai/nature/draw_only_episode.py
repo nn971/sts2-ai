@@ -87,6 +87,7 @@ class DrawOnlyEpisode:
     mcts_search_boundaries: int = 0
     mcts_cutoff_rollouts: int = 0
 
+    @property
     def digest(self) -> str:
         return canonical_sha256(asdict(self))
 
