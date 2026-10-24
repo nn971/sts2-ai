@@ -16,6 +16,7 @@ import argparse
 import json
 import statistics
 from pathlib import Path
+from types import SimpleNamespace
 
 from sts2_ai.emulator.semantic_p0_frozen_player import FrozenPlayerSpec
 from sts2_ai.nature.combat_scenarios import parse_deck_pool, parse_scenario_pool
@@ -79,11 +80,18 @@ def main() -> None:
     p.add_argument("--eval-split", choices=("selection", "confirmation"),
                    default="selection")
     p.add_argument("--mcts-simulations", type=int, default=16)
-    p.add_argument("--mcts-max-boundaries", type=int, default=1200)
+    p.add_argument("--mcts-max-boundaries", type=int, default=24,
+                   help="Short search horizon; NOT the full-combat boundary cap")
+    p.add_argument("--mcts-combat-budget", type=int, default=4000,
+                   help="Max simulated emulator boundaries per real combat")
+    p.add_argument("--allow-expensive-search", action="store_true",
+                   help="Permit MCTS horizons over 128 (potentially very slow)")
     p.add_argument("--workers", type=int, default=15)
     p.add_argument("--actor-seed", type=int, default=31337)
     p.add_argument("--reference-seed", type=int, default=23387)
     p.add_argument("--max-boundaries", type=int, default=1200)
+    p.add_argument("--resume", action="store_true",
+                   help="Resume previously saved per-arm evaluation results")
     p.add_argument("--execute", action="store_true")
     args = p.parse_args()
     scenarios = parse_scenario_pool(args.scenario_pool)
@@ -91,8 +99,13 @@ def main() -> None:
     if (args.eval_episodes < 4 or
             args.eval_episodes % (len(scenarios) * len(decks)) or
             args.mcts_simulations <= 0 or args.workers <= 0 or
-            args.mcts_max_boundaries <= 0 or args.max_boundaries <= 0):
+            args.mcts_max_boundaries <= 0 or args.max_boundaries <= 0 or
+            args.mcts_combat_budget <= 0):
         p.error("Invalid paired comparison study parameters")
+    if args.mcts_max_boundaries > 128 and not args.allow_expensive_search:
+        p.error("MCTS horizon >128 is extremely expensive when searching at "
+                "every player decision; use --mcts-max-boundaries 24 or "
+                "explicitly --allow-expensive-search")
     models = {}
     for entry in args.player:
         label, sep, location = entry.partition("=")
@@ -126,6 +139,7 @@ def main() -> None:
         "episodes": args.eval_episodes,
         "mcts_simulations": args.mcts_simulations,
         "mcts_max_boundaries": args.mcts_max_boundaries,
+        "mcts_combat_budget": args.mcts_combat_budget,
         "workers": args.workers,
     }
     print(json.dumps(config, indent=2, sort_keys=True), flush=True)
@@ -133,8 +147,28 @@ def main() -> None:
         return
     nature = _nature(args.nature_checkpoint)
     command = ("dotnet", str(args.emulator_dll.resolve()), "prototype-ai-jsonl")
-    reports = {}
+    if args.resume:
+        if not args.output.is_file():
+            p.error("--resume requires an existing partial report")
+        saved = json.loads(args.output.read_text(encoding="utf-8"))
+        if saved.get("config") != config:
+            p.error("--resume report was generated with different settings")
+        reports = saved["results"]
+        saved_episodes = saved["episode_summaries"]
+    else:
+        if args.output.exists():
+            p.error("Output already exists; use --resume or a distinct --output")
+        reports = {}
+        saved_episodes = {}
     trajectories = {}
+
+    def persist(complete: bool = False) -> None:
+        atomic_write(args.output, json.dumps({
+            "config": config, "results": reports,
+            "episode_summaries": saved_episodes,
+            "complete": complete,
+        }, indent=2, sort_keys=True) + "\\n")
+
     for label, path in models.items():
         spec = FrozenPlayerSpec.from_file(
             path, seed=args.actor_seed, temperature=1.0,
@@ -144,6 +178,15 @@ def main() -> None:
                                   (f"uct-{args.mcts_simulations}",
                                    args.mcts_simulations)):
             for arm in ("reference", "learned"):
+                key = f"{label}/{policy}/{arm}"
+                if key in reports and key in saved_episodes:
+                    if tuple(e["source_seed"] for e in saved_episodes[key]) != seeds:
+                        p.error(f"Saved source order differs: {key}")
+                    trajectories[key] = tuple(
+                        SimpleNamespace(**ep) for ep in saved_episodes[key]
+                    )
+                    print(f"[h4-mcts] resume skip completed {key}", flush=True)
+                    continue
                 result = draw_only_batch(
                     seeds, nature=nature, spec=spec,
                     emulator_command=command,
@@ -157,22 +200,36 @@ def main() -> None:
                     reward_version=H4_REWARD,
                     mcts_simulations=sim_count,
                     mcts_max_boundaries=args.mcts_max_boundaries,
-                    progress_every=max(1, args.eval_episodes // 4),
+                    mcts_combat_budget=args.mcts_combat_budget,
+                    progress_every=(1 if sim_count else
+                                    max(1, args.eval_episodes // 4)),
                 )
                 episodes = result["episodes"]
                 for expected_seed, episode in zip(seeds, episodes, strict=True):
                     if episode.source_seed != expected_seed or (
                             episode.reward_version != H4_REWARD):
                         raise RuntimeError("Comparison lost original source or reward version")
-                key = f"{label}/{policy}/{arm}"
                 reports[key] = {
                     **_summarize(episodes),
                     "rollout_seconds": result["elapsed_seconds"],
                     "mcts_rollouts": result["mcts_rollouts"],
                     "mcts_search_boundaries": result["mcts_search_boundaries"],
                     "mcts_cutoff_rollouts": result["mcts_cutoff_rollouts"],
+                    "mcts_searched_decisions": result["mcts_searched_decisions"],
+                    "mcts_greedy_fallback_decisions":
+                        result["mcts_greedy_fallback_decisions"],
                 }
                 trajectories[key] = episodes
+                saved_episodes[key] = [
+                    {
+                        "source_seed": ep.source_seed,
+                        "score": ep.score, "outcome": ep.outcome,
+                        "scenario_id": ep.scenario_id,
+                        "deck_preset_id": ep.deck_preset_id,
+                    }
+                    for ep in episodes
+                ]
+                persist()
                 print(f"[h4-mcts] {key}: score={reports[key]['score']:.4f} "
                       f"win={reports[key]['victory']:.3f} "
                       f"seconds={result['elapsed_seconds']:.1f}", flush=True)
@@ -187,9 +244,8 @@ def main() -> None:
                     (b.outcome == "victory") - (a.outcome == "victory")
                     for a, b in zip(greedy, searched, strict=True)),
             }
-    atomic_write(args.output, json.dumps({
-        "config": config, "results": reports,
-    }, indent=2, sort_keys=True) + "\n")
+            persist()
+    persist(complete=True)
 
 
 if __name__ == "__main__":
