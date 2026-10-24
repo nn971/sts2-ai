@@ -86,14 +86,16 @@ def search_player_action(
     seed: str,
     opening_enemy_hp: int,
     player_max_hp: int,
-    max_boundaries: int = 1200,
+    max_boundaries: int = 24,
     exploration: float = 1.4,
 ) -> tuple[str, dict[str, float]]:
-    """Nested UCT player nodes; chance nodes are sampled from the reference law.
+    """Horizon-limited UCT with chance nodes sampled from the reference law.
 
-    Each root simulation forks through the semantic emulator; every created
-    handle is released on completion. Rollout actions use the provided fair
-    greedy player. Nature is NEVER consulted during MCTS simulations.
+    A 1200-boundary rollout at *every* real card decision was prohibitively
+    expensive. This search enforces a short horizon and a public-state cutoff
+    estimate, with per-combat compute accounted for by its caller. Rollout
+    actions use the provided fair greedy player; Nature is never consulted.
+    Every forked handle is released before the next simulation.
     """
     if (simulations < 1 or max_boundaries < 1 or opening_enemy_hp < 1
             or player_max_hp < 1 or not legal_actions
@@ -142,7 +144,10 @@ def search_player_action(
                     else:
                         raise RuntimeError("Unsupported search Chance Law")
                 elif state.boundary in ("player", "player_choice"):
-                    obs, actions = _legal(state)
+                    if state is root:
+                        obs, actions = observation, legal_actions
+                    else:
+                        obs, actions = _legal(state)
                     last_obs = obs
                     key = canonical_sha256([
                         obs, sorted(a["actionId"] for a in actions),
@@ -195,4 +200,5 @@ def search_player_action(
         "cutoff_rollouts": float(cutoffs),
         "simulated_boundaries": float(total_boundaries),
         "root_visited_actions": float(len(visited)),
+        "root_unvisited_actions": float(len(root_ids) - len(visited)),
     }
