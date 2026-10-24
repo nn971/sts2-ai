@@ -58,3 +58,24 @@ def test_uct_prefers_high_return_and_releases_branches():
     assert stats["cutoff_rollouts"] == 0
     assert stats["root_visited_actions"] == 2
     assert session.released == 32
+
+
+
+class NonterminalFakeState(FakeState):
+    def step(self, action):
+        return NonterminalFakeState(self.session)
+
+
+def test_uct_search_stops_at_short_horizon():
+    session = DummySession()
+    root = NonterminalFakeState(session)
+    _, stats = search_player_action(
+        root, observation=root.observe(), legal_actions=root.actions(),
+        rollout_choose=lambda *_: "bad",
+        simulations=8, seed="bounded", opening_enemy_hp=100,
+        player_max_hp=70, max_boundaries=6,
+    )
+    assert stats["simulated_boundaries"] == 48
+    assert stats["cutoff_rollouts"] == 8
+    assert stats["terminal_rollouts"] == 0
+    assert session.released == 48
