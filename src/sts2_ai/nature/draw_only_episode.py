@@ -86,6 +86,8 @@ class DrawOnlyEpisode:
     mcts_rollouts: int = 0
     mcts_search_boundaries: int = 0
     mcts_cutoff_rollouts: int = 0
+    mcts_searched_decisions: int = 0
+    mcts_greedy_fallback_decisions: int = 0
 
     @property
     def digest(self) -> str:
@@ -186,7 +188,8 @@ def play_draw_only_episode(
     score_reference_q: bool = False,
     reward_version: str = "hp_preservation_v1",
     mcts_simulations: int = 0,
-    mcts_max_boundaries: int = 1200,
+    mcts_max_boundaries: int = 24,
+    mcts_combat_budget: int = 4000,
 ) -> DrawOnlyEpisode:
     """Run actual supported first-room mechanics until a genuine terminal.
 
@@ -197,7 +200,8 @@ def play_draw_only_episode(
     check_draw_only_capabilities(session.capabilities)
     if reward_version not in ("hp_preservation_v1", H4_REWARD):
         raise ValueError("Unknown draw-only reward version")
-    if mcts_simulations < 0 or mcts_max_boundaries < 1:
+    if (mcts_simulations < 0 or mcts_max_boundaries < 1
+            or mcts_combat_budget < 1):
         raise ValueError("Invalid H4 MCTS simulation budget")
     if mcts_simulations and (reward_version != H4_REWARD or replay is not None):
         raise ValueError("MCTS evaluation needs H4 reward and non-replay mode")
@@ -250,6 +254,7 @@ def play_draw_only_episode(
     first_public = None
     entry_hp = max_hp = opening_enemy_hp = None
     mcts_rollouts = mcts_search_boundaries = mcts_cutoff_rollouts = 0
+    mcts_searched_decisions = mcts_greedy_fallback_decisions = 0
     draw_count = nontrivial_count = reference_intent_count = 0
     try:
         if not isinstance(opening, str) or not opening:
@@ -317,21 +322,44 @@ def play_draw_only_episode(
                         raise DrawOnlyContractError("Player replay phase drift")
                     action_id = replay[ordinal].selected_id
                 elif mcts_simulations and len(actions) > 1:
-                    from sts2_ai.nature.h4_mcts import search_player_action
-                    action_id, search_stats = search_player_action(
-                        state, observation=obs, legal_actions=actions,
-                        rollout_choose=player_choose,
-                        simulations=mcts_simulations,
-                        seed=f"{source_seed}:{reference_seed}:{ordinal}",
-                        opening_enemy_hp=opening_enemy_hp,
-                        player_max_hp=max_hp,
-                        max_boundaries=mcts_max_boundaries,
+                    # The budget is per *real combat*, not per player action.
+                    # Once depleted, return to greedy policy rather than
+                    # spawning unbounded full-fight searches.
+                    remaining = mcts_combat_budget - mcts_search_boundaries
+                    local_horizon = min(
+                        mcts_max_boundaries,
+                        remaining // mcts_simulations,
                     )
-                    mcts_rollouts += int(search_stats["simulations"])
-                    mcts_search_boundaries += int(
-                        search_stats["simulated_boundaries"])
-                    mcts_cutoff_rollouts += int(
-                        search_stats["cutoff_rollouts"])
+                    if local_horizon >= 4:
+                        from sts2_ai.nature.h4_mcts import search_player_action
+                        action_id, search_stats = search_player_action(
+                            state, observation=obs, legal_actions=actions,
+                            rollout_choose=player_choose,
+                            simulations=mcts_simulations,
+                            seed=f"{source_seed}:{reference_seed}:{ordinal}",
+                            opening_enemy_hp=opening_enemy_hp,
+                            player_max_hp=max_hp,
+                            max_boundaries=local_horizon,
+                        )
+                        mcts_searched_decisions += 1
+                        mcts_rollouts += int(search_stats["simulations"])
+                        mcts_search_boundaries += int(
+                            search_stats["simulated_boundaries"])
+                        mcts_cutoff_rollouts += int(
+                            search_stats["cutoff_rollouts"])
+                        if mcts_searched_decisions == 1 or (
+                            mcts_searched_decisions % 8 == 0
+                        ):
+                            print(
+                                f"[h4-uct-worker] seed={source_seed} "
+                                f"searched={mcts_searched_decisions} "
+                                f"simulated_boundaries={mcts_search_boundaries}/"
+                                f"{mcts_combat_budget}",
+                                flush=True,
+                            )
+                    else:
+                        action_id = player_choose(obs, actions)
+                        mcts_greedy_fallback_decisions += 1
                 else:
                     action_id = player_choose(obs, actions)
                 if action_id not in {a["actionId"] for a in actions}:
@@ -397,6 +425,8 @@ def play_draw_only_episode(
             mcts_rollouts=mcts_rollouts,
             mcts_search_boundaries=mcts_search_boundaries,
             mcts_cutoff_rollouts=mcts_cutoff_rollouts,
+            mcts_searched_decisions=mcts_searched_decisions,
+            mcts_greedy_fallback_decisions=mcts_greedy_fallback_decisions,
         )
     finally:
         session.release_semantic_many(held)
