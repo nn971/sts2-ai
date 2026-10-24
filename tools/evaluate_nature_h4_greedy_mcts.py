@@ -167,7 +167,7 @@ def main() -> None:
             "config": config, "results": reports,
             "episode_summaries": saved_episodes,
             "complete": complete,
-        }, indent=2, sort_keys=True) + "\\n")
+        }, indent=2, sort_keys=True) + "\n")
 
     for label, path in models.items():
         spec = FrozenPlayerSpec.from_file(
