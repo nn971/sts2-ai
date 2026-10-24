@@ -152,3 +152,46 @@ checkpoint/model-selection choices are frozen.
 artifacts; no new folders under `~/projects`; 15 workers in real runs;
 native fidelity and RNG parity are independent research tasks, never a
 training gate.
+
+## H4 UCT runtime correction
+
+The original UCT evaluator mistakenly permitted 16 full-combat simulations
+of up to 1200 boundaries **at every single player decision**. On a boss
+fight this multiplies the already-expensive semantic JSONL calls enormously:
+a silent period after the greedy arms was a compute explosion, not evidence
+of failed reference-law training.
+
+The corrected branch defaults to a **24-boundary rollout horizon** and a
+**4000-simulated-boundary cap per real combat**. Search continues until the
+cap is depleted, then the player chooses greedily for the remainder of
+the fight. This policy is explicitly a **budgeted UCT/greedy hybrid**, not
+unlimited/full-tree MCTS. Each completed comparison arm is now saved
+atomically in the output JSON, with per-world scores, and can be resumed
+using `--resume`. Worker-level UCT progress is printed while searching;
+parallel-batch progress is printed after each completed UCT combat.
+
+Recommended initial mechanical check (reuse the `$dll`, `$bindings`,
+`$rev`, and `$model` variables above):
+
+```fish
+python -u tools/evaluate_nature_h4_greedy_mcts.py \
+  --player v8=$model --emulator-dll $dll \
+  --emulator-bindings $bindings --emulator-revision $rev \
+  --eval-split confirmation --eval-episodes 8 \
+  --mcts-simulations 8 --mcts-max-boundaries 16 \
+  --mcts-combat-budget 1500 --workers 15 \
+  --output results/nature/h4-uct-smoke.json --execute
+```
+
+For the substantial, independent confirmation comparison, use 120 worlds
+and 16 simulations with the default horizon and combat budget.
+Results report `mcts_search_boundaries`, `mcts_searched_decisions` and
+`mcts_greedy_fallback_decisions` so the actual search effort and budget
+exhaustion can be assessed. The `--mcts-max-boundaries` argument is
+**per rollout**; `--max-boundaries` still caps *real combat* length.
+Expensive horizons over 128 are rejected unless
+`--allow-expensive-search` is explicitly specified.
+
+Do not treat the previous greedy log lines as recoverable benchmark
+checkpoints; the original evaluator saved its JSON only at the very end.
+Future runs preserve each completed arm.
