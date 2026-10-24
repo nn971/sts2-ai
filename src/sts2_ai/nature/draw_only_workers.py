@@ -71,7 +71,8 @@ def _one(
     deck_pool: tuple[str, ...], capture_player_training: bool = False,
     reference_count: int = 0, score_reference_q: bool = False,
     reward_version: str = "hp_preservation_v1",
-    mcts_simulations: int = 0, mcts_max_boundaries: int = 1200,
+    mcts_simulations: int = 0, mcts_max_boundaries: int = 24,
+    mcts_combat_budget: int = 4000,
 ) -> tuple[int, DrawOnlyEpisode, int, tuple[dict[str, Any], ...]]:
     if _worker_session is None or _worker_spec is None or _worker_model is None:
         raise RuntimeError("Draw-only worker was not initialized")
@@ -102,6 +103,7 @@ def _one(
         score_reference_q=score_reference_q, reward_version=reward_version,
         mcts_simulations=mcts_simulations,
         mcts_max_boundaries=mcts_max_boundaries,
+        mcts_combat_budget=mcts_combat_budget,
     )
     if not result.terminal_replay_verified:
         raise RuntimeError("Draw-only terminal snapshot failed")
@@ -118,7 +120,8 @@ def _job(
     capture_player_training: bool = False, reference_count: int = 0,
     score_reference_q: bool = False,
     reward_version: str = "hp_preservation_v1",
-    mcts_simulations: int = 0, mcts_max_boundaries: int = 1200,
+    mcts_simulations: int = 0, mcts_max_boundaries: int = 24,
+    mcts_combat_budget: int = 4000,
 ) -> tuple[int, DrawOnlyEpisode, int, tuple[dict[str, Any], ...]]:
     try:
         return _one(
@@ -126,6 +129,7 @@ def _job(
             entry_mode, max_boundaries, scenario_pool, deck_pool,
             capture_player_training, reference_count, score_reference_q,
             reward_version, mcts_simulations, mcts_max_boundaries,
+            mcts_combat_budget,
         )
     except Exception:
         raise RuntimeError(
@@ -146,7 +150,8 @@ def draw_only_batch(
     capture_player_training: bool = False, reference_count: int = 0,
     score_reference_q: bool = False,
     reward_version: str = "hp_preservation_v1",
-    mcts_simulations: int = 0, mcts_max_boundaries: int = 1200,
+    mcts_simulations: int = 0, mcts_max_boundaries: int = 24,
+    mcts_combat_budget: int = 4000,
 ) -> dict[str, Any]:
     """Return original ordered episodes with real C# process provenance."""
     if (not seeds or len(set(seeds)) != len(seeds)
@@ -160,6 +165,7 @@ def draw_only_batch(
         raise ValueError("Invalid mixed-Nature/player PPO cohort configuration")
     if (workers <= 0 or max_boundaries <= 0 or progress_every <= 0
             or mcts_simulations < 0 or mcts_max_boundaries < 1
+            or mcts_combat_budget < 1
             or (capture_player_training and mcts_simulations)):
         raise ValueError("Invalid emulator worker configuration")
     if not emulator_command or not emulator_revision:
@@ -199,6 +205,7 @@ def draw_only_batch(
                 scenario_pool, deck_pool,
                 capture_player_training, reference_count, score_reference_q,
                 reward_version, mcts_simulations, mcts_max_boundaries,
+                mcts_combat_budget,
             ): (index, seed)
             for index, seed in enumerate(seeds)
         }
@@ -253,6 +260,10 @@ def draw_only_batch(
         "mcts_rollouts": sum(ep.mcts_rollouts for ep in results),
         "mcts_search_boundaries": sum(ep.mcts_search_boundaries for ep in results),
         "mcts_cutoff_rollouts": sum(ep.mcts_cutoff_rollouts for ep in results),
+        "mcts_searched_decisions": sum(ep.mcts_searched_decisions for ep in results),
+        "mcts_greedy_fallback_decisions": sum(
+            ep.mcts_greedy_fallback_decisions for ep in results),
+        "mcts_combat_budget": mcts_combat_budget,
         "total_draws": sum(x.controlled_draw_count for x in results),
         "nontrivial_draws": sum(x.nontrivial_draw_count for x in results),
         "total_intents": sum(x.reference_intent_count for x in results),
