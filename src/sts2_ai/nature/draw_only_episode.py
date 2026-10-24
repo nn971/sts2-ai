@@ -25,6 +25,7 @@ from sts2_ai.nature.draw_only_p0 import (
     DrawOnlyRouter,
     SeededLawSampler,
 )
+from sts2_ai.nature.h4_reward import H4_REWARD, boss_progress_score, opening_enemy_health
 from sts2_ai.nature.protocol import canonical_sha256
 from sts2_ai.nature.two_site_opponent import PilotChoice, PilotEpisode, TwoSiteNature
 
@@ -78,6 +79,15 @@ class DrawOnlyEpisode:
     terminal_replay_verified: bool
     scenario_id: str = BASELINE_SCENARIO
     deck_preset_id: str = BASELINE_DECK
+    reward_version: str = "hp_preservation_v1"
+    opening_enemy_hp: int | None = None
+    terminal_enemy_hp: int | None = None
+    mcts_simulations: int = 0
+    mcts_rollouts: int = 0
+    mcts_search_boundaries: int = 0
+    mcts_cutoff_rollouts: int = 0
+    mcts_searched_decisions: int = 0
+    mcts_greedy_fallback_decisions: int = 0
 
     @property
     def digest(self) -> str:
@@ -176,6 +186,10 @@ def play_draw_only_episode(
     scenario: CombatScenario | None = None,
     deck_preset_id: str = BASELINE_DECK,
     score_reference_q: bool = False,
+    reward_version: str = "hp_preservation_v1",
+    mcts_simulations: int = 0,
+    mcts_max_boundaries: int = 24,
+    mcts_combat_budget: int = 4000,
 ) -> DrawOnlyEpisode:
     """Run actual supported first-room mechanics until a genuine terminal.
 
@@ -184,6 +198,13 @@ def play_draw_only_episode(
     Reference RNG is a separate declared-law sampler, never the native cursor.
     """
     check_draw_only_capabilities(session.capabilities)
+    if reward_version not in ("hp_preservation_v1", H4_REWARD):
+        raise ValueError("Unknown draw-only reward version")
+    if (mcts_simulations < 0 or mcts_max_boundaries < 1
+            or mcts_combat_budget < 1):
+        raise ValueError("Invalid H4 MCTS simulation budget")
+    if mcts_simulations and (reward_version != H4_REWARD or replay is not None):
+        raise ValueError("MCTS evaluation needs H4 reward and non-replay mode")
     if (draw_mode not in ("learned", "reference")
             or entry_mode not in ("source-route", "seeded-fixed-shrinker")
             or region not in ("Overgrowth", "Underdocks") or not source_seed
@@ -231,7 +252,9 @@ def play_draw_only_episode(
     choices: list[PilotChoice] = []
     opening = state.status().get("sourceOpeningFingerprint")
     first_public = None
-    entry_hp = max_hp = None
+    entry_hp = max_hp = opening_enemy_hp = None
+    mcts_rollouts = mcts_search_boundaries = mcts_cutoff_rollouts = 0
+    mcts_searched_decisions = mcts_greedy_fallback_decisions = 0
     draw_count = nontrivial_count = reference_intent_count = 0
     try:
         if not isinstance(opening, str) or not opening:
@@ -288,6 +311,8 @@ def play_draw_only_episode(
                 if first_public is None:
                     first_public = canonical_sha256(obs)
                     entry_hp, max_hp = obs.get("hp"), obs.get("max_hp")
+                    if reward_version == H4_REWARD:
+                        opening_enemy_hp = opening_enemy_health(obs)
                 menu_hash = canonical_sha256(
                     [obs, actions] if phase == "player" else
                     [obs, actions, state.pending]
@@ -296,6 +321,45 @@ def play_draw_only_episode(
                     if ordinal >= len(replay) or replay[ordinal].phase != phase:
                         raise DrawOnlyContractError("Player replay phase drift")
                     action_id = replay[ordinal].selected_id
+                elif mcts_simulations and len(actions) > 1:
+                    # The budget is per *real combat*, not per player action.
+                    # Once depleted, return to greedy policy rather than
+                    # spawning unbounded full-fight searches.
+                    remaining = mcts_combat_budget - mcts_search_boundaries
+                    local_horizon = min(
+                        mcts_max_boundaries,
+                        remaining // mcts_simulations,
+                    )
+                    if local_horizon >= 4:
+                        from sts2_ai.nature.h4_mcts import search_player_action
+                        action_id, search_stats = search_player_action(
+                            state, observation=obs, legal_actions=actions,
+                            rollout_choose=player_choose,
+                            simulations=mcts_simulations,
+                            seed=f"{source_seed}:{reference_seed}:{ordinal}",
+                            opening_enemy_hp=opening_enemy_hp,
+                            player_max_hp=max_hp,
+                            max_boundaries=local_horizon,
+                        )
+                        mcts_searched_decisions += 1
+                        mcts_rollouts += int(search_stats["simulations"])
+                        mcts_search_boundaries += int(
+                            search_stats["simulated_boundaries"])
+                        mcts_cutoff_rollouts += int(
+                            search_stats["cutoff_rollouts"])
+                        if mcts_searched_decisions == 1 or (
+                            mcts_searched_decisions % 8 == 0
+                        ):
+                            print(
+                                f"[h4-uct-worker] seed={source_seed} "
+                                f"searched={mcts_searched_decisions} "
+                                f"simulated_boundaries={mcts_search_boundaries}/"
+                                f"{mcts_combat_budget}",
+                                flush=True,
+                            )
+                    else:
+                        action_id = player_choose(obs, actions)
+                        mcts_greedy_fallback_decisions += 1
                 else:
                     action_id = player_choose(obs, actions)
                 if action_id not in {a["actionId"] for a in actions}:
@@ -329,6 +393,14 @@ def play_draw_only_episode(
         held.append(restored)
         if restored.fingerprint != state.fingerprint:
             raise DrawOnlyContractError("Private terminal snapshot replay mismatch")
+        terminal_enemy_hp = (state.status().get("terminalEnemyHp")
+                             if reward_version == H4_REWARD else None)
+        score = (_score(state.outcome, entry_hp, max_hp, state.exit_hp)
+                 if reward_version == "hp_preservation_v1" else
+                 boss_progress_score(
+                     state.outcome, player_exit_hp=state.exit_hp,
+                     player_max_hp=max_hp, opening_enemy_hp=opening_enemy_hp,
+                     terminal_enemy_hp=terminal_enemy_hp))
         return DrawOnlyEpisode(
             schema=DRAW_ONLY_SCHEMA, emulator_revision=emulator_revision,
             source_seed=source_seed, reference_seed=reference_seed,
@@ -341,11 +413,20 @@ def play_draw_only_episode(
             controlled_draw_count=draw_count,
             nontrivial_draw_count=nontrivial_count,
             outcome=state.outcome, exit_hp=state.exit_hp,
-            score=_score(state.outcome, entry_hp, max_hp, state.exit_hp),
+            score=score,
             terminal_fingerprint=state.fingerprint,
             terminal_replay_verified=True,
             scenario_id=selected.scenario_id,
             deck_preset_id=deck_preset_id,
+            reward_version=reward_version,
+            opening_enemy_hp=opening_enemy_hp,
+            terminal_enemy_hp=terminal_enemy_hp,
+            mcts_simulations=mcts_simulations,
+            mcts_rollouts=mcts_rollouts,
+            mcts_search_boundaries=mcts_search_boundaries,
+            mcts_cutoff_rollouts=mcts_cutoff_rollouts,
+            mcts_searched_decisions=mcts_searched_decisions,
+            mcts_greedy_fallback_decisions=mcts_greedy_fallback_decisions,
         )
     finally:
         session.release_semantic_many(held)
