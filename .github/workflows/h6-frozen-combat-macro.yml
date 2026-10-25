@@ -64,7 +64,7 @@ jobs:
             --tactical-state-encoding enemy_instances \
             --combat-objective hp_preservation \
             --hp-monotonic-weight 0 --combat-advantage-baseline critic \
-            --dimension 128 --hidden 32 \
+            --dimension 128 --hidden 32 --ascension 10 \
             --rounds 1 --episodes 2 --workers 2 --eval-seeds 1 \
             --max-decisions 512 \
             --train-seed-prefix h6-ci-native-train \
@@ -79,6 +79,7 @@ jobs:
           report = json.loads(Path('ci-h6-macro-report.json').read_text())
           assert output['combat'] == baseline['combat']
           assert report['freeze_combat'] is True
+          assert report['ascension'] == 10
           assert report['environment'] == 'native-overgrowth'
           assert report['episode_goal_version'] == 'native-act1-boss-v1'
           assert report['rounds'][0]['tactical_decisions'] == 0
