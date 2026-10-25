@@ -1,11 +1,7 @@
 """H6 confirmation must distinguish completed runs from censored runs."""
-import sys
-from pathlib import Path
-
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from evaluate_h6_macro import _paired, _summarize  # noqa: E402
+from tools.evaluate_h6_macro import _paired, _summarize
 
 
 def _row(seed, *, cleared=False, censored=False, progress=0.3):
