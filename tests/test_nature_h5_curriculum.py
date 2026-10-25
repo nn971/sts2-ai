@@ -1,6 +1,4 @@
 """H5 source-bank tests: fixture support, split isolation and exact balance."""
-from collections import Counter
-
 import pytest
 
 from sts2_ai.nature.h5_curriculum import (
