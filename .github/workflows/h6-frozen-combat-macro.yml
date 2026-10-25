@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: nn971/sts2-emulator
-          ref: c254bd99816ac2b89b350ec132fe1cfbb27dfac6
+          ref: 835d9784dabe639995000e71af128059a2c13055
           path: ai/emulator
       - uses: actions/setup-dotnet@v4
         with:
@@ -54,6 +54,9 @@ jobs:
         run: |
           dotnet restore Sts2Emulator.sln
           dotnet build Sts2Emulator.sln -c Release --no-restore
+      - name: Verify legacy event-gold bounded RNG requests
+        working-directory: ai/emulator
+        run: dotnet test tests/Sts2Emulator.Core.Tests/Sts2Emulator.Core.Tests.csproj -c Release --no-build --filter FullyQualifiedName~LegacyNativeEventGoldBoundaryTests
       - name: Native A10 run smoke with H6 frozen combat
         working-directory: ai
         run: |
