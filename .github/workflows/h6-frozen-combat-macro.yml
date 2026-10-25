@@ -7,6 +7,8 @@ on:
       - 'tools/train_phase_split.py'
       - 'tests/test_h6_frozen_combat_macro.py'
       - 'tests/test_h6_native_reset_profiles.py'
+      - 'tests/test_h6_public_enemy_position.py'
+      - 'src/sts2_ai/models/enemy_instances.py'
       - 'src/sts2_ai/emulator/run_environment.py'
       - '.github/workflows/h6-frozen-combat-macro.yml'
   pull_request:
@@ -40,7 +42,7 @@ jobs:
       - name: Lint H6 code
         working-directory: ai
         run: |
-          python -m ruff check tests/test_h6_frozen_combat_macro.py tests/test_h6_macro_evaluation.py tests/test_h6_native_reset_profiles.py tools/evaluate_h6_macro.py
+          python -m ruff check tests/test_h6_frozen_combat_macro.py tests/test_h6_macro_evaluation.py tests/test_h6_native_reset_profiles.py tests/test_h6_public_enemy_position.py tests/test_h6_public_enemy_position.py tools/evaluate_h6_macro.py
       - name: Train and resume with immutable combat in toy emulator
         working-directory: ai
         run: |
