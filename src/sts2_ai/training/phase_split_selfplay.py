@@ -38,6 +38,8 @@ from sts2_ai.models.hashed_linear import (
     tactical_action_features,
 )
 from sts2_ai.models.neural import (
+    NEURAL_FORMAT,
+    NEURAL_MACRO_FORMAT,
     TACTICAL_ATTENTION_FORMAT,
     TACTICAL_DAMAGE_FORMAT,
     TACTICAL_FORMAT,
@@ -171,11 +173,15 @@ def _export_split(
     dimension: int, hidden: int, *, model_id: str, trained: bool,
     tactical_state_encoding: str = "legacy",
     combat_objective: str = "continuation",
+    strategy_action_encoding: str = "legacy",
 ) -> PhaseSplitNeuralModel:
     return PhaseSplitNeuralModel(
         strategy=_export(
             strategy_params, dimension, hidden,
             model_id=model_id + "-strategy", value_head_trained=trained,
+            format_id=(NEURAL_MACRO_FORMAT
+                       if strategy_action_encoding == "macro_v1"
+                       else NEURAL_FORMAT),
         ),
         combat=_export(
             combat_params, dimension, hidden,
@@ -330,6 +336,7 @@ def train_phase_split(
     auxiliary_weight: float = 0.4, boundary_weight: float = 0.25,
     hp_monotonic_weight: float = 0.2,
     tactical_state_encoding: str = "legacy",
+    strategy_action_encoding: str = "legacy",
     loss_normalization: str = "legacy_episode_sum",
     optimizer_method: str = "reinforce",
     ppo_backend: str = "reference",
@@ -359,6 +366,13 @@ def train_phase_split(
         raise ValueError("Ascension must be an integer from 0 through 10")
     if freeze_combat and warm_start is None:
         raise ValueError("Frozen-combat macro training requires a pinned warm start")
+    if strategy_action_encoding not in ("legacy", "macro_v1"):
+        raise ValueError("Unknown macro action encoder")
+    if strategy_action_encoding == "macro_v1" and (
+        not freeze_combat or optimizer_method != "ppo"
+        or ppo_backend != "batched"
+    ):
+        raise ValueError("H6-B macro encoder requires frozen-combat batched PPO")
     if freeze_combat and optimizer_method != "ppo":
         raise ValueError("Frozen-combat macro training requires PPO")
     if min(rounds, episodes_per_round, dimension, hidden, max_decisions, workers) <= 0:
@@ -551,6 +565,8 @@ def train_phase_split(
         config["tactical_state_encoding"] = tactical_state_encoding
     if freeze_combat:
         config["freeze_combat"] = True
+    if strategy_action_encoding != "legacy":
+        config["strategy_action_encoding"] = strategy_action_encoding
     if combat_objective != "continuation":
         config["combat_objective"] = combat_objective
     if combat_advantage_baseline != "critic":
@@ -603,6 +619,7 @@ def train_phase_split(
                 model_id=f"phase-split-before-round-{index}", trained=index > 0,
                 tactical_state_encoding=tactical_state_encoding,
                 combat_objective=combat_objective,
+                strategy_action_encoding=strategy_action_encoding,
             )
             if freeze_combat:
                 model.combat = frozen_combat
@@ -709,6 +726,8 @@ def train_phase_split(
                     value_weight=value_weight,
                     entropy_weight=entropy_weight,
                     seed=seed + index * 1000003,
+                    **({"strategy_action_encoding": strategy_action_encoding}
+                       if ppo_backend == "batched" else {}),
                 )
                 steps = ppo.steps
                 strategic_count = ppo.counts["strategy"]
@@ -991,6 +1010,7 @@ def train_phase_split(
         trained=bool(rows and any(x.optimization_steps for x in rows)),
         tactical_state_encoding=tactical_state_encoding,
         combat_objective=combat_objective,
+        strategy_action_encoding=strategy_action_encoding,
     )
     if freeze_combat:
         final.combat = frozen_combat
