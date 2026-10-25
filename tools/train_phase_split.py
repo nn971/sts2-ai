@@ -40,6 +40,8 @@ def main() -> None:
     p.add_argument("--rounds", type=int, default=5)
     p.add_argument("--episodes", type=int, default=32)
     p.add_argument("--workers", type=int, default=4)
+    p.add_argument("--ascension", type=int, default=0,
+                   help="Run difficulty; H6 frozen-combat runs require 10")
     p.add_argument("--dimension", type=int, default=128)
     p.add_argument("--hidden", type=int, default=32)
     p.add_argument("--learning-rate", type=float, default=0.003)
@@ -115,6 +117,8 @@ def main() -> None:
     args = p.parse_args()
     if args.freeze_combat and (not args.warm_start or args.optimizer_method != "ppo"):
         p.error("--freeze-combat requires --warm-start and --optimizer-method ppo")
+    if args.freeze_combat and args.ascension != 10:
+        p.error("H6 frozen-combat training requires --ascension 10")
     if args.win_anneal_threshold < 1:
         p.error("--win-anneal-threshold must be positive")
     if args.eval_seeds < 1:
@@ -164,6 +168,7 @@ def main() -> None:
         model, rows = train_phase_split(
             backend, rounds=args.rounds, episodes_per_round=args.episodes,
             workers=args.workers, dimension=args.dimension, hidden=args.hidden,
+            ascension=args.ascension,
             learning_rate=args.learning_rate,
             optimizer_method=args.optimizer_method,
             ppo_backend=args.ppo_backend,
@@ -211,6 +216,7 @@ def main() -> None:
                 max_decisions=args.max_decisions,
                 environment=NATIVE_OVERGROWTH,
                 episode_goal_version=args.episode_goal,
+                ascension=args.ascension,
             )
             evaluations.append({
                 "seed": item.seed,
@@ -266,6 +272,7 @@ def main() -> None:
                         max_decisions=args.max_decisions,
                         environment=NATIVE_OVERGROWTH,
                         episode_goal_version=args.episode_goal,
+                        ascension=args.ascension,
                     )
                     baseline_evaluations.append({
                         "seed": item.seed,
@@ -310,6 +317,7 @@ def main() -> None:
             ),
             "optimizer_method": args.optimizer_method,
             "freeze_combat": args.freeze_combat,
+            "ascension": args.ascension,
             "ppo_backend": args.ppo_backend,
             "episode_goal_version": args.episode_goal,
             "win_anneal_threshold": args.win_anneal_threshold,
