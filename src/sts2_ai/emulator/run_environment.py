@@ -18,7 +18,7 @@ ENVIRONMENTS = (NATIVE_OVERGROWTH, LEGACY)
 
 # Versioned native Overgrowth public bridge contract.
 NATIVE_RESET_SCHEMA = "prototype-native-overgrowth-reset-v1"
-NATIVE_MAP_PROFILE = "native-overgrowth-map-structure-v0.111.0-v1"
+NATIVE_MAP_PROFILE = "native-overgrowth-map-native-rng-v0.111.0-v1"
 
 
 def require_environment(backend: EmulatorBackend, environment: str) -> None:
