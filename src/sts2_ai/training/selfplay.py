@@ -196,6 +196,8 @@ def collect_public_episode(
     environment: str = LEGACY,
     temperature: float = 1.0,
     episode_goal_version: str = PROTOTYPE_THREE_ACT_GOAL,
+    ascension: int = 0,
+    greedy_combat: bool = False,
 ) -> Episode:
     """Run the actual emulator; never give hidden handles to the actor.
 
@@ -210,7 +212,7 @@ def collect_public_episode(
         raise ValueError("Sampling temperature must be positive and finite")
     require_episode_goal(episode_goal_version, environment)
     policy = InformationPolicy(policy_id)
-    state = reset_training_run(backend, seed, environment)
+    state = reset_training_run(backend, seed, environment, ascension=ascension)
     history: list[PublicDecision] = []
     boss_tracker = BossProgressTracker(environment)
     combat_recorder = CombatOutcomeRecorder()
@@ -263,11 +265,20 @@ def collect_public_episode(
                 )
 
             actions = tuple(backend.legal_actions(state))
-            index = sample_public_action(
-                model, frame, actions, rng=actor_rng, temperature=temperature
-            )
-            # Record *only* public inputs and the sampled legal index.
             phase = "combat" if isinstance(raw_frame.get("combat"), dict) else "strategy"
+            if greedy_combat and phase == "combat":
+                # H6: the frozen backbone acts greedily, independent of the
+                # macro policy exploration temperature and actor RNG.
+                logits = model.evaluate(frame, actions).action_logits
+                index = max(range(len(actions)), key=lambda i: (
+                    logits[i], actions[i].action_id,
+                ))
+            else:
+                index = sample_public_action(
+                    model, frame, actions, rng=actor_rng,
+                    temperature=temperature,
+                )
+            # Record *only* public inputs and the sampled legal index.
             history.append(PublicDecision(frame, actions, index, phase))
             combat_recorder.selected_action(actions[index])
             try:

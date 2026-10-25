@@ -20,7 +20,7 @@ import tempfile
 import time
 from collections.abc import Callable
 from contextlib import ExitStack
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -345,15 +345,22 @@ def train_phase_split(
     temperature_start: float = 0.05, temperature_end: float = 0.035,
     temperature_decay_rounds: int = 20,
     seed: int = 19, seed_prefix: str = "phase-split-v1",
-    workers: int = 1, environment: str = LEGACY,
+    workers: int = 1, environment: str = LEGACY, ascension: int = 0,
     warm_start: Path | None = None,
     checkpoint: Path | None = None, resume: bool = False,
+    freeze_combat: bool = False,
     combat_samples_dir: Path | None = None,
     progress: Callable[[PhaseSplitRound], None] | None = None,
     excluded_training_seeds: frozenset[str] = frozenset(),
     episode_goal_version: str = PROTOTYPE_THREE_ACT_GOAL,
 ) -> tuple[PhaseSplitNeuralModel, tuple[PhaseSplitRound, ...]]:
     require_episode_goal(episode_goal_version, environment)
+    if type(ascension) is not int or not 0 <= ascension <= 10:
+        raise ValueError("Ascension must be an integer from 0 through 10")
+    if freeze_combat and warm_start is None:
+        raise ValueError("Frozen-combat macro training requires a pinned warm start")
+    if freeze_combat and optimizer_method != "ppo":
+        raise ValueError("Frozen-combat macro training requires PPO")
     if min(rounds, episodes_per_round, dimension, hidden, max_decisions, workers) <= 0:
         raise ValueError("Expected positive sizes and worker count")
     if combat_objective not in ("continuation", "hp_first", "hp_preservation"):
@@ -427,6 +434,7 @@ def train_phase_split(
         for phase, weights in params.items()
     }
     warm_sha: str | None = None
+    frozen_combat = None
     if warm_start is not None:
         raw_bytes = warm_start.read_bytes()
         warm_sha = hashlib.sha256(raw_bytes).hexdigest()
@@ -436,8 +444,12 @@ def train_phase_split(
         if raw.get("format") == "sts2-phase-split-policy-value-v1":
             warm = PhaseSplitNeuralModel.from_dict(raw)
             sources = {"strategy": warm.strategy, "combat": warm.combat}
+            if freeze_combat:
+                frozen_combat = warm.combat
             previous_combat_objective = warm.combat_value_objective
         else:
+            if freeze_combat:
+                raise ValueError("Frozen combat requires a phase-split checkpoint")
             # Tactical-v3 extends v2 semantic tokens with target context.
             # Both heads warm-start approximately: normalization changes with
             # extra features, so the action distributions are not identical.
@@ -458,6 +470,8 @@ def train_phase_split(
             TACTICAL_STRUCTURED_FORMAT
             if tactical_state_encoding == "structured" else TACTICAL_FORMAT
         )
+        if freeze_combat and sources["combat"].format_id != expected_tactical_format:
+            raise ValueError("Frozen combat encoding must match checkpoint exactly")
         for phase, source in sources.items():
             if (source.dimension, source.hidden) != (dimension, hidden):
                 raise ValueError("Warm-start dimensions must match")
@@ -490,6 +504,11 @@ def train_phase_split(
                     weight.copy_(torch.tensor(
                         getattr(source, name), dtype=weight.dtype
                     ))
+    if freeze_combat:
+        # Defense in depth: H6 removes every tactical training sample before
+        # calling PPO, and the original combat JSON object is always used for
+        # inference and export. A zero LR protects accidental future updates.
+        optimizers["combat"].param_groups[0]["lr"] = 0.0
     revision = getattr(backend, "emulator_revision", "test-backend")
     config = {
         "version": (
@@ -514,6 +533,8 @@ def train_phase_split(
     # so it MUST have a distinct checkpoint fingerprint.
     if episode_goal_version != PROTOTYPE_THREE_ACT_GOAL:
         config["episode_goal_version"] = episode_goal_version
+    if ascension:
+        config["ascension"] = ascension
     if optimizer_method == "ppo":
         if ppo_backend != "reference":
             config["ppo_backend"] = ppo_backend
@@ -528,6 +549,8 @@ def train_phase_split(
         })
     if tactical_state_encoding != "legacy":
         config["tactical_state_encoding"] = tactical_state_encoding
+    if freeze_combat:
+        config["freeze_combat"] = True
     if combat_objective != "continuation":
         config["combat_objective"] = combat_objective
     if combat_advantage_baseline != "critic":
@@ -581,6 +604,8 @@ def train_phase_split(
                 tactical_state_encoding=tactical_state_encoding,
                 combat_objective=combat_objective,
             )
+            if freeze_combat:
+                model.combat = frozen_combat
             planned_seeds = [
                 f"{seed_prefix}-{index}-{j}" for j in range(episodes_per_round)
             ]
@@ -603,6 +628,7 @@ def train_phase_split(
                     max_decisions=max_decisions, environment=environment,
                     temperature=temperature,
                     episode_goal_version=episode_goal_version,
+                    ascension=ascension, greedy_combat=freeze_combat,
                 ) for run_seed in seeds)
             else:
                 cohort = collect_parallel(
@@ -610,6 +636,7 @@ def train_phase_split(
                     max_decisions=max_decisions, policy_id="prototype-fair-v0",
                     environment=environment, temperature=temperature,
                     episode_goal_version=episode_goal_version,
+                    ascension=ascension, greedy_combat=freeze_combat,
                 )
             rollout_seconds = time.perf_counter() - start
             completed = [ep for ep in cohort if ep.completed]
@@ -618,8 +645,14 @@ def train_phase_split(
             )
             run_targets = [(ep, _bounded_return(ep, alpha)) for ep in completed]
             local_targets: list[list[tuple[CombatOutcome, float]]] = []
-            for episode, run_target in run_targets:
-                local_targets.append([
+            if freeze_combat:
+                # H6 trains only strategy. Its rewards are run-level; there is
+                # no need to evaluate combat-boundary targets, fit combat
+                # values, encode tactical features, or differentiate combat.
+                local_targets = [[] for _ in run_targets]
+            else:
+                for episode, run_target in run_targets:
+                    local_targets.append([
                     (
                         segment,
                         (
@@ -651,9 +684,16 @@ def train_phase_split(
                 else:
                     from sts2_ai.training.phase_split_ppo import ppo_update
 
+                strategy_only = (
+                    [(replace(ep, decisions=tuple(
+                        d for d in ep.decisions if d.phase == "strategy"
+                    ), combat_outcomes=()), target)
+                     for ep, target in run_targets]
+                    if freeze_combat else run_targets
+                )
                 ppo = ppo_update(
                     torch=torch,
-                    run_targets=run_targets,
+                    run_targets=strategy_only,
                     local_targets=local_targets,
                     params=params,
                     optimizers=optimizers,
@@ -945,10 +985,13 @@ def train_phase_split(
                         temporary.unlink(missing_ok=True)
             if progress is not None:
                 progress(row)
-    return _export_split(
+    final = _export_split(
         params["strategy"], params["combat"], dimension, hidden,
         model_id=f"phase-split-v1-{fingerprint[:12]}-{rounds}",
         trained=bool(rows and any(x.optimization_steps for x in rows)),
         tactical_state_encoding=tactical_state_encoding,
         combat_objective=combat_objective,
-    ), tuple(rows)
+    )
+    if freeze_combat:
+        final.combat = frozen_combat
+    return final, tuple(rows)

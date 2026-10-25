@@ -40,7 +40,9 @@ def enemy_instance_vectors(
     """One vector per unique living enemy; preserves species and individual state.
 
     Formation and last_move are visible. Hidden AI automaton state and RNG are
-    deliberately excluded. Requires a v3 emulator public observation.
+    deliberately excluded. A native public frame may omit explicit
+    formation_position while retaining the visible ordered enemy lineup;
+    then array index is its public positional coordinate, not hidden state.
     """
     if dimension <= DAMAGE_NUMERIC_COORDINATES:
         raise ValueError("Instance encoder requires dimension > 40")
@@ -48,12 +50,12 @@ def enemy_instance_vectors(
     if not isinstance(combat, dict) or not isinstance(combat.get("enemies"), list):
         raise ValueError("Instance encoder requires combat enemies")
     output: dict[int, dict[int, float]] = {}
-    for enemy in combat["enemies"]:
+    for visible_position, enemy in enumerate(combat["enemies"]):
         if not isinstance(enemy, dict):
             raise ValueError("Malformed enemy record")
         instance_id, species, position = (
             enemy.get("instance_id"), enemy.get("enemy_id"),
-            enemy.get("formation_position"),
+            enemy.get("formation_position", visible_position),
         )
         if (type(instance_id) is not int or instance_id <= 0
                 or not isinstance(species, str) or not species
