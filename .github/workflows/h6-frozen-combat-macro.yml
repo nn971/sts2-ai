@@ -6,6 +6,8 @@ on:
       - 'src/sts2_ai/training/phase_split_selfplay.py'
       - 'tools/train_phase_split.py'
       - 'tests/test_h6_frozen_combat_macro.py'
+      - 'tests/test_h6_native_reset_profiles.py'
+      - 'src/sts2_ai/emulator/run_environment.py'
       - '.github/workflows/h6-frozen-combat-macro.yml'
   pull_request:
   workflow_dispatch:
@@ -38,11 +40,11 @@ jobs:
       - name: Lint H6 code
         working-directory: ai
         run: |
-          python -m ruff check tests/test_h6_frozen_combat_macro.py tests/test_h6_macro_evaluation.py tools/evaluate_h6_macro.py
+          python -m ruff check tests/test_h6_frozen_combat_macro.py tests/test_h6_macro_evaluation.py tests/test_h6_native_reset_profiles.py tools/evaluate_h6_macro.py
       - name: Train and resume with immutable combat in toy emulator
         working-directory: ai
         run: |
-          python -m pytest -q tests/test_h6_frozen_combat_macro.py tests/test_h6_macro_evaluation.py
+          python -m pytest -q tests/test_h6_frozen_combat_macro.py tests/test_h6_macro_evaluation.py tests/test_h6_native_reset_profiles.py
       - name: Build pinned native-Overgrowth emulator
         working-directory: ai/emulator
         run: |
