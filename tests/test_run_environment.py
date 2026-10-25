@@ -27,6 +27,7 @@ class FakeRunBackend:
         self.legacy_calls = 0
         self.released: list[str] = []
         self.valid = valid
+        self.ascension = 0
 
     def reset(self, seed: str, ascension: int = 0) -> str:
         self.legacy_calls += 1
@@ -34,12 +35,14 @@ class FakeRunBackend:
 
     def reset_native_overgrowth(self, seed: str, ascension: int = 0) -> str:
         self.native_calls += 1
+        self.ascension = ascension
         return "native-state"
 
     def observe(self, state: str, policy: object) -> Observation:
         payload = {
             "map_generation_profile_id": NATIVE_MAP_PROFILE if self.valid else "legacy",
             "act": 1,
+            "ascension": self.ascension,
             "floor": 0,
             "event_id": "proto.native.event.neow",
             "map": [
@@ -47,7 +50,10 @@ class FakeRunBackend:
                 {"node_id": "1:16:3", "floor": 16},
             ],
             "deck": [{"card_id": "proto.silent.strike"}] * 12
-            + [{"card_id": "proto.common.restlessness"}],
+            + [{"card_id": (
+                "proto.curse.ascenders_bane" if self.ascension >= 5
+                else "proto.common.restlessness"
+            )}],
         }
         return Observation(
             "prototype-fair-v0", json.dumps(payload), "mock-public-hash"
@@ -117,3 +123,33 @@ def test_mode_argument_validation() -> None:
     backend = FakeRunBackend()
     with pytest.raises(ValueError, match="Unknown training environment"):
         require_environment(backend, "invented-mode")
+
+
+def test_a10_native_opening_requires_bane_not_restlessness() -> None:
+    backend = FakeRunBackend()
+    backend.native_overgrowth_reset_schema = NATIVE_RESET_SCHEMA
+    assert reset_training_run(
+        backend, "a10", NATIVE_OVERGROWTH, ascension=10,
+    ) == "native-state"
+    assert backend.ascension == 10
+    assert backend.legacy_calls == 0
+    assert backend.released == []
+
+
+def test_a10_native_opening_rejects_old_restlessness_deck() -> None:
+    class WrongAscensionDeck(FakeRunBackend):
+        def observe(self, state: str, policy: object) -> Observation:
+            original = super().observe(state, policy)
+            raw = json.loads(original.payload_json)
+            raw["deck"][-1]["card_id"] = "proto.common.restlessness"
+            return Observation(
+                original.policy_id, json.dumps(raw), original.observation_hash,
+            )
+
+    backend = WrongAscensionDeck()
+    backend.native_overgrowth_reset_schema = NATIVE_RESET_SCHEMA
+    with pytest.raises(JsonlBridgeError, match="failed public checks"):
+        reset_training_run(
+            backend, "a10-invalid", NATIVE_OVERGROWTH, ascension=10,
+        )
+    assert backend.released == ["native-state"]
