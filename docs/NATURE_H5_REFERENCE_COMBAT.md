@@ -103,31 +103,31 @@ set model results/nature/h4-reference-only-a10/player_models/player-r0040.json
 Dry-run prints the exact config without creating a training run:
 
 ```fish
-python -u tools/train_reference_combat_h5.py \\
-  --player-model $model --emulator-dll $dll \\
-  --emulator-bindings $bindings --emulator-revision $rev \\
+python -u tools/train_reference_combat_h5.py \
+  --player-model $model --emulator-dll $dll \
+  --emulator-bindings $bindings --emulator-revision $rev \
   --output-root results/nature/h5-reference-a10
 ```
 
 Mechanical smoke: **not** a statement of learning effectiveness.
 
 ```fish
-python -u tools/train_reference_combat_h5.py \\
-  --player-model $model --emulator-dll $dll \\
-  --emulator-bindings $bindings --emulator-revision $rev \\
-  --workers 15 --rounds 1 --episodes-per-round 16 \\
-  --eval-every 1 --eval-episodes 16 \\
+python -u tools/train_reference_combat_h5.py \
+  --player-model $model --emulator-dll $dll \
+  --emulator-bindings $bindings --emulator-revision $rev \
+  --workers 15 --rounds 1 --episodes-per-round 16 \
+  --eval-every 1 --eval-episodes 16 \
   --output-root results/nature/h5-reference-smoke --execute
 ```
 
 Full PPO from H4's reference-only r40:
 
 ```fish
-python -u tools/train_reference_combat_h5.py \\
-  --player-model $model --emulator-dll $dll \\
-  --emulator-bindings $bindings --emulator-revision $rev \\
-  --workers 15 --rounds 40 --episodes-per-round 256 \\
-  --eval-every 5 --eval-episodes 160 --max-boundaries 1200 \\
+python -u tools/train_reference_combat_h5.py \
+  --player-model $model --emulator-dll $dll \
+  --emulator-bindings $bindings --emulator-revision $rev \
+  --workers 15 --rounds 40 --episodes-per-round 256 \
+  --eval-every 5 --eval-episodes 160 --max-boundaries 1200 \
   --output-root results/nature/h5-reference-a10 --execute
 ```
 
@@ -139,18 +139,18 @@ After the full 40 rounds and a frozen checkpoint:
 ```fish
 set h5 results/nature/h5-reference-a10/player_models/player-r0040.json
 
-python -u tools/evaluate_reference_combat_h5.py \\
-  --player h4=$model --player h5=$h5 \\
-  --emulator-dll $dll --emulator-bindings $bindings \\
-  --emulator-revision $rev --workers 15 --split confirmation \\
-  --eval-episodes 160 --output results/nature/h5-confirmation.json \\
+python -u tools/evaluate_reference_combat_h5.py \
+  --player h4=$model --player h5=$h5 \
+  --emulator-dll $dll --emulator-bindings $bindings \
+  --emulator-revision $rev --workers 15 --split confirmation \
+  --eval-episodes 160 --output results/nature/h5-confirmation.json \
   --execute
 
-python -u tools/evaluate_reference_combat_h5.py \\
-  --player h4=$model --player h5=$h5 \\
-  --emulator-dll $dll --emulator-bindings $bindings \\
-  --emulator-revision $rev --workers 15 --split zero-shot \\
-  --eval-episodes 120 --output results/nature/h5-zero-shot.json \\
+python -u tools/evaluate_reference_combat_h5.py \
+  --player h4=$model --player h5=$h5 \
+  --emulator-dll $dll --emulator-bindings $bindings \
+  --emulator-revision $rev --workers 15 --split zero-shot \
+  --eval-episodes 120 --output results/nature/h5-zero-shot.json \
   --execute
 ```
 
