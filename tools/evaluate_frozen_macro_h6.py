@@ -24,6 +24,7 @@ from sts2_ai.nature.corpus import atomic_write, file_sha256
 from sts2_ai.training.frozen_macro import combat_digest
 from sts2_ai.training.h6_sources import H6_SOURCE_SCHEMA, run_sources, source_digest
 from sts2_ai.training.parallel_rollouts import collect_parallel, open_worker_pool
+
 SCHEMA = "sts2-h6-frozen-macro-confirmation-v1"
 
 
