@@ -37,6 +37,9 @@ class EpisodeRequest:
     environment: str
     temperature: float = 1.0
     episode_goal_version: str = PROTOTYPE_THREE_ACT_GOAL
+    ascension: int = 0
+    combat_greedy: bool = False
+    strategy_greedy: bool = False
 
 
 def episode_actor_seed(base_seed: int, run_seed: str) -> int:
@@ -77,6 +80,9 @@ def _worker_collect(request: EpisodeRequest) -> Episode:
         environment=request.environment,
         temperature=request.temperature,
         episode_goal_version=request.episode_goal_version,
+        ascension=request.ascension,
+        combat_greedy=request.combat_greedy,
+        strategy_greedy=request.strategy_greedy,
     )
 
 
@@ -106,6 +112,9 @@ def collect_parallel(
     environment: str,
     temperature: float = 1.0,
     episode_goal_version: str = PROTOTYPE_THREE_ACT_GOAL,
+    ascension: int = 0,
+    combat_greedy: bool = False,
+    strategy_greedy: bool = False,
 ) -> tuple[Episode, ...]:
     if not run_seeds:
         return ()
@@ -116,7 +125,8 @@ def collect_parallel(
         EpisodeRequest(
             payload, seed, episode_actor_seed(base_seed, seed),
             max_decisions, policy_id, environment, temperature,
-            episode_goal_version,
+            episode_goal_version, ascension,
+            combat_greedy, strategy_greedy,
         )
         for seed in run_seeds
     ]

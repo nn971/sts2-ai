@@ -196,6 +196,9 @@ def collect_public_episode(
     environment: str = LEGACY,
     temperature: float = 1.0,
     episode_goal_version: str = PROTOTYPE_THREE_ACT_GOAL,
+    ascension: int = 0,
+    combat_greedy: bool = False,
+    strategy_greedy: bool = False,
 ) -> Episode:
     """Run the actual emulator; never give hidden handles to the actor.
 
@@ -206,11 +209,13 @@ def collect_public_episode(
     """
     if max_decisions <= 0:
         raise ValueError("max_decisions must be positive")
+    if type(ascension) is not int or not 0 <= ascension <= 10:
+        raise ValueError("Unsupported single-player ascension level")
     if not math.isfinite(temperature) or temperature <= 0:
         raise ValueError("Sampling temperature must be positive and finite")
     require_episode_goal(episode_goal_version, environment)
     policy = InformationPolicy(policy_id)
-    state = reset_training_run(backend, seed, environment)
+    state = reset_training_run(backend, seed, environment, ascension=ascension)
     history: list[PublicDecision] = []
     boss_tracker = BossProgressTracker(environment)
     combat_recorder = CombatOutcomeRecorder()
@@ -263,11 +268,20 @@ def collect_public_episode(
                 )
 
             actions = tuple(backend.legal_actions(state))
-            index = sample_public_action(
-                model, frame, actions, rng=actor_rng, temperature=temperature
-            )
-            # Record *only* public inputs and the sampled legal index.
+            # A frozen tactical backbone must not inherit exploratory
+            # macro temperature. Evaluation can be fully greedy by phase.
             phase = "combat" if isinstance(raw_frame.get("combat"), dict) else "strategy"
+            greedy = combat_greedy if phase == "combat" else strategy_greedy
+            if greedy:
+                logits = model.evaluate(frame, actions).action_logits
+                if not logits or not all(math.isfinite(x) for x in logits):
+                    raise ValueError("Invalid greedy policy logits")
+                index = max(range(len(logits)), key=lambda i: logits[i])
+            else:
+                index = sample_public_action(
+                    model, frame, actions, rng=actor_rng, temperature=temperature,
+                )
+            # Record *only* public inputs and the sampled legal index.
             history.append(PublicDecision(frame, actions, index, phase))
             combat_recorder.selected_action(actions[index])
             try:

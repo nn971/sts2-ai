@@ -48,12 +48,16 @@ def enemy_instance_vectors(
     if not isinstance(combat, dict) or not isinstance(combat.get("enemies"), list):
         raise ValueError("Instance encoder requires combat enemies")
     output: dict[int, dict[int, float]] = {}
-    for enemy in combat["enemies"]:
+    for visible_index, enemy in enumerate(combat["enemies"]):
         if not isinstance(enemy, dict):
             raise ValueError("Malformed enemy record")
+        # The conditioned-combat projection reports FormationPosition, while
+        # the native Overgrowth PrototypeAiEnemy reports only ordered public
+        # Enemies. Use that *visible list index* as the position proxy if the
+        # explicit field is absent. Never infer private formation state.
         instance_id, species, position = (
             enemy.get("instance_id"), enemy.get("enemy_id"),
-            enemy.get("formation_position"),
+            enemy.get("formation_position", visible_index),
         )
         if (type(instance_id) is not int or instance_id <= 0
                 or not isinstance(species, str) or not species
@@ -110,7 +114,18 @@ def instance_global_features(state: dict[str, Any], dimension: int) -> dict[int,
     if not isinstance(combat, dict):
         raise ValueError("Instance global features require a combat frame")
     stripped = dict(state)
-    stripped["combat"] = {**combat, "enemies": []}
+    public_combat = {**combat, "enemies": []}
+    if ("draw_pile" not in combat
+            and "relic_counters" not in combat
+            and type(combat.get("draw_pile_count")) is int):
+        # The native full-run public frame exposes only the draw-pile COUNT,
+        # never the hidden contents or ordering. Match our existing P0 opaque
+        # projection without inventing card identities or relic counters.
+        public_combat.update(
+            draw_pile=[], draw_pile_opaque=True, relic_counters=[],
+        )
+        stripped["p0_public_projection"] = "sts2-ai-p0-public-count-piles-v1"
+    stripped["combat"] = public_combat
     global_features = public_resources_tactical_state_features(stripped, dimension)
     aggregate = damage_tactical_state_features(state, dimension)
     for index in range(DAMAGE_NUMERIC_COORDINATES):

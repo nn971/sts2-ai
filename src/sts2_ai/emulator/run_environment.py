@@ -18,7 +18,7 @@ ENVIRONMENTS = (NATIVE_OVERGROWTH, LEGACY)
 
 # Versioned native Overgrowth public bridge contract.
 NATIVE_RESET_SCHEMA = "prototype-native-overgrowth-reset-v1"
-NATIVE_MAP_PROFILE = "native-overgrowth-map-structure-v0.111.0-v1"
+NATIVE_MAP_PROFILE = "native-overgrowth-map-native-rng-v0.111.0-v1"
 
 
 def require_environment(backend: EmulatorBackend, environment: str) -> None:
@@ -39,7 +39,7 @@ def require_environment(backend: EmulatorBackend, environment: str) -> None:
         )
 
 
-def validate_native_start(observation: Observation) -> None:
+def validate_native_start(observation: Observation, ascension: int = 0) -> None:
     """Verify visible evidence of real native-shaped initialization."""
     from .jsonl_backend import JsonlBridgeError
 
@@ -48,6 +48,15 @@ def validate_native_start(observation: Observation) -> None:
         raise JsonlBridgeError("Native Overgrowth reset gave malformed public observation")
     map_nodes = raw.get("map")
     deck = raw.get("deck")
+    # Native A5+ replaces the thirteenth Restlessness card with Bane.
+    expected_extra = (
+        "proto.curse.ascenders_bane"
+        if ascension >= 5 else "proto.common.restlessness"
+    )
+    unexpected_extra = (
+        "proto.common.restlessness"
+        if ascension >= 5 else "proto.curse.ascenders_bane"
+    )
     if (
         raw.get("map_generation_profile_id") != NATIVE_MAP_PROFILE
         or raw.get("act") != 1
@@ -57,15 +66,21 @@ def validate_native_start(observation: Observation) -> None:
         or 16 not in [node.get("floor") for node in map_nodes if isinstance(node, dict)]
         or not isinstance(deck, list)
         or sum(
-            card.get("card_id") == "proto.common.restlessness"
+            card.get("card_id") == expected_extra
             for card in deck if isinstance(card, dict)
         ) != 1
+        or any(
+            card.get("card_id") == unexpected_extra
+            for card in deck if isinstance(card, dict)
+        )
         or len(deck) != 13
+        or (raw.get("ascension") is not None
+            and raw.get("ascension") != ascension)
     ):
         raise JsonlBridgeError(
             "Native Overgrowth reset failed public checks: expected Act 1 "
             "16-floor map, Neow opening event and 13-card Silent deck with "
-            "Restlessness. Refusing to train on a substituted prototype."
+            f"{expected_extra}. Refusing to train on a substituted prototype."
         )
 
 
@@ -84,7 +99,8 @@ def reset_training_run(
     state = native_reset(seed, ascension)
     try:
         validate_native_start(
-            backend.observe(state, InformationPolicy("prototype-fair-v0"))
+            backend.observe(state, InformationPolicy("prototype-fair-v0")),
+            ascension=ascension,
         )
     except BaseException:
         backend.release_many([state])

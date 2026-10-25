@@ -289,3 +289,56 @@ def test_checkpoint_rejects_switching_from_v8_to_v7(tmp_path) -> None:
             Fixture(), tactical_state_encoding="public_resources",
             resume=True, **{**kwargs, "rounds": 2},
         )
+
+
+
+def test_native_overgrowth_uses_public_enemy_list_order_without_private_position():
+    """Native PrototypeAiEnemy omits formation_position; preserve all public identities."""
+    from sts2_ai.models.enemy_instances import enemy_instance_vectors
+
+    state = {"combat": {"enemies": [
+        {"instance_id": 10, "enemy_id": "proto.enemy.a", "hp": 20,
+         "block": 0, "statuses": {}, "powers": []},
+        {"instance_id": 11, "enemy_id": "proto.enemy.b", "hp": 20,
+         "block": 0, "statuses": {}, "powers": []},
+    ]}}
+    implicit = enemy_instance_vectors(state, 128)
+    assert implicit[10][3] == 0.0
+    assert implicit[11][3] == 0.1
+    assert len(implicit) == 2
+    explicit = {"combat": {"enemies": [
+        {**state["combat"]["enemies"][0], "formation_position": 4},
+    ]}}
+    assert enemy_instance_vectors(explicit, 128)[10][3] == 0.4
+    bad = {"combat": {"enemies": [
+        {**state["combat"]["enemies"][0], "formation_position": None},
+    ]}}
+    with pytest.raises(ValueError, match="position"):
+        enemy_instance_vectors(bad, 128)
+
+
+
+def test_native_overgrowth_opaque_public_draw_count_is_supported():
+    from sts2_ai.models.enemy_instances import instance_global_features
+
+    state = {
+        "hp": 56, "max_hp": 70, "relics": [],
+        "combat": {
+            "turn": 1, "energy": 3, "player_block": 0,
+            "draw_pile_count": 8, "hand": [], "discard_pile": [],
+            "exhaust_pile": [], "player_powers": [], "enemies": [],
+        },
+    }
+    native = instance_global_features(state, 128)
+    p0 = {
+        **state,
+        "p0_public_projection": "sts2-ai-p0-public-count-piles-v1",
+        "combat": {
+            **state["combat"], "draw_pile": [], "draw_pile_opaque": True,
+            "relic_counters": [],
+        },
+    }
+    assert native == instance_global_features(p0, 128)
+    # The caller's public observation is not mutated, and no hidden order is
+    # fabricated by the encoder adapter.
+    assert "draw_pile" not in state["combat"]
