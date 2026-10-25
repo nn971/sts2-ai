@@ -79,6 +79,9 @@ jobs:
           row=data['rows'][0]
           assert row['frozen_combat_sha256'] == data['config']['frozen_combat_sha256']
           assert row['combat_optimizer_steps'] == 0
+          assert row['train']['completed'] > 0
+          assert row['strategy_decisions'] > 0
+          assert row['ppo_steps'] > 0
           assert row['train']['runs'] == 2
           assert row['selection']['runs'] == 2
           assert Path('ci-h6-macro/macro-checkpoint.pt').is_file()
