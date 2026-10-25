@@ -44,8 +44,10 @@ def require_environment(backend: EmulatorBackend, environment: str) -> None:
         )
 
 
-def validate_native_start(observation: Observation) -> None:
-    """Verify visible evidence of real native-shaped initialization."""
+def validate_native_start(observation: Observation, ascension: int = 0) -> None:
+    """Verify native opening including the A5+ starter-curse replacement."""
+    if type(ascension) is not int or not 0 <= ascension <= 10:
+        raise ValueError("Native opening ascension must be between 0 and 10")
     from .jsonl_backend import JsonlBridgeError
 
     raw = json.loads(observation.payload_json)
@@ -53,6 +55,10 @@ def validate_native_start(observation: Observation) -> None:
         raise JsonlBridgeError("Native Overgrowth reset gave malformed public observation")
     map_nodes = raw.get("map")
     deck = raw.get("deck")
+    required_curse = (
+        "proto.curse.ascenders_bane" if ascension >= 5
+        else "proto.common.restlessness"
+    )
     if (
         raw.get("map_generation_profile_id") not in NATIVE_MAP_PROFILES
         or raw.get("act") != 1
@@ -62,7 +68,7 @@ def validate_native_start(observation: Observation) -> None:
         or 16 not in [node.get("floor") for node in map_nodes if isinstance(node, dict)]
         or not isinstance(deck, list)
         or sum(
-            card.get("card_id") == "proto.common.restlessness"
+            card.get("card_id") == required_curse
             for card in deck if isinstance(card, dict)
         ) != 1
         or len(deck) != 13
@@ -70,7 +76,7 @@ def validate_native_start(observation: Observation) -> None:
         raise JsonlBridgeError(
             "Native Overgrowth reset failed public checks: expected Act 1 "
             "16-floor map, Neow opening event and 13-card Silent deck with "
-            "Restlessness. Refusing to train on a substituted prototype."
+            f"{required_curse}. Refusing to train on a substituted prototype."
         )
 
 
@@ -89,7 +95,8 @@ def reset_training_run(
     state = native_reset(seed, ascension)
     try:
         validate_native_start(
-            backend.observe(state, InformationPolicy("prototype-fair-v0"))
+            backend.observe(state, InformationPolicy("prototype-fair-v0")),
+            ascension=ascension,
         )
     except BaseException:
         backend.release_many([state])
