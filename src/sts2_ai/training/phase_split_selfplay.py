@@ -628,7 +628,7 @@ def train_phase_split(
                     max_decisions=max_decisions, environment=environment,
                     temperature=temperature,
                     episode_goal_version=episode_goal_version,
-                    ascension=ascension,
+                    ascension=ascension, greedy_combat=freeze_combat,
                 ) for run_seed in seeds)
             else:
                 cohort = collect_parallel(
@@ -636,7 +636,7 @@ def train_phase_split(
                     max_decisions=max_decisions, policy_id="prototype-fair-v0",
                     environment=environment, temperature=temperature,
                     episode_goal_version=episode_goal_version,
-                    ascension=ascension,
+                    ascension=ascension, greedy_combat=freeze_combat,
                 )
             rollout_seconds = time.perf_counter() - start
             completed = [ep for ep in cohort if ep.completed]
