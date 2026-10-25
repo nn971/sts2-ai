@@ -6,6 +6,8 @@ on:
       - 'src/sts2_ai/training/frozen_macro.py'
       - 'src/sts2_ai/training/h6_sources.py'
       - 'src/sts2_ai/training/selfplay.py'
+      - 'src/sts2_ai/emulator/run_environment.py'
+      - 'tests/test_run_environment.py'
       - 'src/sts2_ai/training/parallel_rollouts.py'
       - 'tools/train_frozen_macro_h6.py'
       - 'tools/evaluate_frozen_macro_h6.py'
@@ -43,7 +45,7 @@ jobs:
         working-directory: ai
         run: |
           python -m ruff check src/sts2_ai/training/frozen_macro.py src/sts2_ai/training/h6_sources.py tools/train_frozen_macro_h6.py tools/evaluate_frozen_macro_h6.py tests/test_h6_frozen_macro.py
-          python -m pytest -q tests/test_h6_frozen_macro.py tests/test_phase_split_selfplay.py tests/test_neural_selfplay.py
+          python -m pytest -q tests/test_h6_frozen_macro.py tests/test_phase_split_selfplay.py tests/test_neural_selfplay.py tests/test_run_environment.py
       - name: Build unchanged pinned emulator
         working-directory: emulator
         run: |
