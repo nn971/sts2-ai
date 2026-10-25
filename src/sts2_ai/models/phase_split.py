@@ -15,6 +15,7 @@ from typing import Any
 from sts2_ai.emulator import LegalAction, Observation
 from sts2_ai.models.neural import (
     NEURAL_FORMAT,
+    NEURAL_MACRO_FORMAT,
     TACTICAL_ATTENTION_FORMAT,
     TACTICAL_DAMAGE_FORMAT,
     TACTICAL_FORMAT,
@@ -53,7 +54,7 @@ class PhaseSplitNeuralModel:
             raise ValueError("Phase-split model requires a model identifier")
         if self.combat_value_objective not in ("continuation", "hp_first", "hp_preservation"):
             raise ValueError("Unsupported combat value objective")
-        if self.strategy.format_id != NEURAL_FORMAT:
+        if self.strategy.format_id not in (NEURAL_FORMAT, NEURAL_MACRO_FORMAT):
             raise ValueError("Strategy head must use the semantic action format")
         if self.combat.format_id not in (
             TACTICAL_FORMAT, TACTICAL_STRUCTURED_FORMAT, TACTICAL_RELATIONAL_FORMAT,
