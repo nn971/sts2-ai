@@ -8,7 +8,6 @@ from test_nature_h3_joint_player import specimen
 
 from sts2_ai.emulator import Observation
 from sts2_ai.emulator.semantic_p0_public_projection import project_public_p0_observation
-from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.nature.protocol import canonical_sha256
 
 
