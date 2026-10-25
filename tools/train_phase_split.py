@@ -100,6 +100,8 @@ def main() -> None:
         help="Explicitly omit unsupported run seeds from training; recorded in report",
     )
     p.add_argument("--warm-start", type=Path)
+    p.add_argument("--freeze-combat", action="store_true",
+                   help="H6: preserve warm-start combat model exactly, train strategy only")
     p.add_argument(
         "--baseline-eval-cache", type=Path,
         help="Reuse the fixed warm-start evaluation only when its identity matches",
@@ -111,6 +113,8 @@ def main() -> None:
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--report", type=Path, required=True)
     args = p.parse_args()
+    if args.freeze_combat and (not args.warm_start or args.optimizer_method != "ppo"):
+        p.error("--freeze-combat requires --warm-start and --optimizer-method ppo")
     if args.win_anneal_threshold < 1:
         p.error("--win-anneal-threshold must be positive")
     if args.eval_seeds < 1:
@@ -181,6 +185,7 @@ def main() -> None:
             temperature_decay_rounds=args.temperature_decay_rounds,
             max_decisions=args.max_decisions,
             seed=args.seed, warm_start=args.warm_start,
+            freeze_combat=args.freeze_combat,
             checkpoint=args.checkpoint, resume=args.resume,
             combat_samples_dir=args.combat_samples_dir,
             environment=NATIVE_OVERGROWTH, progress=progress,
@@ -189,6 +194,12 @@ def main() -> None:
             win_anneal_threshold=args.win_anneal_threshold,
         )
         model.save(args.output)
+        if args.freeze_combat:
+            from sts2_ai.models.phase_split import PhaseSplitNeuralModel
+            original = PhaseSplitNeuralModel.load(args.warm_start)
+            saved = PhaseSplitNeuralModel.load(args.output)
+            if saved.combat.to_dict() != original.combat.to_dict():
+                raise RuntimeError("H6 frozen combat checkpoint changed during training")
         log(f"[split] model exported: {args.output}")
         agent = PhaseSplitGreedyAgent(model)
         evaluations = []
@@ -298,6 +309,7 @@ def main() -> None:
                 else SPLIT_TRAINING_VERSION
             ),
             "optimizer_method": args.optimizer_method,
+            "freeze_combat": args.freeze_combat,
             "ppo_backend": args.ppo_backend,
             "episode_goal_version": args.episode_goal,
             "win_anneal_threshold": args.win_anneal_threshold,
