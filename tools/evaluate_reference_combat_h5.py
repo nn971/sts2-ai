@@ -18,8 +18,13 @@ from sts2_ai.nature.corpus import atomic_write, file_sha256
 from sts2_ai.nature.draw_only_workers import draw_only_batch
 from sts2_ai.nature.h4_reward import H4_REWARD
 from sts2_ai.nature.h5_curriculum import (
-    DECK_POOL, SCENARIO_POOL, SCHEMA as CURRICULUM_SCHEMA,
-    cell_for_source, source_bank,
+    DECK_POOL,
+    SCENARIO_POOL,
+    cell_for_source,
+    source_bank,
+)
+from sts2_ai.nature.h5_curriculum import (
+    SCHEMA as CURRICULUM_SCHEMA,
 )
 from sts2_ai.nature.ppo_draw import PpoDrawNature
 from sts2_ai.nature.protocol import canonical_sha256
