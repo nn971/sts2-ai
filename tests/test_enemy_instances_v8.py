@@ -315,3 +315,30 @@ def test_native_overgrowth_uses_public_enemy_list_order_without_private_position
     ]}}
     with pytest.raises(ValueError, match="position"):
         enemy_instance_vectors(bad, 128)
+
+
+
+def test_native_overgrowth_opaque_public_draw_count_is_supported():
+    from sts2_ai.models.enemy_instances import instance_global_features
+
+    state = {
+        "hp": 56, "max_hp": 70, "relics": [],
+        "combat": {
+            "turn": 1, "energy": 3, "player_block": 0,
+            "draw_pile_count": 8, "hand": [], "discard_pile": [],
+            "exhaust_pile": [], "player_powers": [], "enemies": [],
+        },
+    }
+    native = instance_global_features(state, 128)
+    p0 = {
+        **state,
+        "p0_public_projection": "sts2-ai-p0-public-count-piles-v1",
+        "combat": {
+            **state["combat"], "draw_pile": [], "draw_pile_opaque": True,
+            "relic_counters": [],
+        },
+    }
+    assert native == instance_global_features(p0, 128)
+    # The caller's public observation is not mutated, and no hidden order is
+    # fabricated by the encoder adapter.
+    assert "draw_pile" not in state["combat"]
