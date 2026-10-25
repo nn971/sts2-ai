@@ -20,7 +20,7 @@ import tempfile
 import time
 from collections.abc import Callable
 from contextlib import ExitStack
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -503,9 +503,9 @@ def train_phase_split(
                         getattr(source, name), dtype=weight.dtype
                     ))
     if freeze_combat:
-        # Zero learning rate protects combat params even when PPO computes
-        # diagnostic combat gradients. The exported combat object is reused
-        # exactly, avoiding float32 round-trip drift in its JSON weights.
+        # Defense in depth: H6 removes every tactical training sample before
+        # calling PPO, and the original combat JSON object is always used for
+        # inference and export. A zero LR protects accidental future updates.
         optimizers["combat"].param_groups[0]["lr"] = 0.0
     revision = getattr(backend, "emulator_revision", "test-backend")
     config = {
@@ -639,8 +639,14 @@ def train_phase_split(
             )
             run_targets = [(ep, _bounded_return(ep, alpha)) for ep in completed]
             local_targets: list[list[tuple[CombatOutcome, float]]] = []
-            for episode, run_target in run_targets:
-                local_targets.append([
+            if freeze_combat:
+                # H6 trains only strategy. Its rewards are run-level; there is
+                # no need to evaluate combat-boundary targets, fit combat
+                # values, encode tactical features, or differentiate combat.
+                local_targets = [[] for _ in run_targets]
+            else:
+                for episode, run_target in run_targets:
+                    local_targets.append([
                     (
                         segment,
                         (
@@ -672,9 +678,16 @@ def train_phase_split(
                 else:
                     from sts2_ai.training.phase_split_ppo import ppo_update
 
+                strategy_only = (
+                    [(replace(ep, decisions=tuple(
+                        d for d in ep.decisions if d.phase == "strategy"
+                    ), combat_outcomes=()), target)
+                     for ep, target in run_targets]
+                    if freeze_combat else run_targets
+                )
                 ppo = ppo_update(
                     torch=torch,
-                    run_targets=run_targets,
+                    run_targets=strategy_only,
                     local_targets=local_targets,
                     params=params,
                     optimizers=optimizers,
