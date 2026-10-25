@@ -1,0 +1,35 @@
+name: h6b-public-macro-actions
+
+on:
+  push:
+    paths:
+      - 'src/sts2_ai/models/macro_actions.py'
+      - 'src/sts2_ai/models/neural.py'
+      - 'src/sts2_ai/models/phase_split.py'
+      - 'src/sts2_ai/training/phase_split_selfplay.py'
+      - 'src/sts2_ai/training/phase_split_ppo_batch.py'
+      - 'tools/train_phase_split.py'
+      - 'tests/test_h6b_public_macro_actions.py'
+      - '.github/workflows/h6b-public-macro-actions.yml'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  h6b-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e '.[dev]'
+      - name: Lint H6-B code
+        run: |
+          python -m ruff check src/sts2_ai/models/macro_actions.py src/sts2_ai/models/neural.py src/sts2_ai/models/phase_split.py src/sts2_ai/training/phase_split_ppo_batch.py tests/test_h6b_public_macro_actions.py
+      - name: Candidate feature and PPO regression
+        run: |
+          python -m pytest -q tests/test_h6b_public_macro_actions.py
