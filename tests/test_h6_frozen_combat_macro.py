@@ -48,3 +48,32 @@ def test_freeze_requires_checkpoint_and_ppo(tmp_path: Path):
             dimension=32, hidden=4, freeze_combat=True,
             optimizer_method="ppo", hp_monotonic_weight=0,
         )
+
+
+def test_frozen_macro_run_uses_explicit_ascension_ten(tmp_path: Path):
+    pytest.importorskip("torch")
+    requested = []
+
+    class SpyBackend(TwoPhaseToy):
+        def reset(self, seed: str, ascension: int = 0) -> str:
+            requested.append(ascension)
+            return super().reset(seed, ascension)
+
+    backbone = PhaseSplitNeuralModel(
+        small_model(NEURAL_FORMAT), small_model(TACTICAL_FORMAT),
+        "ascension-h6-toy",
+    )
+    warm = tmp_path / "ascension-backbone.json"
+    backbone.save(warm)
+    final, rows = train_phase_split(
+        SpyBackend(), rounds=1, episodes_per_round=4, workers=1,
+        dimension=32, hidden=4, max_decisions=8,
+        optimizer_method="ppo", ppo_backend="batched",
+        hp_monotonic_weight=0, warm_start=warm, freeze_combat=True,
+        ascension=10, tactical_state_encoding="legacy",
+        temperature_start=1.0, temperature_end=1.0,
+    )
+    assert requested == [10] * 4
+    assert rows[0].strategic_decisions == 4
+    assert rows[0].tactical_decisions == 0
+    assert final.combat.to_dict() == backbone.combat.to_dict()
