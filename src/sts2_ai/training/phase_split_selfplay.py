@@ -345,7 +345,7 @@ def train_phase_split(
     temperature_start: float = 0.05, temperature_end: float = 0.035,
     temperature_decay_rounds: int = 20,
     seed: int = 19, seed_prefix: str = "phase-split-v1",
-    workers: int = 1, environment: str = LEGACY,
+    workers: int = 1, environment: str = LEGACY, ascension: int = 0,
     warm_start: Path | None = None,
     checkpoint: Path | None = None, resume: bool = False,
     freeze_combat: bool = False,
@@ -355,6 +355,8 @@ def train_phase_split(
     episode_goal_version: str = PROTOTYPE_THREE_ACT_GOAL,
 ) -> tuple[PhaseSplitNeuralModel, tuple[PhaseSplitRound, ...]]:
     require_episode_goal(episode_goal_version, environment)
+    if type(ascension) is not int or not 0 <= ascension <= 10:
+        raise ValueError("Ascension must be an integer from 0 through 10")
     if freeze_combat and warm_start is None:
         raise ValueError("Frozen-combat macro training requires a pinned warm start")
     if freeze_combat and optimizer_method != "ppo":
@@ -531,6 +533,8 @@ def train_phase_split(
     # so it MUST have a distinct checkpoint fingerprint.
     if episode_goal_version != PROTOTYPE_THREE_ACT_GOAL:
         config["episode_goal_version"] = episode_goal_version
+    if ascension:
+        config["ascension"] = ascension
     if optimizer_method == "ppo":
         if ppo_backend != "reference":
             config["ppo_backend"] = ppo_backend
@@ -624,6 +628,7 @@ def train_phase_split(
                     max_decisions=max_decisions, environment=environment,
                     temperature=temperature,
                     episode_goal_version=episode_goal_version,
+                    ascension=ascension,
                 ) for run_seed in seeds)
             else:
                 cohort = collect_parallel(
@@ -631,6 +636,7 @@ def train_phase_split(
                     max_decisions=max_decisions, policy_id="prototype-fair-v0",
                     environment=environment, temperature=temperature,
                     episode_goal_version=episode_goal_version,
+                    ascension=ascension,
                 )
             rollout_seconds = time.perf_counter() - start
             completed = [ep for ep in cohort if ep.completed]
