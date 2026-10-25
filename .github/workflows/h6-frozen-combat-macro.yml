@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: nn971/sts2-emulator
-          ref: e56779ccd86725582af580925ca8242826ba2229
+          ref: a580b1d9f1c961472c4189dc15421bd803afeec3
           path: emulator
       - uses: actions/setup-python@v5
         with:
@@ -66,7 +66,7 @@ jobs:
           python -u tools/train_frozen_macro_h6.py \
             --player-model ci-h6-start.json \
             --repo-root . --emulator-root ../emulator \
-            --emulator-revision e56779ccd86725582af580925ca8242826ba2229 \
+            --emulator-revision a580b1d9f1c961472c4189dc15421bd803afeec3 \
             --output-root ci-h6-macro --rounds 1 \
             --episodes-per-round 2 --eval-every 1 --eval-episodes 2 \
             --workers 2 --max-decisions 600 --execute
@@ -92,7 +92,7 @@ jobs:
             --player initial=ci-h6-start.json \
             --player trained=ci-h6-macro/player_models/player-r0001.json \
             --repo-root . --emulator-root ../emulator \
-            --emulator-revision e56779ccd86725582af580925ca8242826ba2229 \
+            --emulator-revision a580b1d9f1c961472c4189dc15421bd803afeec3 \
             --output ci-h6-confirmation.json --split confirmation \
             --eval-episodes 2 --workers 2 --max-decisions 600 --execute
           python - <<'PY'
