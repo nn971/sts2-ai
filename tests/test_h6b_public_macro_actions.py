@@ -12,7 +12,6 @@ from sts2_ai.models.neural import (
     NEURAL_FORMAT,
     NEURAL_MACRO_FORMAT,
     TACTICAL_FORMAT,
-    NeuralPolicyValueModel,
 )
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.training.phase_split_ppo_batch import encode_decision
