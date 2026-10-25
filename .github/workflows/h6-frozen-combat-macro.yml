@@ -42,11 +42,11 @@ jobs:
       - name: Lint H6 code
         working-directory: ai
         run: |
-          python -m ruff check tests/test_h6_frozen_combat_macro.py tests/test_h6_macro_evaluation.py tests/test_h6_native_reset_profiles.py tests/test_h6_public_enemy_position.py tests/test_h6_public_enemy_position.py tools/evaluate_h6_macro.py
+          python -m ruff check tests/test_h6_frozen_combat_macro.py tests/test_h6_macro_evaluation.py tests/test_h6_native_reset_profiles.py tests/test_h6_public_enemy_position.py tools/evaluate_h6_macro.py
       - name: Train and resume with immutable combat in toy emulator
         working-directory: ai
         run: |
-          python -m pytest -q tests/test_h6_frozen_combat_macro.py tests/test_h6_macro_evaluation.py tests/test_h6_native_reset_profiles.py
+          python -m pytest -q tests/test_h6_frozen_combat_macro.py tests/test_h6_macro_evaluation.py tests/test_h6_native_reset_profiles.py tests/test_h6_public_enemy_position.py
       - name: Build pinned native-Overgrowth emulator
         working-directory: ai/emulator
         run: |
