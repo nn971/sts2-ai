@@ -1,15 +1,15 @@
 """Native A10 count-only public combat must be accepted by frozen H4 v8."""
-from copy import deepcopy
 import json
+from copy import deepcopy
 
 import pytest
+from test_enemy_instances_v8 import combat_frame, targeted
+from test_nature_h3_joint_player import specimen
 
 from sts2_ai.emulator import Observation
 from sts2_ai.emulator.semantic_p0_public_projection import project_public_p0_observation
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.nature.protocol import canonical_sha256
-from test_enemy_instances_v8 import combat_frame, targeted
-from test_nature_h3_joint_player import specimen
 
 
 def test_native_count_only_combat_reuses_public_projection_without_private_cards():
