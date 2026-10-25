@@ -14,7 +14,6 @@ import random
 import statistics
 from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import asdict
 from multiprocessing import get_context
 from pathlib import Path
 from typing import Any
