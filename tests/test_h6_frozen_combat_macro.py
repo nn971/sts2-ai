@@ -1,12 +1,15 @@
 """H6 regression: macro PPO must not change even one tactical weight."""
+import random
 from pathlib import Path
 
 import pytest
 from test_phase_split_selfplay import TwoPhaseToy, small_model
 
+from sts2_ai.emulator import LegalAction
 from sts2_ai.models.neural import NEURAL_FORMAT, TACTICAL_FORMAT
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.training.phase_split_selfplay import train_phase_split
+from sts2_ai.training.selfplay import collect_public_episode
 
 
 def test_frozen_combat_ppo_preserves_exact_export_and_checkpoint(tmp_path: Path):
@@ -77,3 +80,28 @@ def test_frozen_macro_run_uses_explicit_ascension_ten(tmp_path: Path):
     assert rows[0].strategic_decisions == 4
     assert rows[0].tactical_decisions == 0
     assert final.combat.to_dict() == backbone.combat.to_dict()
+
+
+def test_h6_combat_is_greedy_even_when_macro_temperature_is_high():
+    class TwoActionCombat(TwoPhaseToy):
+        def legal_actions(self, state):
+            if self.states[state] == "combat":
+                return (
+                    LegalAction("attack-first", "play_card"),
+                    LegalAction("attack-last", "play_card"),
+                )
+            return super().legal_actions(state)
+
+    backbone = PhaseSplitNeuralModel(
+        small_model(NEURAL_FORMAT), small_model(TACTICAL_FORMAT),
+        "greedy-combat-backbone",
+    )
+    for seed in (1, 7, 401):
+        run = collect_public_episode(
+            TwoActionCombat(), backbone, seed=f"h6-test-{seed}",
+            actor_rng=random.Random(seed), temperature=100.0,
+            greedy_combat=True, max_decisions=8,
+        )
+        choice = run.decisions[0]
+        assert choice.phase == "combat"
+        assert choice.legal_actions[choice.chosen_index].action_id == "attack-last"
