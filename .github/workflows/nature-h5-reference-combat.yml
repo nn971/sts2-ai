@@ -1,0 +1,104 @@
+name: nature-h5-reference-combat
+
+on:
+  push:
+    paths:
+      - 'src/sts2_ai/nature/h5_curriculum.py'
+      - 'tools/train_reference_combat_h5.py'
+      - 'tools/evaluate_reference_combat_h5.py'
+      - 'tests/test_nature_h5_curriculum.py'
+      - '.github/workflows/nature-h5-reference-combat.yml'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  reference-h5-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ai
+          submodules: false
+      - uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: e56779ccd86725582af580925ca8242826ba2229
+          path: emulator
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Install
+        working-directory: ai
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e '.[dev]'
+      - name: H5 isolated lint and deterministic source unit tests
+        working-directory: ai
+        run: |
+          python -m ruff check src/sts2_ai/nature/h5_curriculum.py tests/test_nature_h5_curriculum.py tools/train_reference_combat_h5.py tools/evaluate_reference_combat_h5.py
+          python -m pytest -q tests/test_nature_h5_curriculum.py tests/test_nature_h3_joint_player.py
+      - name: Build pinned emulator
+        working-directory: emulator
+        run: |
+          dotnet restore Sts2Emulator.sln
+          dotnet build Sts2Emulator.sln -c Release --no-restore
+      - name: Real reference-only one-round smoke
+        working-directory: ai
+        run: |
+          python - <<'PY'
+          import json,sys
+          sys.path.insert(0,'tests')
+          from test_nature_h3_joint_player import specimen
+          with open('ci-h5-player.json','w') as f:
+              json.dump(specimen().to_dict(),f)
+          PY
+          python -u tools/train_reference_combat_h5.py \
+            --player-model ci-h5-player.json \
+            --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings ../emulator/bindings/python \
+            --emulator-revision e56779ccd86725582af580925ca8242826ba2229 \
+            --output-root ci-h5-reference --workers 4 --rounds 1 \
+            --episodes-per-round 16 --eval-every 1 --eval-episodes 16 \
+            --max-boundaries 1200 --execute
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path('ci-h5-reference/progress.json').read_text())
+          assert len(report['rows'])==1
+          assert report['rows'][0]['train']['combats']==16
+          assert len(report['rows'][0]['train']['by_cell'])==16
+          assert report['rows'][0]['selection']['combats']==16
+          assert report['rows'][0]['player_ppo_steps']>0
+          assert Path('ci-h5-reference/player-checkpoint.pt').exists()
+          PY
+      - name: Real confirmation and unseen-cell smoke
+        working-directory: ai
+        run: |
+          python -u tools/evaluate_reference_combat_h5.py \
+            --player initial=ci-h5-player.json \
+            --player trained=ci-h5-reference/player_models/player-r0001.json \
+            --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings ../emulator/bindings/python \
+            --emulator-revision e56779ccd86725582af580925ca8242826ba2229 \
+            --workers 4 --split confirmation --eval-episodes 16 \
+            --output ci-h5-confirmation.json --execute
+          python -u tools/evaluate_reference_combat_h5.py \
+            --player initial=ci-h5-player.json \
+            --player trained=ci-h5-reference/player_models/player-r0001.json \
+            --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings ../emulator/bindings/python \
+            --emulator-revision e56779ccd86725582af580925ca8242826ba2229 \
+            --workers 4 --split zero-shot --eval-episodes 3 \
+            --output ci-h5-zero-shot.json --execute
+          python - <<'PY'
+          import json
+          for name,cells in [('ci-h5-confirmation.json',16),('ci-h5-zero-shot.json',3)]:
+              report=json.load(open(name))
+              assert report['complete']
+              assert len(report['summaries']['trained']['by_cell'])==cells
+              assert 'trained-minus-initial' in report['comparisons']
+          PY
