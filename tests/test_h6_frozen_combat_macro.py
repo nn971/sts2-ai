@@ -2,11 +2,11 @@
 from pathlib import Path
 
 import pytest
+from test_phase_split_selfplay import TwoPhaseToy, small_model
 
 from sts2_ai.models.neural import NEURAL_FORMAT, TACTICAL_FORMAT
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.training.phase_split_selfplay import train_phase_split
-from test_phase_split_selfplay import TwoPhaseToy, small_model
 
 
 def test_frozen_combat_ppo_preserves_exact_export_and_checkpoint(tmp_path: Path):
