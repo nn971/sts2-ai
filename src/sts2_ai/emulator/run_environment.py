@@ -19,6 +19,11 @@ ENVIRONMENTS = (NATIVE_OVERGROWTH, LEGACY)
 # Versioned native Overgrowth public bridge contract.
 NATIVE_RESET_SCHEMA = "prototype-native-overgrowth-reset-v1"
 NATIVE_MAP_PROFILE = "native-overgrowth-map-structure-v0.111.0-v1"
+# The pinned native context-stream map generator advertises a new, explicit
+# version. Both are real 16-floor Overgrowth maps; neither permits the
+# six-floor prototype to masquerade as a native run.
+NATIVE_MAP_PROFILE_CONTEXT = "native-overgrowth-map-native-rng-v0.111.0-v1"
+NATIVE_MAP_PROFILES = frozenset((NATIVE_MAP_PROFILE, NATIVE_MAP_PROFILE_CONTEXT))
 
 
 def require_environment(backend: EmulatorBackend, environment: str) -> None:
@@ -49,7 +54,7 @@ def validate_native_start(observation: Observation) -> None:
     map_nodes = raw.get("map")
     deck = raw.get("deck")
     if (
-        raw.get("map_generation_profile_id") != NATIVE_MAP_PROFILE
+        raw.get("map_generation_profile_id") not in NATIVE_MAP_PROFILES
         or raw.get("act") != 1
         or raw.get("floor") != 0
         or raw.get("event_id") != "proto.native.event.neow"
