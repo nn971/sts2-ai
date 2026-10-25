@@ -1,11 +1,17 @@
 """H5 source-bank tests: fixture support, split isolation and exact balance."""
 import pytest
 
-from sts2_ai.nature.h5_curriculum import (
-    DECK_POOL, SCENARIO_POOL, SUPPORTED_CELLS, TRAIN_CELLS, ZERO_SHOT_CELLS,
-    cell_for_source, source_bank, source_cells,
-)
 from sts2_ai.nature.combat_scenarios import deck_for_seed, scenario_for_seed
+from sts2_ai.nature.h5_curriculum import (
+    DECK_POOL,
+    SCENARIO_POOL,
+    SUPPORTED_CELLS,
+    TRAIN_CELLS,
+    ZERO_SHOT_CELLS,
+    cell_for_source,
+    source_bank,
+    source_cells,
+)
 
 
 def test_catalog_has_no_cross_difficulty_combinations():
