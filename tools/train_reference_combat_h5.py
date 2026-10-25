@@ -22,8 +22,15 @@ from sts2_ai.nature.corpus import atomic_write, file_sha256
 from sts2_ai.nature.draw_only_workers import draw_only_batch
 from sts2_ai.nature.h4_reward import H4_REWARD
 from sts2_ai.nature.h5_curriculum import (
-    SCHEMA as CURRICULUM_SCHEMA, SCENARIO_POOL, DECK_POOL,
-    TRAIN_CELLS, cell_for_source, source_bank, source_cells,
+    DECK_POOL,
+    SCENARIO_POOL,
+    TRAIN_CELLS,
+    cell_for_source,
+    source_bank,
+    source_cells,
+)
+from sts2_ai.nature.h5_curriculum import (
+    SCHEMA as CURRICULUM_SCHEMA,
 )
 from sts2_ai.nature.joint_player_ppo import JointPlayerPPO
 from sts2_ai.nature.ppo_draw import PpoDrawNature
