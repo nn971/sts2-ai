@@ -81,6 +81,9 @@ def main() -> None:
         default="relational",
         help="v5/v6 relational, v7 resources, or v8 species-aware enemy instances",
     )
+    p.add_argument("--strategy-action-encoding",
+                   choices=("legacy", "macro_v1"), default="legacy",
+                   help="H6-B explicit public candidate-action features (opt-in)")
     p.add_argument("--temperature-start", type=float, default=0.05)
     p.add_argument("--temperature-end", type=float, default=0.035)
     p.add_argument("--temperature-decay-rounds", type=int, default=20)
@@ -117,6 +120,10 @@ def main() -> None:
     args = p.parse_args()
     if args.freeze_combat and (not args.warm_start or args.optimizer_method != "ppo"):
         p.error("--freeze-combat requires --warm-start and --optimizer-method ppo")
+    if args.strategy_action_encoding == "macro_v1" and (
+        not args.freeze_combat or args.ppo_backend != "batched"
+    ):
+        p.error("H6-B requires --freeze-combat and --ppo-backend batched")
     if args.freeze_combat and args.ascension != 10:
         p.error("H6 frozen-combat training requires --ascension 10")
     if args.win_anneal_threshold < 1:
@@ -182,6 +189,7 @@ def main() -> None:
             boundary_weight=args.boundary_weight,
             hp_monotonic_weight=args.hp_monotonic_weight,
             tactical_state_encoding=args.tactical_state_encoding,
+            strategy_action_encoding=args.strategy_action_encoding,
             loss_normalization=args.loss_normalization,
             combat_objective=args.combat_objective,
             combat_advantage_baseline=combat_baseline,
@@ -317,6 +325,7 @@ def main() -> None:
             ),
             "optimizer_method": args.optimizer_method,
             "freeze_combat": args.freeze_combat,
+            "strategy_action_encoding": args.strategy_action_encoding,
             "ascension": args.ascension,
             "ppo_backend": args.ppo_backend,
             "episode_goal_version": args.episode_goal,

@@ -31,6 +31,7 @@ from .hashed_linear import (
     state_features,
     tactical_action_features,
 )
+from .macro_actions import macro_action_features
 from .protocol import PolicyValueEstimate
 from .tactical_state import (
     damage_tactical_state_features,
@@ -40,6 +41,7 @@ from .tactical_state import (
 )
 
 NEURAL_FORMAT = "sts2-neural-policy-value-v2-semantic-action"
+NEURAL_MACRO_FORMAT = "sts2-neural-policy-value-v16-public-macro-action"
 TACTICAL_FORMAT = "sts2-neural-policy-value-v3-target-aware-combat"
 TACTICAL_STRUCTURED_FORMAT = "sts2-neural-policy-value-v4-structured-tactical"
 TACTICAL_RELATIONAL_FORMAT = "sts2-neural-policy-value-v5-relational-tactical"
@@ -119,7 +121,7 @@ class NeuralPolicyValueModel:
             TACTICAL_RELATIONAL_FORMAT, TACTICAL_DAMAGE_FORMAT,
             TACTICAL_RESOURCES_FORMAT, TACTICAL_INSTANCES_FORMAT,
             TACTICAL_ATTENTION_FORMAT,
-            LEGACY_NEURAL_FORMAT,
+            LEGACY_NEURAL_FORMAT, NEURAL_MACRO_FORMAT,
         }:
             raise ValueError("Unsupported neural model format")
         dimension, hidden = raw.get("dimension"), raw.get("hidden")
@@ -254,6 +256,8 @@ class NeuralPolicyValueModel:
                 feature_fn = tactical_action_features
             elif self.format_id == NEURAL_FORMAT:
                 feature_fn = neural_action_features
+            elif self.format_id == NEURAL_MACRO_FORMAT:
+                feature_fn = macro_action_features
             else:
                 feature_fn = policy_features
             action_vector = feature_fn(
