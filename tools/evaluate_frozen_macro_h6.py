@@ -14,17 +14,16 @@ import time
 from contextlib import ExitStack
 from pathlib import Path
 
+from train_frozen_macro_h6 import summarize
+
 from sts2_ai.emulator import JsonlEmulatorBackend
 from sts2_ai.emulator.episode_goal import NATIVE_ACT1_BOSS_GOAL
 from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.nature.corpus import atomic_write, file_sha256
-from sts2_ai.nature.protocol import canonical_sha256
 from sts2_ai.training.frozen_macro import combat_digest
 from sts2_ai.training.h6_sources import H6_SOURCE_SCHEMA, run_sources, source_digest
 from sts2_ai.training.parallel_rollouts import collect_parallel, open_worker_pool
-from train_frozen_macro_h6 import summarize
-
 SCHEMA = "sts2-h6-frozen-macro-confirmation-v1"
 
 
