@@ -77,8 +77,8 @@ cd ~/projects/sts2-ai
 git fetch origin
 git switch --track origin/research/h6-macro-frozen-combat-20261026
 git submodule update --init emulator
-git -C emulator fetch origin
-git -C emulator switch --detach e56779ccd86725582af580925ca8242826ba2229
+git -C emulator fetch origin fix/h6-event-gold-bounded-20261026
+git -C emulator switch --detach a580b1d9f1c961472c4189dc15421bd803afeec3
 source .venv/bin/activate.fish
 python -m pip install -e '.[dev]'
 dotnet build emulator/Sts2Emulator.sln -c Release
@@ -139,6 +139,16 @@ python -u tools/evaluate_frozen_macro_h6.py \\
 Evaluation supports `--resume` per completed player arm. Check whether
 all-source completion coverage is sufficiently high before interpreting
 victory deltas. Do not treat truncated runs as binary losses.
+
+## Native full-run compatibility
+
+H6-A uses the isolated emulator branch `fix/h6-event-gold-bounded-20261026`
+([emulator PR #186](https://github.com/nn971/sts2-emulator/pull/186))
+based on the H4 pin. It repairs a real event-generated-gold bounded integer
+RNG operation crash reached during native A10 run rollout at decision 51.
+This is a gameplay transition repair, **not** a fidelity/inspector test gate.
+The H6 targeted CI checks native opening, actual full-run stepping,
+strategy-only checkpoint and source-paired evaluation before a long run.
 
 ## Next stage
 
