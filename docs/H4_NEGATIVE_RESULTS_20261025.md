@@ -7,14 +7,14 @@ Monte Carlo tree search cannot help in other settings.
 ## Pinned experiment
 
 - Repo: nn971/sts2-ai, H4 PR #97; H4 schema
-  \`sts2-ai-h4-educational-nature-ppo-v1\`.
-- Emulator pinned at \`e56779ccd86725582af580925ca8242826ba2229\`,
-  DLL SHA-256 \`945d1c595cc84cdacb2d8fd22ae6c398b6e72014c672a5926d940e93e2502ac9\`.
+  `sts2-ai-h4-educational-nature-ppo-v1`.
+- Emulator pinned at `e56779ccd86725582af580925ca8242826ba2229`,
+  DLL SHA-256 `945d1c595cc84cdacb2d8fd22ae6c398b6e72014c672a5926d940e93e2502ac9`.
 - Both start at v8 player SHA-256
-  \`df0808503416fc85384e430a1cd609d5fb8cb5c9f55bfa6a9c2e8bfc568237d5\`.
+  `df0808503416fc85384e430a1cd609d5fb8cb5c9f55bfa6a9c2e8bfc568237d5`.
 - Each: 40 rounds × 256 combats = **10,240 combats**, 15 workers,
   Ascension 10, Ceremonial Beast/Vantom bosses, two pinned 20-card decks,
-  reward \`boss_progress_v2\`.
+  reward `boss_progress_v2`.
 - Educational: 50% reference trajectories, 50% learned-Nature trajectories
   with auxiliary player weight 0.25, Nature teacher alignment target.
 - Control: 100% reference Chance Law PPO. Neither training mode depends on
@@ -49,7 +49,7 @@ deferred until there is reason to revisit Nature.
 ## Independent confirmation — 120 source worlds
 
 Confirmation split from user-supplied H4 greedy-versus-UCT log,
-\`source_digest=a38c33978d0f8ed475df3e84f0c525b42e377867aed354a8df673a75a33c05e4\`.
+`source_digest=a38c33978d0f8ed475df3e84f0c525b42e377867aed354a8df673a75a33c05e4`.
 
 | Frozen player | Greedy reference-law score | Greedy reference-law wins | UCT-16 reference-law score | UCT-16 reference-law wins |
 |---|---:|---:|---:|---:|
@@ -70,7 +70,7 @@ Observed UCT evaluation arms require thousands of seconds versus hundreds
 for greedy; do not make this search a training gate.
 
 **Nature evaluation caveat:** Confirmation log
-\`nature_checkpoint_sha256=null\`, so its \`learned\` arms used an initialized
+`nature_checkpoint_sha256=null`, so its `learned` arms used an initialized
 PpoDrawNature, **not the trained H4 Nature checkpoint**. Those arms cannot
 be cited as the behavior of a trained educational Nature. The shared log
 ends after 11 of 12 arms; the educational/UCT/initialized-Nature arm was
@@ -83,8 +83,8 @@ incomplete at the recorded endpoint.
 2. Train the player using **reference Chance Law** exclusively. Retain
    the semantic Chance Law, provider abstraction, and H1–H4 evidence.
 3. Keep H4 checkpoints in their current outputs:
-   \`results/nature/h4-educational-a10/\` and
-   \`results/nature/h4-reference-only-a10/\`. Do **not** overwrite them.
+   `results/nature/h4-educational-a10/` and
+   `results/nature/h4-reference-only-a10/`. Do **not** overwrite them.
 4. Preserve PR #97 and the H4 source/log record; do not make fidelity
    inspector or exact native RNG parity a prerequisite.
 5. Start H5 in a separate branch, with independent confirmation and
