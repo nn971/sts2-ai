@@ -10,8 +10,8 @@ from __future__ import annotations
 import argparse
 import atexit
 import json
+import random
 import statistics
-import sys
 from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict
@@ -96,7 +96,22 @@ def _paired(baseline: Sequence[dict], candidate: Sequence[dict]) -> dict:
         raise ValueError("Unmatched macro evaluation source worlds")
     pairs = [(a, b) for a, b in zip(baseline, candidate, strict=True)
              if not a["censored"] and not b["censored"]]
+    source_rng = random.Random(61026)
+    differences = [
+        int(b["act1_cleared"] is True) - int(a["act1_cleared"] is True)
+        for a, b in pairs
+    ]
+    bootstrap = sorted(
+        statistics.mean(
+            differences[source_rng.randrange(len(differences))]
+            for _ in range(len(differences))
+        )
+        for _ in range(2000)
+    ) if differences else []
     return {
+        "completed_pair_win_delta_bootstrap_95pct": (
+            [bootstrap[49], bootstrap[1949]] if bootstrap else None
+        ),
         "pairs_jointly_completed": len(pairs),
         "pairs_with_censoring": len(baseline) - len(pairs),
         "completed_pair_win_delta": (
@@ -226,12 +241,15 @@ def main() -> None:
                         backend.emulator_revision, model.to_dict(),
                     ),
                 ) as pool:
-                    results = list(pool.map(
+                    for item in pool.map(
                         _evaluate, seeds,
                         [args.max_decisions] * len(seeds),
-                    ))
-                print(f"[h6-eval] {label} {len(results)}/{len(seeds)}",
-                      flush=True)
+                    ):
+                        results.append(item)
+                        if len(results) % max(1, len(seeds)//8) == 0:
+                            print(f"[h6-eval] {label} "
+                                  f"{len(results)}/{len(seeds)}",
+                                  flush=True)
             if tuple(r["seed"] for r in results) != seeds:
                 raise RuntimeError("H6 evaluator returned unmatched sources")
             worlds[label] = results
