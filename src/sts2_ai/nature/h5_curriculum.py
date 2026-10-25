@@ -10,7 +10,10 @@ from collections import Counter
 from dataclasses import dataclass
 
 from sts2_ai.nature.combat_scenarios import (
-    DECK_PRESETS, SCENARIOS, deck_for_seed, scenario_for_seed,
+    DECK_PRESETS,
+    SCENARIOS,
+    deck_for_seed,
+    scenario_for_seed,
 )
 
 SCHEMA = "sts2-ai-h5-curated-reference-curriculum-v1"
