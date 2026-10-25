@@ -38,6 +38,7 @@ class EpisodeRequest:
     temperature: float = 1.0
     episode_goal_version: str = PROTOTYPE_THREE_ACT_GOAL
     ascension: int = 0
+    greedy_combat: bool = False
 
 
 def episode_actor_seed(base_seed: int, run_seed: str) -> int:
@@ -79,6 +80,7 @@ def _worker_collect(request: EpisodeRequest) -> Episode:
         temperature=request.temperature,
         episode_goal_version=request.episode_goal_version,
         ascension=request.ascension,
+        greedy_combat=request.greedy_combat,
     )
 
 
@@ -109,6 +111,7 @@ def collect_parallel(
     temperature: float = 1.0,
     episode_goal_version: str = PROTOTYPE_THREE_ACT_GOAL,
     ascension: int = 0,
+    greedy_combat: bool = False,
 ) -> tuple[Episode, ...]:
     if not run_seeds:
         return ()
@@ -119,7 +122,7 @@ def collect_parallel(
         EpisodeRequest(
             payload, seed, episode_actor_seed(base_seed, seed),
             max_decisions, policy_id, environment, temperature,
-            episode_goal_version, ascension,
+            episode_goal_version, ascension, greedy_combat,
         )
         for seed in run_seeds
     ]
