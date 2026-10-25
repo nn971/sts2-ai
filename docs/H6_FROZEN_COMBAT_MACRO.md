@@ -15,9 +15,10 @@ combat model serialization against the original input.
 
 This is the *initial implementation* of macro-only PPO using the existing
 phase-separated trainer, **not** a fully optimized strategy-only data path.
-Combat training samples/gradients are still calculated in the shared PPO
-learner for diagnostics, but they cannot update combat weights. Further work
-should skip these expensive combat learner calculations altogether.
+Before PPO the completed trajectory is projected onto public **strategy**
+choices only. The batched PPO learner neither encodes tactical decision
+features nor fits the combat value head, and its optimizer does not step.
+The unmodified tactical model is reused for actual rollouts and final export.
 
 The existing strategy policy is the warm-start checkpoint's strategy head.
 This phase tests improvement through run returns before replacing the old
@@ -29,16 +30,20 @@ Selection and final confirmation must use different run seeds.
 
 ## Provenance, scope and caveats
 
+- The existing full-run pipeline historically defaults to Ascension 0. H6
+  explicitly passes `--ascension 10` through both training workers and
+  paired evaluation, and refuses frozen-combat CLI runs without it.
 - H4 reference-only r40 won 92/120 (76.7%) in the independent *single
   boss-combat* confirmation; this is **not** its full-run win rate.
 - H5 reference-only r40 may replace it after independent evaluation.
   Never assume a combat policy trained in isolated, conditioned H4/H5
   research fixtures will transfer unchanged to native-structure Overgrowth.
-- The pinned emulator `e56779c` supports conditioned boss-combat studies.
-  H6 native-structure Overgrowth reset requires an emulator version that
-  explicitly advertises `prototype-native-overgrowth-reset-v1`.
-  Check that before attempting long-run training; do not substitute the
-  legacy six-floor prototype.
+- H4 emulator `e56779c` is for conditioned boss-combat studies, **not**
+  the H6 full-run emulator. The sts2-ai submodule pin `c254bd99816ac2b89b350ec132fe1cfbb27dfac6`
+  advertises `prototype-native-overgrowth-reset-v1` and is used for the
+  H6 real-run CI smoke. Use `git submodule update --init emulator`; do
+  not override the H6 pin with the older H4 revision. Native RNG fidelity
+  and inspector checks remain independent and do not gate training.
 - Native RNG parity and fidelity inspector are **not** training gates.
 - The macro value estimates run-continuation return; do not interpret the
   H4 tactical value head (boss-progress reward) as a run-win probability.
@@ -67,7 +72,7 @@ python -u tools/train_phase_split.py \
   --combat-objective hp_preservation \
   --hp-monotonic-weight 0 \
   --combat-advantage-baseline critic \
-  --dimension 128 --hidden 32 \
+  --dimension 128 --hidden 32 --ascension 10 \
   --rounds 1 --episodes 8 --workers 4 \
   --eval-seeds 8 \
   --train-seed-prefix h6-train-v1 \
