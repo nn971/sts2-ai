@@ -196,6 +196,7 @@ def collect_public_episode(
     environment: str = LEGACY,
     temperature: float = 1.0,
     episode_goal_version: str = PROTOTYPE_THREE_ACT_GOAL,
+    ascension: int = 0,
 ) -> Episode:
     """Run the actual emulator; never give hidden handles to the actor.
 
@@ -210,7 +211,7 @@ def collect_public_episode(
         raise ValueError("Sampling temperature must be positive and finite")
     require_episode_goal(episode_goal_version, environment)
     policy = InformationPolicy(policy_id)
-    state = reset_training_run(backend, seed, environment)
+    state = reset_training_run(backend, seed, environment, ascension=ascension)
     history: list[PublicDecision] = []
     boss_tracker = BossProgressTracker(environment)
     combat_recorder = CombatOutcomeRecorder()
