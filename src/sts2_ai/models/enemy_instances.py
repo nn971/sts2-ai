@@ -48,12 +48,16 @@ def enemy_instance_vectors(
     if not isinstance(combat, dict) or not isinstance(combat.get("enemies"), list):
         raise ValueError("Instance encoder requires combat enemies")
     output: dict[int, dict[int, float]] = {}
-    for enemy in combat["enemies"]:
+    for visible_index, enemy in enumerate(combat["enemies"]):
         if not isinstance(enemy, dict):
             raise ValueError("Malformed enemy record")
+        # The conditioned-combat projection reports FormationPosition, while
+        # the native Overgrowth PrototypeAiEnemy reports only ordered public
+        # Enemies. Use that *visible list index* as the position proxy if the
+        # explicit field is absent. Never infer private formation state.
         instance_id, species, position = (
             enemy.get("instance_id"), enemy.get("enemy_id"),
-            enemy.get("formation_position"),
+            enemy.get("formation_position", visible_index),
         )
         if (type(instance_id) is not int or instance_id <= 0
                 or not isinstance(species, str) or not species
