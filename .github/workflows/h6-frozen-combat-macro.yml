@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: nn971/sts2-emulator
-          ref: 27079ffb5ab93cc3a54d3fd5541d8d5a27898b5f
+          ref: a41bea9215b8d64f0b6be2c9e7e7ac41ce29e53b
           path: ai/emulator
       - uses: actions/setup-dotnet@v4
         with:
