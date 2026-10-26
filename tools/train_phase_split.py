@@ -12,15 +12,16 @@ from pathlib import Path
 from sts2_ai.agents import NeuralGreedyAgent
 from sts2_ai.agents.phase_split_agent import PhaseSplitGreedyAgent
 from sts2_ai.emulator import FAIR_POLICY_ID, InformationPolicy, JsonlEmulatorBackend
+from sts2_ai.emulator.episode_goal import (
+    EPISODE_GOALS,
+    NATIVE_ACT1_BOSS_GOAL,
+)
 from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH
 from sts2_ai.evaluation import play_run
 from sts2_ai.evaluation.baseline_cache import (
     baseline_identity,
     load_cache,
     save_cache,
-)
-from sts2_ai.emulator.episode_goal import (
-    EPISODE_GOALS, NATIVE_ACT1_BOSS_GOAL,
 )
 from sts2_ai.training.phase_split_selfplay import (
     BALANCED_TRAINING_VERSION,
@@ -77,7 +78,10 @@ def main() -> None:
     p.add_argument("--hp-monotonic-weight", type=float, default=0.2)
     p.add_argument(
         "--tactical-state-encoding",
-        choices=("legacy", "structured", "relational", "relational_damage", "public_resources", "enemy_instances", "enemy_attention"),
+        choices=(
+            "legacy", "structured", "relational", "relational_damage",
+            "public_resources", "enemy_instances", "enemy_attention",
+        ),
         default="relational",
         help="v5/v6 relational, v7 resources, or v8 species-aware enemy instances",
     )
