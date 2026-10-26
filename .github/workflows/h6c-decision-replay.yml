@@ -67,8 +67,9 @@ jobs:
           page = (root / (seed + '.html')).read_text()
           assert len(manifest['runs']) == 1
           assert a['decisions'] and b['decisions']
-          assert a['boss_status'] in ('visible', 'not_exposed')
-          assert len(a['map_snapshots'][0]['nodes']) > 0
+          assert a['boss_status'] == 'visible', a['boss_identity']
+          assert a['boss_identity'] == b['boss_identity']
+          assert any(node['floor'] == 16 for node in a['map_snapshots'][0]['nodes'])
           assert 'viewBox=' in page
           assert 'Boss:' in page
           assert len(a['decisions']) == len(b['decisions'])
