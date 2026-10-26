@@ -14,6 +14,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from sts2_ai.emulator import LegalAction, Observation
+from sts2_ai.models.macro_objects import macro_action_target, macro_attention_action_features, macro_object_vectors
 
 TRACE_SCHEMA = "sts2-ai-h6c-public-decision-trace-v1"
 REPORT_SCHEMA = "sts2-ai-h6c-paired-trace-report-v1"
@@ -86,6 +87,32 @@ def readable_action(action: dict[str, Any], frame: dict[str, Any],
             if isinstance(card, dict) and card.get("instance_id") == instance:
                 verb = "Upgrade" if kind == "rest_upgrade" else "Remove"
                 return f"{verb}: {card.get('card_id', instance)}"
+    if kind in ("buy_card", "buy_potion", "buy_relic", "replace_shop_potion"):
+        offer_id = payload.get("OfferId", payload.get("offer_id"))
+        shop = frame.get("shop")
+        group = ("card_offers" if kind == "buy_card" else
+                 "relic_offers" if kind == "buy_relic" else "potion_offers")
+        offers = shop.get(group, []) if isinstance(shop, dict) else []
+        for offer in offers if isinstance(offers, list) else []:
+            if isinstance(offer, dict) and offer.get("offer_id") == offer_id:
+                return (f"{kind.replace('_', ' ').title()}: "
+                        f"{offer.get('item_id', offer.get('content_id', offer_id))} "
+                        f"({offer.get('price', '?')} gold)")
+        return f"{kind.replace('_', ' ').title()}: offer {offer_id}"
+    if kind == "event_choice":
+        choice = payload.get("ChoiceId", payload.get("choice_id"))
+        event = frame.get("event")
+        value = None
+        if isinstance(event, dict):
+            for item in event.get("visible_choice_values", []):
+                if isinstance(item, dict) and item.get("choice_id") == choice:
+                    value = {k: v for k, v in item.items() if k != "choice_id" and v is not None}
+                    break
+        return f"Event: {choice}" + (f" — {value}" if value else "")
+    if kind in ("skip_reward_relic", "skip_reward_extra_relic"):
+        return "Skip relic"
+    if kind == "take_reward_relic":
+        return "Take relic"
     return action_label(action)
 
 
@@ -146,6 +173,22 @@ class TraceRecorder:
         if len(evaluation.action_logits) != len(actions):
             raise ValueError("Policy score count does not match legal actions")
         choices = []
+        # Diagnostic: equal feature vectors plus equal target pointers force
+        # equal logits, irrespective of training. Record the exact equivalence.
+        encoder = getattr(self.model, "strategy", self.model)
+        feature_dim = getattr(encoder, "dimension", 128)
+        macro = (getattr(encoder, "format_id", "")
+                 == "sts2-neural-policy-value-v17-macro-object-attention"
+                 and not isinstance(frame.get("combat"), dict))
+        objects = macro_object_vectors(frame, actions, feature_dim) if macro else {}
+        signatures = []
+        if macro:
+            for action in actions:
+                features = macro_attention_action_features(
+                    frame, action.kind, action.payload_json, feature_dim,
+                )
+                target = macro_action_target(frame, action, objects)
+                signatures.append((tuple(sorted(features.items())), target))
         selected = None
         for i, action in enumerate(actions):
             if action.action_id == choice.action.action_id:
@@ -158,6 +201,10 @@ class TraceRecorder:
                 "score": score if math.isfinite(score) else None,
             }
             row["label"] = readable_action(row, frame, current_map)
+            row["encoder_equivalence"] = (
+                [j for j, signature in enumerate(signatures) if signature == signatures[i]]
+                if macro else []
+            )
             choices.append(row)
         if selected is None:
             raise ValueError("Agent chose an unlisted action")
@@ -179,6 +226,8 @@ class TraceRecorder:
             "actions": choices,
             "selected": selected,
             "selected_node": _visible_node(actions[selected]),
+            "event_id": frame.get("event_id"),
+            "encounter_species": [e.get("enemy_id") for e in frame.get("combat", {}).get("enemies", []) if isinstance(e, dict)] if isinstance(frame.get("combat"), dict) else [],
         })
 
     def export(self, seed: str, summary: Any, emulator_revision: str,
