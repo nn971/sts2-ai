@@ -19,11 +19,11 @@ import torch
 
 from sts2_ai.models.h7_public_policy import H7PlayerSpec
 from sts2_ai.models.shared_game_objects import SHARED_OBJECT_SCHEMA
-from sts2_ai.models.shared_transformer import H7Config, H7_MODEL_FORMAT, SharedObjectTransformer
+from sts2_ai.models.shared_transformer import H7_MODEL_FORMAT, H7Config, SharedObjectTransformer
 from sts2_ai.nature.draw_only_workers import draw_only_batch
 from sts2_ai.nature.h4_reward import H4_REWARD
 from sts2_ai.nature.h5_curriculum import (
-    DECK_POOL, SCENARIO_POOL, TRAIN_CELLS, cell_for_source, source_bank,
+    DECK_POOL,\n    SCENARIO_POOL,\n    TRAIN_CELLS,\n    cell_for_source,\n    source_bank,
 )
 from sts2_ai.nature.ppo_draw import PpoDrawNature
 from sts2_ai.nature.protocol import canonical_sha256
