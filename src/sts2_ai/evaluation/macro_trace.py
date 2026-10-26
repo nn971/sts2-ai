@@ -14,7 +14,11 @@ from collections.abc import Sequence
 from typing import Any
 
 from sts2_ai.emulator import LegalAction, Observation
-from sts2_ai.models.macro_objects import macro_action_target, macro_attention_action_features, macro_object_vectors
+from sts2_ai.models.macro_objects import (
+    macro_action_target,
+    macro_attention_action_features,
+    macro_object_vectors,
+)
 
 TRACE_SCHEMA = "sts2-ai-h6c-public-decision-trace-v1"
 REPORT_SCHEMA = "sts2-ai-h6c-paired-trace-report-v1"
@@ -227,7 +231,10 @@ class TraceRecorder:
             "selected": selected,
             "selected_node": _visible_node(actions[selected]),
             "event_id": frame.get("event_id"),
-            "encounter_species": [e.get("enemy_id") for e in frame.get("combat", {}).get("enemies", []) if isinstance(e, dict)] if isinstance(frame.get("combat"), dict) else [],
+            "encounter_species": [
+                e.get("enemy_id") for e in frame.get("combat", {}).get("enemies", [])
+                if isinstance(e, dict)
+            ] if isinstance(frame.get("combat"), dict) else [],
         })
 
     def export(self, seed: str, summary: Any, emulator_revision: str,
@@ -409,9 +416,14 @@ def _options(decision: dict[str, Any]) -> str:
     for i, action in values:
         selected = i == decision["selected"]
         score = action["score"]
+        equivalence = action.get("encoder_equivalence", [])
+        diagnostic = (
+            f' <span title="Identical policy inputs">[ENCODER TIE: {len(equivalence)}]</span>'
+            if len(equivalence) > 1 else ""
+        )
         items.append(
             f'<tr class="{"selected" if selected else ""}">'
-            f'<td>{"● " if selected else ""}{_safe(action.get("label", action_label(action)))}</td>'
+            f'<td>{"● " if selected else ""}{_safe(action.get("label", action_label(action)))}{diagnostic}</td>'
             f'<td>{score:.3f}</td>' if score is not None else
             f'<tr><td>{_safe(action.get("label", action_label(action)))}</td><td>unavailable</td>'
         )
