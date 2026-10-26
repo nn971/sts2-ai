@@ -85,8 +85,13 @@ def main() -> None:
     p.add_argument("--temperature-end", type=float, default=0.035)
     p.add_argument("--temperature-decay-rounds", type=int, default=20)
     p.add_argument("--max-decisions", type=int, default=4096)
-    p.add_argument("--win-anneal-threshold", type=int, default=16,
-                   help="Number of training victories before auxiliary shaping vanishes")
+    p.add_argument(
+        "--win-anneal-threshold", type=int, default=None,
+        help=(
+            "Number of training victories before auxiliary defeat shaping vanishes; "
+            "defaults to 256 for frozen-combat H6 runs and 16 otherwise"
+        ),
+    )
     p.add_argument("--eval-seeds", type=int, default=16)
     p.add_argument(
         "--episode-goal", choices=EPISODE_GOALS, default=NATIVE_ACT1_BOSS_GOAL,
@@ -115,6 +120,10 @@ def main() -> None:
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--report", type=Path, required=True)
     args = p.parse_args()
+    # H6-A2: retain meaningful progress targets beyond the first 16 clears.
+    # Explicit --win-anneal-threshold 16 still reproduces historical H6-A.
+    if args.win_anneal_threshold is None:
+        args.win_anneal_threshold = 256 if args.freeze_combat else 16
     if args.freeze_combat and (not args.warm_start or args.optimizer_method != "ppo"):
         p.error("--freeze-combat requires --warm-start and --optimizer-method ppo")
     if args.freeze_combat and args.ascension != 10:
