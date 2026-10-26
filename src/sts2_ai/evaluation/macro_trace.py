@@ -19,7 +19,7 @@ TRACE_SCHEMA = "sts2-ai-h6c-public-decision-trace-v1"
 REPORT_SCHEMA = "sts2-ai-h6c-paired-trace-report-v1"
 
 BOSS_KEYS = (
-    "act1_boss_encounter_id", "act1_boss_id", "boss_encounter_id",
+    "act_one_boss_encounter_id", "act1_boss_encounter_id", "act1_boss_id", "boss_encounter_id",
     "boss_id", "boss_encounter", "boss",
 )
 
@@ -169,7 +169,10 @@ def first_divergence(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
     """Do not call unmatched observations policy disagreements."""
     x, y = a["decisions"], b["decisions"]
     for i in range(min(len(x), len(y))):
-        same_public = x[i]["public_state"] == y[i]["public_state"]
+        same_public = (
+            x[i]["public_state"] == y[i]["public_state"]
+            and _map_for(a, i) == _map_for(b, i)
+        )
         # Canonical action identities are opaque; compare semantic kind/payload
         # rather than assuming the same array position across agents.
         ax = x[i]["actions"][x[i]["selected"]]
@@ -432,7 +435,7 @@ def render_markdown(traces: Sequence[dict[str, Any]]) -> str:
     first = first_divergence(*traces) if len(traces) == 2 else None
     lines = [
         "# H6-C public decision replay", "",
-        f"Source seed: \`{traces[0]['seed']}\`", "",
+        f"Source seed: `{traces[0]['seed']}`", "",
         "| Model | Boss identity | Outcome | Floor | Progress |",
         "|---|---|---|---:|---:|",
     ]
