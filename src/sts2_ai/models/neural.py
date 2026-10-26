@@ -160,19 +160,27 @@ class NeuralPolicyValueModel:
             value_head_trained=_trained_flag(raw),
             enemy_weight=(
                 _matrix(raw["enemy_weight"], hidden, dimension)
-                if raw["format"] in (TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT, MACRO_ATTENTION_FORMAT) else None
+                if raw["format"] in (
+                    TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT, MACRO_ATTENTION_FORMAT,
+                ) else None
             ),
             enemy_bias=(
                 _vector(raw["enemy_bias"], hidden)
-                if raw["format"] in (TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT, MACRO_ATTENTION_FORMAT) else None
+                if raw["format"] in (
+                    TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT, MACRO_ATTENTION_FORMAT,
+                ) else None
             ),
             enemy_context_weight=(
                 _vector(raw["enemy_context_weight"], hidden)
-                if raw["format"] in (TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT, MACRO_ATTENTION_FORMAT) else None
+                if raw["format"] in (
+                    TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT, MACRO_ATTENTION_FORMAT,
+                ) else None
             ),
             enemy_target_weight=(
                 _vector(raw["enemy_target_weight"], hidden)
-                if raw["format"] in (TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT, MACRO_ATTENTION_FORMAT) else None
+                if raw["format"] in (
+                    TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT, MACRO_ATTENTION_FORMAT,
+                ) else None
             ),
             attn_query=_matrix(raw["attn_query"], hidden, hidden)
             if raw["format"] in (TACTICAL_ATTENTION_FORMAT, MACRO_ATTENTION_FORMAT) else None,
@@ -210,7 +218,9 @@ class NeuralPolicyValueModel:
             "model_id": self.model_id,
             "value_head_trained": self.value_head_trained,
         }
-        if self.format_id in (TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT, MACRO_ATTENTION_FORMAT):
+        if self.format_id in (
+            TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT, MACRO_ATTENTION_FORMAT,
+        ):
             result.update(
                 enemy_weight=self.enemy_weight,
                 enemy_bias=self.enemy_bias,
