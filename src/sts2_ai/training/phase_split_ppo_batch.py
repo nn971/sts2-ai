@@ -29,6 +29,8 @@ from sts2_ai.models.hashed_linear import (
 from sts2_ai.models.macro_objects import (
     macro_action_target,
     macro_attention_action_features,
+    macro_deep_action_target,
+    macro_deep_object_vectors,
     macro_global_features,
     macro_object_vectors,
     macro_semantic_action_features,
@@ -39,7 +41,10 @@ from sts2_ai.models.tactical_state import (
     relational_tactical_state_features,
     tactical_state_features,
 )
-from sts2_ai.training.enemy_attention import contextualize_torch
+from sts2_ai.training.enemy_attention import (
+    contextualize_deep_torch,
+    contextualize_torch,
+)
 from sts2_ai.training.neural import _dense
 from sts2_ai.training.phase_split_ppo import PpoDiagnostics, gae_terminal
 from sts2_ai.training.selfplay import Episode, PublicDecision
@@ -88,11 +93,11 @@ def encode_decision(
     if decision.phase == "strategy":
         state_fn = (
             macro_global_features
-            if strategy_encoding in ("macro_attention", "macro_semantic")
+            if strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep")
             else state_features
         )
         action_fn = (macro_semantic_action_features
-                     if strategy_encoding == "macro_semantic"
+                     if strategy_encoding in ("macro_semantic", "macro_deep")
                      else macro_attention_action_features
                      if strategy_encoding == "macro_attention"
                      else neural_action_features)
@@ -126,7 +131,7 @@ def encode_decision(
     if not (
         (
             decision.phase == "strategy"
-            and strategy_encoding in ("macro_attention", "macro_semantic")
+            and strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep")
         )
         or (decision.phase == "combat" and encoding in ("enemy_instances", "enemy_attention"))
     ):
@@ -134,9 +139,13 @@ def encode_decision(
             decision.phase, state_tensor, action_tensor, decision.chosen_index,
         )
 
-    nodes = (macro_object_vectors(state, decision.legal_actions, dimension)
-             if decision.phase == "strategy"
-             else enemy_instance_vectors(state, dimension))
+    nodes = (
+        macro_deep_object_vectors(state, decision.legal_actions, dimension)
+        if decision.phase == "strategy" and strategy_encoding == "macro_deep"
+        else macro_object_vectors(state, decision.legal_actions, dimension)
+        if decision.phase == "strategy"
+        else enemy_instance_vectors(state, dimension)
+    )
     ids = list(nodes)  # order is arbitrary but IDs only select the correct slot
     slot = {instance_id: i for i, instance_id in enumerate(ids)}
     enemy_tensor = (
@@ -145,7 +154,8 @@ def encode_decision(
     )
     target_tensor = torch.tensor([
         slot[target] if (target := (
-            macro_action_target(state, action, nodes)
+            (macro_deep_action_target if strategy_encoding == "macro_deep"
+             else macro_action_target)(state, action, nodes)
             if decision.phase == "strategy" else
             action_target_instance(action.payload_json, nodes)
         )) is not None else -1
@@ -218,6 +228,10 @@ def forward_batch(
             batch.enemies, params["enemy_weight"], params["enemy_bias"],
         ))
         enemy_hidden = contextualize_torch(enemy_hidden, batch.enemy_mask, params, torch)
+        if "attn2_gate" in params:
+            enemy_hidden = contextualize_deep_torch(
+                enemy_hidden, batch.enemy_mask, params, torch,
+            )
         mask = batch.enemy_mask.unsqueeze(-1)
         pooled = (enemy_hidden * mask).sum(dim=1) / (
             batch.enemy_mask.sum(dim=1, keepdim=True).clamp(min=1)

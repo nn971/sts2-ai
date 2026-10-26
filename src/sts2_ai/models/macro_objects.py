@@ -21,6 +21,7 @@ from sts2_ai.models.hashed_linear import (
 
 MACRO_ATTENTION_FORMAT = "sts2-neural-policy-value-v17-macro-object-attention"
 MACRO_SEMANTIC_FORMAT = "sts2-neural-policy-value-v18-macro-semantic-actions"
+MACRO_DEEP_FORMAT = "sts2-neural-policy-value-v19-deep-macro-attention"
 
 
 def _id(value: dict[str, Any], *keys: str) -> str | None:
@@ -195,6 +196,99 @@ def macro_action_target(
         instance = payload.get("CardInstanceId", payload.get("card_instance_id"))
         _, instances = _cards(state)
         key = instances.get(instance) if type(instance) is int else None
+    return key if key in objects else None
+
+
+def _deep_object_key(action: LegalAction) -> str | None:
+    """Within-frame lookup key; raw payload IDs never become learned features."""
+    payload = _payload(action.payload_json)
+    kind = action.kind
+    if kind in ("buy_card", "buy_potion", "buy_relic", "replace_shop_potion"):
+        offer_id = payload.get("OfferId", payload.get("offer_id"))
+        return f"shop-offer:{offer_id}" if type(offer_id) is int else None
+    if kind == "event_choice":
+        choice_id = payload.get("ChoiceId", payload.get("choice_id"))
+        return f"event-choice:{choice_id}" if isinstance(choice_id, str) else None
+    if kind == "take_reward_card":
+        return None  # Already represented by the V17 reward-card pointer.
+    if kind.startswith(("take_reward_", "replace_reward_")):
+        return f"reward-selection:{kind}:{action.payload_json}"
+    return None
+
+
+def macro_deep_object_vectors(
+    state: dict[str, Any], actions: Sequence[LegalAction], dimension: int,
+) -> dict[str, dict[int, float]]:
+    """V19 typed pointers for public shop, event and reward alternatives."""
+    vectors = macro_object_vectors(state, actions, dimension)
+    for action in actions:
+        key = _deep_object_key(action)
+        if key is None or key in vectors:
+            continue
+        payload = _payload(action.payload_json)
+        kind = action.kind
+        tokens: list[tuple[str, float]] = []
+        if kind in ("buy_card", "buy_potion", "buy_relic", "replace_shop_potion"):
+            offer = _offer_from_action(state, kind, payload)
+            if offer is None:
+                continue
+            item = _id(offer, "item_id", "content_id", "card_id", "relic_id", "potion_id")
+            tokens = _typed_tokens("shop-offer", item or "unknown")
+            tokens.append((f"shop:category:{kind.replace('replace_shop_', 'buy_')}", 1.0))
+            for field in ("price", "base_price"):
+                amount = _number(offer.get(field), 100.0)
+                if amount is not None:
+                    tokens.append((f"shop:{field}", amount))
+            if kind == "buy_card":
+                shop = state.get("shop")
+                previews = shop.get("card_offer_previews") if isinstance(shop, dict) else None
+                offer_id = payload.get("OfferId", payload.get("offer_id"))
+                if isinstance(previews, list):
+                    for preview in previews:
+                        if not isinstance(preview, dict) or preview.get("offer_id") != offer_id:
+                            continue
+                        card = preview.get("card")
+                        if isinstance(card, dict):
+                            level = _number(card.get("upgrade_level"), 4.0)
+                            if level is not None:
+                                tokens.append(("shop:card-upgrade", level))
+                        break
+        elif kind == "event_choice":
+            event = state.get("event")
+            if not isinstance(event, dict):
+                continue
+            choice_id = payload.get("ChoiceId", payload.get("choice_id"))
+            tokens = _typed_tokens("event", str(event.get("event_id", "unknown")))
+            tokens += _typed_tokens("event-choice", str(choice_id))
+            for choice in event.get("visible_choice_values", []):
+                if not isinstance(choice, dict) or choice.get("choice_id") != choice_id:
+                    continue
+                for field, value in choice.items():
+                    if field == "choice_id" or value is None:
+                        continue
+                    numeric = _number(value, 100.0)
+                    if numeric is not None:
+                        tokens.append((f"event:effect:{field}", numeric))
+                    elif isinstance(value, str):
+                        tokens.append((f"event:effect:{field}:{value}", 1.0))
+                break
+        else:
+            tokens = [(f"reward:selection:{kind}", 1.0)]
+            tokens.extend(_reward_action_tokens(state, kind, payload))
+            if len(tokens) == 1:
+                continue  # Cannot identify its public target; retain action features.
+        vectors[key] = _hash_features(tokens, dimension)
+    return vectors
+
+
+def macro_deep_action_target(
+    state: dict[str, Any], action: LegalAction,
+    objects: dict[str, dict[int, float]],
+) -> str | None:
+    original = macro_action_target(state, action, objects)
+    if original is not None:
+        return original
+    key = _deep_object_key(action)
     return key if key in objects else None
 
 
