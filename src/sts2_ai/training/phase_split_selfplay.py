@@ -38,10 +38,13 @@ from sts2_ai.models.hashed_linear import (
     tactical_action_features,
 )
 from sts2_ai.models.macro_objects import (
-    MACRO_ATTENTION_FORMAT, MACRO_DEEP_FORMAT, MACRO_SEMANTIC_FORMAT,
+    MACRO_ATTENTION_FORMAT,
+    MACRO_DEEP_FORMAT,
+    MACRO_SEMANTIC_FORMAT,
 )
 from sts2_ai.models.neural import (
     NEURAL_FORMAT,
+    NeuralPolicyValueModel,
     TACTICAL_ATTENTION_FORMAT,
     TACTICAL_DAMAGE_FORMAT,
     TACTICAL_FORMAT,
@@ -49,7 +52,6 @@ from sts2_ai.models.neural import (
     TACTICAL_RELATIONAL_FORMAT,
     TACTICAL_RESOURCES_FORMAT,
     TACTICAL_STRUCTURED_FORMAT,
-    NeuralPolicyValueModel,
 )
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.models.tactical_state import (
@@ -60,7 +62,8 @@ from sts2_ai.models.tactical_state import (
 )
 from sts2_ai.training.combat_outcomes import CombatOutcome
 from sts2_ai.training.enemy_attention import (
-    add_attention_parameters, add_deep_macro_parameters,
+    add_attention_parameters,
+    add_deep_macro_parameters,
 )
 from sts2_ai.training.instance_combat import add_instance_parameters, instance_forward
 from sts2_ai.training.macro_attention import macro_attention_forward
@@ -71,11 +74,11 @@ from sts2_ai.training.parallel_rollouts import (
     open_worker_pool,
 )
 from sts2_ai.training.selfplay import (
-    Episode,
-    PublicDecision,
     _bounded_return,
     _curriculum_coefficient,
     collect_public_episode,
+    Episode,
+    PublicDecision,
     temperature_for_round,
 )
 
@@ -144,7 +147,10 @@ def _forward_decision(
     strategy_encoding: str = "legacy",
 ) -> tuple[Any, Any]:
     state = state_dict(decision.observation.payload_json)
-    if decision.phase == "strategy" and strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep"):
+    if (
+        decision.phase == "strategy"
+        and strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep")
+    ):
         return macro_attention_forward(
             state, decision.legal_actions, params, dimension, torch,
             semantic_actions=strategy_encoding == "macro_semantic",
