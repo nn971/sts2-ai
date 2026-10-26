@@ -88,6 +88,7 @@ def readable_action(action: dict[str, Any], frame: dict[str, Any],
                 verb = "Upgrade" if kind == "rest_upgrade" else "Remove"
                 return f"{verb}: {card.get('card_id', instance)}"
     if kind in ("buy_card", "buy_potion", "buy_relic", "event_choice",
+                "take_reward_relic", "take_reward_extra_relic",
                 "skip_reward_relic", "skip_reward_extra_relic"):
         return public_choice_label(frame, kind, json.dumps(payload))
     return action_label(action)
@@ -421,6 +422,58 @@ def _state_change(start: dict[str, Any], end: dict[str, Any]) -> str:
     return "; ".join(changes) or "No observed persistent-inventory change"
 
 
+def _public_reveals(decision: dict[str, Any]) -> list[str]:
+    """Only identities revealed by the visited observation, never future RNG."""
+    state = decision["public_state"]
+    labels: list[str] = []
+    event = state.get("event")
+    event_id = state.get("event_id")
+    if isinstance(event, dict):
+        event_id = event.get("event_id", event_id)
+    if isinstance(event_id, str) and event_id:
+        labels.append(f"Event: {event_id}")
+    combat = state.get("combat")
+    if isinstance(combat, dict):
+        encounter_id = combat.get("encounter_id")
+        if isinstance(encounter_id, str):
+            labels.append(f"Encounter: {encounter_id}")
+        enemies = combat.get("enemies")
+        if isinstance(enemies, list):
+            ids = sorted({str(e.get("enemy_id", e.get("species_id")))
+                          for e in enemies if isinstance(e, dict)
+                          and (e.get("enemy_id") or e.get("species_id"))})
+            if ids:
+                labels.append("Enemies: " + ", ".join(ids))
+    return labels
+
+
+def _relic_skip_note(decision: dict[str, Any]) -> str:
+    reward = decision["public_state"].get("reward")
+    if not isinstance(reward, dict) or reward.get("relic_resolved") is not False:
+        return ""
+    offers = reward.get("relic_options")
+    if not isinstance(offers, list) or not offers:
+        return ""
+    kinds = {action["kind"] for action in decision["actions"]}
+    if "skip_reward_relic" in kinds or "skip_reward_extra_relic" in kinds:
+        return '<p class="diff">Skip relic is available in the legal menu.</p>'
+    mode = reward.get("independent_selection")
+    explanation = ("Ordered reward mode" if mode is False else
+                   "the current reward boundary")
+    return (f'<p class="diff">Skip relic is NOT a legal action at this '
+            f'decision ({_safe(explanation)}). Full legal menu shown below.</p>')
+
+
+def _discovered_nodes(traces: Sequence[dict[str, Any]]) -> dict[str, set[str]]:
+    revealed: dict[str, set[str]] = defaultdict(set)
+    for trace in traces:
+        for decision in trace["decisions"]:
+            node_id = decision.get("current_node_id")
+            if isinstance(node_id, str):
+                revealed[node_id].update(_public_reveals(decision))
+    return revealed
+
+
 def _floor_sections(trace: dict[str, Any]) -> str:
     rows: dict[tuple[object, object], list[dict[str, Any]]] = defaultdict(list)
     for d in trace["decisions"]:
@@ -441,7 +494,10 @@ def _floor_sections(trace: dict[str, Any]) -> str:
             f' · {len(macro)} macro choices · {combat} combat choices'
         )
         change = _state_change(first["public_state"], end_state)
-        details = [f'<p class="diff">{_safe(change)}</p>']
+        revealed = sorted(set(item for d in group for item in _public_reveals(d)))
+        reveal_line = ", ".join(revealed) if revealed else "No revealed encounter/event"
+        details = [f'<p class="diff">{_safe(change)}</p>',
+                   f'<p>Revealed: {_safe(reveal_line)}</p>']
         for d in group:
             if d["phase"] == "combat":
                 continue
@@ -452,7 +508,7 @@ def _floor_sections(trace: dict[str, Any]) -> str:
                 f' · HP {_safe(d["hp"])} · Gold {_safe(d["gold"])}'
                 '</summary>'
                 f'<p>Value estimate: {_safe(round(d["value"], 4))}</p>'
-                + _options(d) + '</details>'
+                + _relic_skip_note(d) + _options(d) + '</details>'
             )
         chunks.append(
             '<details class="floor"><summary>' + headline + '</summary>'
@@ -575,7 +631,8 @@ def render_html(traces: Sequence[dict[str, Any]]) -> str:
         'width:100%;margin:8px 0}td,th{padding:5px;border-bottom:'
         '1px solid #3a4a5b;text-align:left;word-break:break-word}'
         '.selected{color:#78dcaa}.diff{color:#b8d0e4} .legend,.missing{color:#aab8c5}'
-        '</style><header>' + head + map_svg(graph, paths, current, route_paths)
+        '</style><header>' + head
+        + map_svg(graph, paths, current, route_paths, _discovered_nodes(traces))
         + '</header><main class="body"><h1>Public decision history</h1>'
         + divergence + '<div class="agents">' + "".join(panels)
         + '</div></main></html>'
