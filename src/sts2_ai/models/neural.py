@@ -33,7 +33,7 @@ from .hashed_linear import (
 )
 from .macro_choice_identity import MACRO_CHOICE_FORMAT, macro_choice_action_features
 from .macro_objects import (
-    MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT,
+    MACRO_ATTENTION_FORMAT,
     macro_action_target,
     macro_attention_action_features,
     macro_global_features,
@@ -126,7 +126,8 @@ class NeuralPolicyValueModel:
             NEURAL_FORMAT, TACTICAL_FORMAT, TACTICAL_STRUCTURED_FORMAT,
             TACTICAL_RELATIONAL_FORMAT, TACTICAL_DAMAGE_FORMAT,
             TACTICAL_RESOURCES_FORMAT, TACTICAL_INSTANCES_FORMAT,
-            TACTICAL_ATTENTION_FORMAT, MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT,
+            TACTICAL_ATTENTION_FORMAT,
+                    MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT,
             LEGACY_NEURAL_FORMAT,
         }:
             raise ValueError("Unsupported neural model format")
@@ -139,7 +140,8 @@ class NeuralPolicyValueModel:
         model_id = raw.get("model_id")
         if not isinstance(model_id, str) or not model_id:
             raise ValueError("Invalid neural model identifier")
-        if raw["format"] in (TACTICAL_ATTENTION_FORMAT, MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT) and hidden % 4:
+        if raw["format"] in (TACTICAL_ATTENTION_FORMAT,
+                    MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT) and hidden % 4:
             raise ValueError("Attention hidden size must be divisible by four")
         policy_bias = float(raw["policy_bias"])
         value_bias = float(raw["value_bias"])
@@ -162,37 +164,46 @@ class NeuralPolicyValueModel:
             enemy_weight=(
                 _matrix(raw["enemy_weight"], hidden, dimension)
                 if raw["format"] in (
-                    TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT, MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT,
+                    TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT,
+                    MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT,
                 ) else None
             ),
             enemy_bias=(
                 _vector(raw["enemy_bias"], hidden)
                 if raw["format"] in (
-                    TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT, MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT,
+                    TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT,
+                    MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT,
                 ) else None
             ),
             enemy_context_weight=(
                 _vector(raw["enemy_context_weight"], hidden)
                 if raw["format"] in (
-                    TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT, MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT,
+                    TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT,
+                    MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT,
                 ) else None
             ),
             enemy_target_weight=(
                 _vector(raw["enemy_target_weight"], hidden)
                 if raw["format"] in (
-                    TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT, MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT,
+                    TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT,
+                    MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT,
                 ) else None
             ),
             attn_query=_matrix(raw["attn_query"], hidden, hidden)
-            if raw["format"] in (TACTICAL_ATTENTION_FORMAT, MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT) else None,
+            if raw["format"] in (TACTICAL_ATTENTION_FORMAT,
+                    MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT) else None,
             attn_key=_matrix(raw["attn_key"], hidden, hidden)
-            if raw["format"] in (TACTICAL_ATTENTION_FORMAT, MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT) else None,
+            if raw["format"] in (TACTICAL_ATTENTION_FORMAT,
+                    MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT) else None,
             attn_value=_matrix(raw["attn_value"], hidden, hidden)
-            if raw["format"] in (TACTICAL_ATTENTION_FORMAT, MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT) else None,
+            if raw["format"] in (TACTICAL_ATTENTION_FORMAT,
+                    MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT) else None,
             attn_output=_matrix(raw["attn_output"], hidden, hidden)
-            if raw["format"] in (TACTICAL_ATTENTION_FORMAT, MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT) else None,
+            if raw["format"] in (TACTICAL_ATTENTION_FORMAT,
+                    MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT) else None,
             attn_gate=_vector(raw["attn_gate"], hidden)
-            if raw["format"] in (TACTICAL_ATTENTION_FORMAT, MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT) else None,
+            if raw["format"] in (TACTICAL_ATTENTION_FORMAT,
+                    MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT) else None,
             
         )
 
@@ -220,7 +231,8 @@ class NeuralPolicyValueModel:
             "value_head_trained": self.value_head_trained,
         }
         if self.format_id in (
-            TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT, MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT,
+            TACTICAL_INSTANCES_FORMAT, TACTICAL_ATTENTION_FORMAT,
+                    MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT,
         ):
             result.update(
                 enemy_weight=self.enemy_weight,
@@ -228,7 +240,8 @@ class NeuralPolicyValueModel:
                 enemy_context_weight=self.enemy_context_weight,
                 enemy_target_weight=self.enemy_target_weight,
             )
-        if self.format_id in (TACTICAL_ATTENTION_FORMAT, MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT):
+        if self.format_id in (TACTICAL_ATTENTION_FORMAT,
+                    MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT):
             result.update({name: getattr(self, name) for name in ATTENTION_FIELDS})
         return result
 
