@@ -167,3 +167,26 @@ def test_v18_checkpoint_remains_separate_and_combat_frozen(tmp_path):
     assert model.combat.to_dict() == original.combat.to_dict()
     reloaded = PhaseSplitNeuralModel.from_dict(model.to_dict())
     assert reloaded.strategy.format_id == MACRO_CHOICE_FORMAT
+
+
+
+def test_replay_identifies_legacy_feature_aliases_not_merely_logit_ties():
+    from types import SimpleNamespace
+
+    from sts2_ai.evaluation.macro_trace import feature_alias_groups
+
+    state, actions = shop_event()
+    old = SimpleNamespace(strategy=SimpleNamespace(
+        format_id=MACRO_ATTENTION_FORMAT, dimension=128,
+    ))
+    new = SimpleNamespace(strategy=SimpleNamespace(
+        format_id=MACRO_CHOICE_FORMAT, dimension=128,
+    ))
+    old_aliases = feature_alias_groups(old, state, actions)
+    assert any({0, 1}.issubset(group) for group in map(set, old_aliases))
+    assert any({2, 3}.issubset(group) for group in map(set, old_aliases))
+    assert any({6, 7}.issubset(group) for group in map(set, old_aliases))
+    new_aliases = feature_alias_groups(new, state, actions)
+    assert not any({0, 1}.issubset(group) for group in map(set, new_aliases))
+    assert not any({2, 3}.issubset(group) for group in map(set, new_aliases))
+    assert not any({6, 7}.issubset(group) for group in map(set, new_aliases))
