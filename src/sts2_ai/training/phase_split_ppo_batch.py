@@ -26,6 +26,7 @@ from sts2_ai.models.hashed_linear import (
     state_features,
     tactical_action_features,
 )
+from sts2_ai.models.macro_choice_identity import macro_choice_action_features
 from sts2_ai.models.macro_objects import (
     macro_action_target,
     macro_attention_action_features,
@@ -86,10 +87,12 @@ def encode_decision(
 
     if decision.phase == "strategy":
         state_fn = (macro_global_features
-                    if strategy_encoding == "macro_attention" else state_features)
-        action_fn = (macro_attention_action_features
-                     if strategy_encoding == "macro_attention"
-                     else neural_action_features)
+                    if strategy_encoding in ("macro_attention", "macro_attention_v2")
+                    else state_features)
+        action_fn = (macro_choice_action_features
+                     if strategy_encoding == "macro_attention_v2"
+                     else macro_attention_action_features
+                     if strategy_encoding == "macro_attention" else neural_action_features)
     elif decision.phase == "combat":
         state_fn = {
             "legacy": state_features,
@@ -117,7 +120,9 @@ def encode_decision(
         _dense(action_fn(state, action.kind, action.payload_json, dimension), dimension)
         for action in decision.legal_actions
     ], dtype=torch.float32)
-    if not ((decision.phase == "strategy" and strategy_encoding == "macro_attention")
+    if not ((decision.phase == "strategy" and strategy_encoding in (
+            "macro_attention", "macro_attention_v2",
+        ))
             or (decision.phase == "combat" and encoding in ("enemy_instances", "enemy_attention"))):
         return EncodedDecision(
             decision.phase, state_tensor, action_tensor, decision.chosen_index,

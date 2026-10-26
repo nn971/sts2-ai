@@ -37,6 +37,7 @@ from sts2_ai.models.hashed_linear import (
     state_features,
     tactical_action_features,
 )
+from sts2_ai.models.macro_choice_identity import MACRO_CHOICE_FORMAT
 from sts2_ai.models.macro_objects import MACRO_ATTENTION_FORMAT
 from sts2_ai.models.neural import (
     NEURAL_FORMAT,
@@ -140,9 +141,13 @@ def _forward_decision(
     strategy_encoding: str = "legacy",
 ) -> tuple[Any, Any]:
     state = state_dict(decision.observation.payload_json)
-    if decision.phase == "strategy" and strategy_encoding == "macro_attention":
+    if decision.phase == "strategy" and strategy_encoding in (
+        "macro_attention", "macro_attention_v2",
+    ):
         return macro_attention_forward(
             state, decision.legal_actions, params, dimension, torch,
+            choice_encoding=("v18" if strategy_encoding == "macro_attention_v2"
+                             else "legacy"),
         )
     if (decision.phase == "combat" and
             tactical_state_encoding in ("enemy_instances", "enemy_attention")):
@@ -186,7 +191,9 @@ def _export_split(
         strategy=_export(
             strategy_params, dimension, hidden,
             model_id=model_id + "-strategy", value_head_trained=trained,
-            format_id=(MACRO_ATTENTION_FORMAT
+            format_id=(MACRO_CHOICE_FORMAT
+                       if strategy_encoding == "macro_attention_v2" else
+                       MACRO_ATTENTION_FORMAT
                        if strategy_encoding == "macro_attention" else NEURAL_FORMAT),
         ),
         combat=_export(
@@ -374,13 +381,13 @@ def train_phase_split(
         raise ValueError("Frozen-combat macro training requires a pinned warm start")
     if freeze_combat and optimizer_method != "ppo":
         raise ValueError("Frozen-combat macro training requires PPO")
-    if strategy_encoding not in ("legacy", "macro_attention"):
+    if strategy_encoding not in ("legacy", "macro_attention", "macro_attention_v2"):
         raise ValueError("Unknown strategy encoding")
-    if strategy_encoding == "macro_attention" and not (
+    if strategy_encoding in ("macro_attention", "macro_attention_v2") and not (
         freeze_combat and optimizer_method == "ppo" and ppo_backend == "batched"
     ):
         raise ValueError("Macro attention requires frozen-combat batched PPO")
-    if strategy_encoding == "macro_attention" and hidden % 4:
+    if strategy_encoding in ("macro_attention", "macro_attention_v2") and hidden % 4:
         raise ValueError("Macro attention hidden width must be divisible by four")
     if min(rounds, episodes_per_round, dimension, hidden, max_decisions, workers) <= 0:
         raise ValueError("Expected positive sizes and worker count")
@@ -446,7 +453,7 @@ def train_phase_split(
         "strategy": _new_params(dimension, hidden, torch),
         "combat": _new_params(dimension, hidden, torch),
     }
-    if strategy_encoding == "macro_attention":
+    if strategy_encoding in ("macro_attention", "macro_attention_v2"):
         add_instance_parameters(params["strategy"], dimension, hidden, torch)
         add_attention_parameters(params["strategy"], hidden, torch)
     if tactical_state_encoding in ("enemy_instances", "enemy_attention"):
@@ -511,10 +518,19 @@ def train_phase_split(
             migrating_combat_value = (
                 phase == "combat" and previous_combat_objective != combat_objective
             )
+            # v18 action feature hashes do not share v17 coordinates.
+            # Keep learned state/object/attention representations, but learn
+            # a new action projection instead of misinterpreting old weights.
+            migrating_macro_choice = (
+                phase == "strategy" and strategy_encoding == "macro_attention_v2"
+                and source.format_id != MACRO_CHOICE_FORMAT
+            )
             with torch.no_grad():
                 for name, weight in params[phase].items():
                     if not hasattr(source, name) or getattr(source, name) is None:
                         continue  # Newly initialized v8-specific parameters.
+                    if migrating_macro_choice and name == "action_weight":
+                        continue
                     if migrating_tactical and name in (
                         "state_weight", "state_bias", "value_weight", "value_bias"
                     ):

@@ -108,6 +108,7 @@ def test_unknown_boss_explicit_and_html_escapes():
     a["boss_identity"] = None
     a["boss_status"] = "not_exposed"
     a["decisions"][0]["actions"][0]["payload"]["NodeId"] = '<script>alert(1)</script>'
+    a["decisions"][0]["actions"][0]["label"] = '<script>alert(1)</script>'
     page = render_html([a])
     assert "Boss: not exposed" in page
     assert "<script>" not in page
@@ -140,3 +141,36 @@ def test_trace_files_keep_distinct_model_names(tmp_path):
         assert (tmp_path / f"seed.{name}.jsonl").is_file()
         data = json.loads((tmp_path / f"seed.{name}.json").read_text())
         assert data["label"] == name
+
+
+def test_numeric_native_room_types_and_boss_are_readable():
+    from sts2_ai.evaluation.macro_trace import room_type_name
+
+    assert room_type_name(0) == 'Combat'
+    assert room_type_name(1) == 'Elite'
+    assert room_type_name(2) == 'Event'
+    assert room_type_name(3) == 'Shop'
+    assert room_type_name(4) == 'Rest'
+    assert room_type_name(5) == 'Boss'
+    assert room_type_name(6) == 'Unknown (?)'
+    assert room_type_name(7) == 'Treasure'
+    trace = sample_trace()
+    trace['map_snapshots'][0]['nodes'][0]['room_type'] = 0
+    assert 'Combat' in render_html([trace])
+
+
+
+def test_revealed_event_in_map_and_missing_skip_explained():
+    trace = sample_trace()
+    d = trace["decisions"][0]
+    d["current_node_id"] = "a"
+    d["public_state"]["event_id"] = "proto.native.event.fake_merchant"
+    reward_decision = trace["decisions"][1]
+    reward_decision["public_state"]["reward"] = {
+        "relic_options": ["proto.relic.kunai"],
+        "relic_resolved": False,
+        "independent_selection": False,
+    }
+    html = render_html([trace])
+    assert "proto.native.event.fake_merchant" in html
+    assert "Skip relic is NOT a legal action" in html

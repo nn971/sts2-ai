@@ -14,9 +14,34 @@ from collections.abc import Sequence
 from typing import Any
 
 from sts2_ai.emulator import LegalAction, Observation
+from sts2_ai.models.macro_choice_identity import (
+    MACRO_CHOICE_FORMAT,
+    macro_choice_action_features,
+    public_choice_label,
+)
+from sts2_ai.models.macro_objects import (
+    MACRO_ATTENTION_FORMAT,
+    macro_action_target,
+    macro_attention_action_features,
+    macro_object_vectors,
+)
 
 TRACE_SCHEMA = "sts2-ai-h6c-public-decision-trace-v1"
 REPORT_SCHEMA = "sts2-ai-h6c-paired-trace-report-v1"
+
+# The pinned emulator's PrototypeRoomType is serialized as a numeric enum.
+# Never assume the integer is already a text room name.
+ROOM_TYPES = {
+    0: "Combat", 1: "Elite", 2: "Event", 3: "Shop",
+    4: "Rest", 5: "Boss", 6: "Unknown (?)", 7: "Treasure",
+}
+
+
+def room_type_name(value: object) -> str:
+    if type(value) is int:
+        return ROOM_TYPES.get(value, f"Unknown room type #{value}")
+    return value if isinstance(value, str) else "Unknown"
+
 
 BOSS_KEYS = (
     "act_one_boss_encounter_id", "act1_boss_encounter_id", "act1_boss_id", "boss_encounter_id",
@@ -69,7 +94,7 @@ def readable_action(action: dict[str, Any], frame: dict[str, Any],
         for node in map_nodes if isinstance(map_nodes, list) else []:
             if isinstance(node, dict) and node.get("node_id") == node_id:
                 return (f"Route → floor {node.get('floor', '?')} "
-                        f"{node.get('room_type', 'unknown')} ({node_id})")
+                        f"{room_type_name(node.get('room_type'))} ({node_id})")
     if kind == "take_reward_card":
         index = payload.get("Index", payload.get("index"))
         reward = frame.get("reward")
@@ -86,6 +111,10 @@ def readable_action(action: dict[str, Any], frame: dict[str, Any],
             if isinstance(card, dict) and card.get("instance_id") == instance:
                 verb = "Upgrade" if kind == "rest_upgrade" else "Remove"
                 return f"{verb}: {card.get('card_id', instance)}"
+    if kind in ("buy_card", "buy_potion", "buy_relic", "event_choice",
+                "take_reward_relic", "take_reward_extra_relic",
+                "skip_reward_relic", "skip_reward_extra_relic"):
+        return public_choice_label(frame, kind, json.dumps(payload))
     return action_label(action)
 
 
@@ -109,6 +138,27 @@ def _visible_node(action: LegalAction) -> str | None:
 def _number(obj: dict[str, Any], key: str) -> int | float | None:
     n = obj.get(key)
     return n if isinstance(n, (float, int)) and not isinstance(n, bool) else None
+
+
+def feature_alias_groups(model: Any, state: dict[str, Any],
+                         actions: tuple[LegalAction, ...]) -> list[list[int]]:
+    """Prove input-layer collisions independently of trained logit values."""
+    strategy = getattr(model, "strategy", None)
+    fmt = getattr(strategy, "format_id", None)
+    if fmt not in (MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT):
+        return []
+    dimension = strategy.dimension
+    objects = macro_object_vectors(state, actions, dimension)
+    feature_fn = (macro_choice_action_features if fmt == MACRO_CHOICE_FORMAT
+                  else macro_attention_action_features)
+    groups: dict[tuple[object, ...], list[int]] = defaultdict(list)
+    for i, action in enumerate(actions):
+        x = tuple(sorted(feature_fn(
+            state, action.kind, action.payload_json, dimension,
+        ).items()))
+        target = macro_action_target(state, action, objects)
+        groups[(x, target)].append(i)
+    return [indices for indices in groups.values() if len(indices) > 1]
 
 
 class TraceRecorder:
@@ -177,6 +227,10 @@ class TraceRecorder:
             "public_state": frame,
             "value": float(evaluation.value),
             "actions": choices,
+            "feature_alias_groups": (
+                feature_alias_groups(self.model, frame, actions)
+                if not isinstance(frame.get("combat"), dict) else []
+            ),
             "selected": selected,
             "selected_node": _visible_node(actions[selected]),
         })
@@ -245,7 +299,8 @@ def _room_style(room: str) -> str:
 
 def map_svg(nodes: Sequence[dict[str, Any]], routes: dict[str, set[str]],
             current: dict[str, str | None],
-            route_paths: dict[str, list[str]] | None = None) -> str:
+            route_paths: dict[str, list[str]] | None = None,
+            discovered: dict[str, set[str]] | None = None) -> str:
     """Full public graph, including all known future nodes and route overlays."""
     valid = [n for n in nodes if isinstance(n, dict)
              and isinstance(n.get("node_id"), str)]
@@ -287,7 +342,7 @@ def map_svg(nodes: Sequence[dict[str, Any]], routes: dict[str, set[str]],
             )
     for label, path in (route_paths or {}).items():
         color = "#30bd8a" if label == "a" else "#f5b14c"
-        for u, v in zip(path, path[1:]):
+        for u, v in zip(path, path[1:], strict=False):
             if u not in coords or v not in coords:
                 continue
             left, right = coords[u], coords[v]
@@ -300,15 +355,17 @@ def map_svg(nodes: Sequence[dict[str, Any]], routes: dict[str, set[str]],
     for n in valid:
         node_id = n["node_id"]
         x, y = coords[node_id]
-        color = _room_style(str(n.get("room_type", "unknown")))
+        color = _room_style(room_type_name(n.get("room_type")))
         visited = [label for label, route in routes.items()
                    if node_id in route]
         outline = "#30bd8a" if "a" in visited else "#f5b14c" if visited else "#293340"
+        details = sorted((discovered or {}).get(node_id, set()))
+        extra = " | " + "; ".join(details) if details else ""
         parts.append(
             f'<circle cx="{x}" cy="{y}" r="14" fill="{color}" '
             f'stroke="{outline}" stroke-width="{4 if visited else 1.5}">'
-            f'<title>{_safe(node_id)}: {_safe(n.get("room_type", "unknown"))}</title>'
-            '</circle>'
+            f'<title>{_safe(node_id)}: {_safe(room_type_name(n.get("room_type")))}'
+            f'{_safe(extra)}</title></circle>'
         )
         for label, active_id in current.items():
             if node_id == active_id:
@@ -317,10 +374,13 @@ def map_svg(nodes: Sequence[dict[str, Any]], routes: dict[str, set[str]],
                     f'fill="none" stroke="{"#30bd8a" if label == "a" else "#f5b14c"}" '
                     'stroke-width="2.5"/>'
                 )
+        room_name = room_type_name(n.get("room_type"))
         parts.append(
             f'<text x="{x}" y="{y + 4}" text-anchor="middle" '
             'font-size="9" fill="#101419">'
-            f'{_safe(str(n.get("room_type", "?"))[:2].upper())}</text>'
+            f'{_safe(room_name[:2].upper())}</text>'
+            f'<text x="{x}" y="{y + 28}" text-anchor="middle" '
+            f'font-size="10" fill="#dbe7f3">{_safe(room_name)}</text>'
         )
     for idx, floor in enumerate(floor_order):
         parts.append(
@@ -411,6 +471,58 @@ def _state_change(start: dict[str, Any], end: dict[str, Any]) -> str:
     return "; ".join(changes) or "No observed persistent-inventory change"
 
 
+def _public_reveals(decision: dict[str, Any]) -> list[str]:
+    """Only identities revealed by the visited observation, never future RNG."""
+    state = decision["public_state"]
+    labels: list[str] = []
+    event = state.get("event")
+    event_id = state.get("event_id")
+    if isinstance(event, dict):
+        event_id = event.get("event_id", event_id)
+    if isinstance(event_id, str) and event_id:
+        labels.append(f"Event: {event_id}")
+    combat = state.get("combat")
+    if isinstance(combat, dict):
+        encounter_id = combat.get("encounter_id")
+        if isinstance(encounter_id, str):
+            labels.append(f"Encounter: {encounter_id}")
+        enemies = combat.get("enemies")
+        if isinstance(enemies, list):
+            ids = sorted({str(e.get("enemy_id", e.get("species_id")))
+                          for e in enemies if isinstance(e, dict)
+                          and (e.get("enemy_id") or e.get("species_id"))})
+            if ids:
+                labels.append("Enemies: " + ", ".join(ids))
+    return labels
+
+
+def _relic_skip_note(decision: dict[str, Any]) -> str:
+    reward = decision["public_state"].get("reward")
+    if not isinstance(reward, dict) or reward.get("relic_resolved") is not False:
+        return ""
+    offers = reward.get("relic_options")
+    if not isinstance(offers, list) or not offers:
+        return ""
+    kinds = {action["kind"] for action in decision["actions"]}
+    if "skip_reward_relic" in kinds or "skip_reward_extra_relic" in kinds:
+        return '<p class="diff">Skip relic is available in the legal menu.</p>'
+    mode = reward.get("independent_selection")
+    explanation = ("Ordered reward mode" if mode is False else
+                   "the current reward boundary")
+    return (f'<p class="diff">Skip relic is NOT a legal action at this '
+            f'decision ({_safe(explanation)}). Full legal menu shown below.</p>')
+
+
+def _discovered_nodes(traces: Sequence[dict[str, Any]]) -> dict[str, set[str]]:
+    revealed: dict[str, set[str]] = defaultdict(set)
+    for trace in traces:
+        for decision in trace["decisions"]:
+            node_id = decision.get("current_node_id")
+            if isinstance(node_id, str):
+                revealed[node_id].update(_public_reveals(decision))
+    return revealed
+
+
 def _floor_sections(trace: dict[str, Any]) -> str:
     rows: dict[tuple[object, object], list[dict[str, Any]]] = defaultdict(list)
     for d in trace["decisions"]:
@@ -431,7 +543,10 @@ def _floor_sections(trace: dict[str, Any]) -> str:
             f' · {len(macro)} macro choices · {combat} combat choices'
         )
         change = _state_change(first["public_state"], end_state)
-        details = [f'<p class="diff">{_safe(change)}</p>']
+        revealed = sorted(set(item for d in group for item in _public_reveals(d)))
+        reveal_line = ", ".join(revealed) if revealed else "No revealed encounter/event"
+        details = [f'<p class="diff">{_safe(change)}</p>',
+                   f'<p>Revealed: {_safe(reveal_line)}</p>']
         for d in group:
             if d["phase"] == "combat":
                 continue
@@ -442,6 +557,10 @@ def _floor_sections(trace: dict[str, Any]) -> str:
                 f' · HP {_safe(d["hp"])} · Gold {_safe(d["gold"])}'
                 '</summary>'
                 f'<p>Value estimate: {_safe(round(d["value"], 4))}</p>'
+                + _relic_skip_note(d)
+                + ('<p class="diff">Input-layer alias: '
+                   + _safe(d['feature_alias_groups']) + '</p>'
+                   if d.get('feature_alias_groups') else '')
                 + _options(d) + '</details>'
             )
         chunks.append(
@@ -565,7 +684,8 @@ def render_html(traces: Sequence[dict[str, Any]]) -> str:
         'width:100%;margin:8px 0}td,th{padding:5px;border-bottom:'
         '1px solid #3a4a5b;text-align:left;word-break:break-word}'
         '.selected{color:#78dcaa}.diff{color:#b8d0e4} .legend,.missing{color:#aab8c5}'
-        '</style><header>' + head + map_svg(graph, paths, current, route_paths)
+        '</style><header>' + head
+        + map_svg(graph, paths, current, route_paths, _discovered_nodes(traces))
         + '</header><main class="body"><h1>Public decision history</h1>'
         + divergence + '<div class="agents">' + "".join(panels)
         + '</div></main></html>'
