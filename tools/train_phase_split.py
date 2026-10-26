@@ -25,8 +25,8 @@ from sts2_ai.evaluation.baseline_cache import (
 )
 from sts2_ai.training.phase_split_selfplay import (
     BALANCED_TRAINING_VERSION,
-    PhaseSplitRound,
     PPO_TRAINING_VERSION,
+    PhaseSplitRound,
     SPLIT_TRAINING_VERSION,
     train_phase_split,
 )
