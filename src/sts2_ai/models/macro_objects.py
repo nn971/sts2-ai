@@ -20,6 +20,7 @@ from sts2_ai.models.hashed_linear import (
 )
 
 MACRO_ATTENTION_FORMAT = "sts2-neural-policy-value-v17-macro-object-attention"
+MACRO_SEMANTIC_FORMAT = "sts2-neural-policy-value-v18-macro-semantic-actions"
 
 
 def _id(value: dict[str, Any], *keys: str) -> str | None:
@@ -204,6 +205,111 @@ def macro_attention_action_features(
     # The legacy action representation helps preserve an interpretable
     # warm-start, while object pointers carry graph/card distinctions.
     return neural_action_features(state, action_kind, payload_json, dimension)
+
+
+def _offer_from_action(
+    state: dict[str, Any], kind: str, payload: dict[str, Any],
+) -> dict[str, Any] | None:
+    shop = state.get("shop")
+    if not isinstance(shop, dict):
+        return None
+    key = (
+        "card_offers" if kind == "buy_card" else
+        "relic_offers" if kind == "buy_relic" else
+        "potion_offers" if kind in ("buy_potion", "replace_shop_potion") else None
+    )
+    if key is None:
+        return None
+    offer_id = payload.get("OfferId", payload.get("offer_id"))
+    for offer in shop.get(key, []):
+        if (isinstance(offer, dict) and offer.get("offer_id") == offer_id):
+            return offer
+    # Older bridge sometimes exposes one singular potion/relic offer.
+    singular = shop.get("potion_offer" if key == "potion_offers" else "relic_offer")
+    if isinstance(singular, dict) and singular.get("offer_id") == offer_id:
+        return singular
+    return None
+
+
+def macro_semantic_action_features(
+    state: dict[str, Any], action_kind: str, payload_json: str, dimension: int,
+) -> dict[int, float]:
+    """V18: identify *publicly visible* action choices instead of offer slots.
+
+    V17 checkpoints always use macro_attention_action_features unchanged.
+    A malformed/unresolvable offer receives an explicit unknown identity,
+    never a raw ephemeral OfferId masquerading as an intrinsic item feature.
+    """
+    tokens: list[tuple[str, float]] = [
+        ("neural-action:bias", 1.0),
+        (f"neural-action:kind={action_kind}", 1.0),
+    ]
+    base = neural_action_features(state, action_kind, payload_json, dimension)
+    payload = _payload(payload_json)
+    if action_kind in ("buy_card", "buy_potion", "buy_relic", "replace_shop_potion"):
+        offer = _offer_from_action(state, action_kind, payload)
+        if offer is None:
+            tokens.append(("macro:offer:unknown", 1.0))
+        else:
+            name = _id(offer, "item_id", "content_id", "card_id", "relic_id", "potion_id")
+            tokens.append((f"macro:offer:item:{name or 'unknown'}", 1.0))
+            price = _number(offer.get("price"), 100.0)
+            if price is not None:
+                tokens.append(("macro:offer:price", price))
+            for field in ("on_sale", "sold"):
+                if type(offer.get(field)) is bool:
+                    tokens.append((f"macro:offer:{field}", float(offer[field])))
+        if action_kind == "replace_shop_potion":
+            tokens.append(("macro:potion:replace", 1.0))
+            slot = payload.get("Slot", payload.get("SlotIndex", payload.get("slot")))
+            # A slot is an actual visible potion resource, unlike an ephemeral offer ID.
+            potions = state.get("potions")
+            if type(slot) is int and isinstance(potions, list) and 0 <= slot < len(potions):
+                potion = potions[slot]
+                if isinstance(potion, dict):
+                    tokens.append((f"macro:potion:replace:{_id(potion, 'potion_id')}", 1.0))
+    elif action_kind == "event_choice":
+        event = state.get("event")
+        choice = payload.get("ChoiceId", payload.get("choice_id"))
+        event_id = state.get("event_id")
+        if isinstance(event, dict):
+            event_id = event.get("event_id", event_id)
+        tokens.append((f"macro:event:{event_id}:choice:{choice}", 1.0))
+        if isinstance(event, dict):
+            values = event.get("visible_choice_values")
+            for item in values if isinstance(values, list) else []:
+                if isinstance(item, dict) and item.get("choice_id") == choice:
+                    for field, value in sorted(item.items()):
+                        if field == "choice_id" or value is None:
+                            continue
+                        numeric = _number(value, 100.0)
+                        if numeric is not None:
+                            tokens.append((f"macro:event:value:{field}", numeric))
+                        elif isinstance(value, str):
+                            tokens.append((f"macro:event:value:{field}:{value}", 1.0))
+                    break
+    elif action_kind == "choose_event_deck_card":
+        instance = payload.get("CardInstanceId", payload.get("card_instance_id"))
+        _, ids = _cards(state)
+        key = ids.get(instance) if type(instance) is int else None
+        tokens.append((f"macro:event:deck:{key or 'unknown'}", 1.0))
+    elif action_kind in ("take_reward_relic", "skip_reward_relic",
+                         "skip_reward_extra_relic"):
+        reward = state.get("reward")
+        if isinstance(reward, dict) and action_kind == "take_reward_relic":
+            index = payload.get("Index", payload.get("index"))
+            options = reward.get("relic_options")
+            if isinstance(options, list) and type(index) is int and 0 <= index < len(options):
+                tokens.append((f"macro:reward:relic:{options[index]}", 1.0))
+            else:
+                tokens.append((f"macro:reward:relic:{reward.get('relic_option')}", 1.0))
+    # Preserve V17 signal without modifying any V17 representation or its checkpoints.
+    enriched = _hash_features(tokens, dimension)
+    # Hashed feature merging deliberately sums collisions; identity tokens
+    # should change the representation even for same-kind alternatives.
+    return {key: base.get(key, 0.0) + enriched.get(key, 0.0)
+            for key in base.keys() | enriched.keys()}
+
 
 
 def macro_global_features(state: dict[str, Any], dimension: int) -> dict[int, float]:
