@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from sts2_ai.emulator import LegalAction
+from sts2_ai.models.macro_choice_identity import macro_choice_action_features
 from sts2_ai.models.macro_objects import (
     macro_action_target,
     macro_attention_action_features,
@@ -23,6 +24,7 @@ from sts2_ai.training.neural import _dense
 def macro_attention_forward(
     state: dict[str, Any], actions: Sequence[LegalAction],
     params: dict[str, Any], dimension: int, torch: Any,
+    *, choice_encoding: str = "legacy",
 ) -> tuple[Any, Any]:
     objects = macro_object_vectors(state, actions, dimension)
     ids = list(objects)
@@ -60,9 +62,10 @@ def macro_attention_forward(
     if not actions:
         return value, torch.empty((0,), dtype=torch.float32)
     actions_x = torch.tensor([
-        _dense(macro_attention_action_features(
-            state, action.kind, action.payload_json, dimension,
-        ), dimension) for action in actions
+        _dense((macro_choice_action_features if choice_encoding == "v18"
+                else macro_attention_action_features)(
+                    state, action.kind, action.payload_json, dimension,
+                ), dimension) for action in actions
     ], dtype=torch.float32)
     zero = torch.zeros_like(hidden)
     targets = [
