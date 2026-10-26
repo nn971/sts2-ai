@@ -13,7 +13,9 @@ from collections.abc import Sequence
 from typing import Any
 
 from sts2_ai.emulator import LegalAction
-from sts2_ai.models.hashed_linear import _hash_features, neural_action_features
+from sts2_ai.models.hashed_linear import (
+    _hash_features, neural_action_features, state_features,
+)
 
 MACRO_ATTENTION_FORMAT = "sts2-neural-policy-value-v17-macro-object-attention"
 
@@ -200,3 +202,13 @@ def macro_attention_action_features(
     # The legacy action representation helps preserve an interpretable
     # warm-start, while object pointers carry graph/card distinctions.
     return neural_action_features(state, action_kind, payload_json, dimension)
+
+
+def macro_global_features(state: dict[str, Any], dimension: int) -> dict[int, float]:
+    """Global public summary without raw graph identity/edge-label tokens.
+
+    Map topology is represented in candidate-node embeddings, not flattened
+    next_node_ids (which are ephemeral source IDs and can spuriously overfit).
+    """
+    return state_features({key: value for key, value in state.items()
+                           if key != "map"}, dimension)
