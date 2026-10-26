@@ -42,7 +42,7 @@ def sample_trace(label="80", selected=0):
     )
     state = {
         "act": 1, "floor": 1, "hp": 30, "max_hp": 70, "gold": 90,
-        "map": nodes, "boss_encounter_id": "sample.act1.boss",
+        "map": nodes, "act_one_boss_encounter_id": "sample.act1.boss",
         "deck": [{"card_id": "silent.strike"}],
     }
     obs = Observation("prototype-fair-v0", json.dumps(state), "public")
@@ -70,6 +70,7 @@ def test_capture_keeps_complete_public_map_and_boss_across_phases():
     assert trace["decisions"][1]["floor"] == 2
     assert len(trace["decisions"][0]["actions"]) == 2
     assert action_label(trace["decisions"][0]["actions"][0]) == "choose map node: b"
+    assert "rest (b)" in trace["decisions"][0]["actions"][0]["label"]
 
 
 def test_first_policy_disagreement_and_map_are_rendered():
@@ -85,8 +86,8 @@ def test_first_policy_disagreement_and_map_are_rendered():
     assert "Complete publicly visible Act 1 map" in page
     assert "first route" in page
     assert "First divergence" in page
-    assert "choose map node: b" in page
-    assert "choose map node: c" in page
+    assert "rest (b)" in page
+    assert "elite (c)" in page
     assert "0.1200" in page or "0.12" in page
     assert "position:sticky" in page
     markdown = render_markdown([a, b])
