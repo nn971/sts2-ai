@@ -1,4 +1,4 @@
-# H6-A: macro PPO with an immutable combat backbone
+# H6: macro PPO with an immutable combat backbone (A / A2)
 
 Research goal: optimize Silent A10 full-run **strategy** while a previously
 trained H4/H5 tactical policy handles each combat. First goal: certified
@@ -28,6 +28,29 @@ types, but cannot yet reason systematically about map-path connectivity.
 
 A truncated run stays censored and must **not** get a loss/victory label.
 Selection and final confirmation must use different run seeds.
+
+## H6-A result and H6-A2 reward ablation
+
+The completed H6-A experiment used `--win-anneal-threshold 16` (the old
+frozen-combat CLI default): after 16 cumulative Act-1 clears, the auxiliary
+reward for every defeated run became **exactly zero**. In the 160 paired
+independent confirmation runs, the original H4 macro head cleared 5/160 and
+the trained H6-A head cleared 2/160; mean frontier progress also declined
+(9.31 to 8.99). H6-A is a negative result, not proof the architecture cannot
+learn. Preserve its original seeds, report, checkpoint, and exported model.
+
+**H6-A2 changes exactly one training variable:**
+`--win-anneal-threshold 256`. The frozen-combat CLI now selects this value by
+default; unfrozen historical experiments still default to 16. The per-run
+reward formula is unchanged: genuine Act-1 clears are worth 1, while defeated
+runs get a bounded auxiliary value combining floor progress and final HP,
+scaled from 0.4 toward zero with cumulative wins. This means a floor-15
+defeat still has higher return than a floor-4 defeat after 16 wins, and any
+clear remains strictly better than any defeat. The reward would vanish at
+256 cumulative clears; this is a controlled **40-round ablation**, not a
+permanent positive shaping floor. Explicitly passing `--win-anneal-threshold
+16` reproduces the old H6-A reward schedule.
+
 
 ## Provenance, scope and caveats
 
@@ -93,7 +116,7 @@ a long-run generalization improvement. Run ends without a certified
 Act-1 boss clear are losses **only** if the emulator certifies defeat;
 decision caps remain censored.
 
-### Full H6 training (fish)
+### Full H6-A2 dense-reward training (fish)
 
 ```fish
 python -u tools/train_phase_split.py \
@@ -106,11 +129,12 @@ python -u tools/train_phase_split.py \
   --temperature-start 0.85 --temperature-end 0.65 \
   --rounds 40 --episodes 128 --workers 15 \
   --max-decisions 4096 --eval-seeds 16 \
-  --train-seed-prefix h6-native-a10-training-v1 \
-  --eval-seed-prefix h6-native-a10-selection-v1 \
-  --checkpoint results/nature/h6-macro-a10.pt \
-  --output results/nature/h6-macro-a10.json \
-  --report results/nature/h6-macro-a10-report.json
+  --win-anneal-threshold 256 \
+  --train-seed-prefix h6-a2-native-a10-training-v1 \
+  --eval-seed-prefix h6-a2-native-a10-selection-v1 \
+  --checkpoint results/nature/h6-a2-macro-a10.pt \
+  --output results/nature/h6-a2-macro-a10.json \
+  --report results/nature/h6-a2-macro-a10-report.json
 ```
 
 On interruption rerun **the same command** with `--resume`; the
@@ -124,11 +148,11 @@ Run only after model and hyperparameters are frozen:
 ```fish
 python -u tools/evaluate_h6_macro.py \
   --player baseline=$model \
-  --player trained=results/nature/h6-macro-a10.json \
+  --player trained=results/nature/h6-a2-macro-a10.json \
   --split confirmation --runs 160 --workers 15 \
   --max-decisions 4096 \
-  --seed-prefix h6-native-a10-eval-v1 \
-  --output results/nature/h6-macro-confirmation.json
+  --seed-prefix h6-a2-native-a10-eval-v1 \
+  --output results/nature/h6-a2-macro-confirmation.json
 ```
 
 Add `--resume` after an interruption to reuse finished model arms.
@@ -139,16 +163,18 @@ Source seeds are paired but stochastic action paths need not coincide.
 
 ## Research sequence
 
-1. **H6-A** Establish that the H4 combat policy can complete native A10
-   Act-1 runs. Run paired greedy baseline and initial strategy training;
-   track unsupported run starts and transitions separately.
-2. **H6-B** Replace the general hashed macro action encoding with public
+1. **H6-A** Completed: 40 rounds, 5,120 uncensored native A10 runs; no
+   significant advantage over the H4 baseline on independent confirmation.
+2. **H6-A2** Repeat H6-A with the extended defeat-progress reward (256
+   cumulative wins before annealing fully), disjoint training/selection/
+   confirmation seed prefixes and unchanged frozen H4 combat checkpoint.
+3. **H6-B** Replace the general hashed macro action encoding with public
    features for reachable map subpaths, deck/reward synergy, relic effects,
    shop economics and upgrade/removal opportunities.
-3. **H6-C** Use macro PPO with a calibrated run-continuation critic and
+4. **H6-C** Use macro PPO with a calibrated run-continuation critic and
    independent source-seeded confirmation. Report full-run Act-1 clear,
    censoring, HP, route and deck outcomes, and per-hour learning progress.
-4. **H6-D** Once stable, alternate frozen-strategy tactical adaptation and
+5. **H6-D** Once stable, alternate frozen-strategy tactical adaptation and
    frozen-combat strategic adaptation to learn future-HP/potion valuation.
 
 The macro policy's end goal is to value the **probability of clearing
