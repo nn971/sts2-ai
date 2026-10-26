@@ -40,8 +40,8 @@ Selection and final confirmation must use different run seeds.
   Never assume a combat policy trained in isolated, conditioned H4/H5
   research fixtures will transfer unchanged to native-structure Overgrowth.
 - H4 emulator `e56779c` is for conditioned boss-combat studies, **not**
-  the H6 full-run emulator. The sts2-ai submodule pin `387a366eebd154d2a0b1435da69dee12062caae5`
-  advertises `prototype-native-overgrowth-reset-v1` and fixes the legacy event-gold bounded-integer request and registered legacy Fisher–Yates shuffle boundaries and is used for the
+  the H6 full-run emulator. The sts2-ai submodule pin `27079ffb5ab93cc3a54d3fd5541d8d5a27898b5f`
+  advertises `prototype-native-overgrowth-reset-v1` and fixes legacy event-gold requests, registered Fisher–Yates shuffles, and Power-card completion after source removal and is used for the
   H6 real-run CI smoke. Use `git submodule update --init emulator`; do
   not override the H6 pin with the older H4 revision. Native RNG fidelity
   and inspector checks remain independent and do not gate training.
