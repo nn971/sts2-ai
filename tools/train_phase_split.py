@@ -25,9 +25,9 @@ from sts2_ai.evaluation.baseline_cache import (
 )
 from sts2_ai.training.phase_split_selfplay import (
     BALANCED_TRAINING_VERSION,
+    PhaseSplitRound,
     PPO_TRAINING_VERSION,
     SPLIT_TRAINING_VERSION,
-    PhaseSplitRound,
     train_phase_split,
 )
 
@@ -86,7 +86,8 @@ def main() -> None:
         help="v5/v6 relational, v7 resources, or v8 species-aware enemy instances",
     )
     p.add_argument(
-        "--strategy-encoding", choices=("legacy", "macro_attention", "macro_semantic", "macro_deep"),
+        "--strategy-encoding",
+        choices=("legacy", "macro_attention", "macro_semantic", "macro_deep"),
         default="legacy",
         help="H6-E: opt-in deep macro attention (frozen batched PPO)",
     )
