@@ -86,9 +86,9 @@ def main() -> None:
         help="v5/v6 relational, v7 resources, or v8 species-aware enemy instances",
     )
     p.add_argument(
-        "--strategy-encoding", choices=("legacy", "macro_attention", "macro_semantic"),
+        "--strategy-encoding", choices=("legacy", "macro_attention", "macro_semantic", "macro_deep"),
         default="legacy",
-        help="H6-C: opt-in public macro object attention (frozen batched PPO)",
+        help="H6-E: opt-in deep macro attention (frozen batched PPO)",
     )
     p.add_argument("--temperature-start", type=float, default=0.05)
     p.add_argument("--temperature-end", type=float, default=0.035)
@@ -137,7 +137,7 @@ def main() -> None:
         p.error("--freeze-combat requires --warm-start and --optimizer-method ppo")
     if args.freeze_combat and args.ascension != 10:
         p.error("H6 frozen-combat training requires --ascension 10")
-    if args.strategy_encoding in ("macro_attention", "macro_semantic") and not (
+    if args.strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep") and not (
         args.freeze_combat and args.optimizer_method == "ppo"
         and args.ppo_backend == "batched"
     ):
