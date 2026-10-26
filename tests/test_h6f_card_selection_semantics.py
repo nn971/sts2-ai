@@ -199,3 +199,51 @@ def test_v19_inference_stays_unchanged():
     serialized = model.to_dict()
     assert NeuralPolicyValueModel.from_dict(serialized).to_dict() == serialized
     assert "attn2_gate" in serialized and "macro_ffn_gate" in serialized
+
+
+def test_v19_to_v20_warm_start_preserves_combat_exactly(tmp_path):
+    torch = pytest.importorskip("torch")
+    from test_phase_split_selfplay import TwoPhaseToy
+
+    from sts2_ai.models.neural import TACTICAL_FORMAT
+    from sts2_ai.models.phase_split import PhaseSplitNeuralModel
+    from sts2_ai.training.enemy_attention import (
+        add_attention_parameters,
+        add_deep_macro_parameters,
+    )
+    from sts2_ai.training.instance_combat import add_instance_parameters
+    from sts2_ai.training.neural import _export, _new_params
+    from sts2_ai.training.phase_split_selfplay import train_phase_split
+
+    torch.manual_seed(23)
+    dimension, hidden = 32, 8
+    params = _new_params(dimension, hidden, torch)
+    add_instance_parameters(params, dimension, hidden, torch)
+    add_attention_parameters(params, hidden, torch)
+    add_deep_macro_parameters(params, hidden, torch)
+    tactical = _new_params(dimension, hidden, torch)
+    original = PhaseSplitNeuralModel(
+        _export(params, dimension, hidden, model_id="v19",
+                value_head_trained=True, format_id=MACRO_DEEP_FORMAT),
+        _export(tactical, dimension, hidden, model_id="frozen",
+                value_head_trained=True, format_id=TACTICAL_FORMAT),
+        "h6f-warm-start",
+    )
+    source = tmp_path / "v19.json"
+    original.save(source)
+    before = source.read_bytes()
+    result, rounds = train_phase_split(
+        TwoPhaseToy(), rounds=1, episodes_per_round=6,
+        dimension=dimension, hidden=hidden, max_decisions=8, workers=1,
+        optimizer_method="ppo", ppo_backend="batched",
+        hp_monotonic_weight=0, tactical_state_encoding="legacy",
+        combat_objective="continuation", freeze_combat=True,
+        temperature_start=1.0, temperature_end=1.0,
+        warm_start=source, strategy_encoding="macro_card_ops",
+        win_anneal_threshold=1000000,
+    )
+    assert result.strategy.format_id == MACRO_CARD_OPERATIONS_FORMAT
+    assert rounds[0].strategic_decisions > 0
+    assert result.combat.to_dict() == original.combat.to_dict()
+    assert source.read_bytes() == before
+    assert PhaseSplitNeuralModel.from_dict(result.to_dict()).to_dict() == result.to_dict()
