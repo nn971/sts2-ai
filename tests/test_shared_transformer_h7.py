@@ -161,3 +161,31 @@ def test_macro_can_share_embedding_vocabulary_but_uses_independent_heads():
     assert logits.shape == (2, 4) and values.shape == (2,)
     assert torch.isfinite(logits[1, 0])
     assert (logits[1, 1:] < -1e20).all()
+
+
+def test_h7_public_actor_uses_existing_p0_menu_without_teacher(tmp_path: Path):
+    from sts2_ai.emulator.semantic_p0_frozen_player import FrozenP0Player
+    from sts2_ai.models.h7_public_policy import H7PlayerSpec
+
+    checkpoint = tmp_path / "fresh-random-h7.pt"
+    model().save_checkpoint(checkpoint)
+    spec = H7PlayerSpec.from_file(checkpoint, seed=19, temperature=0.85, greedy=False)
+    actor = FrozenP0Player(
+        spec.load_pinned(), actor_seed=spec.episode_seed(
+            fixture_seed="h7-test-world", fixture_id="h7-p0",
+        ), temperature=spec.temperature, greedy=False,
+        action_scope="all-legal-v1", capture_training=True,
+    )
+    legal_source = [
+        {"actionId": str(i), "kind": action.kind,
+         "payloadJson": action.payload_json}
+        for i, action in enumerate(legal())
+    ]
+    selected = actor.choose(frame(), legal_source)
+    assert selected in {str(i) for i in range(len(legal_source))}
+    assert actor.decisions == 1
+    row = actor.training_actions[0]
+    assert row["selected_id"] == selected
+    assert row["behavior_model_id"].startswith("h7-")
+    assert row["source_legal_actions"] == legal_source
+    assert row["source_observation"] == frame()
