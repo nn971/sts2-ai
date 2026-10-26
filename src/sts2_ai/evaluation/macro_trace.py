@@ -14,6 +14,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from sts2_ai.emulator import LegalAction, Observation
+from sts2_ai.models.macro_choice_identity import public_choice_label
 
 TRACE_SCHEMA = "sts2-ai-h6c-public-decision-trace-v1"
 REPORT_SCHEMA = "sts2-ai-h6c-paired-trace-report-v1"
@@ -86,6 +87,9 @@ def readable_action(action: dict[str, Any], frame: dict[str, Any],
             if isinstance(card, dict) and card.get("instance_id") == instance:
                 verb = "Upgrade" if kind == "rest_upgrade" else "Remove"
                 return f"{verb}: {card.get('card_id', instance)}"
+    if kind in ("buy_card", "buy_potion", "buy_relic", "event_choice",
+                "skip_reward_relic", "skip_reward_extra_relic"):
+        return public_choice_label(frame, kind, json.dumps(payload))
     return action_label(action)
 
 
@@ -245,7 +249,8 @@ def _room_style(room: str) -> str:
 
 def map_svg(nodes: Sequence[dict[str, Any]], routes: dict[str, set[str]],
             current: dict[str, str | None],
-            route_paths: dict[str, list[str]] | None = None) -> str:
+            route_paths: dict[str, list[str]] | None = None,
+            discovered: dict[str, set[str]] | None = None) -> str:
     """Full public graph, including all known future nodes and route overlays."""
     valid = [n for n in nodes if isinstance(n, dict)
              and isinstance(n.get("node_id"), str)]
@@ -304,11 +309,13 @@ def map_svg(nodes: Sequence[dict[str, Any]], routes: dict[str, set[str]],
         visited = [label for label, route in routes.items()
                    if node_id in route]
         outline = "#30bd8a" if "a" in visited else "#f5b14c" if visited else "#293340"
+        details = sorted((discovered or {}).get(node_id, set()))
+        extra = " | " + "; ".join(details) if details else ""
         parts.append(
             f'<circle cx="{x}" cy="{y}" r="14" fill="{color}" '
             f'stroke="{outline}" stroke-width="{4 if visited else 1.5}">'
-            f'<title>{_safe(node_id)}: {_safe(n.get("room_type", "unknown"))}</title>'
-            '</circle>'
+            f'<title>{_safe(node_id)}: {_safe(n.get("room_type", "unknown"))}'
+            f'{_safe(extra)}</title></circle>'
         )
         for label, active_id in current.items():
             if node_id == active_id:
@@ -317,10 +324,13 @@ def map_svg(nodes: Sequence[dict[str, Any]], routes: dict[str, set[str]],
                     f'fill="none" stroke="{"#30bd8a" if label == "a" else "#f5b14c"}" '
                     'stroke-width="2.5"/>'
                 )
+        room_name = str(n.get("room_type", "unknown"))
         parts.append(
             f'<text x="{x}" y="{y + 4}" text-anchor="middle" '
             'font-size="9" fill="#101419">'
-            f'{_safe(str(n.get("room_type", "?"))[:2].upper())}</text>'
+            f'{_safe(room_name[:2].upper())}</text>'
+            f'<text x="{x}" y="{y + 28}" text-anchor="middle" '
+            f'font-size="10" fill="#dbe7f3">{_safe(room_name)}</text>'
         )
     for idx, floor in enumerate(floor_order):
         parts.append(
