@@ -39,13 +39,12 @@ from sts2_ai.models.hashed_linear import (
 )
 from sts2_ai.models.macro_objects import (
     MACRO_ATTENTION_FORMAT,
-    MACRO_DEEP_FORMAT,
     MACRO_CARD_OPERATIONS_FORMAT,
+    MACRO_DEEP_FORMAT,
     MACRO_SEMANTIC_FORMAT,
 )
 from sts2_ai.models.neural import (
     NEURAL_FORMAT,
-    NeuralPolicyValueModel,
     TACTICAL_ATTENTION_FORMAT,
     TACTICAL_DAMAGE_FORMAT,
     TACTICAL_FORMAT,
@@ -53,6 +52,7 @@ from sts2_ai.models.neural import (
     TACTICAL_RELATIONAL_FORMAT,
     TACTICAL_RESOURCES_FORMAT,
     TACTICAL_STRUCTURED_FORMAT,
+    NeuralPolicyValueModel,
 )
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.models.tactical_state import (
@@ -392,7 +392,9 @@ def train_phase_split(
         raise ValueError("Frozen-combat macro training requires a pinned warm start")
     if freeze_combat and optimizer_method != "ppo":
         raise ValueError("Frozen-combat macro training requires PPO")
-    if strategy_encoding not in ("legacy", "macro_attention", "macro_semantic", "macro_deep"):
+    if strategy_encoding not in (
+        "legacy", "macro_attention", "macro_semantic", "macro_deep", "macro_card_ops",
+    ):
         raise ValueError("Unknown strategy encoding")
     if strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep",
     "macro_card_ops") and not (
