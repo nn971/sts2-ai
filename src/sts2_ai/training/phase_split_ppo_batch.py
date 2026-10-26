@@ -19,16 +19,16 @@ from sts2_ai.models.enemy_instances import (
     instance_action_features,
     instance_global_features,
 )
-from sts2_ai.models.macro_objects import (
-    macro_action_target, macro_attention_action_features, macro_global_features,
-    macro_object_vectors,
-)
 from sts2_ai.models.hashed_linear import (
     neural_action_features,
     public_resources_tactical_action_features,
     state_dict,
     state_features,
     tactical_action_features,
+)
+from sts2_ai.models.macro_objects import (
+    macro_action_target, macro_attention_action_features, macro_global_features,
+    macro_object_vectors,
 )
 from sts2_ai.models.tactical_state import (
     damage_tactical_state_features,
