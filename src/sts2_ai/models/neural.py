@@ -18,9 +18,9 @@ from sts2_ai.emulator import LegalAction, Observation
 
 from .enemy_attention import (
     ATTENTION_FIELDS,
+    DEEP_MACRO_FIELDS,
     contextualize_deep_python,
     contextualize_python,
-    DEEP_MACRO_FIELDS,
 )
 from .enemy_instances import (
     action_target_instance,
@@ -37,16 +37,16 @@ from .hashed_linear import (
     tactical_action_features,
 )
 from .macro_objects import (
+    MACRO_ATTENTION_FORMAT,
+    MACRO_DEEP_FORMAT,
+    MACRO_SEMANTIC_FORMAT,
     macro_action_target,
     macro_attention_action_features,
-    MACRO_ATTENTION_FORMAT,
     macro_deep_action_target,
-    MACRO_DEEP_FORMAT,
     macro_deep_object_vectors,
     macro_global_features,
     macro_object_vectors,
     macro_semantic_action_features,
-    MACRO_SEMANTIC_FORMAT,
 )
 from .protocol import PolicyValueEstimate
 from .tactical_state import (
