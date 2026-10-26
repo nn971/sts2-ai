@@ -125,3 +125,18 @@ def test_deck_and_hidden_fields_never_inferred():
     import pytest
     with pytest.raises(ValueError, match="Privileged"):
         rec(None, obs, actions, SimpleNamespace(action=actions[0]))
+
+
+
+def test_trace_files_keep_distinct_model_names(tmp_path):
+    from tools.replay_h6_macro import _write_trace
+
+    a = sample_trace("a")
+    b = sample_trace("b", selected=1)
+    _write_trace(tmp_path / "seed.a", a)
+    _write_trace(tmp_path / "seed.b", b)
+    for name in ("a", "b"):
+        assert (tmp_path / f"seed.{name}.json").is_file()
+        assert (tmp_path / f"seed.{name}.jsonl").is_file()
+        data = json.loads((tmp_path / f"seed.{name}.json").read_text())
+        assert data["label"] == name
