@@ -8,11 +8,11 @@ import random
 import statistics
 from pathlib import Path
 
+from train_h7_reference_combat import collect, summarize
+
 from sts2_ai.models.h7_public_policy import H7PlayerSpec
 from sts2_ai.nature.h5_curriculum import source_bank
 from sts2_ai.nature.protocol import canonical_sha256
-
-from train_h7_reference_combat import collect, summarize
 
 SCHEMA = "sts2-h7-independent-reference-combat-evaluation-v1"
 
