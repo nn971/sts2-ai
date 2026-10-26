@@ -59,6 +59,42 @@ Target user's Ryzen 7 9700X, RTX 5070 12GB and 24GB RAM. Start with 15 CPU emula
 - New and old checkpoint formats coexist without reinterpretation; macro modules and frozen H4/H5/H6 weights remain untouched.
 - CI smoke and sufficient-sample statistical evaluation are separate deliverables.
 
+## M0 execution and source-fair actor interface
+
+The initial opt-in shared codec and Torch backbone are implemented, with a strict
+v1 model checkpoint, masked variable-size legal-action queries, independent
+combat/macro policy/value heads and an actual **14,659,972-parameter** default
+model (384 × 6 × 8, FFN 1536). They load no H4/H5 teacher weights.
+
+Standalone local and dedicated CI testing demonstrated:
+- six codec/permutation/pointer/masking/gradient/checkpoint tests passing;
+- a full-size Torch forward/backward with finite loss and nonzero gradients;
+- isolated Ruff and CPU Torch CI green on initial M0.
+
+A follow-up `src/sts2_ai/models/h7_public_policy.py` defines a
+SHA-256-pinned random-start `H7PlayerSpec` and
+`TorchH7PublicPolicy.evaluate` compatible with the existing
+`FrozenP0Player` public legal-menu protocol. A dedicated regression test
+exercises this adapter on a fair-public synthetic combat frame.
+Its CI result must be checked separately before treating adapter parity
+as verified. This bridge is for P0 combat only; it is not yet a
+batch-optimized actor, a PPO optimizer, or a complete training experiment.
+
+Probe in the existing checkout (after installing `pip install -e '.[neural,dev]'`):
+
+```fish
+cd ~/projects/sts2-ai
+git fetch origin
+git switch research/h7-shared-transformer-combat-20261027
+python -m pytest -q tests/test_shared_transformer_h7.py
+python tools/probe_h7_transformer.py --device cpu
+# On CUDA-capable Torch installation, change to --device cuda.
+```
+
+This probe measures implementation correctness, not win rate. H7 remains an
+isolated research branch stacked on H6-E. Mainline and existing on-policy
+combat/macro trainers have not been changed.
+
 ## Current implementation status
 
-See the new `shared_game_objects.py`, `shared_transformer.py`, `tests/test_shared_transformer_h7.py` and `tools/probe_h7_transformer.py` for M0. **M1–M4 remain future work until explicitly completed and validated.** Do not launch lengthy training solely from this document.
+M0 source files: `shared_game_objects.py`, `shared_transformer.py`, `h7_public_policy.py`, `tests/test_shared_transformer_h7.py` and `tools/probe_h7_transformer.py`. **M1–M4 remain future work until explicitly completed and validated.** Do not launch lengthy training solely from this document.
