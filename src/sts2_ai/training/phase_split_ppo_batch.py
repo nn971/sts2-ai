@@ -87,7 +87,8 @@ def encode_decision(
 
     if decision.phase == "strategy":
         state_fn = (macro_global_features
-                    if strategy_encoding in ("macro_attention", "macro_attention_v2") else state_features)
+                    if strategy_encoding in ("macro_attention", "macro_attention_v2")
+                    else state_features)
         action_fn = (macro_choice_action_features
                      if strategy_encoding == "macro_attention_v2"
                      else macro_attention_action_features
@@ -119,7 +120,9 @@ def encode_decision(
         _dense(action_fn(state, action.kind, action.payload_json, dimension), dimension)
         for action in decision.legal_actions
     ], dtype=torch.float32)
-    if not ((decision.phase == "strategy" and strategy_encoding in ("macro_attention", "macro_attention_v2"))
+    if not ((decision.phase == "strategy" and strategy_encoding in (
+            "macro_attention", "macro_attention_v2",
+        ))
             or (decision.phase == "combat" and encoding in ("enemy_instances", "enemy_attention"))):
         return EncodedDecision(
             decision.phase, state_tensor, action_tensor, decision.chosen_index,
