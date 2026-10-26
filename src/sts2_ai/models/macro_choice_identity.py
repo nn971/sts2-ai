@@ -122,13 +122,19 @@ def choice_tokens(state: dict[str, Any], kind: str,
         names = {"take_reward_relic": "relic_option",
                  "take_reward_potion": "potion_option"}
         name = reward.get(names[kind]) if kind in names else None
+        index = _field(payload, "Index", "index")
+        if kind == "take_reward_relic" and type(index) is int:
+            options = reward.get("relic_options")
+            if isinstance(options, list) and 0 <= index < len(options):
+                name = options[index]
+        if kind == "take_reward_extra_relic" and type(index) is int:
+            options = reward.get("pending_extra_relic_rewards")
+            if isinstance(options, list):
+                for item in options:
+                    if isinstance(item, dict) and item.get("group_index") == index:
+                        name = item.get("relic_id")
         if isinstance(name, str):
             tokens.append((f"macro-action:reward:{kind}:{name}", 1.0))
-        for source in ("Index", "index", "GroupIndex", "group_index"):
-            if source in payload and type(payload[source]) is int:
-                value = payload[source]
-                # Only used to join a visible option, never a physical instance.
-                tokens.append((f"macro-action:reward:{kind}:group:{value}", 1.0))
     return tokens
 
 
@@ -156,6 +162,15 @@ def public_choice_label(state: dict[str, Any], kind: str, payload_json: str) -> 
                 effects.append(f"{key}={known[key]}")
         effect = f" [{', '.join(effects)}]" if effects else ""
         return f"Event {event_id}: {choice}{effect}"
+    if kind in ("take_reward_relic", "take_reward_extra_relic"):
+        reward = _dict(state.get("reward"))
+        idx = _field(payload, "Index", "index")
+        options = reward.get("relic_options")
+        if isinstance(options, list) and type(idx) is int and 0 <= idx < len(options):
+            return f"Take relic: {options[idx]}"
+        option = reward.get("relic_option")
+        if isinstance(option, str):
+            return f"Take relic: {option}"
     if kind.startswith("skip_") or kind in ("leave_shop", "leave_event"):
         return kind.replace("_", " ")
     return semantic_action_label(state, kind, payload_json).replace("_", " ")
