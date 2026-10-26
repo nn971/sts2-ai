@@ -43,6 +43,7 @@ def _shop_offer(state: dict[str, Any], kind: str,
     names = {
         "buy_card": ("card_offers",),
         "buy_potion": ("potion_offers", "potion_offer"),
+        "replace_shop_potion": ("potion_offers", "potion_offer"),
         "buy_relic": ("relic_offers", "relic_offer"),
     }.get(kind, ())
     for name in names:
@@ -67,6 +68,18 @@ def _visible_choice(state: dict[str, Any], payload: dict[str, Any]) -> dict[str,
     return None
 
 
+def _potion_in_slot(state: dict[str, Any], payload: dict[str, Any]) -> str | None:
+    slot = _field(payload, "Slot", "slot")
+    potions = state.get("potions")
+    if type(slot) is not int or not isinstance(potions, list):
+        return None
+    for potion in potions:
+        if isinstance(potion, dict) and potion.get("slot") == slot:
+            value = potion.get("potion_id")
+            return value if isinstance(value, str) else None
+    return None
+
+
 def choice_tokens(state: dict[str, Any], kind: str,
                   payload_json: str) -> list[tuple[str, float]]:
     """Stable public choice identity and known numeric consequences."""
@@ -76,7 +89,7 @@ def choice_tokens(state: dict[str, Any], kind: str,
         (f"macro-action:kind:{kind}", 1.0),
         (f"macro-action:old:{semantic_action_label(state, kind, payload_json)}", 1.0),
     ]
-    if kind in ("buy_card", "buy_potion", "buy_relic"):
+    if kind in ("buy_card", "buy_potion", "buy_relic", "replace_shop_potion"):
         offer = _shop_offer(state, kind, payload)
         if offer is None:
             tokens.append(("macro-action:shop:offer-unavailable", 1.0))
@@ -92,6 +105,25 @@ def choice_tokens(state: dict[str, Any], kind: str,
             sale = _field(offer, "on_sale", "OnSale")
             if isinstance(sale, bool):
                 tokens.append(("macro-action:shop:on-sale", float(sale)))
+        if kind == "replace_shop_potion":
+            lost = _potion_in_slot(state, payload)
+            if lost is not None:
+                tokens.append((f"macro-action:replace-potion:{lost}", 1.0))
+    elif kind in ("use_potion", "replace_reward_potion",
+                  "replace_event_potion", "take_event_potion",
+                  "replace_reward_extra_potion"):
+        current = _potion_in_slot(state, payload)
+        if current is not None:
+            tokens.append((f"macro-action:potion-slot-item:{current}", 1.0))
+        reward = _dict(state.get("reward"))
+        offered = reward.get("potion_option")
+        if isinstance(offered, str):
+            tokens.append((f"macro-action:potion-option:{offered}", 1.0))
+        event = _dict(state.get("event"))
+        pending = _dict(event.get("pending_potion_replacement"))
+        offered = pending.get("potion_id")
+        if isinstance(offered, str):
+            tokens.append((f"macro-action:event-potion:{offered}", 1.0))
     elif kind == "event_choice":
         event = _dict(state.get("event"))
         event_id = _field(event, "event_id", "EventId", "event_id")
@@ -145,12 +177,14 @@ def macro_choice_action_features(state: dict[str, Any], kind: str,
 
 def public_choice_label(state: dict[str, Any], kind: str, payload_json: str) -> str:
     payload = _payload(payload_json)
-    if kind in ("buy_card", "buy_potion", "buy_relic"):
+    if kind in ("buy_card", "buy_potion", "buy_relic", "replace_shop_potion"):
         offer = _shop_offer(state, kind, payload)
         if offer is not None:
             name = _field(offer, "item_id", "ItemId")
             price = _field(offer, "price", "Price")
-            return f"{kind.replace('_', ' ')}: {name} ({price} gold)"
+            lost = _potion_in_slot(state, payload)
+            extra = f"; replace {lost}" if lost is not None else ""
+            return f"{kind.replace('_', ' ')}: {name} ({price} gold{extra})"
     if kind == "event_choice":
         event = _dict(state.get("event"))
         event_id = _field(event, "event_id", "EventId") or state.get("event_id")
