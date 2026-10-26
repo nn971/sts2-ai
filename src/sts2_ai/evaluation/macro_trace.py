@@ -58,6 +58,37 @@ def action_label(action: dict[str, Any]) -> str:
     return f"{label}: {identity}" if identity is not None else label
 
 
+
+def readable_action(action: dict[str, Any], frame: dict[str, Any],
+                    map_nodes: object) -> str:
+    """Human-scale labels from exclusively visible public card/map objects."""
+    kind = action["kind"]
+    payload = action["payload"]
+    if kind == "choose_map_node":
+        node_id = payload.get("NodeId", payload.get("node_id"))
+        for node in map_nodes if isinstance(map_nodes, list) else []:
+            if isinstance(node, dict) and node.get("node_id") == node_id:
+                return (f"Route → floor {node.get('floor', '?')} "
+                        f"{node.get('room_type', 'unknown')} ({node_id})")
+    if kind == "take_reward_card":
+        index = payload.get("Index", payload.get("index"))
+        reward = frame.get("reward")
+        choices = reward.get("card_options") if isinstance(reward, dict) else None
+        if type(index) is int and isinstance(choices, list) and 0 <= index < len(choices):
+            choice = choices[index]
+            name = choice.get("card_id") if isinstance(choice, dict) else choice
+            if isinstance(name, str):
+                return f"Take card: {name}"
+    if kind in ("rest_upgrade", "remove_card"):
+        instance = payload.get("CardInstanceId", payload.get("card_instance_id"))
+        deck = frame.get("deck")
+        for card in deck if isinstance(deck, list) else []:
+            if isinstance(card, dict) and card.get("instance_id") == instance:
+                return f"{'Upgrade' if kind == 'rest_upgrade' else 'Remove'}: {card.get('card_id', instance)}"
+    return action_label(action)
+
+
+
 def _payload(action: LegalAction) -> dict[str, Any]:
     try:
         value = json.loads(action.payload_json)
@@ -119,12 +150,14 @@ class TraceRecorder:
             if action.action_id == choice.action.action_id:
                 selected = i
             score = float(evaluation.action_logits[i])
-            choices.append({
+            row = {
                 "action_id": action.action_id,
                 "kind": action.kind,
                 "payload": _payload(action),
                 "score": score if math.isfinite(score) else None,
-            })
+            }
+            row["label"] = readable_action(row, frame, current_map)
+            choices.append(row)
         if selected is None:
             raise ValueError("Agent chose an unlisted action")
         self.decisions.append({
@@ -311,9 +344,9 @@ def _options(decision: dict[str, Any]) -> str:
         score = action["score"]
         items.append(
             f'<tr class="{"selected" if selected else ""}">'
-            f'<td>{"● " if selected else ""}{_safe(action_label(action))}</td>'
+            f'<td>{"● " if selected else ""}{_safe(action.get("label", action_label(action)))}</td>'
             f'<td>{score:.3f}</td>' if score is not None else
-            f'<tr><td>{_safe(action_label(action))}</td><td>unavailable</td>'
+            f'<tr><td>{_safe(action.get("label", action_label(action)))}</td><td>unavailable</td>'
         )
         items[-1] += "</tr>"
     return '<table><tr><th>Legal action</th><th>Logit</th></tr>' + "".join(items) + '</table>'
@@ -340,7 +373,7 @@ def _floor_sections(trace: dict[str, Any]) -> str:
             selected = d["actions"][d["selected"]]
             details.append(
                 '<details class="decision"><summary>'
-                f'#{d["index"]}: {_safe(action_label(selected))}'
+                f'#{d["index"]}: {_safe(selected.get("label", action_label(selected)))}'
                 f' · HP {_safe(d["hp"])} · Gold {_safe(d["gold"])}'
                 '</summary>'
                 f'<p>Value estimate: {_safe(round(d["value"], 4))}</p>'
@@ -394,7 +427,7 @@ def render_html(traces: Sequence[dict[str, Any]]) -> str:
                 d = trace["decisions"][idx]
                 selected = d["actions"][d["selected"]]
                 entries.append(
-                    f'{_safe(trace["label"])}: {_safe(action_label(selected))}'
+                    f'{_safe(trace["label"])}: {_safe(selected.get("label", action_label(selected)))}'
                 )
             divergence += '<p>' + ' versus '.join(entries) + '</p>'
     panels = []
@@ -465,7 +498,7 @@ def render_markdown(traces: Sequence[dict[str, Any]]) -> str:
                 if d["phase"] == "strategy":
                     action = d["actions"][d["selected"]]
                     lines.append(
-                        f"- #{d['index']} {action_label(action)} "
+                        f"- #{d['index']} {action.get('label', action_label(action))} "
                         f"(logit {action['score']}, value {d['value']:.3f})"
                     )
             lines.append("")
