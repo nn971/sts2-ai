@@ -124,7 +124,10 @@ def encode_decision(
         for action in decision.legal_actions
     ], dtype=torch.float32)
     if not (
-        (decision.phase == "strategy" and strategy_encoding in ("macro_attention", "macro_semantic"))
+        (
+            decision.phase == "strategy"
+            and strategy_encoding in ("macro_attention", "macro_semantic")
+        )
         or (decision.phase == "combat" and encoding in ("enemy_instances", "enemy_attention"))
     ):
         return EncodedDecision(
