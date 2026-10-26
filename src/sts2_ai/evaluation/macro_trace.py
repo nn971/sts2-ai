@@ -293,7 +293,7 @@ def map_svg(nodes: Sequence[dict[str, Any]], routes: dict[str, set[str]],
             )
     for label, path in (route_paths or {}).items():
         color = "#30bd8a" if label == "a" else "#f5b14c"
-        for u, v in zip(path, path[1:]):
+        for u, v in zip(path, path[1:], strict=False):
             if u not in coords or v not in coords:
                 continue
             left, right = coords[u], coords[v]
