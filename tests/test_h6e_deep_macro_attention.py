@@ -129,3 +129,47 @@ def test_deep_has_more_parameters_than_v18():
     add_deep_macro_parameters(params, 32, torch)
     deep_count = sum(x.numel() for x in params.values())
     assert deep_count > baseline_count * 1.5
+
+
+def test_v18_to_v19_warm_start_retains_frozen_combat(tmp_path):
+    torch = pytest.importorskip("torch")
+    from test_phase_split_selfplay import TwoPhaseToy
+
+    from sts2_ai.models.macro_objects import MACRO_SEMANTIC_FORMAT
+    from sts2_ai.models.neural import TACTICAL_FORMAT
+    from sts2_ai.models.phase_split import PhaseSplitNeuralModel
+    from sts2_ai.training.enemy_attention import add_attention_parameters
+    from sts2_ai.training.instance_combat import add_instance_parameters
+    from sts2_ai.training.neural import _export, _new_params
+    from sts2_ai.training.phase_split_selfplay import train_phase_split
+
+    torch.manual_seed(98)
+    strategy_params = _new_params(32, 8, torch)
+    add_instance_parameters(strategy_params, 32, 8, torch)
+    add_attention_parameters(strategy_params, 8, torch)
+    tactical_params = _new_params(32, 8, torch)
+    original = PhaseSplitNeuralModel(
+        _export(strategy_params, 32, 8, model_id="v18-strategy",
+                value_head_trained=True, format_id=MACRO_SEMANTIC_FORMAT),
+        _export(tactical_params, 32, 8, model_id="frozen-combat",
+                value_head_trained=True, format_id=TACTICAL_FORMAT),
+        "v18-warm",
+    )
+    source = tmp_path / "v18.json"
+    original.save(source)
+    source_bytes = source.read_bytes()
+    trained, rounds = train_phase_split(
+        TwoPhaseToy(), rounds=1, episodes_per_round=6,
+        dimension=32, hidden=8, max_decisions=8, workers=1,
+        optimizer_method="ppo", ppo_backend="batched",
+        hp_monotonic_weight=0, tactical_state_encoding="legacy",
+        combat_objective="continuation", freeze_combat=True,
+        temperature_start=1.0, temperature_end=1.0,
+        warm_start=source, strategy_encoding="macro_deep",
+        win_anneal_threshold=1000000,
+    )
+    assert trained.strategy.format_id == MACRO_DEEP_FORMAT
+    assert rounds[0].strategic_decisions > 0
+    assert trained.combat.to_dict() == original.combat.to_dict()
+    assert source.read_bytes() == source_bytes
+    assert PhaseSplitNeuralModel.from_dict(trained.to_dict()).to_dict() == trained.to_dict()
