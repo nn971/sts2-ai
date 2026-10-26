@@ -16,6 +16,7 @@ from sts2_ai.emulator import LegalAction, Observation
 from sts2_ai.emulator.semantic_p0_public_projection import (
     project_public_p0_observation,
 )
+from sts2_ai.models.macro_objects import MACRO_ATTENTION_FORMAT
 from sts2_ai.models.neural import (
     NEURAL_FORMAT,
     TACTICAL_ATTENTION_FORMAT,
@@ -27,7 +28,6 @@ from sts2_ai.models.neural import (
     TACTICAL_STRUCTURED_FORMAT,
     NeuralPolicyValueModel,
 )
-from sts2_ai.models.macro_objects import MACRO_ATTENTION_FORMAT
 from sts2_ai.models.pooled_objects import POOLED_OBJECT_FORMAT, PortablePooledObjectModel
 from sts2_ai.models.protocol import PolicyValueEstimate
 from sts2_ai.models.relational_objects import (
