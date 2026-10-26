@@ -28,9 +28,9 @@ from sts2_ai.models.hashed_linear import (
 )
 from sts2_ai.models.macro_objects import (
     macro_action_target,
+    macro_attention_action_features,
     macro_deep_action_target,
     macro_deep_object_vectors,
-    macro_attention_action_features,
     macro_global_features,
     macro_object_vectors,
     macro_semantic_action_features,
@@ -42,7 +42,8 @@ from sts2_ai.models.tactical_state import (
     tactical_state_features,
 )
 from sts2_ai.training.enemy_attention import (
-    contextualize_deep_torch, contextualize_torch,
+    contextualize_deep_torch,
+    contextualize_torch,
 )
 from sts2_ai.training.neural import _dense
 from sts2_ai.training.phase_split_ppo import PpoDiagnostics, gae_terminal
