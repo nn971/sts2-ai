@@ -288,7 +288,9 @@ def macro_semantic_action_features(
                                 else:
                                     amount = _number(value, 10.0)
                                     if amount is not None:
-                                        tokens.append((f"macro:offer:preview:enchant:{field}", amount))
+                                        tokens.append((
+                                            f"macro:offer:preview:enchant:{field}", amount,
+                                        ))
                     break
             for field in ("on_sale", "sold"):
                 if type(offer.get(field)) is bool:
