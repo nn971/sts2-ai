@@ -244,7 +244,8 @@ def _room_style(room: str) -> str:
 
 
 def map_svg(nodes: Sequence[dict[str, Any]], routes: dict[str, set[str]],
-            current: dict[str, str | None]) -> str:
+            current: dict[str, str | None],
+            route_paths: dict[str, list[str]] | None = None) -> str:
     """Full public graph, including all known future nodes and route overlays."""
     valid = [n for n in nodes if isinstance(n, dict)
              and isinstance(n.get("node_id"), str)]
@@ -283,6 +284,18 @@ def map_svg(nodes: Sequence[dict[str, Any]], routes: dict[str, set[str]],
                 f'<line x1="{origin[0]}" y1="{origin[1]}" '
                 f'x2="{end[0]}" y2="{end[1]}" '
                 'stroke="#677484" stroke-width="1.6" opacity="0.65"/>'
+            )
+    for label, path in (route_paths or {}).items():
+        color = "#30bd8a" if label == "a" else "#f5b14c"
+        for u, v in zip(path, path[1:]):
+            if u not in coords or v not in coords:
+                continue
+            left, right = coords[u], coords[v]
+            offset = -3 if label == "a" else 3
+            parts.append(
+                f'<line x1="{left[0]}" y1="{left[1] + offset}" '
+                f'x2="{right[0]}" y2="{right[1] + offset}" '
+                f'stroke="{color}" stroke-width="4" opacity="0.9"/>'
             )
     for n in valid:
         node_id = n["node_id"]
@@ -327,9 +340,13 @@ def _map_for(trace: dict[str, Any], index: int) -> list[dict[str, Any]]:
     return previous
 
 
+def _route_path(trace: dict[str, Any], index: int) -> list[str]:
+    return [d["selected_node"] for d in trace["decisions"][:index + 1]
+            if isinstance(d.get("selected_node"), str)]
+
+
 def _visited(trace: dict[str, Any], index: int) -> set[str]:
-    return {d["selected_node"] for d in trace["decisions"][:index + 1]
-            if isinstance(d.get("selected_node"), str)}
+    return set(_route_path(trace, index))
 
 
 def _options(decision: dict[str, Any]) -> str:
@@ -435,18 +452,21 @@ def render_html(traces: Sequence[dict[str, Any]]) -> str:
     first = first_divergence(*traces) if len(traces) == 2 else None
     maps = [_map_for(t, len(t["decisions"])) for t in traces]
     graph = maps[0] or (maps[1] if len(maps) == 2 else [])
-    paths = {"a": _visited(traces[0], len(traces[0]["decisions"]))}
+    route_paths = {"a": _route_path(traces[0], len(traces[0]["decisions"]))}
+    paths = {"a": set(route_paths["a"])}
     current = {"a": traces[0]["decisions"][-1].get("current_node_id")
                if traces[0]["decisions"] else None}
     if len(traces) == 2:
-        paths["b"] = _visited(traces[1], len(traces[1]["decisions"]))
+        route_paths["b"] = _route_path(traces[1], len(traces[1]["decisions"]))
+        paths["b"] = set(route_paths["b"])
         current["b"] = (
             traces[1]["decisions"][-1].get("current_node_id")
             if traces[1]["decisions"] else None
         )
     label = " · ".join(_safe(t["label"]) for t in traces)
-    boss = " / ".join(_safe(t["boss_identity"] or "not exposed")
-                      for t in traces)
+    identities = [t["boss_identity"] or "not exposed" for t in traces]
+    boss = _safe(identities[0] if len(set(identities)) == 1
+                 else " / ".join(identities))
     head = (
         f'<b>Seed {_safe(traces[0]["seed"])}</b> · {label}'
         f' · <b>Boss: {boss}</b>'
@@ -498,7 +518,7 @@ def render_html(traces: Sequence[dict[str, Any]]) -> str:
         'width:100%;margin:8px 0}td,th{padding:5px;border-bottom:'
         '1px solid #3a4a5b;text-align:left;word-break:break-word}'
         '.selected{color:#78dcaa} .legend,.missing{color:#aab8c5}'
-        '</style><header>' + head + map_svg(graph, paths, current)
+        '</style><header>' + head + map_svg(graph, paths, current, route_paths)
         + '</header><main class="body"><h1>Public decision history</h1>'
         + divergence + '<div class="agents">' + "".join(panels)
         + '</div></main></html>'
