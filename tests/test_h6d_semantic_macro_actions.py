@@ -119,3 +119,100 @@ def test_v18_batched_single_and_portable_logits():
     legacy = _export(params, 128, 16, model_id="v17-backward",
                      value_head_trained=True, format_id=MACRO_ATTENTION_FORMAT)
     assert NeuralPolicyValueModel.from_dict(legacy.to_dict()).format_id == MACRO_ATTENTION_FORMAT
+
+
+def test_v18_native_shop_offer_schema_and_sparse_potion_slots():
+    # Fields follow pinned PrototypeAiObservation/PrototypeAiShop/ShopOffer.
+    state = {
+        "gold": 300,
+        "potions": [
+            {"slot": 0, "potion_id": "proto.potion.poison", "state": {}},
+            {"slot": 2, "potion_id": "proto.potion.fire", "state": {}},
+        ],
+        "shop": {
+            "card_offers": [
+                {"offer_id": 10, "item_id": "silent.backflip", "price": 80,
+                 "base_price": 100, "on_sale": True, "sold": False},
+                {"offer_id": 11, "item_id": "silent.footwork", "price": 95,
+                 "base_price": 95, "on_sale": False, "sold": False},
+            ],
+            "potion_offer": {
+                "offer_id": 12, "item_id": "proto.potion.strength",
+                "price": 40, "sold": False,
+            },
+            "potion_offers": [
+                {"offer_id": 12, "item_id": "proto.potion.strength",
+                 "price": 40, "sold": False},
+            ],
+            "relic_offers": [
+                {"offer_id": 13, "item_id": "proto.relic.nunchaku",
+                 "price": 150, "sold": False},
+                {"offer_id": 14, "item_id": "proto.relic.bag_of_preparation",
+                 "price": 170, "sold": False},
+            ],
+            "card_offer_previews": [
+                {"offer_id": 10, "card": {
+                    "card_id": "silent.backflip", "upgrade_level": 1,
+                    "enchantment": None,
+                }},
+            ],
+        },
+    }
+
+    def encoded(kind, payload):
+        return macro_semantic_action_features(state, kind, json.dumps(payload), 512)
+
+    assert encoded("buy_card", {"OfferId": 10}) != encoded(
+        "buy_card", {"OfferId": 11},
+    )
+    assert encoded("buy_relic", {"OfferId": 13}) != encoded(
+        "buy_relic", {"OfferId": 14},
+    )
+    assert encoded("replace_shop_potion", {"OfferId": 12, "Slot": 0}) != encoded(
+        "replace_shop_potion", {"OfferId": 12, "Slot": 2},
+    )
+    before = encoded("replace_shop_potion", {"OfferId": 12, "Slot": 2})
+    # The public potions collection is packed, but native Slot is a slot number.
+    state["potions"].reverse()
+    assert encoded("replace_shop_potion", {"OfferId": 12, "Slot": 2}) == before
+    # Different transient offer IDs leave semantic encoding unchanged.
+    before = encoded("buy_card", {"OfferId": 10})
+    state["shop"]["card_offers"][0]["offer_id"] = 88
+    state["shop"]["card_offer_previews"][0]["offer_id"] = 88
+    assert encoded("buy_card", {"OfferId": 88}) == before
+
+
+def test_v18_native_visible_event_choices_and_potion_replacement():
+    state = {
+        "event_id": "proto.native.event.test",
+        "event": {
+            "event_id": "proto.native.event.test",
+            "offered_choice_ids": ["trudge", "rest"],
+            "visible_choice_values": [
+                {"choice_id": "trudge", "gold_gain": 83, "hp_loss": 8},
+                {"choice_id": "rest", "heal": 21},
+            ],
+            "pending_potion_replacement": {
+                "choice_id": "take", "potion_id": "proto.potion.energy",
+                "candidate_slots": [0, 2],
+            },
+        },
+        "potions": [
+            {"slot": 0, "potion_id": "proto.potion.poison", "state": {}},
+            {"slot": 2, "potion_id": "proto.potion.fire", "state": {}},
+        ],
+    }
+
+    def encoded(kind, payload):
+        return macro_semantic_action_features(state, kind, json.dumps(payload), 512)
+
+    assert encoded("event_choice", {"ChoiceId": "trudge"}) != encoded(
+        "event_choice", {"ChoiceId": "rest"},
+    )
+    assert encoded("replace_event_potion", {"Slot": 0}) != encoded(
+        "replace_event_potion", {"Slot": 2},
+    )
+    # IDs link visible choices; the network receives the chosen effect data.
+    old = encoded("event_choice", {"ChoiceId": "rest"})
+    state["event"]["visible_choice_values"][1]["heal"] = 45
+    assert encoded("event_choice", {"ChoiceId": "rest"}) != old
