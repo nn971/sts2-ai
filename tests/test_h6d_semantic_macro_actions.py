@@ -307,3 +307,44 @@ def test_v18_reward_same_card_with_different_public_upgrades():
         state, "take_reward_card", '{"Index":1}', 512,
     )
     assert plain != upgraded
+
+
+def test_v18_warm_start_from_v17_keeps_combat_head_byte_exact(tmp_path):
+    pytest.importorskip("torch")
+    from test_phase_split_selfplay import TwoPhaseToy, small_model
+
+    from sts2_ai.models.neural import NEURAL_FORMAT, TACTICAL_FORMAT
+    from sts2_ai.models.phase_split import PhaseSplitNeuralModel
+    from sts2_ai.training.phase_split_selfplay import train_phase_split
+
+    initial = PhaseSplitNeuralModel(
+        small_model(NEURAL_FORMAT),
+        small_model(TACTICAL_FORMAT, value_bias=0.17),
+        "v18-handoff-toy",
+    )
+    initial_path = tmp_path / "initial.json"
+    initial.save(initial_path)
+    opts = dict(
+        backend=TwoPhaseToy(), episodes_per_round=6,
+        dimension=32, hidden=4, max_decisions=8, workers=1,
+        optimizer_method="ppo", ppo_backend="batched",
+        hp_monotonic_weight=0, tactical_state_encoding="legacy",
+        combat_objective="continuation", freeze_combat=True,
+        temperature_start=1.0, temperature_end=1.0,
+    )
+    v17, _ = train_phase_split(
+        **opts, rounds=1, warm_start=initial_path,
+        strategy_encoding="macro_attention",
+    )
+    assert v17.strategy.format_id == MACRO_ATTENTION_FORMAT
+    v17_path = tmp_path / "h6c-v17.json"
+    v17.save(v17_path)
+    original_bytes = v17_path.read_bytes()
+    v18, rows = train_phase_split(
+        **opts, rounds=1, warm_start=v17_path,
+        strategy_encoding="macro_semantic",
+    )
+    assert rows[0].strategic_decisions > 0
+    assert v18.strategy.format_id == MACRO_SEMANTIC_FORMAT
+    assert v18.combat.to_dict() == v17.combat.to_dict()
+    assert v17_path.read_bytes() == original_bytes
