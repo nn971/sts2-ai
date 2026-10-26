@@ -301,7 +301,8 @@ def _room_style(room: str) -> str:
 
 def map_svg(nodes: Sequence[dict[str, Any]], routes: dict[str, set[str]],
             current: dict[str, str | None],
-            route_paths: dict[str, list[str]] | None = None) -> str:
+            route_paths: dict[str, list[str]] | None = None,
+            observed: dict[str, list[str]] | None = None) -> str:
     """Full public graph, including all known future nodes and route overlays."""
     valid = [n for n in nodes if isinstance(n, dict)
              and isinstance(n.get("node_id"), str)]
@@ -360,10 +361,14 @@ def map_svg(nodes: Sequence[dict[str, Any]], routes: dict[str, set[str]],
         visited = [label for label, route in routes.items()
                    if node_id in route]
         outline = "#30bd8a" if "a" in visited else "#f5b14c" if visited else "#293340"
+        observed_content = ", ".join((observed or {}).get(node_id, []))
+        description = str(n.get("room_type", "unknown"))
+        if observed_content:
+            description += " | " + observed_content
         parts.append(
             f'<circle cx="{x}" cy="{y}" r="14" fill="{color}" '
             f'stroke="{outline}" stroke-width="{4 if visited else 1.5}">'
-            f'<title>{_safe(node_id)}: {_safe(n.get("room_type", "unknown"))}</title>'
+            f'<title>{_safe(node_id)}: {_safe(description)}</title>'
             '</circle>'
         )
         for label, active_id in current.items():
@@ -552,6 +557,30 @@ def _first_disagreement_table(traces: Sequence[dict[str, Any]],
     )
 
 
+def _observed_rooms(traces: Sequence[dict[str, Any]]) -> dict[str, list[str]]:
+    """Attach only encounters/events observed after actually visiting a node."""
+    results: dict[str, list[str]] = defaultdict(list)
+    for trace in traces:
+        current_node = None
+        for d in trace["decisions"]:
+            selected = d.get("selected_node")
+            if selected:
+                current_node = selected
+            if current_node is None:
+                continue
+            event = d.get("event_id")
+            if isinstance(event, str) and event:
+                label = f"Event: {event}"
+                if label not in results[current_node]:
+                    results[current_node].append(label)
+            species = d.get("encounter_species", [])
+            if species:
+                label = "Encounter: " + ", ".join(map(str, species))
+                if label not in results[current_node]:
+                    results[current_node].append(label)
+    return results
+
+
 def render_html(traces: Sequence[dict[str, Any]]) -> str:
     if not 1 <= len(traces) <= 2:
         raise ValueError("HTML report supports one or two replay traces")
@@ -571,6 +600,7 @@ def render_html(traces: Sequence[dict[str, Any]]) -> str:
             traces[1]["decisions"][-1].get("current_node_id")
             if traces[1]["decisions"] else None
         )
+    observed = _observed_rooms(traces)
     label = " · ".join(_safe(t["label"]) for t in traces)
     identities = [t["boss_identity"] or "not exposed" for t in traces]
     boss = _safe(identities[0] if len(set(identities)) == 1
@@ -626,7 +656,10 @@ def render_html(traces: Sequence[dict[str, Any]]) -> str:
         'width:100%;margin:8px 0}td,th{padding:5px;border-bottom:'
         '1px solid #3a4a5b;text-align:left;word-break:break-word}'
         '.selected{color:#78dcaa}.diff{color:#b8d0e4} .legend,.missing{color:#aab8c5}'
-        '</style><header>' + head + map_svg(graph, paths, current, route_paths)
+        '</style><header>' + head
+        + '<p class="legend">Hover a map node for its room type and observed '
+        'event/encounter identity. Unvisited identities are not revealed.</p>'
+        + map_svg(graph, paths, current, route_paths, observed)
         + '</header><main class="body"><h1>Public decision history</h1>'
         + divergence + '<div class="agents">' + "".join(panels)
         + '</div></main></html>'
