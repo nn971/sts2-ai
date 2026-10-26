@@ -140,3 +140,53 @@ def test_trace_files_keep_distinct_model_names(tmp_path):
         assert (tmp_path / f"seed.{name}.jsonl").is_file()
         data = json.loads((tmp_path / f"seed.{name}.json").read_text())
         assert data["label"] == name
+
+
+
+def test_shop_event_offer_names_and_skip_relic():
+    from sts2_ai.evaluation.macro_trace import readable_action
+
+    shop = {
+        "shop": {"card_offers": [
+            {"offer_id": 1, "item_id": "silent.backflip", "price": 85},
+            {"offer_id": 2, "item_id": "silent.noxious_fumes", "price": 115},
+        ]},
+    }
+    first = {"kind": "buy_card", "payload": {"OfferId": 1}}
+    second = {"kind": "buy_card", "payload": {"OfferId": 2}}
+    assert "backflip" in readable_action(first, shop, [])
+    assert "noxious_fumes" in readable_action(second, shop, [])
+    event = {"event": {"visible_choice_values": [
+        {"choice_id": "refuse", "gold_gain": 50},
+    ]}}
+    assert "refuse" in readable_action({
+        "kind": "event_choice", "payload": {"ChoiceId": "refuse"},
+    }, event, [])
+    assert readable_action({
+        "kind": "skip_reward_relic", "payload": {},
+    }, {}, []) == "Skip relic"
+
+
+def test_exact_feature_collision_is_reported_for_unmodeled_shop_choices():
+    from sts2_ai.models.macro_objects import MACRO_ATTENTION_FORMAT
+
+    class LegacyMacro(Model):
+        format_id = MACRO_ATTENTION_FORMAT
+        dimension = 128
+
+    actions = (
+        LegalAction("1", "buy_card", '{"OfferId":1}'),
+        LegalAction("2", "buy_card", '{"OfferId":2}'),
+        LegalAction("3", "leave_shop"),
+    )
+    state = {"act": 1, "floor": 5, "gold": 250, "deck": [],
+             "shop": {"card_offers": [
+                 {"offer_id": 1, "item_id": "silent.backflip", "price": 85},
+                 {"offer_id": 2, "item_id": "silent.dodge", "price": 95},
+             ]}}
+    rec = TraceRecorder(LegacyMacro(), model_label="h6c-v17")
+    rec(None, Observation("prototype-fair-v0", json.dumps(state), "obs"),
+        actions, SimpleNamespace(action=actions[0]))
+    first, second = rec.decisions[0]["actions"][:2]
+    assert first["encoder_equivalence"] == [0, 1]
+    assert second["encoder_equivalence"] == [0, 1]
