@@ -14,8 +14,13 @@ import torch
 from torch import Tensor, nn
 
 from .shared_game_objects import (
-    ACTION_BUCKETS, IDENTITY_BUCKETS, KINDS, NUMERIC_FIELDS, SHARED_OBJECT_SCHEMA,
-    ZONES, EncodedDecision,
+    ACTION_BUCKETS,
+    IDENTITY_BUCKETS,
+    KINDS,
+    NUMERIC_FIELDS,
+    SHARED_OBJECT_SCHEMA,
+    ZONES,
+    EncodedDecision,
 )
 
 H7_MODEL_FORMAT = "sts2-h7-shared-object-transformer-v1"
