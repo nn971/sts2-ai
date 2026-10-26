@@ -10,10 +10,14 @@ import pytest
 
 torch = pytest.importorskip("torch")
 from sts2_ai.models.shared_game_objects import (  # noqa: E402
-    NUMERIC_FIELDS, SHARED_OBJECT_SCHEMA, encode_public_decision,
+    NUMERIC_FIELDS,
+    SHARED_OBJECT_SCHEMA,
+    encode_public_decision,
 )
 from sts2_ai.models.shared_transformer import (  # noqa: E402
-    H7Config, SharedObjectTransformer, collate_h7,
+    H7Config,
+    SharedObjectTransformer,
+    collate_h7,
 )
 
 
