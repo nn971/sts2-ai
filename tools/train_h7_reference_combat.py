@@ -51,12 +51,24 @@ def atomic_torch(path: Path, payload: dict[str, Any]) -> None:
 
 
 def summarize(episodes: tuple[Any, ...]) -> dict[str, Any]:
-    def summary(items: list[Any]) -> dict[str, float | int]:
+    def summary(items: list[Any]) -> dict[str, float | int | None]:
+        wins = [x for x in items if x.outcome == "victory"]
+        defeats = [x for x in items if x.outcome == "defeat"]
+        loss_hp = [
+            x.terminal_enemy_hp for x in defeats
+            if x.terminal_enemy_hp is not None
+        ]
         return {
             "combats": len(items),
-            "wins": sum(x.outcome == "victory" for x in items),
+            "wins": len(wins),
+            "defeats": len(defeats),
             "mean_score": statistics.mean(x.score for x in items),
-            "mean_exit_hp": statistics.mean(x.exit_hp for x in items),
+            "victory_mean_exit_hp": (
+                statistics.mean(x.exit_hp for x in wins) if wins else None
+            ),
+            "defeat_mean_remaining_enemy_hp": (
+                statistics.mean(loss_hp) if loss_hp else None
+            ),
         }
     cells: dict[str, list[Any]] = {}
     for ep in episodes:
