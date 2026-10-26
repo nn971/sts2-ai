@@ -9,7 +9,7 @@ from __future__ import annotations
 import html
 import json
 import math
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Sequence
 from typing import Any
 
@@ -370,6 +370,47 @@ def _options(decision: dict[str, Any]) -> str:
     return '<table><tr><th>Legal action</th><th>Logit</th></tr>' + "".join(items) + '</table>'
 
 
+def _inventory(state: dict[str, Any], key: str) -> Counter[str]:
+    """Visible persistent inventory, not ephemeral combat draw/discard zones."""
+    result: Counter[str] = Counter()
+    values = state.get(key)
+    if not isinstance(values, list):
+        return result
+    for item in values:
+        if isinstance(item, str):
+            result[item] += 1
+        elif isinstance(item, dict):
+            names = {
+                "deck": ("card_id",),
+                "relics": ("relic_id", "id"),
+                "potions": ("potion_id", "id"),
+            }
+            name = next((item[x] for x in names[key]
+                         if isinstance(item.get(x), str)), None)
+            if isinstance(name, str):
+                upgrade = item.get("upgrades", item.get("upgrade_level", 0))
+                if key == "deck" and isinstance(upgrade, int) and upgrade:
+                    name += f"+{upgrade}"
+                result[name] += 1
+    return result
+
+
+def _state_change(start: dict[str, Any], end: dict[str, Any]) -> str:
+    changes = []
+    for label, key in (("Cards", "deck"), ("Relics", "relics"),
+                       ("Potions", "potions")):
+        before, after = _inventory(start, key), _inventory(end, key)
+        added, removed = after - before, before - after
+        for direction, count in (("+", added), ("−", removed)):
+            for name, copies in sorted(count.items()):
+                changes.append(f"{direction}{copies} {name} ({label})")
+    gold_before, gold_after = start.get("gold"), end.get("gold")
+    if (isinstance(gold_before, int) and isinstance(gold_after, int)
+            and gold_before != gold_after):
+        changes.append(f"Gold {gold_before} → {gold_after}")
+    return "; ".join(changes) or "No observed persistent-inventory change"
+
+
 def _floor_sections(trace: dict[str, Any]) -> str:
     rows: dict[tuple[object, object], list[dict[str, Any]]] = defaultdict(list)
     for d in trace["decisions"]:
@@ -379,12 +420,18 @@ def _floor_sections(trace: dict[str, Any]) -> str:
         first, last = group[0], group[-1]
         macro = [d for d in group if d["phase"] == "strategy"]
         combat = sum(d["phase"] == "combat" for d in group)
+        all_decisions = trace["decisions"]
+        following = (all_decisions[last["index"] + 1]
+                     if last["index"] + 1 < len(all_decisions) else None)
+        end_state = following["public_state"] if following else last["public_state"]
+        end_hp = following["hp"] if following else trace["final_hp"]
         headline = (
             f'Act {_safe(act)} floor {_safe(floor)}'
-            f' · HP {_safe(first["hp"])} → {_safe(last["hp"])}'
+            f' · HP {_safe(first["hp"])} → {_safe(end_hp)}'
             f' · {len(macro)} macro choices · {combat} combat choices'
         )
-        details = []
+        change = _state_change(first["public_state"], end_state)
+        details = [f'<p class="diff">{_safe(change)}</p>']
         for d in group:
             if d["phase"] == "combat":
                 continue
@@ -517,7 +564,7 @@ def render_html(traces: Sequence[dict[str, Any]]) -> str:
         '.decision{background:#243140}table{border-collapse:collapse;'
         'width:100%;margin:8px 0}td,th{padding:5px;border-bottom:'
         '1px solid #3a4a5b;text-align:left;word-break:break-word}'
-        '.selected{color:#78dcaa} .legend,.missing{color:#aab8c5}'
+        '.selected{color:#78dcaa}.diff{color:#b8d0e4} .legend,.missing{color:#aab8c5}'
         '</style><header>' + head + map_svg(graph, paths, current, route_paths)
         + '</header><main class="body"><h1>Public decision history</h1>'
         + divergence + '<div class="agents">' + "".join(panels)
