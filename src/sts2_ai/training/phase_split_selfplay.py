@@ -518,10 +518,19 @@ def train_phase_split(
             migrating_combat_value = (
                 phase == "combat" and previous_combat_objective != combat_objective
             )
+            # v18 action feature hashes do not share v17 coordinates.
+            # Keep learned state/object/attention representations, but learn
+            # a new action projection instead of misinterpreting old weights.
+            migrating_macro_choice = (
+                phase == "strategy" and strategy_encoding == "macro_attention_v2"
+                and source.format_id != MACRO_CHOICE_FORMAT
+            )
             with torch.no_grad():
                 for name, weight in params[phase].items():
                     if not hasattr(source, name) or getattr(source, name) is None:
                         continue  # Newly initialized v8-specific parameters.
+                    if migrating_macro_choice and name == "action_weight":
+                        continue
                     if migrating_tactical and name in (
                         "state_weight", "state_bias", "value_weight", "value_bias"
                     ):
