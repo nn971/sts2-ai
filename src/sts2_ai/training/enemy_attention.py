@@ -57,3 +57,38 @@ def contextualize_torch(
     mixed = attended.permute(0, 2, 1, 3).reshape(batch, count, width)
     updates = linear(mixed, params[f"{prefix}output"])
     return embeddings + params[f"{prefix}gate"] * updates * mask.unsqueeze(-1)
+
+
+def add_deep_macro_parameters(params: dict[str, Any], hidden: int, torch: Any) -> None:
+    """V19: one additional eight-head block and a four-times-wide gated MLP."""
+    if hidden % 8:
+        raise ValueError("H6-E requires hidden width divisible by eight")
+    add_attention_parameters(params, hidden, torch, prefix="attn2_", heads=8)
+    width = hidden * 4
+    scale = 1.0 / math.sqrt(hidden)
+    params["macro_ffn_in"] = (
+        torch.randn(width, hidden) * scale
+    ).requires_grad_()
+    params["macro_ffn_in_bias"] = torch.zeros(width, requires_grad=True)
+    params["macro_ffn_out"] = (
+        torch.randn(hidden, width) / math.sqrt(width)
+    ).requires_grad_()
+    params["macro_ffn_out_bias"] = torch.zeros(hidden, requires_grad=True)
+    params["macro_ffn_gate"] = torch.zeros(hidden, requires_grad=True)
+
+
+def contextualize_deep_torch(
+    embeddings: Any, mask: Any, params: dict[str, Any], torch: Any,
+) -> Any:
+    """Second 8-head relational block, then per-object gated feedforward."""
+    updated = contextualize_torch(
+        embeddings, mask, params, torch, prefix="attn2_", heads=8,
+    )
+    linear = torch.nn.functional.linear
+    expanded = torch.nn.functional.relu(
+        linear(updated, params["macro_ffn_in"], params["macro_ffn_in_bias"])
+    )
+    residual = linear(
+        expanded, params["macro_ffn_out"], params["macro_ffn_out_bias"],
+    )
+    return updated + params["macro_ffn_gate"] * residual * mask.unsqueeze(-1)
