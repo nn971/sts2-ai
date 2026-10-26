@@ -383,6 +383,11 @@ def map_svg(nodes: Sequence[dict[str, Any]], routes: dict[str, set[str]],
             'font-size="9" fill="#101419">'
             f'{_safe(str(n.get("room_type", "?"))[:2].upper())}</text>'
         )
+        parts.append(
+            f'<text x="{x}" y="{y + 30}" text-anchor="middle" '
+            'font-size="9" fill="#d1d9e3">'
+            f'{_safe(str(n.get("room_type", "unknown")))}</text>'
+        )
     for idx, floor in enumerate(floor_order):
         parts.append(
             f'<text x="{48 + idx * 90}" y="16" text-anchor="middle" '
@@ -553,7 +558,9 @@ def _first_disagreement_table(traces: Sequence[dict[str, Any]],
         f'<th>{_safe(traces[0]["label"])} logit</th>'
         f'<th>{_safe(traces[1]["label"])} logit</th></tr>'
         + "".join(cells) + '</table>'
-        '<p>● selected action; logits are not calibrated win probabilities.</p>'
+        '<p>● selected action; [ENCODER TIE] marks distinct legal choices '
+        'with exactly identical H6-C V17 action features and object targets. '
+        'Logits are not calibrated win probabilities.</p>'
     )
 
 
