@@ -20,7 +20,8 @@ from sts2_ai.models.enemy_instances import (
     instance_global_features,
 )
 from sts2_ai.models.macro_objects import (
-    macro_action_target, macro_attention_action_features, macro_object_vectors,
+    macro_action_target, macro_attention_action_features, macro_global_features,
+    macro_object_vectors,
 )
 from sts2_ai.models.hashed_linear import (
     neural_action_features,
@@ -82,7 +83,8 @@ def encode_decision(
         raise ValueError("Chosen PPO action lies outside legal menu")
 
     if decision.phase == "strategy":
-        state_fn = state_features
+        state_fn = (macro_global_features
+                    if strategy_encoding == "macro_attention" else state_features)
         action_fn = (macro_attention_action_features
                      if strategy_encoding == "macro_attention"
                      else neural_action_features)
