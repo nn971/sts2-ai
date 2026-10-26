@@ -26,8 +26,8 @@ from sts2_ai.evaluation.baseline_cache import (
 from sts2_ai.training.phase_split_selfplay import (
     BALANCED_TRAINING_VERSION,
     PPO_TRAINING_VERSION,
-    PhaseSplitRound,
     SPLIT_TRAINING_VERSION,
+    PhaseSplitRound,
     train_phase_split,
 )
 
@@ -87,9 +87,10 @@ def main() -> None:
     )
     p.add_argument(
         "--strategy-encoding",
-        choices=("legacy", "macro_attention", "macro_semantic", "macro_deep"),
+        choices=("legacy", "macro_attention", "macro_semantic", "macro_deep",
+                 "macro_card_ops"),
         default="legacy",
-        help="H6-E: opt-in deep macro attention (frozen batched PPO)",
+        help="V20: opt-in operation-aware deep macro attention (frozen batched PPO)",
     )
     p.add_argument("--temperature-start", type=float, default=0.05)
     p.add_argument("--temperature-end", type=float, default=0.035)

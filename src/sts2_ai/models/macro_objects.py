@@ -22,6 +22,7 @@ from sts2_ai.models.hashed_linear import (
 MACRO_ATTENTION_FORMAT = "sts2-neural-policy-value-v17-macro-object-attention"
 MACRO_SEMANTIC_FORMAT = "sts2-neural-policy-value-v18-macro-semantic-actions"
 MACRO_DEEP_FORMAT = "sts2-neural-policy-value-v19-deep-macro-attention"
+MACRO_CARD_OPERATIONS_FORMAT = "sts2-neural-policy-value-v20-deep-macro-card-operations"
 
 
 def _id(value: dict[str, Any], *keys: str) -> str | None:
@@ -290,6 +291,114 @@ def macro_deep_action_target(
         return original
     key = _deep_object_key(action)
     return key if key in objects else None
+
+
+
+
+# V20: A deck-card prompt's action name is the *same* for removal, upgrade,
+# transformation, and enchantment. The public pending prompt supplies the
+# operation. No native outcome or hidden state is consulted.
+_DECK_SELECTION_SOURCES = {
+    "choose_event_deck_card": "event",
+    "choose_shop_relic_deck_card": "shop",
+    "choose_relic_deck_card": "reward",
+}
+_DECK_OPERATION_NAMES = ("remove", "upgrade", "transform", "enchant")
+
+
+def macro_card_selection_operation(
+    state: dict[str, Any], action_kind: str,
+) -> str | None:
+    """Read the operation actually shown to the player for a card prompt."""
+    source = _DECK_SELECTION_SOURCES.get(action_kind)
+    container = state.get(source) if source else None
+    if not isinstance(container, dict):
+        return None
+    pending = container.get("pending_deck_choice")
+    if not isinstance(pending, dict):
+        return None
+    value = pending.get("kind")
+    if isinstance(value, str):
+        candidate = value.lower()
+        return candidate if candidate in _DECK_OPERATION_NAMES else None
+    # The pinned C# enum has Remove=0, Upgrade=1, Transform=2, Enchant=3.
+    # Accept either JSON enum representation; bool is not an integer enum.
+    if type(value) is int and 0 <= value < len(_DECK_OPERATION_NAMES):
+        return _DECK_OPERATION_NAMES[value]
+    return None
+
+
+def macro_card_operation_action_features(
+    state: dict[str, Any], action_kind: str, payload_json: str, dimension: int,
+) -> dict[int, float]:
+    """V20 action representation, including deck prompt operation semantics.
+
+    Critically, no V17/V18/V19 feature function is changed retroactively.
+    The operation is shared across the selection menu and is therefore
+    contextual information distinct from the selected card's identity.
+    """
+    base = macro_semantic_action_features(state, action_kind, payload_json, dimension)
+    source = _DECK_SELECTION_SOURCES.get(action_kind)
+    if source is None:
+        return base
+    operation = macro_card_selection_operation(state, action_kind) or "unknown"
+    tokens: list[tuple[str, float]] = [
+        (f"macro:card-selection:operation:{operation}", 1.0),
+        (f"macro:card-selection:source:{source}", 1.0),
+        (f"macro:card-selection:{source}:{operation}", 1.0),
+    ]
+    container = state.get(source)
+    pending = container.get("pending_deck_choice") if isinstance(container, dict) else None
+    if isinstance(pending, dict):
+        remaining = _number(pending.get("remaining_selections"), 3.0)
+        if remaining is not None:
+            tokens.append(("macro:card-selection:remaining", remaining))
+        source_relic = _id(pending, "source_relic_id")
+        if source_relic is not None:
+            tokens.append((f"macro:card-selection:relic:{source_relic}", 1.0))
+        upgrade_transformed = pending.get("upgrade_transformed_cards")
+        if type(upgrade_transformed) is bool:
+            tokens.append(("macro:card-selection:upgrade-transformed", float(upgrade_transformed)))
+    enriched = _hash_features(tokens, dimension)
+    return {key: base.get(key, 0.0) + enriched.get(key, 0.0)
+            for key in base.keys() | enriched.keys()}
+
+
+def macro_card_operation_object_vectors(
+    state: dict[str, Any], actions: Sequence[LegalAction], dimension: int,
+) -> dict[str, dict[int, float]]:
+    """Ensure every selectable public deck card is a target, even beyond 48 groups."""
+    objects = macro_deep_object_vectors(state, actions, dimension)
+    cards, instances = _cards(state)
+    for action in actions:
+        if action.kind not in _DECK_SELECTION_SOURCES:
+            continue
+        payload = _payload(action.payload_json)
+        instance = payload.get("CardInstanceId", payload.get("card_instance_id"))
+        key = instances.get(instance) if type(instance) is int else None
+        if key is None or key in objects:
+            continue
+        card = cards[key]
+        tokens = _typed_tokens("card", card["card_id"])
+        tokens += [
+            ("card:upgrades", min(card["upgrades"] / 4, 2.0)),
+            ("card:copies", min(card["count"] / 5, 2.0)),
+        ]
+        objects[key] = _hash_features(tokens, dimension)
+    return objects
+
+
+def macro_card_operation_action_target(
+    state: dict[str, Any], action: LegalAction,
+    objects: dict[str, dict[int, float]],
+) -> str | None:
+    if action.kind in _DECK_SELECTION_SOURCES:
+        payload = _payload(action.payload_json)
+        instance = payload.get("CardInstanceId", payload.get("card_instance_id"))
+        _, instances = _cards(state)
+        key = instances.get(instance) if type(instance) is int else None
+        return key if key in objects else None
+    return macro_deep_action_target(state, action, objects)
 
 
 def macro_attention_action_features(
