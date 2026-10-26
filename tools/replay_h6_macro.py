@@ -73,7 +73,7 @@ def select_seeds(comparison: dict[str, Any], labels: tuple[str, str],
 
 
 def _write_trace(path: Path, trace: dict[str, Any]) -> None:
-    atomic_write(path.with_suffix(".json"), json.dumps(
+    atomic_write(Path(str(path) + ".json"), json.dumps(
         trace, indent=2, sort_keys=True,
     ) + "\n")
     header = {key: value for key, value in trace.items()
@@ -83,7 +83,7 @@ def _write_trace(path: Path, trace: dict[str, Any]) -> None:
         lines.append(json.dumps({"type": "map", **row}, sort_keys=True))
     for row in trace["decisions"]:
         lines.append(json.dumps({"type": "decision", **row}, sort_keys=True))
-    atomic_write(path.with_suffix(".jsonl"), "\n".join(lines) + "\n")
+    atomic_write(Path(str(path) + ".jsonl"), "\n".join(lines) + "\n")
 
 
 def main() -> None:
