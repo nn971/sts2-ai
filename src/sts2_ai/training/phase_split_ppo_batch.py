@@ -29,6 +29,9 @@ from sts2_ai.models.hashed_linear import (
 from sts2_ai.models.macro_objects import (
     macro_action_target,
     macro_attention_action_features,
+    macro_card_operation_action_features,
+    macro_card_operation_action_target,
+    macro_card_operation_object_vectors,
     macro_deep_action_target,
     macro_deep_object_vectors,
     macro_global_features,
@@ -93,10 +96,12 @@ def encode_decision(
     if decision.phase == "strategy":
         state_fn = (
             macro_global_features
-            if strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep")
+            if strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep", "macro_card_ops")
             else state_features
         )
-        action_fn = (macro_semantic_action_features
+        action_fn = (macro_card_operation_action_features
+                     if strategy_encoding == "macro_card_ops"
+                     else macro_semantic_action_features
                      if strategy_encoding in ("macro_semantic", "macro_deep")
                      else macro_attention_action_features
                      if strategy_encoding == "macro_attention"
@@ -131,7 +136,7 @@ def encode_decision(
     if not (
         (
             decision.phase == "strategy"
-            and strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep")
+            and strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep", "macro_card_ops")
         )
         or (decision.phase == "combat" and encoding in ("enemy_instances", "enemy_attention"))
     ):
@@ -140,7 +145,9 @@ def encode_decision(
         )
 
     nodes = (
-        macro_deep_object_vectors(state, decision.legal_actions, dimension)
+        macro_card_operation_object_vectors(state, decision.legal_actions, dimension)
+        if decision.phase == "strategy" and strategy_encoding == "macro_card_ops"
+        else macro_deep_object_vectors(state, decision.legal_actions, dimension)
         if decision.phase == "strategy" and strategy_encoding == "macro_deep"
         else macro_object_vectors(state, decision.legal_actions, dimension)
         if decision.phase == "strategy"
@@ -154,7 +161,8 @@ def encode_decision(
     )
     target_tensor = torch.tensor([
         slot[target] if (target := (
-            (macro_deep_action_target if strategy_encoding == "macro_deep"
+            (macro_card_operation_action_target if strategy_encoding == "macro_card_ops"
+             else macro_deep_action_target if strategy_encoding == "macro_deep"
              else macro_action_target)(state, action, nodes)
             if decision.phase == "strategy" else
             action_target_instance(action.payload_json, nodes)
