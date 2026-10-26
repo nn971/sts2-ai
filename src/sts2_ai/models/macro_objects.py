@@ -237,6 +237,98 @@ def _offer_from_action(
     return None
 
 
+def _potion_in_slot(state: dict[str, Any], slot: object) -> str | None:
+    """Native public potions contains only occupied slots, not slot-indexed entries."""
+    if type(slot) is not int:
+        return None
+    potions = state.get("potions")
+    if isinstance(potions, list):
+        for potion in potions:
+            if isinstance(potion, dict) and potion.get("slot") == slot:
+                return _id(potion, "potion_id")
+    return None
+
+
+def _reward_action_tokens(
+    state: dict[str, Any], kind: str, payload: dict[str, Any],
+) -> list[tuple[str, float]]:
+    reward = state.get("reward")
+    if not isinstance(reward, dict):
+        return []
+    tokens: list[tuple[str, float]] = []
+    index = payload.get("Index", payload.get("index"))
+    group = payload.get("GroupIndex", payload.get("group_index"))
+    if kind in ("take_reward_card", "take_reward_card_group",
+                "skip_reward_card_group", "sacrifice_reward_card_group",
+                "reroll_reward_card"):
+        cards = reward.get("card_options")
+        if type(group) is int:
+            groups = reward.get("pending_card_groups")
+            matched = next((
+                item for item in groups
+                if isinstance(item, dict) and item.get("group_index") == group
+            ), None) if isinstance(groups, list) else None
+            cards = matched.get("card_options") if isinstance(matched, dict) else None
+        if isinstance(cards, list):
+            if kind in ("take_reward_card", "take_reward_card_group"):
+                if type(index) is int and 0 <= index < len(cards):
+                    tokens.append((f"macro:reward:card:{cards[index]}", 1.0))
+            else:
+                # The offered set is visible even for a skip/reroll decision.
+                for card_id in sorted(name for name in cards if isinstance(name, str)):
+                    tokens.append((f"macro:reward:group-card:{card_id}", 1.0))
+    elif kind in ("take_reward_relic", "take_reward_extra_relic",
+                  "skip_reward_extra_relic"):
+        if kind == "take_reward_relic":
+            options = reward.get("relic_options")
+            if isinstance(options, list) and type(index) is int and 0 <= index < len(options):
+                relic_id = options[index]
+            else:
+                relic_id = reward.get("relic_option")
+        else:
+            relic_id = None
+            pending = reward.get("pending_extra_relic_rewards")
+            if isinstance(pending, list) and type(index) is int:
+                for item in pending:
+                    if isinstance(item, dict) and item.get("group_index") == index:
+                        relic_id = _id(item, "relic_id")
+                        if type(item.get("is_wax")) is bool:
+                            tokens.append(("macro:reward:relic:is_wax", float(item["is_wax"])))
+                        break
+        if isinstance(relic_id, str):
+            tokens.append((f"macro:reward:relic:{relic_id}", 1.0))
+    elif kind in ("take_reward_extra_potion", "replace_reward_extra_potion",
+                  "skip_reward_extra_potion"):
+        pending = reward.get("pending_extra_potion_rewards")
+        if type(group) is int and isinstance(pending, list):
+            for item in pending:
+                if isinstance(item, dict) and item.get("group_index") == group:
+                    name = _id(item, "potion_id")
+                    if name is not None:
+                        tokens.append((f"macro:reward:potion:{name}", 1.0))
+                    break
+    elif kind == "take_reward_extra_gold":
+        pending = reward.get("pending_extra_gold_rewards")
+        if type(group) is int and isinstance(pending, list):
+            for item in pending:
+                if isinstance(item, dict) and item.get("group_index") == group:
+                    amount = _number(item.get("amount"), 100.0)
+                    if amount is not None:
+                        tokens.append(("macro:reward:gold", amount))
+                    break
+    elif kind == "take_reward_bundle":
+        # The pinned public reward schema does not publish bundle contents.
+        # Index is an explicit player-visible selector, never hidden content.
+        if type(index) is int:
+            tokens.append((f"macro:reward:bundle-index:{index}", 1.0))
+    if kind in ("replace_reward_potion", "replace_reward_extra_potion"):
+        slot = payload.get("Slot", payload.get("slot"))
+        outgoing = _potion_in_slot(state, slot)
+        if outgoing is not None:
+            tokens.append((f"macro:reward:replace-potion:{outgoing}", 1.0))
+    return tokens
+
+
 def macro_semantic_action_features(
     state: dict[str, Any], action_kind: str, payload_json: str, dimension: int,
 ) -> dict[int, float]:
@@ -299,16 +391,9 @@ def macro_semantic_action_features(
             tokens.append(("macro:potion:replace", 1.0))
             slot = payload.get("Slot", payload.get("SlotIndex", payload.get("slot")))
             # A slot is an actual visible potion resource, unlike an ephemeral offer ID.
-            potions = state.get("potions")
-            if type(slot) is int and isinstance(potions, list):
-                # Native public potions is a compact array of occupied slots;
-                # the "slot" field, not its position, identifies the target.
-                for potion in potions:
-                    if isinstance(potion, dict) and potion.get("slot") == slot:
-                        potion_id = _id(potion, "potion_id")
-                        if potion_id is not None:
-                            tokens.append((f"macro:potion:replace:{potion_id}", 1.0))
-                        break
+            potion_id = _potion_in_slot(state, slot)
+            if potion_id is not None:
+                tokens.append((f"macro:potion:replace:{potion_id}", 1.0))
     elif action_kind == "event_choice":
         event = state.get("event")
         choice = payload.get("ChoiceId", payload.get("choice_id"))
@@ -339,29 +424,26 @@ def macro_semantic_action_features(
             if incoming is not None:
                 tokens.append((f"macro:event:incoming-potion:{incoming}", 1.0))
         slot = payload.get("Slot", payload.get("slot"))
-        potions = state.get("potions")
-        if type(slot) is int and isinstance(potions, list):
-            for potion in potions:
-                if isinstance(potion, dict) and potion.get("slot") == slot:
-                    outgoing = _id(potion, "potion_id")
-                    if outgoing is not None:
-                        tokens.append((f"macro:event:outgoing-potion:{outgoing}", 1.0))
-                    break
-    elif action_kind == "choose_event_deck_card":
+        outgoing = _potion_in_slot(state, slot)
+        if outgoing is not None:
+            tokens.append((f"macro:event:outgoing-potion:{outgoing}", 1.0))
+    elif action_kind in (
+        "choose_event_deck_card", "choose_shop_relic_deck_card",
+        "choose_relic_deck_card",
+    ):
         instance = payload.get("CardInstanceId", payload.get("card_instance_id"))
         _, ids = _cards(state)
         key = ids.get(instance) if type(instance) is int else None
-        tokens.append((f"macro:event:deck:{key or 'unknown'}", 1.0))
-    elif action_kind in ("take_reward_relic", "skip_reward_relic",
-                         "skip_reward_extra_relic"):
-        reward = state.get("reward")
-        if isinstance(reward, dict) and action_kind == "take_reward_relic":
-            index = payload.get("Index", payload.get("index"))
-            options = reward.get("relic_options")
-            if isinstance(options, list) and type(index) is int and 0 <= index < len(options):
-                tokens.append((f"macro:reward:relic:{options[index]}", 1.0))
-            else:
-                tokens.append((f"macro:reward:relic:{reward.get('relic_option')}", 1.0))
+        tokens.append((f"macro:deck-choice:{key or 'unknown'}", 1.0))
+    elif action_kind in (
+        "take_reward_card", "take_reward_card_group", "skip_reward_card_group",
+        "sacrifice_reward_card_group", "reroll_reward_card",
+        "take_reward_relic", "take_reward_extra_relic", "skip_reward_extra_relic",
+        "replace_reward_potion", "take_reward_extra_potion",
+        "replace_reward_extra_potion", "skip_reward_extra_potion",
+        "take_reward_extra_gold", "take_reward_bundle",
+    ):
+        tokens.extend(_reward_action_tokens(state, action_kind, payload))
     # Preserve V17 signal without modifying any V17 representation or its checkpoints.
     enriched = _hash_features(tokens, dimension)
     # Hashed feature merging deliberately sums collisions; identity tokens
