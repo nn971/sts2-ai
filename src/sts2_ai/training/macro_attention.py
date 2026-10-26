@@ -13,6 +13,9 @@ from sts2_ai.emulator import LegalAction
 from sts2_ai.models.macro_objects import (
     macro_action_target,
     macro_attention_action_features,
+    macro_card_operation_action_features,
+    macro_card_operation_action_target,
+    macro_card_operation_object_vectors,
     macro_deep_action_target,
     macro_deep_object_vectors,
     macro_global_features,
@@ -30,8 +33,12 @@ def macro_attention_forward(
     state: dict[str, Any], actions: Sequence[LegalAction],
     params: dict[str, Any], dimension: int, torch: Any,
     *, semantic_actions: bool = False, deep_actions: bool = False,
+    card_operations: bool = False,
 ) -> tuple[Any, Any]:
-    objects = (macro_deep_object_vectors if deep_actions else macro_object_vectors)(
+    objects = (
+        macro_card_operation_object_vectors if card_operations
+        else macro_deep_object_vectors if deep_actions else macro_object_vectors
+    )(
         state, actions, dimension,
     )
     ids = list(objects)
@@ -48,7 +55,7 @@ def macro_attention_forward(
             embeddings.unsqueeze(0),
             torch.ones((1, len(ids)), dtype=torch.bool), params, torch,
         ).squeeze(0)
-        if deep_actions:
+        if deep_actions or card_operations:
             embeddings = contextualize_deep_torch(
                 embeddings.unsqueeze(0),
                 torch.ones((1, len(ids)), dtype=torch.bool),
@@ -75,14 +82,16 @@ def macro_attention_forward(
     if not actions:
         return value, torch.empty((0,), dtype=torch.float32)
     actions_x = torch.tensor([
-        _dense((macro_semantic_action_features
-                if semantic_actions or deep_actions else macro_attention_action_features)(
+        _dense((macro_card_operation_action_features if card_operations
+                else macro_semantic_action_features if semantic_actions or deep_actions
+                else macro_attention_action_features)(
             state, action.kind, action.payload_json, dimension,
         ), dimension) for action in actions
     ], dtype=torch.float32)
     zero = torch.zeros_like(hidden)
     targets = [
-        (macro_deep_action_target if deep_actions else macro_action_target)(
+        (macro_card_operation_action_target if card_operations
+         else macro_deep_action_target if deep_actions else macro_action_target)(
             state, action, objects,
         ) for action in actions
     ]
