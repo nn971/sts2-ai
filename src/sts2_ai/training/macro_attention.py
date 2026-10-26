@@ -12,15 +12,16 @@ from typing import Any
 from sts2_ai.emulator import LegalAction
 from sts2_ai.models.macro_objects import (
     macro_action_target,
+    macro_attention_action_features,
     macro_deep_action_target,
     macro_deep_object_vectors,
-    macro_attention_action_features,
     macro_global_features,
     macro_object_vectors,
     macro_semantic_action_features,
 )
 from sts2_ai.training.enemy_attention import (
-    contextualize_deep_torch, contextualize_torch,
+    contextualize_deep_torch,
+    contextualize_torch,
 )
 from sts2_ai.training.neural import _dense
 
