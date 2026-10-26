@@ -74,11 +74,11 @@ from sts2_ai.training.parallel_rollouts import (
     open_worker_pool,
 )
 from sts2_ai.training.selfplay import (
+    Episode,
+    PublicDecision,
     _bounded_return,
     _curriculum_coefficient,
     collect_public_episode,
-    Episode,
-    PublicDecision,
     temperature_for_round,
 )
 
