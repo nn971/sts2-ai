@@ -209,6 +209,8 @@ def _deep_object_key(action: LegalAction) -> str | None:
     if kind == "event_choice":
         choice_id = payload.get("ChoiceId", payload.get("choice_id"))
         return f"event-choice:{choice_id}" if isinstance(choice_id, str) else None
+    if kind == "take_reward_card":
+        return None  # Already represented by the V17 reward-card pointer.
     if kind.startswith(("take_reward_", "replace_reward_")):
         return f"reward-selection:{kind}:{action.payload_json}"
     return None
