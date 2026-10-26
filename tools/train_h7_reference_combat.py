@@ -20,6 +20,7 @@ import torch
 from sts2_ai.models.h7_public_policy import H7PlayerSpec
 from sts2_ai.models.shared_game_objects import SHARED_OBJECT_SCHEMA
 from sts2_ai.models.shared_transformer import H7_MODEL_FORMAT, H7Config, SharedObjectTransformer
+from sts2_ai.nature.corpus import file_sha256
 from sts2_ai.nature.draw_only_workers import draw_only_batch
 from sts2_ai.nature.h4_reward import H4_REWARD
 from sts2_ai.nature.h5_curriculum import (
@@ -149,6 +150,14 @@ def main() -> None:
         "emulator_revision": args.emulator_revision,
         "emulator_dll": str(args.emulator_dll.resolve()),
         "emulator_bindings": str(args.emulator_bindings.resolve()),
+        "emulator_dll_sha256": (
+            file_sha256(args.emulator_dll) if args.emulator_dll.is_file() else None
+        ),
+        "emulator_bindings_sha256": (
+            file_sha256(args.emulator_bindings / "sts2_emulator" / "__init__.py")
+            if (args.emulator_bindings / "sts2_emulator" / "__init__.py").is_file()
+            else None
+        ),
         "chance_law": "reference", "combat_reward": H4_REWARD,
         "curriculum": "h5-16-train-cells", "training_cells": len(TRAIN_CELLS),
         "rounds": args.rounds, "episodes_per_round": args.episodes_per_round,
