@@ -90,6 +90,7 @@ jobs:
           assert output['combat'] == baseline['combat']
           assert report['freeze_combat'] is True
           assert report['win_anneal_threshold'] == 256
+          assert report['rounds'][0]['auxiliary_reward_weight'] > 0
           assert report['ascension'] == 10
           assert report['environment'] == 'native-overgrowth'
           assert report['episode_goal_version'] == 'native-act1-boss-v1'
