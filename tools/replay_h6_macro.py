@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -171,6 +172,25 @@ def main() -> None:
             "models": {key: file_sha256(path) for key, path in paths.items()},
             "runs": manifest,
         }, indent=2, sort_keys=True) + "\n")
+        links = []
+        for row in manifest:
+            filename = Path(row["html"]).name
+            outcomes = ", ".join(f"{label}: {outcome}" for label, outcome
+                                 in row["outcomes"].items())
+            links.append(
+                f'<li><a href="{escape(filename, quote=True)}">'
+                f'{escape(row["seed"])}</a> — {escape(outcomes)}</li>'
+            )
+        atomic_write(args.output_dir / "index.html", (
+            '<!DOCTYPE html><html lang="en"><meta charset="utf-8">'
+            '<title>H6-C public paired replays</title><style>'
+            'body{font:16px system-ui;background:#151d26;color:#e8edf5;'
+            'max-width:1000px;margin:40px auto}a{color:#89caff}'
+            'li{padding:7px}</style><h1>Paired decision replays</h1>'
+            '<p>Open a run for the persistent full map, boss identity '
+            'and expandable floor histories.</p><ul>'
+            + "".join(links) + '</ul></html>'
+        ))
 
 
 if __name__ == "__main__":
