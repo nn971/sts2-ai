@@ -8,11 +8,11 @@ from types import SimpleNamespace
 import pytest
 
 torch = pytest.importorskip("torch")
-from test_shared_transformer_h7 import actions, frame, legal, model
+from test_shared_transformer_h7 import actions, frame, legal, model  # noqa: E402
 
-from sts2_ai.emulator.semantic_p0_frozen_player import FrozenP0Player
-from sts2_ai.models.h7_public_policy import H7PlayerSpec
-from sts2_ai.training.h7_combat_ppo import H7CombatPPO
+from sts2_ai.emulator.semantic_p0_frozen_player import FrozenP0Player  # noqa: E402
+from sts2_ai.models.h7_public_policy import H7PlayerSpec  # noqa: E402
+from sts2_ai.training.h7_combat_ppo import H7CombatPPO  # noqa: E402
 
 
 def make_cohort(tmp_path: Path):
