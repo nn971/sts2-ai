@@ -38,6 +38,7 @@ from sts2_ai.models.hashed_linear import (
     tactical_action_features,
 )
 from sts2_ai.models.neural import (
+    NEURAL_FORMAT,
     TACTICAL_ATTENTION_FORMAT,
     TACTICAL_DAMAGE_FORMAT,
     TACTICAL_FORMAT,
