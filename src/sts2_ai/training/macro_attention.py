@@ -15,6 +15,7 @@ from sts2_ai.models.macro_objects import (
     macro_attention_action_features,
     macro_global_features,
     macro_object_vectors,
+    macro_semantic_action_features,
 )
 from sts2_ai.training.enemy_attention import contextualize_torch
 from sts2_ai.training.neural import _dense
@@ -23,6 +24,7 @@ from sts2_ai.training.neural import _dense
 def macro_attention_forward(
     state: dict[str, Any], actions: Sequence[LegalAction],
     params: dict[str, Any], dimension: int, torch: Any,
+    *, semantic_actions: bool = False,
 ) -> tuple[Any, Any]:
     objects = macro_object_vectors(state, actions, dimension)
     ids = list(objects)
@@ -60,7 +62,8 @@ def macro_attention_forward(
     if not actions:
         return value, torch.empty((0,), dtype=torch.float32)
     actions_x = torch.tensor([
-        _dense(macro_attention_action_features(
+        _dense((macro_semantic_action_features
+                if semantic_actions else macro_attention_action_features)(
             state, action.kind, action.payload_json, dimension,
         ), dimension) for action in actions
     ], dtype=torch.float32)

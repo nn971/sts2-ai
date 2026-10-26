@@ -31,6 +31,7 @@ from sts2_ai.models.macro_objects import (
     macro_attention_action_features,
     macro_global_features,
     macro_object_vectors,
+    macro_semantic_action_features,
 )
 from sts2_ai.models.tactical_state import (
     damage_tactical_state_features,
@@ -86,8 +87,10 @@ def encode_decision(
 
     if decision.phase == "strategy":
         state_fn = (macro_global_features
-                    if strategy_encoding == "macro_attention" else state_features)
-        action_fn = (macro_attention_action_features
+                    if strategy_encoding in ("macro_attention", "macro_semantic") else state_features)
+        action_fn = (macro_semantic_action_features
+                     if strategy_encoding == "macro_semantic"
+                     else macro_attention_action_features
                      if strategy_encoding == "macro_attention"
                      else neural_action_features)
     elif decision.phase == "combat":
@@ -117,7 +120,7 @@ def encode_decision(
         _dense(action_fn(state, action.kind, action.payload_json, dimension), dimension)
         for action in decision.legal_actions
     ], dtype=torch.float32)
-    if not ((decision.phase == "strategy" and strategy_encoding == "macro_attention")
+    if not ((decision.phase == "strategy" and strategy_encoding in ("macro_attention", "macro_semantic"))
             or (decision.phase == "combat" and encoding in ("enemy_instances", "enemy_attention"))):
         return EncodedDecision(
             decision.phase, state_tensor, action_tensor, decision.chosen_index,
