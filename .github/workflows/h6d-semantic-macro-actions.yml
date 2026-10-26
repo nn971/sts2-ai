@@ -34,3 +34,17 @@ jobs:
       - name: Semantic and backward-compatible numerical parity
         run: |
           python -m pytest -q tests/test_h6d_semantic_macro_actions.py tests/test_h6c_macro_attention.py tests/test_h6_frozen_combat_macro.py tests/test_phase_split_ppo_batch.py
+      - name: Checkout pinned native emulator
+        uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: 0469424fc20679fd81c0d5e4ee8d9a484ec19108
+          path: emulator
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Verify public shop and event fields at the emulator pin
+        run: |
+          dotnet test emulator/tests/Sts2Emulator.Core.Tests/Sts2Emulator.Core.Tests.csproj \
+            --configuration Release --nologo \
+            --filter 'FullyQualifiedName~PrototypeExpandedShopTests|FullyQualifiedName~V111OvergrowthEventChoiceObservabilityTests'
