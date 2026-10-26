@@ -19,6 +19,20 @@ from sts2_ai.models.macro_choice_identity import public_choice_label
 TRACE_SCHEMA = "sts2-ai-h6c-public-decision-trace-v1"
 REPORT_SCHEMA = "sts2-ai-h6c-paired-trace-report-v1"
 
+# The pinned emulator's PrototypeRoomType is serialized as a numeric enum.
+# Never assume the integer is already a text room name.
+ROOM_TYPES = {
+    0: "Combat", 1: "Elite", 2: "Event", 3: "Shop",
+    4: "Rest", 5: "Boss", 6: "Unknown (?)", 7: "Treasure",
+}
+
+
+def room_type_name(value: object) -> str:
+    if type(value) is int:
+        return ROOM_TYPES.get(value, f"Unknown room type #{value}")
+    return value if isinstance(value, str) else "Unknown"
+
+
 BOSS_KEYS = (
     "act_one_boss_encounter_id", "act1_boss_encounter_id", "act1_boss_id", "boss_encounter_id",
     "boss_id", "boss_encounter", "boss",
@@ -70,7 +84,7 @@ def readable_action(action: dict[str, Any], frame: dict[str, Any],
         for node in map_nodes if isinstance(map_nodes, list) else []:
             if isinstance(node, dict) and node.get("node_id") == node_id:
                 return (f"Route → floor {node.get('floor', '?')} "
-                        f"{node.get('room_type', 'unknown')} ({node_id})")
+                        f"{room_type_name(node.get('room_type'))} ({node_id})")
     if kind == "take_reward_card":
         index = payload.get("Index", payload.get("index"))
         reward = frame.get("reward")
@@ -306,7 +320,7 @@ def map_svg(nodes: Sequence[dict[str, Any]], routes: dict[str, set[str]],
     for n in valid:
         node_id = n["node_id"]
         x, y = coords[node_id]
-        color = _room_style(str(n.get("room_type", "unknown")))
+        color = _room_style(room_type_name(n.get("room_type")))
         visited = [label for label, route in routes.items()
                    if node_id in route]
         outline = "#30bd8a" if "a" in visited else "#f5b14c" if visited else "#293340"
@@ -315,7 +329,7 @@ def map_svg(nodes: Sequence[dict[str, Any]], routes: dict[str, set[str]],
         parts.append(
             f'<circle cx="{x}" cy="{y}" r="14" fill="{color}" '
             f'stroke="{outline}" stroke-width="{4 if visited else 1.5}">'
-            f'<title>{_safe(node_id)}: {_safe(n.get("room_type", "unknown"))}'
+            f'<title>{_safe(node_id)}: {_safe(room_type_name(n.get("room_type")))}'
             f'{_safe(extra)}</title></circle>'
         )
         for label, active_id in current.items():
@@ -325,7 +339,7 @@ def map_svg(nodes: Sequence[dict[str, Any]], routes: dict[str, set[str]],
                     f'fill="none" stroke="{"#30bd8a" if label == "a" else "#f5b14c"}" '
                     'stroke-width="2.5"/>'
                 )
-        room_name = str(n.get("room_type", "unknown"))
+        room_name = room_type_name(n.get("room_type"))
         parts.append(
             f'<text x="{x}" y="{y + 4}" text-anchor="middle" '
             'font-size="9" fill="#101419">'
