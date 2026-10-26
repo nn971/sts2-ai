@@ -40,6 +40,7 @@ from sts2_ai.models.hashed_linear import (
 from sts2_ai.models.macro_objects import (
     MACRO_ATTENTION_FORMAT,
     MACRO_DEEP_FORMAT,
+    MACRO_CARD_OPERATIONS_FORMAT,
     MACRO_SEMANTIC_FORMAT,
 )
 from sts2_ai.models.neural import (
@@ -149,12 +150,13 @@ def _forward_decision(
     state = state_dict(decision.observation.payload_json)
     if (
         decision.phase == "strategy"
-        and strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep")
+        and strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep", "macro_card_ops")
     ):
         return macro_attention_forward(
             state, decision.legal_actions, params, dimension, torch,
             semantic_actions=strategy_encoding == "macro_semantic",
             deep_actions=strategy_encoding == "macro_deep",
+            card_operations=strategy_encoding == "macro_card_ops",
         )
     if (decision.phase == "combat" and
             tactical_state_encoding in ("enemy_instances", "enemy_attention")):
@@ -198,7 +200,8 @@ def _export_split(
         strategy=_export(
             strategy_params, dimension, hidden,
             model_id=model_id + "-strategy", value_head_trained=trained,
-            format_id=(MACRO_DEEP_FORMAT if strategy_encoding == "macro_deep"
+            format_id=(MACRO_CARD_OPERATIONS_FORMAT if strategy_encoding == "macro_card_ops"
+                       else MACRO_DEEP_FORMAT if strategy_encoding == "macro_deep"
                        else MACRO_SEMANTIC_FORMAT if strategy_encoding == "macro_semantic"
                        else MACRO_ATTENTION_FORMAT
                        if strategy_encoding == "macro_attention" else NEURAL_FORMAT),
@@ -390,11 +393,11 @@ def train_phase_split(
         raise ValueError("Frozen-combat macro training requires PPO")
     if strategy_encoding not in ("legacy", "macro_attention", "macro_semantic", "macro_deep"):
         raise ValueError("Unknown strategy encoding")
-    if strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep") and not (
+    if strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep", "macro_card_ops") and not (
         freeze_combat and optimizer_method == "ppo" and ppo_backend == "batched"
     ):
         raise ValueError("Macro attention requires frozen-combat batched PPO")
-    if strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep") and hidden % 4:
+    if strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep", "macro_card_ops") and hidden % 4:
         raise ValueError("Macro attention hidden width must be divisible by four")
     if min(rounds, episodes_per_round, dimension, hidden, max_decisions, workers) <= 0:
         raise ValueError("Expected positive sizes and worker count")
@@ -460,10 +463,10 @@ def train_phase_split(
         "strategy": _new_params(dimension, hidden, torch),
         "combat": _new_params(dimension, hidden, torch),
     }
-    if strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep"):
+    if strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep", "macro_card_ops"):
         add_instance_parameters(params["strategy"], dimension, hidden, torch)
         add_attention_parameters(params["strategy"], hidden, torch)
-        if strategy_encoding == "macro_deep":
+        if strategy_encoding in ("macro_deep", "macro_card_ops"):
             add_deep_macro_parameters(params["strategy"], hidden, torch)
     if tactical_state_encoding in ("enemy_instances", "enemy_attention"):
         add_instance_parameters(params["combat"], dimension, hidden, torch)
