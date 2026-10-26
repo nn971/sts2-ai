@@ -1,0 +1,50 @@
+name: h6d-semantic-macro-actions
+
+on:
+  push:
+    paths:
+      - 'src/sts2_ai/models/macro_objects.py'
+      - 'src/sts2_ai/models/neural.py'
+      - 'src/sts2_ai/models/phase_split.py'
+      - 'src/sts2_ai/training/macro_attention.py'
+      - 'src/sts2_ai/training/phase_split_ppo_batch.py'
+      - 'src/sts2_ai/training/phase_split_selfplay.py'
+      - 'tools/train_phase_split.py'
+      - 'tests/test_h6d_semantic_macro_actions.py'
+      - '.github/workflows/h6d-semantic-macro-actions.yml'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  semantic-actions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e '.[dev]'
+      - name: Lint touched Python
+        run: |
+          python -m ruff check src/sts2_ai/models/macro_objects.py src/sts2_ai/models/neural.py src/sts2_ai/models/phase_split.py src/sts2_ai/training/macro_attention.py src/sts2_ai/training/phase_split_ppo_batch.py src/sts2_ai/training/phase_split_selfplay.py tools/train_phase_split.py tests/test_h6d_semantic_macro_actions.py
+      - name: Semantic and backward-compatible numerical parity
+        run: |
+          python -m pytest -q tests/test_h6d_semantic_macro_actions.py tests/test_h6c_macro_attention.py tests/test_h6_frozen_combat_macro.py tests/test_phase_split_ppo_batch.py
+      - name: Checkout pinned native emulator
+        uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: 0469424fc20679fd81c0d5e4ee8d9a484ec19108
+          path: emulator
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Verify public shop and event fields at the emulator pin
+        run: |
+          dotnet test emulator/tests/Sts2Emulator.Core.Tests/Sts2Emulator.Core.Tests.csproj \
+            --configuration Release --nologo \
+            --filter 'FullyQualifiedName~PrototypeExpandedShopTests|FullyQualifiedName~V111OvergrowthEventChoiceObservabilityTests'

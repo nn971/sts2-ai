@@ -16,7 +16,7 @@ from sts2_ai.emulator import LegalAction, Observation
 from sts2_ai.emulator.semantic_p0_public_projection import (
     project_public_p0_observation,
 )
-from sts2_ai.models.macro_objects import MACRO_ATTENTION_FORMAT
+from sts2_ai.models.macro_objects import MACRO_ATTENTION_FORMAT, MACRO_SEMANTIC_FORMAT
 from sts2_ai.models.neural import (
     NEURAL_FORMAT,
     TACTICAL_ATTENTION_FORMAT,
@@ -57,7 +57,9 @@ class PhaseSplitNeuralModel:
             raise ValueError("Phase-split model requires a model identifier")
         if self.combat_value_objective not in ("continuation", "hp_first", "hp_preservation"):
             raise ValueError("Unsupported combat value objective")
-        if self.strategy.format_id not in (NEURAL_FORMAT, MACRO_ATTENTION_FORMAT):
+        if self.strategy.format_id not in (
+            NEURAL_FORMAT, MACRO_ATTENTION_FORMAT, MACRO_SEMANTIC_FORMAT,
+        ):
             raise ValueError("Strategy head must use the semantic action format")
         if self.combat.format_id not in (
             TACTICAL_FORMAT, TACTICAL_STRUCTURED_FORMAT, TACTICAL_RELATIONAL_FORMAT,
