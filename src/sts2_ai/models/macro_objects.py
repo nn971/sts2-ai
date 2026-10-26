@@ -221,7 +221,8 @@ def _offer_from_action(
     if key is None:
         return None
     offer_id = payload.get("OfferId", payload.get("offer_id"))
-    for offer in shop.get(key, []):
+    listed = shop.get(key)
+    for offer in listed if isinstance(listed, list) else []:
         if (isinstance(offer, dict) and offer.get("offer_id") == offer_id):
             return offer
     # Older bridge sometimes exposes one singular potion/relic offer.
