@@ -150,7 +150,8 @@ def _forward_decision(
     state = state_dict(decision.observation.payload_json)
     if (
         decision.phase == "strategy"
-        and strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep", "macro_card_ops")
+        and strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep",
+        "macro_card_ops")
     ):
         return macro_attention_forward(
             state, decision.legal_actions, params, dimension, torch,
@@ -393,11 +394,13 @@ def train_phase_split(
         raise ValueError("Frozen-combat macro training requires PPO")
     if strategy_encoding not in ("legacy", "macro_attention", "macro_semantic", "macro_deep"):
         raise ValueError("Unknown strategy encoding")
-    if strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep", "macro_card_ops") and not (
+    if strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep",
+    "macro_card_ops") and not (
         freeze_combat and optimizer_method == "ppo" and ppo_backend == "batched"
     ):
         raise ValueError("Macro attention requires frozen-combat batched PPO")
-    if strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep", "macro_card_ops") and hidden % 4:
+    if strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep",
+    "macro_card_ops") and hidden % 4:
         raise ValueError("Macro attention hidden width must be divisible by four")
     if min(rounds, episodes_per_round, dimension, hidden, max_decisions, workers) <= 0:
         raise ValueError("Expected positive sizes and worker count")
