@@ -388,6 +388,45 @@ def _floor_sections(trace: dict[str, Any]) -> str:
     return "".join(chunks)
 
 
+def _first_disagreement_table(traces: Sequence[dict[str, Any]],
+                              index: int) -> str:
+    """Compare both checkpoints' logits for the *same* observed action menu."""
+    a, b = (t["decisions"][index] for t in traces)
+    def keyed(decision: dict[str, Any]) -> dict[tuple[str, str], tuple[float | None, bool, str]]:
+        result = {}
+        for i, action in enumerate(decision["actions"]):
+            key = (action["kind"], json.dumps(action["payload"], sort_keys=True))
+            result[key] = (action["score"], i == decision["selected"],
+                           action.get("label", action_label(action)))
+        return result
+
+    aa, bb = keyed(a), keyed(b)
+    if aa.keys() != bb.keys():
+        return '<p>Menus differ; matched-action scores are not directly comparable.</p>'
+    order = sorted(aa, key=lambda key: max(
+        aa[key][0] if aa[key][0] is not None else -math.inf,
+        bb[key][0] if bb[key][0] is not None else -math.inf,
+    ), reverse=True)
+    cells = []
+    for key in order:
+        one, two = aa[key], bb[key]
+        fmt = lambda record: (
+            ("● " if record[1] else "") +
+            (f"{record[0]:.3f}" if record[0] is not None else "n/a")
+        )
+        cells.append(
+            f'<tr><td>{_safe(one[2])}</td>'
+            f'<td>{_safe(fmt(one))}</td><td>{_safe(fmt(two))}</td></tr>'
+        )
+    return (
+        '<table><tr><th>Legal action</th>'
+        f'<th>{_safe(traces[0]["label"])} logit</th>'
+        f'<th>{_safe(traces[1]["label"])} logit</th></tr>'
+        + "".join(cells) + '</table>'
+        '<p>● selected action; logits are not calibrated win probabilities.</p>'
+    )
+
+
 def render_html(traces: Sequence[dict[str, Any]]) -> str:
     if not 1 <= len(traces) <= 2:
         raise ValueError("HTML report supports one or two replay traces")
@@ -430,6 +469,7 @@ def render_html(traces: Sequence[dict[str, Any]]) -> str:
                     f'{_safe(trace["label"])}: {_safe(selected.get("label", action_label(selected)))}'
                 )
             divergence += '<p>' + ' versus '.join(entries) + '</p>'
+            divergence += _first_disagreement_table(traces, idx)
     panels = []
     for trace in traces:
         panels.append(
