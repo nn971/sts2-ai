@@ -32,8 +32,11 @@ from .hashed_linear import (
     tactical_action_features,
 )
 from .macro_objects import (
-    MACRO_ATTENTION_FORMAT, macro_action_target,
-    macro_attention_action_features, macro_global_features, macro_object_vectors,
+    MACRO_ATTENTION_FORMAT,
+    macro_action_target,
+    macro_attention_action_features,
+    macro_global_features,
+    macro_object_vectors,
 )
 from .protocol import PolicyValueEstimate
 from .tactical_state import (
