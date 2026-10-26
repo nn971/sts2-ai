@@ -7,7 +7,9 @@ import pytest
 
 from sts2_ai.emulator import LegalAction, Observation
 from sts2_ai.models.macro_objects import (
-    MACRO_DEEP_FORMAT, macro_deep_action_target, macro_deep_object_vectors,
+    macro_deep_action_target,
+    MACRO_DEEP_FORMAT,
+    macro_deep_object_vectors,
 )
 from sts2_ai.models.neural import NeuralPolicyValueModel
 from sts2_ai.training.selfplay import PublicDecision
@@ -114,7 +116,8 @@ def test_deep_torch_batch_portable_parity_and_gradients():
 def test_deep_has_more_parameters_than_v18():
     torch = pytest.importorskip("torch")
     from sts2_ai.training.enemy_attention import (
-        add_attention_parameters, add_deep_macro_parameters,
+        add_attention_parameters,
+        add_deep_macro_parameters,
     )
     from sts2_ai.training.instance_combat import add_instance_parameters
     from sts2_ai.training.neural import _new_params
