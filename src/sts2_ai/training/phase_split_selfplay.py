@@ -37,7 +37,9 @@ from sts2_ai.models.hashed_linear import (
     state_features,
     tactical_action_features,
 )
+from sts2_ai.models.macro_objects import MACRO_ATTENTION_FORMAT
 from sts2_ai.models.neural import (
+    NEURAL_FORMAT,
     TACTICAL_ATTENTION_FORMAT,
     TACTICAL_DAMAGE_FORMAT,
     TACTICAL_FORMAT,
@@ -57,6 +59,7 @@ from sts2_ai.models.tactical_state import (
 from sts2_ai.training.combat_outcomes import CombatOutcome
 from sts2_ai.training.enemy_attention import add_attention_parameters
 from sts2_ai.training.instance_combat import add_instance_parameters, instance_forward
+from sts2_ai.training.macro_attention import macro_attention_forward
 from sts2_ai.training.neural import _dense, _export, _forward, _new_params
 from sts2_ai.training.parallel_rollouts import (
     collect_parallel,
@@ -134,8 +137,13 @@ def _forward_decision(
     decision: PublicDecision, params: dict[str, Any],
     dimension: int, torch: Any, *,
     tactical_state_encoding: str = "legacy",
+    strategy_encoding: str = "legacy",
 ) -> tuple[Any, Any]:
     state = state_dict(decision.observation.payload_json)
+    if decision.phase == "strategy" and strategy_encoding == "macro_attention":
+        return macro_attention_forward(
+            state, decision.legal_actions, params, dimension, torch,
+        )
     if (decision.phase == "combat" and
             tactical_state_encoding in ("enemy_instances", "enemy_attention")):
         return instance_forward(state, decision.legal_actions, params, dimension, torch)
@@ -171,12 +179,15 @@ def _export_split(
     strategy_params: dict[str, Any], combat_params: dict[str, Any],
     dimension: int, hidden: int, *, model_id: str, trained: bool,
     tactical_state_encoding: str = "legacy",
+    strategy_encoding: str = "legacy",
     combat_objective: str = "continuation",
 ) -> PhaseSplitNeuralModel:
     return PhaseSplitNeuralModel(
         strategy=_export(
             strategy_params, dimension, hidden,
             model_id=model_id + "-strategy", value_head_trained=trained,
+            format_id=(MACRO_ATTENTION_FORMAT
+                       if strategy_encoding == "macro_attention" else NEURAL_FORMAT),
         ),
         combat=_export(
             combat_params, dimension, hidden,
@@ -331,6 +342,7 @@ def train_phase_split(
     auxiliary_weight: float = 0.4, boundary_weight: float = 0.25,
     hp_monotonic_weight: float = 0.2,
     tactical_state_encoding: str = "legacy",
+    strategy_encoding: str = "legacy",
     loss_normalization: str = "legacy_episode_sum",
     optimizer_method: str = "reinforce",
     ppo_backend: str = "reference",
@@ -362,6 +374,14 @@ def train_phase_split(
         raise ValueError("Frozen-combat macro training requires a pinned warm start")
     if freeze_combat and optimizer_method != "ppo":
         raise ValueError("Frozen-combat macro training requires PPO")
+    if strategy_encoding not in ("legacy", "macro_attention"):
+        raise ValueError("Unknown strategy encoding")
+    if strategy_encoding == "macro_attention" and not (
+        freeze_combat and optimizer_method == "ppo" and ppo_backend == "batched"
+    ):
+        raise ValueError("Macro attention requires frozen-combat batched PPO")
+    if strategy_encoding == "macro_attention" and hidden % 4:
+        raise ValueError("Macro attention hidden width must be divisible by four")
     if min(rounds, episodes_per_round, dimension, hidden, max_decisions, workers) <= 0:
         raise ValueError("Expected positive sizes and worker count")
     if combat_objective not in ("continuation", "hp_first", "hp_preservation"):
@@ -426,6 +446,9 @@ def train_phase_split(
         "strategy": _new_params(dimension, hidden, torch),
         "combat": _new_params(dimension, hidden, torch),
     }
+    if strategy_encoding == "macro_attention":
+        add_instance_parameters(params["strategy"], dimension, hidden, torch)
+        add_attention_parameters(params["strategy"], hidden, torch)
     if tactical_state_encoding in ("enemy_instances", "enemy_attention"):
         add_instance_parameters(params["combat"], dimension, hidden, torch)
     if tactical_state_encoding == "enemy_attention":
@@ -550,6 +573,8 @@ def train_phase_split(
         })
     if tactical_state_encoding != "legacy":
         config["tactical_state_encoding"] = tactical_state_encoding
+    if strategy_encoding != "legacy":
+        config["strategy_encoding"] = strategy_encoding
     if freeze_combat:
         config["freeze_combat"] = True
     if combat_objective != "continuation":
@@ -603,6 +628,7 @@ def train_phase_split(
                 params["strategy"], params["combat"], dimension, hidden,
                 model_id=f"phase-split-before-round-{index}", trained=index > 0,
                 tactical_state_encoding=tactical_state_encoding,
+                strategy_encoding=strategy_encoding,
                 combat_objective=combat_objective,
             )
             if freeze_combat:
@@ -710,6 +736,8 @@ def train_phase_split(
                     value_weight=value_weight,
                     entropy_weight=entropy_weight,
                     seed=seed + index * 1000003,
+                    **({"strategy_encoding": strategy_encoding}
+                       if ppo_backend == "batched" else {}),
                 )
                 steps = ppo.steps
                 strategic_count = ppo.counts["strategy"]
@@ -992,6 +1020,7 @@ def train_phase_split(
         model_id=f"phase-split-v1-{fingerprint[:12]}-{rounds}",
         trained=bool(rows and any(x.optimization_steps for x in rows)),
         tactical_state_encoding=tactical_state_encoding,
+        strategy_encoding=strategy_encoding,
         combat_objective=combat_objective,
     )
     if freeze_combat:

@@ -12,15 +12,16 @@ from pathlib import Path
 from sts2_ai.agents import NeuralGreedyAgent
 from sts2_ai.agents.phase_split_agent import PhaseSplitGreedyAgent
 from sts2_ai.emulator import FAIR_POLICY_ID, InformationPolicy, JsonlEmulatorBackend
+from sts2_ai.emulator.episode_goal import (
+    EPISODE_GOALS,
+    NATIVE_ACT1_BOSS_GOAL,
+)
 from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH
 from sts2_ai.evaluation import play_run
 from sts2_ai.evaluation.baseline_cache import (
     baseline_identity,
     load_cache,
     save_cache,
-)
-from sts2_ai.emulator.episode_goal import (
-    EPISODE_GOALS, NATIVE_ACT1_BOSS_GOAL,
 )
 from sts2_ai.training.phase_split_selfplay import (
     BALANCED_TRAINING_VERSION,
@@ -77,9 +78,17 @@ def main() -> None:
     p.add_argument("--hp-monotonic-weight", type=float, default=0.2)
     p.add_argument(
         "--tactical-state-encoding",
-        choices=("legacy", "structured", "relational", "relational_damage", "public_resources", "enemy_instances", "enemy_attention"),
+        choices=(
+            "legacy", "structured", "relational", "relational_damage",
+            "public_resources", "enemy_instances", "enemy_attention",
+        ),
         default="relational",
         help="v5/v6 relational, v7 resources, or v8 species-aware enemy instances",
+    )
+    p.add_argument(
+        "--strategy-encoding", choices=("legacy", "macro_attention"),
+        default="legacy",
+        help="H6-C: opt-in public macro object attention (frozen batched PPO)",
     )
     p.add_argument("--temperature-start", type=float, default=0.05)
     p.add_argument("--temperature-end", type=float, default=0.035)
@@ -128,6 +137,11 @@ def main() -> None:
         p.error("--freeze-combat requires --warm-start and --optimizer-method ppo")
     if args.freeze_combat and args.ascension != 10:
         p.error("H6 frozen-combat training requires --ascension 10")
+    if args.strategy_encoding == "macro_attention" and not (
+        args.freeze_combat and args.optimizer_method == "ppo"
+        and args.ppo_backend == "batched"
+    ):
+        p.error("Macro attention requires frozen-combat batched PPO")
     if args.win_anneal_threshold < 1:
         p.error("--win-anneal-threshold must be positive")
     if args.eval_seeds < 1:
@@ -167,6 +181,7 @@ def main() -> None:
         f"[split] start | rounds={args.rounds} episodes={args.episodes} "
         f"workers={args.workers} boundary_weight={args.boundary_weight} "
         f"tactical_state_encoding={args.tactical_state_encoding} "
+        f"strategy_encoding={args.strategy_encoding} "
         f"optimizer_method={args.optimizer_method} ppo_backend={args.ppo_backend} "
         f"loss_normalization={args.loss_normalization} "
         f"combat_objective={args.combat_objective} "
@@ -193,6 +208,7 @@ def main() -> None:
             boundary_weight=args.boundary_weight,
             hp_monotonic_weight=args.hp_monotonic_weight,
             tactical_state_encoding=args.tactical_state_encoding,
+            strategy_encoding=args.strategy_encoding,
             loss_normalization=args.loss_normalization,
             combat_objective=args.combat_objective,
             combat_advantage_baseline=combat_baseline,
@@ -370,6 +386,7 @@ def main() -> None:
             ),
             "hp_monotonic_weight": args.hp_monotonic_weight,
             "tactical_state_encoding": args.tactical_state_encoding,
+            "strategy_encoding": args.strategy_encoding,
             "eval_seed_prefix": args.eval_seed_prefix,
             "warm_start": str(args.warm_start) if args.warm_start else None,
         }

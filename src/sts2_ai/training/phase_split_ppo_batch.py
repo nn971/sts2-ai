@@ -26,6 +26,12 @@ from sts2_ai.models.hashed_linear import (
     state_features,
     tactical_action_features,
 )
+from sts2_ai.models.macro_objects import (
+    macro_action_target,
+    macro_attention_action_features,
+    macro_global_features,
+    macro_object_vectors,
+)
 from sts2_ai.models.tactical_state import (
     damage_tactical_state_features,
     public_resources_tactical_state_features,
@@ -70,6 +76,7 @@ class PreparedSample:
 
 def encode_decision(
     decision: PublicDecision, dimension: int, encoding: str, torch: Any,
+    *, strategy_encoding: str = "legacy",
 ) -> EncodedDecision:
     state = state_dict(decision.observation.payload_json)
     if not decision.legal_actions:
@@ -78,8 +85,11 @@ def encode_decision(
         raise ValueError("Chosen PPO action lies outside legal menu")
 
     if decision.phase == "strategy":
-        state_fn = state_features
-        action_fn = neural_action_features
+        state_fn = (macro_global_features
+                    if strategy_encoding == "macro_attention" else state_features)
+        action_fn = (macro_attention_action_features
+                     if strategy_encoding == "macro_attention"
+                     else neural_action_features)
     elif decision.phase == "combat":
         state_fn = {
             "legacy": state_features,
@@ -107,12 +117,15 @@ def encode_decision(
         _dense(action_fn(state, action.kind, action.payload_json, dimension), dimension)
         for action in decision.legal_actions
     ], dtype=torch.float32)
-    if decision.phase != "combat" or encoding not in ("enemy_instances", "enemy_attention"):
+    if not ((decision.phase == "strategy" and strategy_encoding == "macro_attention")
+            or (decision.phase == "combat" and encoding in ("enemy_instances", "enemy_attention"))):
         return EncodedDecision(
             decision.phase, state_tensor, action_tensor, decision.chosen_index,
         )
 
-    nodes = enemy_instance_vectors(state, dimension)
+    nodes = (macro_object_vectors(state, decision.legal_actions, dimension)
+             if decision.phase == "strategy"
+             else enemy_instance_vectors(state, dimension))
     ids = list(nodes)  # order is arbitrary but IDs only select the correct slot
     slot = {instance_id: i for i, instance_id in enumerate(ids)}
     enemy_tensor = (
@@ -120,8 +133,10 @@ def encode_decision(
         if ids else torch.empty((0, dimension), dtype=torch.float32)
     )
     target_tensor = torch.tensor([
-        slot[target] if (target := action_target_instance(
-            action.payload_json, nodes
+        slot[target] if (target := (
+            macro_action_target(state, action, nodes)
+            if decision.phase == "strategy" else
+            action_target_instance(action.payload_json, nodes)
         )) is not None else -1
         for action in decision.legal_actions
     ], dtype=torch.long)
@@ -231,6 +246,7 @@ def _prepare(
     temperature: float, gamma: float, gae_lambda: float,
     inference_batch_size: int = 128,
     episode_weights: list[float] | None = None,
+    strategy_encoding: str = "legacy",
 ) -> dict[str, list[PreparedSample]]:
     """Encode the whole cohort ONCE, including old-policy logits and values."""
     if episode_weights is not None and (
@@ -240,7 +256,9 @@ def _prepare(
     ):
         raise ValueError("Malformed reference-law importance weights")
     encoded_episodes = [
-        [encode_decision(decision, dimension, encoding, torch) for decision in ep.decisions]
+        [encode_decision(decision, dimension, encoding, torch,
+                         strategy_encoding=strategy_encoding)
+         for decision in ep.decisions]
         for ep, _ in run_targets
     ]
     # Flatten records by phase, retaining their episode and decision indices.
@@ -321,6 +339,7 @@ def ppo_update_batched(
     batch_size: int, sample_limit: int, clip_epsilon: float,
     value_weight: float, entropy_weight: float, seed: int,
     episode_weights: list[float] | None = None,
+    strategy_encoding: str = "legacy",
 ) -> PpoDiagnostics:
     if min(epochs, batch_size, sample_limit) <= 0:
         raise ValueError("PPO epoch/batch/sample sizes must be positive")
@@ -333,6 +352,7 @@ def ppo_update_batched(
         params=params, dimension=dimension, encoding=encoding,
         temperature=temperature, gamma=gamma, gae_lambda=gae_lambda,
         episode_weights=episode_weights,
+        strategy_encoding=strategy_encoding,
     )
     rng = random.Random(seed)
     all_losses: list[float] = []
