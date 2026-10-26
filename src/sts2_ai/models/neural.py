@@ -33,7 +33,7 @@ from .hashed_linear import (
 )
 from .macro_objects import (
     MACRO_ATTENTION_FORMAT, macro_action_target,
-    macro_attention_action_features, macro_object_vectors,
+    macro_attention_action_features, macro_global_features, macro_object_vectors,
 )
 from .protocol import PolicyValueEstimate
 from .tactical_state import (
@@ -366,7 +366,7 @@ class NeuralPolicyValueModel:
             if individual else 0.0 for i in range(self.hidden)
         ]
         projected_state = _sparse_matvec(
-            self.state_weight, state_features(state, self.dimension), self.state_bias,
+            self.state_weight, macro_global_features(state, self.dimension), self.state_bias,
         )
         hidden = _relu([
             projected_state[i] + self.enemy_context_weight[i] * pooled[i]
