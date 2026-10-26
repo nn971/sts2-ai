@@ -285,3 +285,25 @@ def test_v18_native_grouped_reward_actions_retain_public_identity():
     assert encoded("choose_relic_deck_card", {"CardInstanceId": 100}) != encoded(
         "choose_relic_deck_card", {"CardInstanceId": 200},
     )
+
+
+def test_v18_reward_same_card_with_different_public_upgrades():
+    state = {
+        "reward": {
+            "card_options": ["silent.backflip", "silent.backflip"],
+            "card_option_upgrade_flags": [False, True],
+            "card_option_previews": [
+                {"card_id": "silent.backflip", "upgrade_level": 0,
+                 "enchantment": None},
+                {"card_id": "silent.backflip", "upgrade_level": 1,
+                 "enchantment": None},
+            ],
+        },
+    }
+    plain = macro_semantic_action_features(
+        state, "take_reward_card", '{"Index":0}', 512,
+    )
+    upgraded = macro_semantic_action_features(
+        state, "take_reward_card", '{"Index":1}', 512,
+    )
+    assert plain != upgraded
