@@ -262,6 +262,8 @@ def _reward_action_tokens(
                 "skip_reward_card_group", "sacrifice_reward_card_group",
                 "reroll_reward_card"):
         cards = reward.get("card_options")
+        flags = reward.get("card_option_upgrade_flags")
+        previews = reward.get("card_option_previews")
         if type(group) is int:
             groups = reward.get("pending_card_groups")
             matched = next((
@@ -269,10 +271,28 @@ def _reward_action_tokens(
                 if isinstance(item, dict) and item.get("group_index") == group
             ), None) if isinstance(groups, list) else None
             cards = matched.get("card_options") if isinstance(matched, dict) else None
+            flags = matched.get("option_upgrade_flags") if isinstance(matched, dict) else None
+            previews = matched.get("card_previews") if isinstance(matched, dict) else None
         if isinstance(cards, list):
             if kind in ("take_reward_card", "take_reward_card_group"):
                 if type(index) is int and 0 <= index < len(cards):
                     tokens.append((f"macro:reward:card:{cards[index]}", 1.0))
+                    if isinstance(flags, list) and index < len(flags):
+                        if type(flags[index]) is bool:
+                            tokens.append(("macro:reward:card:upgrade_flag", float(flags[index])))
+                    if isinstance(previews, list) and index < len(previews):
+                        preview = previews[index]
+                        if isinstance(preview, dict):
+                            level = _number(preview.get("upgrade_level"), 4.0)
+                            if level is not None:
+                                tokens.append(("macro:reward:card:preview_level", level))
+                            enchantment = preview.get("enchantment")
+                            if isinstance(enchantment, dict):
+                                for field, value in sorted(enchantment.items()):
+                                    if isinstance(value, str):
+                                        tokens.append((
+                                            f"macro:reward:card:enchant:{field}:{value}", 1.0,
+                                        ))
             else:
                 # The offered set is visible even for a skip/reroll decision.
                 for card_id in sorted(name for name in cards if isinstance(name, str)):
