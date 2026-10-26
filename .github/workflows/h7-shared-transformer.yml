@@ -8,6 +8,7 @@ on:
       - 'docs/H7_SHARED_TRANSFORMER_COMBAT.md'
       - 'src/sts2_ai/models/shared_game_objects.py'
       - 'src/sts2_ai/models/shared_transformer.py'
+      - 'src/sts2_ai/models/h7_public_policy.py'
       - 'tests/test_shared_transformer_h7.py'
       - 'tools/probe_h7_transformer.py'
       - '.github/workflows/h7-shared-transformer.yml'
@@ -16,6 +17,7 @@ on:
       - 'docs/H7_SHARED_TRANSFORMER_COMBAT.md'
       - 'src/sts2_ai/models/shared_game_objects.py'
       - 'src/sts2_ai/models/shared_transformer.py'
+      - 'src/sts2_ai/models/h7_public_policy.py'
       - 'tests/test_shared_transformer_h7.py'
       - 'tools/probe_h7_transformer.py'
       - '.github/workflows/h7-shared-transformer.yml'
@@ -36,7 +38,7 @@ jobs:
           python -m pip install -e '.[dev]'
       - name: H7 isolated lint and unit tests
         run: |
-          python -m ruff check src/sts2_ai/models/shared_game_objects.py src/sts2_ai/models/shared_transformer.py tests/test_shared_transformer_h7.py tools/probe_h7_transformer.py
+          python -m ruff check src/sts2_ai/models/shared_game_objects.py src/sts2_ai/models/shared_transformer.py src/sts2_ai/models/h7_public_policy.py tests/test_shared_transformer_h7.py tools/probe_h7_transformer.py
           python -m pytest -q tests/test_shared_transformer_h7.py
       - name: Full-size differentiable architecture probe
         run: |
