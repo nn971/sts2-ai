@@ -10,9 +10,9 @@ from collections.abc import Sequence
 from typing import Any
 
 from sts2_ai.emulator import LegalAction
-from sts2_ai.models.hashed_linear import state_features
 from sts2_ai.models.macro_objects import (
-    macro_action_target, macro_attention_action_features, macro_object_vectors,
+    macro_action_target, macro_attention_action_features, macro_global_features,
+    macro_object_vectors,
 )
 from sts2_ai.training.enemy_attention import contextualize_torch
 from sts2_ai.training.neural import _dense
@@ -46,7 +46,7 @@ def macro_attention_forward(
         pooled = torch.zeros_like(params["enemy_bias"])
         index = {}
     state_x = torch.tensor(
-        _dense(state_features(state, dimension), dimension), dtype=torch.float32,
+        _dense(macro_global_features(state, dimension), dimension), dtype=torch.float32,
     )
     hidden = relu(
         linear(state_x, params["state_weight"], params["state_bias"])
