@@ -18,6 +18,7 @@ from sts2_ai.emulator.semantic_p0_public_projection import (
 )
 from sts2_ai.models.macro_objects import (
     MACRO_ATTENTION_FORMAT,
+    MACRO_CARD_OPERATIONS_FORMAT,
     MACRO_DEEP_FORMAT,
     MACRO_SEMANTIC_FORMAT,
 )
@@ -62,7 +63,8 @@ class PhaseSplitNeuralModel:
         if self.combat_value_objective not in ("continuation", "hp_first", "hp_preservation"):
             raise ValueError("Unsupported combat value objective")
         if self.strategy.format_id not in (
-            NEURAL_FORMAT, MACRO_ATTENTION_FORMAT, MACRO_SEMANTIC_FORMAT, MACRO_DEEP_FORMAT,
+            NEURAL_FORMAT, MACRO_ATTENTION_FORMAT, MACRO_SEMANTIC_FORMAT,
+            MACRO_DEEP_FORMAT, MACRO_CARD_OPERATIONS_FORMAT,
         ):
             raise ValueError("Strategy head must use the semantic action format")
         if self.combat.format_id not in (
