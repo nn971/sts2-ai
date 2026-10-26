@@ -12,21 +12,27 @@ from typing import Any
 from sts2_ai.emulator import LegalAction
 from sts2_ai.models.macro_objects import (
     macro_action_target,
+    macro_deep_action_target,
+    macro_deep_object_vectors,
     macro_attention_action_features,
     macro_global_features,
     macro_object_vectors,
     macro_semantic_action_features,
 )
-from sts2_ai.training.enemy_attention import contextualize_torch
+from sts2_ai.training.enemy_attention import (
+    contextualize_deep_torch, contextualize_torch,
+)
 from sts2_ai.training.neural import _dense
 
 
 def macro_attention_forward(
     state: dict[str, Any], actions: Sequence[LegalAction],
     params: dict[str, Any], dimension: int, torch: Any,
-    *, semantic_actions: bool = False,
+    *, semantic_actions: bool = False, deep_actions: bool = False,
 ) -> tuple[Any, Any]:
-    objects = macro_object_vectors(state, actions, dimension)
+    objects = (macro_deep_object_vectors if deep_actions else macro_object_vectors)(
+        state, actions, dimension,
+    )
     ids = list(objects)
     linear = torch.nn.functional.linear
     relu = torch.nn.functional.relu
@@ -41,6 +47,12 @@ def macro_attention_forward(
             embeddings.unsqueeze(0),
             torch.ones((1, len(ids)), dtype=torch.bool), params, torch,
         ).squeeze(0)
+        if deep_actions:
+            embeddings = contextualize_deep_torch(
+                embeddings.unsqueeze(0),
+                torch.ones((1, len(ids)), dtype=torch.bool),
+                params, torch,
+            ).squeeze(0)
         pooled = embeddings.mean(dim=0)
         index = {key: i for i, key in enumerate(ids)}
     else:
@@ -63,13 +75,15 @@ def macro_attention_forward(
         return value, torch.empty((0,), dtype=torch.float32)
     actions_x = torch.tensor([
         _dense((macro_semantic_action_features
-                if semantic_actions else macro_attention_action_features)(
+                if semantic_actions or deep_actions else macro_attention_action_features)(
             state, action.kind, action.payload_json, dimension,
         ), dimension) for action in actions
     ], dtype=torch.float32)
     zero = torch.zeros_like(hidden)
     targets = [
-        macro_action_target(state, action, objects) for action in actions
+        (macro_deep_action_target if deep_actions else macro_action_target)(
+            state, action, objects,
+        ) for action in actions
     ]
     target_x = torch.stack([
         embeddings[index[target]] if target is not None else zero
