@@ -7,8 +7,8 @@ import pytest
 
 from sts2_ai.emulator import LegalAction, Observation
 from sts2_ai.models.macro_objects import (
-    macro_deep_action_target,
     MACRO_DEEP_FORMAT,
+    macro_deep_action_target,
     macro_deep_object_vectors,
 )
 from sts2_ai.models.neural import NeuralPolicyValueModel
