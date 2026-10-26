@@ -79,3 +79,21 @@ native game's exact horizontal coordinates. It uses the public floor and
 available columns, and otherwise a stable per-floor layout. If the boss
 identifier is unavailable in the pinned public schema, address that as a
 separate observation-interface request; it must not become a fidelity gate.
+
+## Important diagnostics
+
+The v17 H6-C strategy encoder identifies most shop actions only by `kind`,
+not by the public `OfferId`'s item/price, and event choices only by
+`event_choice` instead of the public `ChoiceId`. Distinct offers can thus
+produce exactly the same feature vector and target pointer. The HTML report
+marks those cases **ENCODER TIE**, which is a representation collision, not a
+merely small numerical logit difference.
+
+The new semantic-action fix is **versioned separately as V18**, not silently
+applied to historical V17 checkpoint inference. Details: PR #108.
+
+The map always shows the graph's *public room types*. Exact encounters and
+events are annotated on nodes only after they are publicly revealed during
+the replay. The shop event choices and the legal `skip_reward_relic` option
+are displayed explicitly. Training uses temperature-sampled strategic choices;
+this replay uses the greedy evaluation policy.
