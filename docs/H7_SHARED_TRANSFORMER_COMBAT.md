@@ -59,6 +59,102 @@ Target user's Ryzen 7 9700X, RTX 5070 12GB and 24GB RAM. Start with 15 CPU emula
 - New and old checkpoint formats coexist without reinterpretation; macro modules and frozen H4/H5/H6 weights remain untouched.
 - CI smoke and sufficient-sample statistical evaluation are separate deliverables.
 
+## M1 implementation: first genuine reference-law PPO path
+
+Initial independent H7 PPO modules are added:
+
+- `src/sts2_ai/training/h7_combat_ppo.py`: on-policy PPO for H7 logits/
+  critic, source-public observation/menu provenance checks, strict frozen
+  behavior log-probability/value matching **before any gradient mutation**,
+  clipped policy updates, GAE, entropy, critic loss and gradient clipping.
+  H4 scores [0,2] are scaled by 1/2 to fit the H7 tanh critic, preserving
+  the preference of any victory over any defeat. Decisions can be uniformly
+  downsampled after complete source checks.
+- `tools/train_h7_reference_combat.py`: initializes **random** H7 weights,
+  uses the H5 **16 train cells** with original reference Chance Law,
+  `H7PlayerSpec` and the existing replay-checked H5 P0 draw-only worker,
+  checkpointed AdamW, resume fingerprint/optimizer/RNG, separate selection
+  source seeds, and per-cell reports. Training does **not** require H4/H5
+  checkpoint inputs or distillation.
+- `tools/evaluate_h7_reference_combat.py`: frozen greedy H7 checkpoint
+  evaluation on disjoint confirmation or H5 zero-shot combinations, with
+  paired bootstrap comparisons when multiple H7 checkpoints are supplied.
+- `tests/test_h7_combat_ppo.py` and two isolated CI workflows: a Torch
+  synthetic source-public PPO check and a small-width **real** H5-compatible
+  semantic emulator combat run. Real-emulator smoke is a mechanical gate
+  and may be pending; verify its Actions run before claiming H7 end-to-end
+  compatibility.
+
+First-stage H7 combat uses the *existing* supported H5 16 train cells:
+sixteen genuinely distinct encounter/deck pairings, not the hundreds or
+thousands of card/relic/HP builds required for the capacity study.
+The standalone H7 trainer is available for **mechanical smoke only** until
+M2 supplies broad coherent scenario starts and M1 actual emulator training
+passes. Initial H7 CLI outputs are Torch checkpoints, not legacy JSON weights.
+
+### Local usage (Fish)
+
+Use the existing checkout at `~/projects/sts2-ai`. The executable's H5
+semantic emulator requirement is *separate* from H6-E's native macro emulator
+pin. Point `--emulator-dll` at an existing **compatible, already built**
+H5 semantic emulator binary and use its corresponding bindings/revision;
+do not check out or overwrite your active emulator development branch.
+
+```fish
+cd ~/projects/sts2-ai
+git fetch origin
+git switch research/h7-shared-transformer-combat-20261027
+git pull --ff-only
+source .venv/bin/activate.fish
+python -m pip install -e '.[neural,dev]'
+
+# Adapt these three values to your already-built H5-compatible emulator:
+set dll /absolute/path/to/Sts2Emulator.Cli.dll
+set bindings /absolute/path/to/emulator/bindings/python
+set rev e56779ccd86725582af580925ca8242826ba2229
+
+# Cheap config check without training:
+python -u tools/train_h7_reference_combat.py \
+  --emulator-dll $dll --emulator-bindings $bindings \
+  --emulator-revision $rev \
+  --output-root results/nature/h7-reference-a10 --device cuda
+
+# Mechanical smoke with a SMALL scratch model; new output directory:
+python -u tools/train_h7_reference_combat.py \
+  --emulator-dll $dll --emulator-bindings $bindings \
+  --emulator-revision $rev \
+  --output-root results/nature/h7-p0-small-smoke --device cuda \
+  --width 32 --layers 1 --heads 4 --feedforward 64 \
+  --rounds 1 --episodes-per-round 16 --workers 4 \
+  --eval-every 1 --eval-episodes 16 \
+  --ppo-epochs 1 --ppo-minibatch 16 --ppo-sample-limit 64 \
+  --execute
+```
+
+After semantic compatibility, throughput, numerical stability, M2 fixture
+coverage, and holdout gates have passed, a *new* serious full-size study can
+use the default `--width 384 --layers 6 --heads 8 --feedforward 1536`,
+`--rounds 40 --episodes-per-round 256 --workers 15`. The output directory
+must be unique. Repeating the same launch options with `--resume` restores
+the PPO optimizer and random states.
+
+Final frozen evaluation:
+
+```fish
+python -u tools/evaluate_h7_reference_combat.py \
+  --player h7=results/nature/h7-reference-a10/final-player.pt \
+  --emulator-dll $dll --emulator-bindings $bindings \
+  --emulator-revision $rev \
+  --split confirmation --runs 160 --workers 15 \
+  --output results/nature/h7-reference-confirmation.json --execute
+```
+
+An untouched zero-shot evaluation uses `--split zero-shot --runs 120` and
+a distinct output path. Any exploratory configuration or PPO hyperparameter
+selection must use only training/selection worlds. The evaluation script
+does **not** claim original-game native-seed fidelity; this uses the declared
+reference-law semantic fixtures.
+
 ## M0 execution and source-fair actor interface
 
 The initial opt-in shared codec and Torch backbone are implemented, with a strict
