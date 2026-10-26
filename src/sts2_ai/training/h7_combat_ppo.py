@@ -37,13 +37,14 @@ class H7CombatPPO:
     def __init__(
         self, model: SharedObjectTransformer, *, device: str = "cpu",
         lr: float = 0.0001, temperature: float = 0.85,
-        epochs: int = 3, minibatch: int = 64, gamma: float = 1.0,
+        epochs: int = 3, minibatch: int = 64, sample_limit: int = 4096,
+        gamma: float = 1.0,
         gae_lambda: float = 0.98, clip: float = 0.2,
         entropy_coef: float = 0.001, value_coef: float = 0.5,
         max_grad_norm: float = 1.0,
     ) -> None:
         if (lr <= 0 or temperature <= 0 or epochs < 1 or minibatch < 1
-                or not 0 < gamma <= 1 or not 0 <= gae_lambda <= 1
+                or sample_limit < 2 or not 0 < gamma <= 1 or not 0 <= gae_lambda <= 1
                 or not 0 < clip < 1 or entropy_coef < 0 or value_coef < 0
                 or max_grad_norm <= 0):
             raise ValueError("Invalid H7 PPO optimizer configuration")
@@ -52,6 +53,9 @@ class H7CombatPPO:
         self.temperature = temperature
         self.epochs = epochs
         self.minibatch = minibatch
+        self.sample_limit = sample_limit
+        if model.config.dropout != 0.0:
+            raise ValueError("H7 on-policy ratio verification requires dropout=0")
         self.gamma = gamma
         self.gae_lambda = gae_lambda
         self.clip = clip
@@ -151,6 +155,9 @@ class H7CombatPPO:
             ))
         if len(prepared) < 2:
             raise ValueError("H7 PPO requires at least two source-public decisions")
+        total_valid_decisions = len(prepared)
+        if len(prepared) > self.sample_limit:
+            prepared = random.Random(seed).sample(prepared, self.sample_limit)
 
         # Recompute once before ANY mutation, proving that the captured frozen
         # actor corresponds to the exact trainable source policy revision.
@@ -231,6 +238,7 @@ class H7CombatPPO:
         self.model.eval()
         return {
             "decisions": len(prepared),
+            "source_decisions": total_valid_decisions,
             "updates": len(diagnostics),
             "approx_kl": sum(x[0] for x in diagnostics) / len(diagnostics),
             "clip_fraction": sum(x[1] for x in diagnostics) / len(diagnostics),
