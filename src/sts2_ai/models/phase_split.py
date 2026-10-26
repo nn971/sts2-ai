@@ -17,10 +17,13 @@ from sts2_ai.emulator.semantic_p0_public_projection import (
     project_public_p0_observation,
 )
 from sts2_ai.models.macro_objects import (
-    MACRO_ATTENTION_FORMAT, MACRO_DEEP_FORMAT, MACRO_SEMANTIC_FORMAT,
+    MACRO_ATTENTION_FORMAT,
+    MACRO_DEEP_FORMAT,
+    MACRO_SEMANTIC_FORMAT,
 )
 from sts2_ai.models.neural import (
     NEURAL_FORMAT,
+    NeuralPolicyValueModel,
     TACTICAL_ATTENTION_FORMAT,
     TACTICAL_DAMAGE_FORMAT,
     TACTICAL_FORMAT,
@@ -28,13 +31,12 @@ from sts2_ai.models.neural import (
     TACTICAL_RELATIONAL_FORMAT,
     TACTICAL_RESOURCES_FORMAT,
     TACTICAL_STRUCTURED_FORMAT,
-    NeuralPolicyValueModel,
 )
 from sts2_ai.models.pooled_objects import POOLED_OBJECT_FORMAT, PortablePooledObjectModel
 from sts2_ai.models.protocol import PolicyValueEstimate
 from sts2_ai.models.relational_objects import (
-    RELATIONAL_OBJECT_FORMAT,
     PortableRelationalObjectModel,
+    RELATIONAL_OBJECT_FORMAT,
 )
 
 PHASE_SPLIT_FORMAT = "sts2-phase-split-policy-value-v1"
