@@ -23,7 +23,6 @@ from sts2_ai.models.macro_objects import (
 )
 from sts2_ai.models.neural import (
     NEURAL_FORMAT,
-    NeuralPolicyValueModel,
     TACTICAL_ATTENTION_FORMAT,
     TACTICAL_DAMAGE_FORMAT,
     TACTICAL_FORMAT,
@@ -31,12 +30,13 @@ from sts2_ai.models.neural import (
     TACTICAL_RELATIONAL_FORMAT,
     TACTICAL_RESOURCES_FORMAT,
     TACTICAL_STRUCTURED_FORMAT,
+    NeuralPolicyValueModel,
 )
 from sts2_ai.models.pooled_objects import POOLED_OBJECT_FORMAT, PortablePooledObjectModel
 from sts2_ai.models.protocol import PolicyValueEstimate
 from sts2_ai.models.relational_objects import (
-    PortableRelationalObjectModel,
     RELATIONAL_OBJECT_FORMAT,
+    PortableRelationalObjectModel,
 )
 
 PHASE_SPLIT_FORMAT = "sts2-phase-split-policy-value-v1"
