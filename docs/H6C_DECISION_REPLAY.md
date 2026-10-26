@@ -40,6 +40,7 @@ python -u tools/replay_h6_macro.py \
 
 Outputs:
 
+- `index.html`: entry point linking all selected paired replay reports.
 - `manifest.json`: seeds, model SHA-256s, boss identity, outcomes.
 - `<seed>.html`: self-contained side-by-side viewer with sticky complete map.
 - `<seed>.md`: compact floor-by-floor reading version.
