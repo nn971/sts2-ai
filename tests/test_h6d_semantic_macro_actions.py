@@ -216,3 +216,72 @@ def test_v18_native_visible_event_choices_and_potion_replacement():
     old = encoded("event_choice", {"ChoiceId": "rest"})
     state["event"]["visible_choice_values"][1]["heal"] = 45
     assert encoded("event_choice", {"ChoiceId": "rest"}) != old
+
+
+def test_v18_native_grouped_reward_actions_retain_public_identity():
+    state = {
+        "reward": {
+            "card_options": ["silent.backflip", "silent.dagger_throw"],
+            "relic_option": "proto.relic.anchor",
+            "relic_options": ["proto.relic.anchor", "proto.relic.nunchaku"],
+            "pending_card_groups": [
+                {"group_index": 1, "card_options": [
+                    "silent.footwork", "silent.accuracy",
+                ]},
+                {"group_index": 2, "card_options": [
+                    "silent.catalyst", "silent.bouncing_flask",
+                ]},
+            ],
+            "pending_extra_relic_rewards": [
+                {"group_index": 0, "relic_id": "proto.relic.vajra", "is_wax": False},
+                {"group_index": 1, "relic_id": "proto.relic.shuriken", "is_wax": True},
+            ],
+            "pending_extra_potion_rewards": [
+                {"group_index": 0, "potion_id": "proto.potion.energy"},
+                {"group_index": 1, "potion_id": "proto.potion.fire"},
+            ],
+            "pending_extra_gold_rewards": [
+                {"group_index": 0, "amount": 30},
+                {"group_index": 1, "amount": 150},
+            ],
+        },
+        "potions": [
+            {"slot": 0, "potion_id": "proto.potion.poison"},
+            {"slot": 2, "potion_id": "proto.potion.strength"},
+        ],
+        "deck": [
+            {"instance_id": 100, "card_id": "silent.backflip", "upgrade_level": 0},
+            {"instance_id": 200, "card_id": "silent.catalyst", "upgrade_level": 1},
+        ],
+    }
+
+    def encoded(kind, payload):
+        return macro_semantic_action_features(state, kind, json.dumps(payload), 512)
+
+    assert encoded("take_reward_card_group", {"GroupIndex": 1, "Index": 0}) != encoded(
+        "take_reward_card_group", {"GroupIndex": 1, "Index": 1},
+    )
+    assert encoded("take_reward_card_group", {"GroupIndex": 1, "Index": 0}) != encoded(
+        "take_reward_card_group", {"GroupIndex": 2, "Index": 0},
+    )
+    assert encoded("reroll_reward_card", {"GroupIndex": 1}) != encoded(
+        "reroll_reward_card", {"GroupIndex": 2},
+    )
+    assert encoded("take_reward_relic", {"Index": 0}) != encoded(
+        "take_reward_relic", {"Index": 1},
+    )
+    assert encoded("take_reward_extra_relic", {"Index": 0}) != encoded(
+        "take_reward_extra_relic", {"Index": 1},
+    )
+    assert encoded("take_reward_extra_potion", {"GroupIndex": 0}) != encoded(
+        "take_reward_extra_potion", {"GroupIndex": 1},
+    )
+    assert encoded("take_reward_extra_gold", {"GroupIndex": 0}) != encoded(
+        "take_reward_extra_gold", {"GroupIndex": 1},
+    )
+    assert encoded("replace_reward_extra_potion", {"GroupIndex": 0, "Slot": 0}) != encoded(
+        "replace_reward_extra_potion", {"GroupIndex": 0, "Slot": 2},
+    )
+    assert encoded("choose_relic_deck_card", {"CardInstanceId": 100}) != encoded(
+        "choose_relic_deck_card", {"CardInstanceId": 200},
+    )
