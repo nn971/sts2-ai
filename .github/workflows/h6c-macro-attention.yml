@@ -21,6 +21,14 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: 0469424fc20679fd81c0d5e4ee8d9a484ec19108
+          path: emulator
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -34,3 +42,45 @@ jobs:
       - name: Run focused regression and numerical parity
         run: |
           python -m pytest -q tests/test_h6c_macro_attention.py tests/test_h6_frozen_combat_macro.py tests/test_phase_split_ppo_batch.py
+      - name: Build pinned emulator
+        working-directory: emulator
+        run: |
+          dotnet restore Sts2Emulator.sln
+          dotnet build Sts2Emulator.sln -c Release --no-restore
+      - name: Native A10 H6-C short correctness smoke
+        run: |
+          python - <<'PY'
+          import json
+          import sys
+          sys.path.insert(0, 'tests')
+          from test_nature_h3_joint_player import specimen
+          with open('ci-h6c-backbone.json', 'w') as stream:
+              json.dump(specimen().to_dict(), stream)
+          PY
+          python -u tools/train_phase_split.py \
+            --warm-start ci-h6c-backbone.json --freeze-combat \
+            --strategy-encoding macro_attention \
+            --optimizer-method ppo --ppo-backend batched \
+            --tactical-state-encoding enemy_instances \
+            --combat-objective hp_preservation \
+            --hp-monotonic-weight 0 --combat-advantage-baseline critic \
+            --dimension 128 --hidden 4 --ascension 10 \
+            --rounds 1 --episodes 2 --workers 2 --eval-seeds 1 \
+            --max-decisions 512 \
+            --train-seed-prefix h6c-ci-native-train \
+            --eval-seed-prefix h6c-ci-native-selection \
+            --checkpoint ci-h6c-macro.pt \
+            --output ci-h6c-macro.json --report ci-h6c-report.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          baseline = json.loads(Path('ci-h6c-backbone.json').read_text())
+          output = json.loads(Path('ci-h6c-macro.json').read_text())
+          report = json.loads(Path('ci-h6c-report.json').read_text())
+          assert output['strategy']['format'] == 'sts2-neural-policy-value-v17-macro-object-attention'
+          assert output['combat'] == baseline['combat']
+          assert report['rounds'][0]['tactical_decisions'] == 0
+          assert report['rounds'][0]['strategic_decisions'] > 0
+          assert report['rounds'][0]['completed'] > 0
+          assert Path('ci-h6c-macro.pt').exists()
+          PY
