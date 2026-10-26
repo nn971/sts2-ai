@@ -1,0 +1,73 @@
+name: h6c-decision-replay
+
+on:
+  push:
+    paths:
+      - 'src/sts2_ai/evaluation/macro_trace.py'
+      - 'tools/replay_h6_macro.py'
+      - 'tests/test_h6c_macro_trace.py'
+      - '.github/workflows/h6c-decision-replay.yml'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  public-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: 0469424fc20679fd81c0d5e4ee8d9a484ec19108
+          path: emulator
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install project
+        run: python -m pip install -e '.[dev]'
+      - name: Check touched Python code
+        run: |
+          python -m ruff check src/sts2_ai/evaluation/macro_trace.py tools/replay_h6_macro.py tests/test_h6c_macro_trace.py
+      - name: Public recorder and rendering regression
+        run: python -m pytest -q tests/test_h6c_macro_trace.py
+      - name: Build pinned emulator
+        working-directory: emulator
+        run: |
+          dotnet restore Sts2Emulator.sln
+          dotnet build Sts2Emulator.sln -c Release --no-restore
+      - name: Native Act 1 public run replay smoke
+        run: |
+          python - <<'PY'
+          import json
+          import sys
+          sys.path.insert(0, 'tests')
+          from test_nature_h3_joint_player import specimen
+          with open('ci-replay-backbone.json', 'w') as stream:
+              json.dump(specimen().to_dict(), stream)
+          PY
+          python -u tools/replay_h6_macro.py \
+            --player a=ci-replay-backbone.json \
+            --player b=ci-replay-backbone.json \
+            --seed h6c-public-replay-ci-v1 \
+            --output-dir ci-h6c-replay
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('ci-h6c-replay')
+          manifest = json.loads((root / 'manifest.json').read_text())
+          seed = 'h6c-public-replay-ci-v1'
+          a = json.loads((root / (seed + '.a.json')).read_text())
+          b = json.loads((root / (seed + '.b.json')).read_text())
+          page = (root / (seed + '.html')).read_text()
+          assert len(manifest['runs']) == 1
+          assert a['decisions'] and b['decisions']
+          assert a['boss_status'] in ('visible', 'not_exposed')
+          assert len(a['map_snapshots'][0]['nodes']) > 0
+          assert 'viewBox=' in page
+          assert 'Boss:' in page
+          assert len(a['decisions']) == len(b['decisions'])
+          PY
