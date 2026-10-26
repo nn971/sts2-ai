@@ -96,7 +96,8 @@ def encode_decision(
     if decision.phase == "strategy":
         state_fn = (
             macro_global_features
-            if strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep", "macro_card_ops")
+            if strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep",
+            "macro_card_ops")
             else state_features
         )
         action_fn = (macro_card_operation_action_features
@@ -136,7 +137,8 @@ def encode_decision(
     if not (
         (
             decision.phase == "strategy"
-            and strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep", "macro_card_ops")
+            and strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep",
+            "macro_card_ops")
         )
         or (decision.phase == "combat" and encoding in ("enemy_instances", "enemy_attention"))
     ):
