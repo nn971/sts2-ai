@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: nn971/sts2-emulator
-          ref: c254bd99816ac2b89b350ec132fe1cfbb27dfac6
+          ref: 0469424fc20679fd81c0d5e4ee8d9a484ec19108
           path: ai/emulator
       - uses: actions/setup-dotnet@v4
         with:
@@ -54,6 +54,9 @@ jobs:
         run: |
           dotnet restore Sts2Emulator.sln
           dotnet build Sts2Emulator.sln -c Release --no-restore
+      - name: Verify H6 legacy RNG and Power-card lifecycle boundaries
+        working-directory: ai/emulator
+        run: dotnet test tests/Sts2Emulator.Core.Tests/Sts2Emulator.Core.Tests.csproj -c Release --no-build --filter 'FullyQualifiedName~LegacyNativeEventGoldBoundaryTests|FullyQualifiedName~LegacyFisherYatesRegisteredSiteTests|FullyQualifiedName~PrototypePowerCardCompletionLifecycleTests'
       - name: Native A10 run smoke with H6 frozen combat
         working-directory: ai
         run: |
