@@ -14,7 +14,17 @@ from collections.abc import Sequence
 from typing import Any
 
 from sts2_ai.emulator import LegalAction, Observation
-from sts2_ai.models.macro_choice_identity import public_choice_label
+from sts2_ai.models.macro_choice_identity import (
+    MACRO_CHOICE_FORMAT,
+    macro_choice_action_features,
+    public_choice_label,
+)
+from sts2_ai.models.macro_objects import (
+    MACRO_ATTENTION_FORMAT,
+    macro_action_target,
+    macro_attention_action_features,
+    macro_object_vectors,
+)
 
 TRACE_SCHEMA = "sts2-ai-h6c-public-decision-trace-v1"
 REPORT_SCHEMA = "sts2-ai-h6c-paired-trace-report-v1"
@@ -130,6 +140,27 @@ def _number(obj: dict[str, Any], key: str) -> int | float | None:
     return n if isinstance(n, (float, int)) and not isinstance(n, bool) else None
 
 
+def feature_alias_groups(model: Any, state: dict[str, Any],
+                         actions: tuple[LegalAction, ...]) -> list[list[int]]:
+    """Prove input-layer collisions independently of trained logit values."""
+    strategy = getattr(model, "strategy", None)
+    fmt = getattr(strategy, "format_id", None)
+    if fmt not in (MACRO_ATTENTION_FORMAT, MACRO_CHOICE_FORMAT):
+        return []
+    dimension = strategy.dimension
+    objects = macro_object_vectors(state, actions, dimension)
+    feature_fn = (macro_choice_action_features if fmt == MACRO_CHOICE_FORMAT
+                  else macro_attention_action_features)
+    groups: dict[tuple[object, ...], list[int]] = defaultdict(list)
+    for i, action in enumerate(actions):
+        x = tuple(sorted(feature_fn(
+            state, action.kind, action.payload_json, dimension,
+        ).items()))
+        target = macro_action_target(state, action, objects)
+        groups[(x, target)].append(i)
+    return [indices for indices in groups.values() if len(indices) > 1]
+
+
 class TraceRecorder:
     """Capture fair observation/action/score pairs at the existing run hook."""
 
@@ -196,6 +227,10 @@ class TraceRecorder:
             "public_state": frame,
             "value": float(evaluation.value),
             "actions": choices,
+            "feature_alias_groups": (
+                feature_alias_groups(self.model, frame, actions)
+                if not isinstance(frame.get("combat"), dict) else []
+            ),
             "selected": selected,
             "selected_node": _visible_node(actions[selected]),
         })
@@ -522,7 +557,11 @@ def _floor_sections(trace: dict[str, Any]) -> str:
                 f' · HP {_safe(d["hp"])} · Gold {_safe(d["gold"])}'
                 '</summary>'
                 f'<p>Value estimate: {_safe(round(d["value"], 4))}</p>'
-                + _relic_skip_note(d) + _options(d) + '</details>'
+                + _relic_skip_note(d)
+                + ('<p class="diff">Input-layer alias: '
+                   + _safe(d['feature_alias_groups']) + '</p>'
+                   if d.get('feature_alias_groups') else '')
+                + _options(d) + '</details>'
             )
         chunks.append(
             '<details class="floor"><summary>' + headline + '</summary>'
