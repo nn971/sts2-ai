@@ -14,7 +14,9 @@ from typing import Any
 
 from sts2_ai.emulator import LegalAction
 from sts2_ai.models.hashed_linear import (
-    _hash_features, neural_action_features, state_features,
+    _hash_features,
+    neural_action_features,
+    state_features,
 )
 
 MACRO_ATTENTION_FORMAT = "sts2-neural-policy-value-v17-macro-object-attention"
