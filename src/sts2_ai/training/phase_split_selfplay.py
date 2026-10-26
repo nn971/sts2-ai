@@ -101,6 +101,7 @@ class PhaseSplitRound:
     mean_victory_exit_hp_fraction: float | None = None
     mean_potions_used_per_combat: float | None = None
     mean_victory_hp_lost_fraction: float | None = None
+    auxiliary_reward_weight: float | None = None
 
 
 def _higher_hp_public_pair(
@@ -908,6 +909,7 @@ def train_phase_split(
                 rollout_seconds=rollout_seconds,
                 optimizer_seconds=time.perf_counter() - optimizer_started,
                 hp_monotonic_pairs=len(monotonic_terms),
+                auxiliary_reward_weight=alpha,
                 phase_loss_diagnostics=phase_diagnostics,
                 mean_victory_exit_hp_fraction=(
                     sum(
