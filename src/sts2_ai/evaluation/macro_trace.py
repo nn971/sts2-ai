@@ -636,7 +636,7 @@ def render_html(traces: Sequence[dict[str, Any]]) -> str:
     head = (
         f'<b>Seed {_safe(traces[0]["seed"])}</b> · {label}'
         f' · <b>Boss: {boss}</b>'
-        f' · <span class="legend">● green: first route; ● amber: second route</span>'
+        f' · <span class="legend">● green: first route; ● amber: second route; hover nodes for revealed encounters/events</span>'
     )
     divergence = ""
     if first is not None:
@@ -674,8 +674,8 @@ def render_html(traces: Sequence[dict[str, Any]]) -> str:
         'body{font:14px system-ui,sans-serif;background:#111820;color:#e8edf5;'
         'margin:0}header{position:sticky;top:0;background:#18232f;z-index:5;'
         'border-bottom:1px solid #667789;padding:8px 14px;max-height:52vh;'
-        'overflow:auto}header p{margin:5px 0}.map{width:100%;height:auto;'
-        'max-height:36vh}.body{padding:18px} .agents{display:grid;'
+        'overflow:auto}header p{margin:5px 0}.map{width:max(100%,1500px);height:auto;min-height:320px;'
+        '}.body{padding:18px} .agents{display:grid;'
         'grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px}'
         '.agent{min-width:0}.floor,.decision{background:#1a2836;'
         'border:1px solid #465568;border-radius:6px;padding:9px;'
