@@ -62,3 +62,36 @@ def contextualize_python(
             for k in range(width)
         ]
     return result
+
+
+DEEP_MACRO_FIELDS = (
+    "attn2_query", "attn2_key", "attn2_value", "attn2_output", "attn2_gate",
+    "macro_ffn_in", "macro_ffn_in_bias", "macro_ffn_out",
+    "macro_ffn_out_bias", "macro_ffn_gate",
+)
+
+
+def contextualize_deep_python(
+    embeddings: dict[str, list[float]], params: dict[str, Any],
+) -> dict[str, list[float]]:
+    """Portable second eight-head attention and width-4 gated feedforward."""
+    updated = contextualize_python(embeddings, params, prefix="attn2_", heads=8)
+    result: dict[str, list[float]] = {}
+    for key, values in updated.items():
+        middle = [
+            max(0.0, bias + sum(a * b for a, b in zip(row, values, strict=True)))
+            for row, bias in zip(params["macro_ffn_in"],
+                                 params["macro_ffn_in_bias"], strict=True)
+        ]
+        residual = [
+            bias + sum(a * b for a, b in zip(row, middle, strict=True))
+            for row, bias in zip(params["macro_ffn_out"],
+                                 params["macro_ffn_out_bias"], strict=True)
+        ]
+        result[key] = [
+            value + gate * delta
+            for value, gate, delta in zip(
+                values, params["macro_ffn_gate"], residual, strict=True,
+            )
+        ]
+    return result
