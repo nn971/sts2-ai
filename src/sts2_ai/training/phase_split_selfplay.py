@@ -37,6 +37,7 @@ from sts2_ai.models.hashed_linear import (
     state_features,
     tactical_action_features,
 )
+from sts2_ai.models.macro_objects import MACRO_ATTENTION_FORMAT
 from sts2_ai.models.neural import (
     NEURAL_FORMAT,
     TACTICAL_ATTENTION_FORMAT,
@@ -48,7 +49,6 @@ from sts2_ai.models.neural import (
     TACTICAL_STRUCTURED_FORMAT,
     NeuralPolicyValueModel,
 )
-from sts2_ai.models.macro_objects import MACRO_ATTENTION_FORMAT
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.models.tactical_state import (
     damage_tactical_state_features,
