@@ -157,3 +157,20 @@ def test_numeric_native_room_types_and_boss_are_readable():
     trace = sample_trace()
     trace['map_snapshots'][0]['nodes'][0]['room_type'] = 0
     assert 'Combat' in render_html([trace])
+
+
+
+def test_revealed_event_in_map_and_missing_skip_explained():
+    trace = sample_trace()
+    d = trace["decisions"][0]
+    d["current_node_id"] = "a"
+    d["public_state"]["event_id"] = "proto.native.event.fake_merchant"
+    reward_decision = trace["decisions"][1]
+    reward_decision["public_state"]["reward"] = {
+        "relic_options": ["proto.relic.kunai"],
+        "relic_resolved": False,
+        "independent_selection": False,
+    }
+    html = render_html([trace])
+    assert "proto.native.event.fake_merchant" in html
+    assert "Skip relic is NOT a legal action" in html
