@@ -225,8 +225,13 @@ def _offer_from_action(
     for offer in listed if isinstance(listed, list) else []:
         if (isinstance(offer, dict) and offer.get("offer_id") == offer_id):
             return offer
-    # Older bridge sometimes exposes one singular potion/relic offer.
-    singular = shop.get("potion_offer" if key == "potion_offers" else "relic_offer")
+    # Native observations expose both plural arrays and legacy singular
+    # potion/relic aliases; card purchases have no singular fallback.
+    singular_key = {
+        "potion_offers": "potion_offer",
+        "relic_offers": "relic_offer",
+    }.get(key)
+    singular = shop.get(singular_key) if singular_key else None
     if isinstance(singular, dict) and singular.get("offer_id") == offer_id:
         return singular
     return None
@@ -254,9 +259,37 @@ def macro_semantic_action_features(
         else:
             name = _id(offer, "item_id", "content_id", "card_id", "relic_id", "potion_id")
             tokens.append((f"macro:offer:item:{name or 'unknown'}", 1.0))
-            price = _number(offer.get("price"), 100.0)
-            if price is not None:
-                tokens.append(("macro:offer:price", price))
+            for price_field in ("price", "base_price"):
+                price = _number(offer.get(price_field), 100.0)
+                if price is not None:
+                    tokens.append((f"macro:offer:{price_field}", price))
+            if action_kind == "buy_card":
+                shop = state.get("shop")
+                previews = shop.get("card_offer_previews") if isinstance(shop, dict) else None
+                offer_id = payload.get("OfferId", payload.get("offer_id"))
+                for preview in previews if isinstance(previews, list) else []:
+                    if not isinstance(preview, dict) or preview.get("offer_id") != offer_id:
+                        continue
+                    card = preview.get("card")
+                    if isinstance(card, dict):
+                        card_id = _id(card, "card_id")
+                        if card_id is not None:
+                            tokens.append((f"macro:offer:preview:{card_id}", 1.0))
+                        level = _number(card.get("upgrade_level"), 4.0)
+                        if level is not None:
+                            tokens.append(("macro:offer:preview:upgrade_level", level))
+                        enchantment = card.get("enchantment")
+                        if isinstance(enchantment, dict):
+                            for field, value in sorted(enchantment.items()):
+                                if isinstance(value, str):
+                                    tokens.append((
+                                        f"macro:offer:preview:enchant:{field}:{value}", 1.0,
+                                    ))
+                                else:
+                                    amount = _number(value, 10.0)
+                                    if amount is not None:
+                                        tokens.append((f"macro:offer:preview:enchant:{field}", amount))
+                    break
             for field in ("on_sale", "sold"):
                 if type(offer.get(field)) is bool:
                     tokens.append((f"macro:offer:{field}", float(offer[field])))
@@ -265,10 +298,15 @@ def macro_semantic_action_features(
             slot = payload.get("Slot", payload.get("SlotIndex", payload.get("slot")))
             # A slot is an actual visible potion resource, unlike an ephemeral offer ID.
             potions = state.get("potions")
-            if type(slot) is int and isinstance(potions, list) and 0 <= slot < len(potions):
-                potion = potions[slot]
-                if isinstance(potion, dict):
-                    tokens.append((f"macro:potion:replace:{_id(potion, 'potion_id')}", 1.0))
+            if type(slot) is int and isinstance(potions, list):
+                # Native public potions is a compact array of occupied slots;
+                # the "slot" field, not its position, identifies the target.
+                for potion in potions:
+                    if isinstance(potion, dict) and potion.get("slot") == slot:
+                        potion_id = _id(potion, "potion_id")
+                        if potion_id is not None:
+                            tokens.append((f"macro:potion:replace:{potion_id}", 1.0))
+                        break
     elif action_kind == "event_choice":
         event = state.get("event")
         choice = payload.get("ChoiceId", payload.get("choice_id"))
@@ -288,6 +326,24 @@ def macro_semantic_action_features(
                             tokens.append((f"macro:event:value:{field}", numeric))
                         elif isinstance(value, str):
                             tokens.append((f"macro:event:value:{field}:{value}", 1.0))
+                    break
+    elif action_kind == "replace_event_potion":
+        event = state.get("event")
+        replacement = (
+            event.get("pending_potion_replacement") if isinstance(event, dict) else None
+        )
+        if isinstance(replacement, dict):
+            incoming = _id(replacement, "potion_id")
+            if incoming is not None:
+                tokens.append((f"macro:event:incoming-potion:{incoming}", 1.0))
+        slot = payload.get("Slot", payload.get("slot"))
+        potions = state.get("potions")
+        if type(slot) is int and isinstance(potions, list):
+            for potion in potions:
+                if isinstance(potion, dict) and potion.get("slot") == slot:
+                    outgoing = _id(potion, "potion_id")
+                    if outgoing is not None:
+                        tokens.append((f"macro:event:outgoing-potion:{outgoing}", 1.0))
                     break
     elif action_kind == "choose_event_deck_card":
         instance = payload.get("CardInstanceId", payload.get("card_instance_id"))
