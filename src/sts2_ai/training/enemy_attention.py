@@ -38,12 +38,12 @@ def contextualize_torch(
     size = width // heads
     linear = torch.nn.functional.linear
 
-    def heads(tensor: Any) -> Any:
+    def split_heads(tensor: Any) -> Any:
         return tensor.reshape(batch, count, heads, size).permute(0, 2, 1, 3)
 
-    q = heads(linear(embeddings, params[f"{prefix}query"]))
-    k = heads(linear(embeddings, params[f"{prefix}key"]))
-    v = heads(linear(embeddings, params[f"{prefix}value"]))
+    q = split_heads(linear(embeddings, params[f"{prefix}query"]))
+    k = split_heads(linear(embeddings, params[f"{prefix}key"]))
+    v = split_heads(linear(embeddings, params[f"{prefix}value"]))
     scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(size)
     # Mask both queries and keys, and exclude the diagonal. A masked row
     # has no neighbors (e.g. 0/1 enemies), so its output must be exactly zero.
