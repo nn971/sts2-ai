@@ -6,16 +6,18 @@ import json
 from pathlib import Path
 
 import pytest
+from test_phase_split_selfplay import TwoPhaseToy, small_model
 
 from sts2_ai.emulator import LegalAction, Observation
 from sts2_ai.models.macro_objects import (
-    MACRO_ATTENTION_FORMAT, macro_action_target, macro_object_vectors,
+    MACRO_ATTENTION_FORMAT,
+    macro_action_target,
+    macro_object_vectors,
 )
 from sts2_ai.models.neural import NEURAL_FORMAT, TACTICAL_FORMAT
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.training.phase_split_selfplay import _forward_decision, train_phase_split
 from sts2_ai.training.selfplay import PublicDecision
-from test_phase_split_selfplay import TwoPhaseToy, small_model
 
 
 def sample():
@@ -87,7 +89,9 @@ def test_macro_attention_single_batched_and_portable_parity():
     from sts2_ai.training.instance_combat import add_instance_parameters
     from sts2_ai.training.neural import _export, _new_params
     from sts2_ai.training.phase_split_ppo_batch import (
-        collate, encode_decision, forward_batch,
+        collate,
+        encode_decision,
+        forward_batch,
     )
 
     torch.manual_seed(31)
@@ -147,9 +151,9 @@ def test_macro_attention_single_batched_and_portable_parity():
 
 def test_node_renaming_and_private_fields_do_not_change_action_logits():
     torch = pytest.importorskip("torch")
-    from sts2_ai.training.neural import _export, _new_params
-    from sts2_ai.training.instance_combat import add_instance_parameters
     from sts2_ai.training.enemy_attention import add_attention_parameters
+    from sts2_ai.training.instance_combat import add_instance_parameters
+    from sts2_ai.training.neural import _export, _new_params
 
     state, actions = sample()
     torch.manual_seed(17)
