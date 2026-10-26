@@ -84,7 +84,8 @@ def readable_action(action: dict[str, Any], frame: dict[str, Any],
         deck = frame.get("deck")
         for card in deck if isinstance(deck, list) else []:
             if isinstance(card, dict) and card.get("instance_id") == instance:
-                return f"{'Upgrade' if kind == 'rest_upgrade' else 'Remove'}: {card.get('card_id', instance)}"
+                verb = "Upgrade" if kind == "rest_upgrade" else "Remove"
+                return f"{verb}: {card.get('card_id', instance)}"
     return action_label(action)
 
 
@@ -410,10 +411,9 @@ def _first_disagreement_table(traces: Sequence[dict[str, Any]],
     cells = []
     for key in order:
         one, two = aa[key], bb[key]
-        fmt = lambda record: (
-            ("● " if record[1] else "") +
-            (f"{record[0]:.3f}" if record[0] is not None else "n/a")
-        )
+        def fmt(record: tuple[float | None, bool, str]) -> str:
+            return (("● " if record[1] else "") +
+                    (f"{record[0]:.3f}" if record[0] is not None else "n/a"))
         cells.append(
             f'<tr><td>{_safe(one[2])}</td>'
             f'<td>{_safe(fmt(one))}</td><td>{_safe(fmt(two))}</td></tr>'
@@ -466,7 +466,8 @@ def render_html(traces: Sequence[dict[str, Any]]) -> str:
                 d = trace["decisions"][idx]
                 selected = d["actions"][d["selected"]]
                 entries.append(
-                    f'{_safe(trace["label"])}: {_safe(selected.get("label", action_label(selected)))}'
+                    f'{_safe(trace["label"])}: '
+                    f'{_safe(selected.get("label", action_label(selected)))}'
                 )
             divergence += '<p>' + ' versus '.join(entries) + '</p>'
             divergence += _first_disagreement_table(traces, idx)
