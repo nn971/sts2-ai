@@ -8,7 +8,7 @@ clustered on the original source run, never on individual fights.
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +18,7 @@ SCHEMA = "sts2-v15q-importance-ablation-comparison-v1"
 ARMS = {"target": 0.0, "priority": 0.7}
 
 
-def _mean(values: list[float]) -> float | None:
+def _mean(values: Sequence[float]) -> float | None:
     return math.fsum(values) / len(values) if values else None
 
 
