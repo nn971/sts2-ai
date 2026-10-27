@@ -113,7 +113,25 @@ def instance_global_features(state: dict[str, Any], dimension: int) -> dict[int,
         raise ValueError("Instance global features require a combat frame")
     stripped = dict(state)
     stripped["combat"] = {**combat, "enemies": []}
-    global_features = public_resources_tactical_state_features(stripped, dimension)
+    # Native full-run fair observations may publish a draw pile COUNT while
+    # omitting its private identities or omit relic counter details entirely.
+    # Preserve the exact V8 representation when both public arrays exist.
+    # Otherwise use only published V6 context and encode the missingness:
+    # treating unavailable card/relic identities as known empty is unsound.
+    missing = []
+    for field in ("draw_pile", "relic_counters"):
+        if field not in combat:
+            missing.append(field)
+        elif not isinstance(combat[field], list):
+            raise ValueError(f"Malformed public combat {field} field")
+    if missing:
+        global_features = damage_tactical_state_features(stripped, dimension)
+        for field in missing:
+            _hashed(
+                global_features, f"unpublished-combat-field:{field}", 1.0, dimension,
+            )
+    else:
+        global_features = public_resources_tactical_state_features(stripped, dimension)
     aggregate = damage_tactical_state_features(state, dimension)
     for index in range(DAMAGE_NUMERIC_COORDINATES):
         if index in aggregate:
