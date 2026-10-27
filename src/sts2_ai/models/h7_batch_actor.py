@@ -103,6 +103,7 @@ def _serve(
 ) -> None:
     stats: dict[str, float | int | str] = {
         "batches": 0, "requests": 0, "forward_seconds": 0.0,
+        "collate_seconds": 0.0,
         "model_load_seconds": 0.0, "max_batch_observed": 0,
         "device": device,
     }
@@ -139,7 +140,11 @@ def _serve(
                     frames = [entry[2] for entry in work]
                     if not all(isinstance(item, EncodedDecision) for item in frames):
                         raise ValueError("H7 inference received non-public token request")
+                    prepared = time.perf_counter()
                     batch = collate_h7(frames).to(device)
+                    stats["collate_seconds"] = float(stats["collate_seconds"]) + (
+                        time.perf_counter() - prepared
+                    )
                     begun = time.perf_counter()
                     logits, values = model(batch)
                     if device.startswith("cuda"):
