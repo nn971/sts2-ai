@@ -1,0 +1,70 @@
+name: h8-h7-reference-training
+
+on:
+  push:
+    branches:
+      - research/h8-h7-reference-law-benchmark-20261028
+    paths:
+      - 'tools/benchmark_h8_h7_policy_pilot.py'
+      - 'tools/benchmark_h8_training_iteration.py'
+      - 'tests/test_h8_h7_policy_pilot.py'
+      - 'tests/test_h8_training_iteration.py'
+      - '.github/workflows/h8-h7-reference-training.yml'
+  pull_request:
+    paths:
+      - 'tools/benchmark_h8_h7_policy_pilot.py'
+      - 'tools/benchmark_h8_training_iteration.py'
+      - 'tests/test_h8_h7_policy_pilot.py'
+      - 'tests/test_h8_training_iteration.py'
+      - '.github/workflows/h8-h7-reference-training.yml'
+  workflow_dispatch:
+
+jobs:
+  exact-reference-h8-one-ppo-step:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: research/h8-h7-reference-law-benchmark-20261028
+          path: external-h8-emulator
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install model/test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[neural,dev]'
+      - name: Build H8 source
+        run: |
+          dotnet restore external-h8-emulator/Sts2Emulator.sln
+          dotnet build external-h8-emulator/Sts2Emulator.sln -c Release --no-restore -m:1
+      - name: Pure Python H8 law/PPO contract tests
+        run: |
+          python -m pytest -q tests/test_h8_h7_policy_pilot.py tests/test_h8_training_iteration.py
+      - name: Versioned H8 law and replay JSONL integration
+        env:
+          STS2_EMULATOR_DLL: ${{ github.workspace }}/external-h8-emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll
+        run: python -m unittest discover -s external-h8-emulator/tests -p test_h8_runtime_jsonl.py -v
+      - name: Exact legacy-H7 vs native-H8 source-parity and one PPO step
+        run: |
+          python -u tools/benchmark_h8_training_iteration.py \
+            --emulator-dll external-h8-emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings external-h8-emulator/bindings/python \
+            --emulator-revision "$(git -C external-h8-emulator rev-parse HEAD)" \
+            --workers 2 --episodes 16 --max-boundaries 1200 \
+            --replay-every 1 --actor-device cpu --learner-device cpu \
+            --compare-legacy \
+            --output /tmp/h8-h7-reference-training-cpu.json
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: h8-h7-reference-training-cpu
+          path: /tmp/h8-h7-reference-training-cpu.json
+          if-no-files-found: ignore
