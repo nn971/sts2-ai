@@ -32,7 +32,8 @@ class _Node:
 
 
 def _legal(state: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    obs, actions = state.observe(), state.actions()
+    obs: dict[str, Any] = state.observe()
+    actions: list[dict[str, Any]] = state.actions()
     if state.boundary == "player_choice":
         from sts2_ai.nature.draw_only_episode import fair_player_choice_actions
         actions = fair_player_choice_actions(state.pending, actions)
