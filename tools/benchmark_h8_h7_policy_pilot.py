@@ -24,10 +24,9 @@ import sys
 import tempfile
 import time
 from collections import Counter
+from contextlib import ExitStack
 import queue
 import traceback
-from contextlib import ExitStack
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +37,7 @@ from sts2_ai.models.h7_batch_actor import RemoteH7Policy, SharedH7Service
 from sts2_ai.models.h7_public_policy import H7PlayerSpec
 from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
 from sts2_ai.nature.combat_scenarios import SCENARIOS
-from sts2_ai.nature.draw_only_episode import fair_player_choice_actions 
+from sts2_ai.nature.draw_only_episode import fair_player_choice_actions
 from sts2_ai.nature.h5_curriculum import cell_for_source, source_bank
 from sts2_ai.nature.protocol import canonical_sha256
 
