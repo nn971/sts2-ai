@@ -108,7 +108,7 @@ def _shard(
             # Stable per-source independent reference-weighted choices.
             # This sampler is not the H7 event-indexed reference sampler.
             nature_rng = random.Random(reference_seed + index * 1000003)
-            event_sampler = SeededLawSampler(reference_seed)
+            event_sampler = SeededLawSampler(reference_seed + index * 1000003)
             nature_law_trace: list[tuple[str, str, str]] = []
             opening_hp: int | None = None
             opening_max_hp: int | None = None
