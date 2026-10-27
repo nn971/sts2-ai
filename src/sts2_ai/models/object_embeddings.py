@@ -327,15 +327,15 @@ class TypedObjectEncoder:
         if numeric_by_kind:
             sums = torch.zeros_like(x)
             for kind in sorted(numeric_by_kind):
-                positions, fields, values = numeric_by_kind[kind]
-                field_vectors = self.module.numeric_fields(ids(fields))
+                num_positions, num_fields, num_values = numeric_by_kind[kind]
+                field_vectors = self.module.numeric_fields(ids(num_fields))
                 scalar = torch.tensor(
-                    values, device=device, dtype=dtype,
+                    num_values, device=device, dtype=dtype,
                 ).unsqueeze(-1)
                 projected = self.module.numeric_layers[kind](
                     torch.cat((field_vectors, scalar), dim=-1)
                 )
-                sums = sums.index_add(0, ids(positions), projected)
+                sums = sums.index_add(0, ids(num_positions), projected)
             counts = torch.tensor(
                 num_counts, device=device, dtype=dtype,
             ).unsqueeze(-1)
