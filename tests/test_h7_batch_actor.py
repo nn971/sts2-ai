@@ -4,6 +4,7 @@ from __future__ import annotations
 import concurrent.futures
 import hashlib
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -52,13 +53,15 @@ def test_batched_inference_matches_direct_per_legal_action(tmp_path: Path):
     partial = reference.evaluate(public, legal_actions[:1])
     with SharedH7Service(
         checkpoint=path, digest=digest, workers=4,
-        max_batch=4, max_delay_ms=40.0,
+        max_batch=4, max_delay_ms=120.0,
     ) as service:
         policies = [
             RemoteH7Policy(service.transport, slot=service.transport.allocate_slot())
             for _ in range(4)
         ]
+        barrier = threading.Barrier(4)
         def query(index: int):
+            barrier.wait(timeout=10)
             menu = legal_actions if index % 2 == 0 else legal_actions[:1]
             return policies[index].evaluate(public, menu)
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
