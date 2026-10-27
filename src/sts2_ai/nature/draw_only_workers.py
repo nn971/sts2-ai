@@ -86,6 +86,7 @@ def _one(
     reward_version: str = "hp_preservation_v1",
     mcts_simulations: int = 0, mcts_max_boundaries: int = 24,
     mcts_combat_budget: int = 4000,
+    verify_terminal_replay: bool = True,
 ) -> tuple[int, DrawOnlyEpisode, int, tuple[dict[str, Any], ...]]:
     if (_worker_session is None or _worker_spec is None or _worker_model is None
             or _worker_revision is None):
@@ -124,9 +125,10 @@ def _one(
         mcts_simulations=mcts_simulations,
         mcts_max_boundaries=mcts_max_boundaries,
         mcts_combat_budget=mcts_combat_budget,
+        verify_terminal_replay=verify_terminal_replay,
     )
-    if not result.terminal_replay_verified:
-        raise RuntimeError("Draw-only terminal snapshot failed")
+    if result.terminal_replay_verified != verify_terminal_replay:
+        raise RuntimeError("Draw-only terminal audit policy drift")
     if result.player_model_id != spec.policy_id:
         raise RuntimeError("Draw-only frozen player checksum drift")
     if before is not None:
@@ -150,6 +152,7 @@ def _job(
     reward_version: str = "hp_preservation_v1",
     mcts_simulations: int = 0, mcts_max_boundaries: int = 24,
     mcts_combat_budget: int = 4000,
+    verify_terminal_replay: bool = True,
 ) -> tuple[int, DrawOnlyEpisode, int, tuple[dict[str, Any], ...]]:
     try:
         return _one(
@@ -157,7 +160,7 @@ def _job(
             entry_mode, max_boundaries, scenario_pool, deck_pool,
             capture_player_training, reference_count, score_reference_q,
             reward_version, mcts_simulations, mcts_max_boundaries,
-            mcts_combat_budget,
+            mcts_combat_budget, verify_terminal_replay,
         )
     except Exception:
         raise RuntimeError(
@@ -185,6 +188,7 @@ def draw_only_batch(
     actor_max_batch: int = 16,
     actor_delay_ms: float = 3.0,
     profile_actor: bool = False,
+    terminal_replay_indices: tuple[int, ...] | None = None,
 ) -> dict[str, Any]:
     """Return original ordered episodes with real C# process provenance."""
     if (not seeds or len(set(seeds)) != len(seeds)
@@ -192,6 +196,19 @@ def draw_only_batch(
         raise ValueError("Each source-run seed must be nonempty and distinct")
     if draw_mode not in ("learned", "reference"):
         raise ValueError("Unknown draw routing mode")
+    # None preserves the original all-verified research contract.
+    # Explicit subsets are deterministic by source *index* and never depend
+    # on which worker finishes first. Fail closed on malformed selections.
+    if terminal_replay_indices is None:
+        terminal_replay_indices = tuple(range(len(seeds)))
+    if (not isinstance(terminal_replay_indices, tuple)
+            or not terminal_replay_indices
+            or any(type(i) is not int or i < 0 or i >= len(seeds)
+                   for i in terminal_replay_indices)
+            or tuple(sorted(set(terminal_replay_indices))) !=
+               terminal_replay_indices):
+        raise ValueError("Invalid terminal replay audit indices")
+    verified_indices = frozenset(terminal_replay_indices)
     if actor_backend not in ("local", "shared"):
         raise ValueError("Unknown H7 actor inference backend")
     if actor_backend == "shared":
@@ -261,6 +278,7 @@ def draw_only_batch(
                 capture_player_training, reference_count, score_reference_q,
                 reward_version, mcts_simulations, mcts_max_boundaries,
                 mcts_combat_budget,
+                index in verified_indices,
             ): (index, seed)
             for index, seed in enumerate(seeds)
         }
@@ -276,6 +294,8 @@ def draw_only_batch(
                 raise
             if resolved_index != index or episode.source_seed != seed:
                 raise RuntimeError("Shuffled cross-worker draw-only source result")
+            if episode.terminal_replay_verified != (index in verified_indices):
+                raise RuntimeError("Terminal replay coverage differs from audit schedule")
             ordered[index] = episode
             ordered_player[index] = player_actions
             process_ids.add(pid)
@@ -318,6 +338,15 @@ def draw_only_batch(
         "process_count": len(process_ids),
         "emulator_revision": emulator_revision,
         "source_count": len(results),
+        "terminal_replay_verified": sum(ep.terminal_replay_verified for ep in results),
+        "terminal_replay_not_checked": sum(
+            not ep.terminal_replay_verified for ep in results
+        ),
+        "terminal_replay_audit_seed_digest": None
+        if len(verified_indices) == len(seeds)
+        else __import__("hashlib").sha256(
+            "\\n".join(seeds[i] for i in terminal_replay_indices).encode("utf-8")
+        ).hexdigest(),
         "draw_mode": draw_mode,
         "scenario_pool": scenario_pool,
         "deck_pool": deck_pool,
