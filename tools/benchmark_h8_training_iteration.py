@@ -20,7 +20,12 @@ from typing import Any
 
 import torch
 
-from benchmark_h8_h7_policy_pilot import _cohort
+try:
+    from benchmark_h8_h7_policy_pilot import _cohort
+except ModuleNotFoundError as exc:
+    if exc.name != "benchmark_h8_h7_policy_pilot":
+        raise
+    from tools.benchmark_h8_h7_policy_pilot import _cohort
 from sts2_ai.models.h7_public_policy import H7PlayerSpec
 from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
 from sts2_ai.nature.draw_only_workers import draw_only_batch
@@ -34,6 +39,8 @@ from sts2_ai.training.h7_combat_ppo import H7CombatPPO
 def validate_training_cohort(
     cohort: dict[str, Any], seeds: tuple[str, ...],
     *, replay_every: int,
+    replay_indices: frozenset[int] | None = None,
+    require_capture: bool = True,
 ) -> tuple[tuple[Any, ...], tuple[tuple[dict[str, Any], ...], ...]]:
     """Reject censored, non-reference, unverified or incomplete on-policy data."""
     if cohort["episodes"] != len(seeds) or (
@@ -47,23 +54,29 @@ def validate_training_cohort(
     captures = []
     for index, seed in enumerate(seeds):
         row = cohort["trajectories"][seed]
-        audited = index % replay_every == 0
+        audited = (index % replay_every == 0 if replay_indices is None
+                   else index in replay_indices)
         if (row["status"] != "terminal" or
                 row["outcome"] not in ("victory", "defeat") or
                 row["replay_verified"] != audited or
                 row["score"] is None or
                 row["reference_event_digest"] is None or
-                row["captured_player_decisions"] != row["player_decisions"] or
-                row["captured_player_decisions"] != len(row["player_steps"]) or
-                not isinstance(row["training_actions"], (tuple, list)) or
-                len(row["training_actions"]) != row["player_decisions"]):
+                (require_capture and (
+                    row["captured_player_decisions"] != row["player_decisions"] or
+                    row["captured_player_decisions"] != len(row["player_steps"]) or
+                    not isinstance(row["training_actions"], (tuple, list)) or
+                    len(row["training_actions"]) != row["player_decisions"]))):
+
             raise RuntimeError("Missing terminal or source-public PPO data: " + seed)
         episodes.append(SimpleNamespace(
             source_seed=seed, outcome=row["outcome"], score=row["score"],
+            exit_hp=row["exit_hp"],
+            terminal_enemy_hp=row["terminal_enemy_hp"],
+            reward_version=H4_REWARD,
             draw_mode="reference", terminal_replay_verified=audited,
             decisions=tuple(SimpleNamespace(**x) for x in row["decision_sequence"]),
         ))
-        captures.append(tuple(row["training_actions"]))
+        captures.append(tuple(row["training_actions"] or ()))
     return tuple(episodes), tuple(captures)
 
 

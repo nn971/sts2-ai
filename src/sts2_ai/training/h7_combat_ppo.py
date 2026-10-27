@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import math
 import random
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -156,6 +157,7 @@ class H7CombatPPO:
     ) -> dict[str, float | int]:
         if len(episodes) != len(captures) or not episodes:
             raise ValueError("H7 update requires complete aligned on-policy episodes")
+        started = time.perf_counter()
         prepared: list[PreparedH7] = []
         for ep, cap in zip(episodes, captures, strict=True):
             prepared.extend(self._prepare_episode(
@@ -167,6 +169,7 @@ class H7CombatPPO:
         if len(prepared) < 2:
             raise ValueError("H7 PPO requires at least two source-public decisions")
         total_valid_decisions = len(prepared)
+        prepare_seconds = time.perf_counter() - started
         if len(prepared) > self.sample_limit:
             prepared = random.Random(seed).sample(prepared, self.sample_limit)
 
@@ -189,6 +192,8 @@ class H7CombatPPO:
                             or abs(p.old_value - value) > 5e-4):
                         raise ValueError("H7 behavior policy mismatch before PPO update")
 
+        ratio_verification_seconds = time.perf_counter() - started - prepare_seconds
+        optimization_started = time.perf_counter()
         advantages = torch.tensor([p.advantage for p in prepared], dtype=torch.float32)
         normalized = (advantages - advantages.mean()) / advantages.std(
             unbiased=False,
@@ -247,7 +252,12 @@ class H7CombatPPO:
                         float(entropy), float(value_loss), float(grad),
                     ))
         self.model.eval()
+        optimizer_seconds = time.perf_counter() - optimization_started
         return {
+            "prepare_seconds": prepare_seconds,
+            "ratio_verification_seconds": ratio_verification_seconds,
+            "optimizer_seconds": optimizer_seconds,
+            "total_update_seconds": time.perf_counter() - started,
             "decisions": len(prepared),
             "source_decisions": total_valid_decisions,
             "updates": len(diagnostics),
