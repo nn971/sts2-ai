@@ -16,6 +16,9 @@ on:
       - 'tests/test_h7_readiness.py'
       - 'src/sts2_ai/evaluation/h7_readiness.py'
       - 'tools/benchmark_h7_rollouts.py'
+      - 'src/sts2_ai/models/h7_batch_actor.py'
+      - 'src/sts2_ai/nature/draw_only_workers.py'
+      - 'tests/test_h7_batch_actor.py'
       - 'tests/test_shared_transformer_h7.py'
       - 'tools/probe_h7_transformer.py'
       - '.github/workflows/h7-shared-transformer.yml'
@@ -32,6 +35,9 @@ on:
       - 'tests/test_h7_readiness.py'
       - 'src/sts2_ai/evaluation/h7_readiness.py'
       - 'tools/benchmark_h7_rollouts.py'
+      - 'src/sts2_ai/models/h7_batch_actor.py'
+      - 'src/sts2_ai/nature/draw_only_workers.py'
+      - 'tests/test_h7_batch_actor.py'
       - 'tests/test_shared_transformer_h7.py'
       - 'tools/probe_h7_transformer.py'
       - '.github/workflows/h7-shared-transformer.yml'
@@ -52,8 +58,8 @@ jobs:
           python -m pip install -e '.[dev]'
       - name: H7 isolated lint and unit tests
         run: |
-          python -m ruff check src/sts2_ai/models/shared_game_objects.py src/sts2_ai/models/shared_transformer.py src/sts2_ai/models/h7_public_policy.py tests/test_shared_transformer_h7.py tools/probe_h7_transformer.py src/sts2_ai/training/h7_combat_ppo.py tools/train_h7_reference_combat.py tools/evaluate_h7_reference_combat.py tests/test_h7_combat_ppo.py src/sts2_ai/evaluation/h7_readiness.py tools/benchmark_h7_rollouts.py tests/test_h7_readiness.py
-          python -m pytest -q tests/test_shared_transformer_h7.py tests/test_h7_combat_ppo.py tests/test_h7_readiness.py
+          python -m ruff check src/sts2_ai/models/shared_game_objects.py src/sts2_ai/models/shared_transformer.py src/sts2_ai/models/h7_public_policy.py tests/test_shared_transformer_h7.py tools/probe_h7_transformer.py src/sts2_ai/training/h7_combat_ppo.py tools/train_h7_reference_combat.py tools/evaluate_h7_reference_combat.py tests/test_h7_combat_ppo.py src/sts2_ai/evaluation/h7_readiness.py tools/benchmark_h7_rollouts.py tests/test_h7_readiness.py src/sts2_ai/models/h7_batch_actor.py src/sts2_ai/nature/draw_only_workers.py tests/test_h7_batch_actor.py
+          python -m pytest -q tests/test_shared_transformer_h7.py tests/test_h7_combat_ppo.py tests/test_h7_readiness.py tests/test_h7_batch_actor.py
       - name: Full-size differentiable architecture probe
         run: |
           python -u tools/probe_h7_transformer.py --width 384 --layers 6 --heads 8 --feedforward 1536 > h7-probe.json
