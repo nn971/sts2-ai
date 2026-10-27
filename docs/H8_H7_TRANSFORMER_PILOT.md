@@ -1,0 +1,113 @@
+# H8 / H7 shared Transformer integration pilot
+
+Date: 2026-10-28. Branch `research/h8-h7-shared-transformer-pilot-20261028`
+(draft PR #120), stacked on the H7 source sampled-replay branch.
+Depends on emulator H8 public bridge [PR #211](https://github.com/nn971/sts2-emulator/pull/211)
+(stacked on H8 consolidated #210).
+
+## Implemented in this slice
+
+`tools/benchmark_h8_h7_policy_pilot.py` uses the **unchanged 14,659,972
+weight H7 SharedObjectTransformer** (width=384, layers=6, heads=8,
+FFN=1536) through H7's existing single shared inference process
+(`SharedH7Service`, `RemoteH7Policy`), existing frozen-source-fair
+`FrozenP0Player` action sampling, and the original H7 balanced 16-cell
+Ascension 10 source bank. The agent receives *exactly* the source
+`PrototypeAiEnvironment.Observe` public policy view and source-visible
+`ActionWire` menu from H8's new version-checked `h8_observe`.
+The session still owns all mechanics and card/intent support.
+
+- It samples **actual player actions** from the frozen H7 model, including
+  legal card plays, rather than always ending its turn.
+- A distinct Nature sampler uses the source weighted enemy-intent ticket
+  support and uniform eligible physical card IDs, with per-source seeded
+  randomness and no player hidden-state exposure.
+- `h8_begin_seeded` now takes the existing H7 research deck preset
+  exactly as the semantic source engine did. The H7 16 source cells are
+  grouped and resolved before contact with the engine.
+- A/B or A/B/B/A cohorts are **checked H8** vs **native H8**, with
+  identical player checkpoint, actor seeds and Nature sample stream.
+  Acceptance compares each source's chosen physical IDs, player actions,
+  decision journal and **complete mechanics SHA**; 1-in-8 replay audits
+  are selected by *global source index*.
+- Nested `player_choice` and other unsupported H8 boundary types
+  **stop** the pilot with explicit per-type counts, and never count as
+  terminal combats or PPO trajectories.
+- A dedicated paired-repository CI builds emulator source, tests
+  public observation/weighted-sampling invariants, then attempts
+  H7 public inference for 16 A10 cells on shared CPU inference.
+  Production benchmarking uses shared CUDA.
+
+## Run on target workstation (fish)
+
+First build the emulator branch including the H7 public bridge:
+
+```fish
+git -C ~/projects/sts2-emulator fetch origin
+git -C ~/projects/sts2-emulator switch research/h8-h7-public-policy-bridge-20261028
+dotnet build ~/projects/sts2-emulator/Sts2Emulator.sln -c Release -m:1
+
+git -C ~/projects/sts2-ai fetch origin
+git -C ~/projects/sts2-ai switch research/h8-h7-shared-transformer-pilot-20261028
+cd ~/projects/sts2-ai
+source .venv/bin/activate.fish
+
+set emulator ~/projects/sts2-emulator
+set dll $emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll
+set rev (git -C $emulator rev-parse HEAD)
+python -m pytest -q tests/test_h8_h7_policy_pilot.py
+
+python -u tools/benchmark_h8_h7_policy_pilot.py \
+  --emulator-dll $dll \
+  --emulator-bindings $emulator/bindings/python \
+  --emulator-revision $rev \
+  --workers 15 --episodes 128 --max-boundaries 1200 \
+  --replay-every 8 --actor-device cuda \
+  --actor-max-batch 16 --actor-delay-ms 3 \
+  --order abba \
+  --output results/h8-h7-transformer-pilot-a10-128-abba.json
+```
+
+Use `--player-checkpoint /absolute/path/to/h7-actor.pt` to select
+the **same actual H7 model** rather than creating deterministic fresh
+random weights; in either case the whole A/B/B/A run has an unchanged
+frozen model and source cohort.
+
+The output's `statuses.terminal` is the number of complete fights,
+whereas `player_choice`, `unsupported`, and `max_boundaries` describe
+nonterminal work; never substitute all 128 source count for completion.
+`terminal_combats_per_second` measures real terminal completions only.
+
+## Remaining blockers for valid H7 versus H8 training comparison
+
+1. The current Nature sampler uses source-weight-correct intent tickets
+   and eligible physical cards, but **not** the existing H7 reference
+   sampler's event-scoped RNG derivation. Implement the exact old
+   Chance Law/reference sampling protocol before a cross-emulator law
+   parity claim; do not allow H8 to silently use native RNG instead.
+2. The current H8 `player_choice` boundary is explicitly unsupported
+   for this model pilot; resume nested player card-selection and draw-hook
+   fair menus with exact H7 `fair_player_choice_actions` semantics.
+   Migrate additional stochastic sites, including random targets,
+   costs and generated cards, or retain exact checked fallback.
+3. Promote this pilot to `draw_only_workers` once full source-valid
+   H7 16-cell terminal combats and audited on-policy source logprobs
+   can be gathered. Build a matched H7-legacy vs H8-native 15-worker,
+   128-combat A/B/B/A under a *single frozen checkpoint SHA* and the
+   exact same reference law and source cells.
+4. Remove output-only v111 continuation projection, design one native
+   H8 effect cursor/owner, and transport typed batched observations
+   without repeated JSON for additional throughput after profiling.
+5. **No emulator submodule pin update or long PPO training** until
+   complete mechanics, replay and on-policy capture pass.
+
+## Reference baseline
+
+User's legacy H7 local full 128 source-complete A10 combats with
+15 processes and shared CUDA inference: **53.131 s**, **2.409 complete
+combats/s**, **64.331 player decisions/s**, **144.153 boundaries/s**,
+source digest `f7e599e1154c99c59c52d85174daa7b329f456396d2f779bbd7d14304905c3b5`
+and emulator rev `ec948b5b5abbb94a4ef63d362f8eefe71656987b`.
+The H8-scripted 128-combat end-turn-only benchmark on 15 workers
+measured a 2.01x speedup, but omitted model inference and all real
+player card decisions. Do not extrapolate that result to PPO.
