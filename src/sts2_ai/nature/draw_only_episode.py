@@ -183,6 +183,7 @@ def play_draw_only_episode(
     entry_mode: str = "source-route",
     draw_mode: str = "learned",
     replay: tuple[DrawOnlyStep, ...] | None = None,
+    verify_terminal_replay: bool = True,
     scenario: CombatScenario | None = None,
     deck_preset_id: str = BASELINE_DECK,
     score_reference_q: bool = False,
@@ -198,6 +199,10 @@ def play_draw_only_episode(
     Reference RNG is a separate declared-law sampler, never the native cursor.
     """
     check_draw_only_capabilities(session.capabilities)
+    if type(verify_terminal_replay) is not bool:
+        raise ValueError("verify_terminal_replay must be bool")
+    if replay is not None and not verify_terminal_replay:
+        raise ValueError("Explicit action transcript replay requires terminal verification")
     if reward_version not in ("hp_preservation_v1", H4_REWARD):
         raise ValueError("Unknown draw-only reward version")
     if (mcts_simulations < 0 or mcts_max_boundaries < 1
@@ -406,10 +411,11 @@ def play_draw_only_episode(
             raise DrawOnlyContractError("Malformed genuine terminal combat")
         if replay is not None and len(replay) != len(decisions):
             raise DrawOnlyContractError("Replay ended at different boundary count")
-        restored = session.load_semantic_snapshot(state.save_snapshot())
-        held.append(restored)
-        if restored.fingerprint != state.fingerprint:
-            raise DrawOnlyContractError("Private terminal snapshot replay mismatch")
+        if verify_terminal_replay:
+            restored = session.load_semantic_snapshot(state.save_snapshot())
+            held.append(restored)
+            if restored.fingerprint != state.fingerprint:
+                raise DrawOnlyContractError("Private terminal snapshot replay mismatch")
         terminal_enemy_hp: int | None = None
         if reward_version == H4_REWARD:
             if opening_enemy_hp is None:
@@ -442,7 +448,7 @@ def play_draw_only_episode(
             outcome=state.outcome, exit_hp=state.exit_hp,
             score=score,
             terminal_fingerprint=state.fingerprint,
-            terminal_replay_verified=True,
+            terminal_replay_verified=verify_terminal_replay,
             scenario_id=selected.scenario_id,
             deck_preset_id=deck_preset_id,
             reward_version=reward_version,
