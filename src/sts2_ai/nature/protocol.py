@@ -10,7 +10,7 @@ import hashlib
 import json
 import math
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 NATURE_EVENT_SCHEMA = "sts2-ai-nature-event-v1"
 ISOLATED_EMULATOR_SCHEMA = "sts2-v111-nature-isolated-boundary-v1"
@@ -77,7 +77,7 @@ class ChanceEvent:
 
     @classmethod
     def from_isolated_wire(
-        cls, pending: dict, *, fingerprint: str,
+        cls, pending: dict[str, Any], *, fingerprint: str,
     ) -> ChanceEvent:
         """Decode actual v111 C# JSON camelCase; do not invent probabilities."""
         required = ("siteId", "streamId", "ownerId", "ordinal",
