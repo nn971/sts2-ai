@@ -1,0 +1,31 @@
+name: h8-structured-combat-curriculum
+on:
+  push:
+    paths:
+      - 'src/sts2_ai/nature/research_combat_fixtures.py'
+      - 'src/sts2_ai/nature/draw_only_episode.py'
+      - 'src/sts2_ai/nature/draw_only_workers.py'
+      - 'tools/train_h7_reference_combat.py'
+      - 'tools/evaluate_h7_reference_combat.py'
+      - 'tests/test_h8_structured_curriculum.py'
+      - '.github/workflows/h8-structured-combat.yml'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  structural-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install independent structural test dependencies
+        run: python -m pip install -e '.[dev]'
+      - name: Syntax compile
+        run: |
+          python -m compileall -q src/sts2_ai/nature/research_combat_fixtures.py src/sts2_ai/nature/draw_only_episode.py src/sts2_ai/nature/draw_only_workers.py tools/train_h7_reference_combat.py tools/evaluate_h7_reference_combat.py
+      - name: Deterministic 1000-spec audit and split tests
+        run: python -m pytest -q tests/test_h8_structured_curriculum.py
+      - name: Ruff on H8 changes
+        run: ruff check src/sts2_ai/nature/research_combat_fixtures.py tests/test_h8_structured_curriculum.py
