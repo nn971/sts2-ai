@@ -320,6 +320,11 @@ def _shard(
                     intents=counts["enemy_intent"],
                     trace_digest=canonical_sha256(transcript),
                     journal_digest=canonical_sha256(history),
+                    reference_law_steps=[
+                        {"event_id": event_id, "law_id": law_id,
+                         "selected_id": outcome_id}
+                        for event_id, law_id, outcome_id in nature_law_trace
+                    ],
                     reference_event_digest=(
                         canonical_sha256(nature_law_trace)
                         if chance_sampling == "event-law" else None
@@ -451,7 +456,7 @@ def _validate_pair(a: dict[str, Any], b: dict[str, Any]) -> None:
             "nature_draws", "intents", "trace_digest",
             "journal_digest", "mechanics_sha256",
             "captured_player_decisions", "behavior_digest",
-            "reference_event_digest",
+            "reference_event_digest", "reference_law_steps",
         ):
             if left[key] != right[key]:
                 raise RuntimeError(
