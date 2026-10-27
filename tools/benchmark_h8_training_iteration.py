@@ -35,6 +35,7 @@ def validate_training_cohort(
     cohort: dict[str, Any], seeds: tuple[str, ...],
     *, replay_every: int,
     replay_indices: frozenset[int] | None = None,
+    require_capture: bool = True,
 ) -> tuple[tuple[Any, ...], tuple[tuple[dict[str, Any], ...], ...]]:
     """Reject censored, non-reference, unverified or incomplete on-policy data."""
     if cohort["episodes"] != len(seeds) or (
@@ -55,10 +56,12 @@ def validate_training_cohort(
                 row["replay_verified"] != audited or
                 row["score"] is None or
                 row["reference_event_digest"] is None or
-                row["captured_player_decisions"] != row["player_decisions"] or
-                row["captured_player_decisions"] != len(row["player_steps"]) or
-                not isinstance(row["training_actions"], (tuple, list)) or
-                len(row["training_actions"]) != row["player_decisions"]):
+                (require_capture and (
+                    row["captured_player_decisions"] != row["player_decisions"] or
+                    row["captured_player_decisions"] != len(row["player_steps"]) or
+                    not isinstance(row["training_actions"], (tuple, list)) or
+                    len(row["training_actions"]) != row["player_decisions"]))):
+
             raise RuntimeError("Missing terminal or source-public PPO data: " + seed)
         episodes.append(SimpleNamespace(
             source_seed=seed, outcome=row["outcome"], score=row["score"],
@@ -68,7 +71,7 @@ def validate_training_cohort(
             draw_mode="reference", terminal_replay_verified=audited,
             decisions=tuple(SimpleNamespace(**x) for x in row["decision_sequence"]),
         ))
-        captures.append(tuple(row["training_actions"]))
+        captures.append(tuple(row["training_actions"] or ()))
     return tuple(episodes), tuple(captures)
 
 
