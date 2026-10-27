@@ -42,6 +42,10 @@ def main() -> None:
     p.add_argument("--study-seed", type=int, default=73127)
     p.add_argument("--actor-seed", type=int, default=31337)
     p.add_argument("--reference-seed", type=int, default=23387)
+    p.add_argument("--actor-backend", choices=("local", "shared"), default="local")
+    p.add_argument("--actor-device", default="cpu")
+    p.add_argument("--actor-max-batch", type=int, default=16)
+    p.add_argument("--actor-delay-ms", type=float, default=3.0)
     args = p.parse_args()
     if (args.workers < 1 or args.episodes < 16 or args.max_boundaries < 1
             or min(args.study_seed, args.actor_seed, args.reference_seed) < 0):
@@ -85,6 +89,9 @@ def main() -> None:
                 emulator_bindings=args.emulator_bindings,
                 emulator_revision=args.emulator_revision,
                 workers=args.workers, max_boundaries=args.max_boundaries,
+                actor_backend=args.actor_backend, actor_device=args.actor_device,
+                actor_max_batch=args.actor_max_batch,
+                actor_delay_ms=args.actor_delay_ms, profile_actor=True,
             ),
             reference_seed=args.reference_seed, capture=False,
         )
@@ -95,6 +102,11 @@ def main() -> None:
         )
         report.update({
             "initialization": start,
+            "actor_backend": args.actor_backend,
+            "actor_device": args.actor_device,
+            "actor_max_batch": args.actor_max_batch,
+            "actor_delay_ms": args.actor_delay_ms,
+            "actor_metrics": cohort["actor_metrics"],
             "model_config": model_config,
             "source_digest": canonical_sha256(seeds),
             "emulator_revision": args.emulator_revision,

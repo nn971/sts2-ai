@@ -7,6 +7,10 @@ on:
       - 'src/sts2_ai/training/h7_combat_ppo.py'
       - 'tools/train_h7_reference_combat.py'
       - 'tests/test_h7_combat_ppo.py'
+      - 'src/sts2_ai/models/h7_batch_actor.py'
+      - 'src/sts2_ai/nature/draw_only_workers.py'
+      - 'tests/test_h7_batch_actor.py'
+      - 'tools/benchmark_h7_rollouts.py'
       - '.github/workflows/h7-reference-combat-smoke.yml'
   workflow_dispatch:
 
@@ -40,7 +44,7 @@ jobs:
         working-directory: emulator
         run: |
           dotnet restore Sts2Emulator.sln
-          dotnet build Sts2Emulator.sln -c Release --no-restore
+          dotnet build Sts2Emulator.sln -c Release --no-restore -m:1
       - name: Run small random-start H7 reference-law PPO integration
         working-directory: ai
         run: |
@@ -67,9 +71,39 @@ jobs:
           assert Path("ci-h7-reference/optimizer-checkpoint.pt").is_file()
           assert Path("ci-h7-reference/final-player.pt").is_file()
           PY
+      - name: Run shared batched H7 reference-law PPO integration
+        working-directory: ai
+        run: |
+          python -u tools/train_h7_reference_combat.py \
+            --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings ../emulator/bindings/python \
+            --emulator-revision e56779ccd86725582af580925ca8242826ba2229 \
+            --output-root ci-h7-shared --device cpu \
+            --width 32 --layers 1 --heads 4 --feedforward 64 \
+            --rounds 1 --episodes-per-round 16 --workers 2 \
+            --eval-every 1 --eval-episodes 16 \
+            --ppo-epochs 1 --ppo-minibatch 16 --ppo-sample-limit 64 \
+            --actor-backend shared --actor-device cpu \
+            --actor-max-batch 2 --actor-delay-ms 10 --profile-actor \
+            --max-boundaries 1200 --execute
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          row=json.loads(Path("ci-h7-shared/progress.json").read_text())["history"][0]
+          assert row["train"]["combats"] == 16
+          assert len(row["train"]["by_cell"]) == 16
+          assert row["selection"]["combats"] == 16
+          assert row["updates"] > 0
+          assert row["actor_metrics"]["server"]["requests"] > 0
+          assert row["actor_metrics"]["calls"] > 0
+          assert Path("ci-h7-shared/optimizer-checkpoint.pt").is_file()
+          assert Path("ci-h7-shared/final-player.pt").is_file()
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: h7-reference-one-round-diagnostics
-          path: ai/ci-h7-reference/progress.json
+          path: |
+            ai/ci-h7-reference/progress.json
+            ai/ci-h7-shared/progress.json
           if-no-files-found: ignore

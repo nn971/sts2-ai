@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,19 +31,38 @@ class TorchH7PublicPolicy:
     def __init__(self, model: SharedObjectTransformer, *, model_id: str) -> None:
         self.model = model.eval()
         self.model_id = model_id
+        self.calls = 0
+        self.encoding_seconds = 0.0
+        self.collate_seconds = 0.0
+        self.forward_seconds = 0.0
+
+    def timings_snapshot(self) -> dict[str, float | int]:
+        return {
+            "calls": self.calls,
+            "encoding_seconds": self.encoding_seconds,
+            "collate_seconds": self.collate_seconds,
+            "forward_seconds": self.forward_seconds,
+        }
 
     def evaluate(
         self, observation: Observation, legal_actions: Sequence[LegalAction],
     ) -> PolicyValueEstimate:
+        begun = time.perf_counter()
         frame = json.loads(observation.payload_json)
         if not isinstance(frame, dict):
             raise ValueError("Malformed fair public observation")
         encoded = encode_public_decision(frame, legal_actions)
+        self.encoding_seconds += time.perf_counter() - begun
+        begun = time.perf_counter()
         batch = collate_h7([encoded]).to(next(self.model.parameters()).device)
+        self.collate_seconds += time.perf_counter() - begun
+        begun = time.perf_counter()
         with torch.inference_mode():
             logits, values = self.model(batch)
         result = tuple(float(x) for x in logits[0].detach().float().cpu())
         value = float(values[0].detach().float().cpu())
+        self.forward_seconds += time.perf_counter() - begun
+        self.calls += 1
         if len(result) != len(legal_actions) or not all(map(math.isfinite, (*result, value))):
             raise ValueError("Nonfinite H7 fair-policy inference")
         return PolicyValueEstimate(action_logits=result, value=value)
