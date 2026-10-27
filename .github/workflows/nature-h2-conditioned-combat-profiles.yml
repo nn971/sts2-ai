@@ -77,17 +77,23 @@ jobs:
           import sys
           sys.path.insert(0, '../emulator/bindings/python')
           from sts2_emulator import Session
-          from sts2_ai.nature.combat_scenarios import SCENARIOS, DECK_PRESETS
+          from sts2_ai.nature.combat_scenarios import SCENARIOS
           from sts2_ai.nature.draw_only_episode import play_draw_only_episode
           from sts2_ai.nature.two_site_opponent import TwoSiteNature
           from sts2_ai.emulator.semantic_p0_combat import strike_first_player
+          # Reproduce the four decks supported by the pinned H2 emulator;
+          # H5's two boss deck presets were added after this source revision.
+          h2_decks = (
+              'silent-starter-v1', 'silent-strike-heavy-v1',
+              'silent-defend-heavy-v1', 'silent-poison-kit-v1',
+          )
           cmd = ['dotnet', '../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll', 'prototype-ai-jsonl']
           with Session(cmd) as session:
               for scenario_id in (
                   'shrinker-a10', 'nibbits-a10',
                   'mawler-a10', 'cubex-a10', 'vine-shambler-a10',
               ):
-                  for deck in DECK_PRESETS:
+                  for deck in h2_decks:
                       opts = dict(
                           source_seed='h2-ci-'+scenario_id+'-'+deck,
                           reference_seed=88,
