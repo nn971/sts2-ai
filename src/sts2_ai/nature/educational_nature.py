@@ -25,7 +25,7 @@ def educational_rewards(
     player: JointPlayerPPO,
     episodes: tuple[Any, ...],
     records: tuple[tuple[dict[str, Any], ...], ...],
-) -> tuple[tuple[float, ...], dict[str, float]]:
+) -> tuple[tuple[float, ...], dict[str, Any]]:
     """Estimate per-Nature-episode alignment with reference policy improvement.
 
     g_ref is the reference-arm ascent gradient (REINFORCE, using a fixed
