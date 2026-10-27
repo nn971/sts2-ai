@@ -34,7 +34,7 @@ from .corpus import (
     validated_record,
 )
 from .policies import FirstLegalNature, LastLegalNature, ScriptedNature, UniformNature
-from .protocol import canonical_sha256
+from .protocol import NaturePolicy, canonical_sha256
 from .trace import ChanceTraceEntry, ChanceTranscript, record_entry
 
 _worker_wire: NatureJsonlProcess | None = None
@@ -65,7 +65,7 @@ def _init_worker(command: tuple[str, ...], emulator_revision: str) -> None:
     Finalize(None, _close_worker_wire, exitpriority=10)
 
 
-def _policy(mode: str, seed: int, fixture: NatureFixture):
+def _policy(mode: str, seed: int, fixture: NatureFixture) -> NaturePolicy:
     if mode == "first":
         return FirstLegalNature()
     if mode == "last":
