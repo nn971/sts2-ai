@@ -14,7 +14,17 @@ from benchmark_h8_training_iteration import (  # noqa: E402
 
 
 def _row(seed: str) -> dict:
-    actions = ({"selected_id": "end_turn"},)
+    actions = ({
+        "source_support_identity": "support",
+        "source_observation": {"hp": 66},
+        "source_legal_actions": [{"actionId": "end_turn"}],
+        "observation": {"policy_id": "prototype-fair-v0"},
+        "legal_actions": [{"action_id": "end_turn"}],
+        "chosen_index": 0, "selected_id": "end_turn",
+        "behavior_model_id": "h7-test", "temperature": 0.85,
+        "action_scope": "all-legal-v1",
+        "behavior_logprob": -0.25, "behavior_value": 0.3,
+    },)
     steps = [
         {"phase": "player", "selected_id": "end_turn"},
         {"phase": "nature:enemy_intent", "selected_id": "attack"},
