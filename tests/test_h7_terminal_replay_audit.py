@@ -1,7 +1,6 @@
 """H7 terminal replay audit selection must not depend on outcomes or scheduling."""
 from __future__ import annotations
 
-from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -30,9 +29,12 @@ def test_bad_replay_rate_rejected(rate):
         terminal_replay_audit_indices(("anything",), rate)
 
 
-def test_missing_curated_seed_rejected():
+def test_missing_curated_seed_rejected(monkeypatch):
+    monkeypatch.setattr(
+        "tools.train_h7_reference_combat.cell_for_source", lambda _: None,
+    )
     with pytest.raises(ValueError, match="uncurated"):
-        terminal_replay_audit_indices(("not-a-valid-h5-source",), 8)
+        terminal_replay_audit_indices(("out-of-curriculum-source",), 8)
 
 
 def test_collect_accepts_only_preselected_unchecked_indices(monkeypatch):
