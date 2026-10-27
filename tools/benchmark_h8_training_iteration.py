@@ -34,6 +34,7 @@ from sts2_ai.training.h7_combat_ppo import H7CombatPPO
 def validate_training_cohort(
     cohort: dict[str, Any], seeds: tuple[str, ...],
     *, replay_every: int,
+    replay_indices: frozenset[int] | None = None,
 ) -> tuple[tuple[Any, ...], tuple[tuple[dict[str, Any], ...], ...]]:
     """Reject censored, non-reference, unverified or incomplete on-policy data."""
     if cohort["episodes"] != len(seeds) or (
@@ -47,7 +48,8 @@ def validate_training_cohort(
     captures = []
     for index, seed in enumerate(seeds):
         row = cohort["trajectories"][seed]
-        audited = index % replay_every == 0
+        audited = (index % replay_every == 0 if replay_indices is None
+                   else index in replay_indices)
         if (row["status"] != "terminal" or
                 row["outcome"] not in ("victory", "defeat") or
                 row["replay_verified"] != audited or
@@ -60,6 +62,9 @@ def validate_training_cohort(
             raise RuntimeError("Missing terminal or source-public PPO data: " + seed)
         episodes.append(SimpleNamespace(
             source_seed=seed, outcome=row["outcome"], score=row["score"],
+            exit_hp=row["exit_hp"],
+            terminal_enemy_hp=row["terminal_enemy_hp"],
+            reward_version=H4_REWARD,
             draw_mode="reference", terminal_replay_verified=audited,
             decisions=tuple(SimpleNamespace(**x) for x in row["decision_sequence"]),
         ))
