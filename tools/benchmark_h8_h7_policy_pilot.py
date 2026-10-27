@@ -75,7 +75,7 @@ def _shard(
     indexed_seeds: list[tuple[int, str]],
     dll: str, bindings: str,
     mode: str, max_boundaries: int, replay_every: int,
-    reference_seed: int,
+    reference_seed: int, capture_player_training: bool = False,
 ) -> list[dict[str, Any]]:
     sys.path.insert(0, bindings)
     from sts2_emulator import Session
@@ -94,7 +94,8 @@ def _shard(
             scenario = SCENARIOS[cell.scenario]
             actor = FrozenP0Player(
                 policy, greedy=spec.greedy, temperature=spec.temperature,
-                action_scope=spec.action_scope, capture_training=False,
+                action_scope=spec.action_scope,
+                capture_training=capture_player_training,
                 actor_seed=spec.episode_seed(
                     fixture_seed=seed,
                     fixture_id=("draw-only:seeded-fixed-shrinker:"
@@ -221,7 +222,12 @@ def _shard(
                     exit_hp=state.get("exitHp"),
                     terminal_enemy_hp=state.get("terminalEnemyHp"),
                     boundaries=len(transcript),
-                    player_decisions=counts["player"],
+                    player_decisions=actor.decisions,
+                    captured_player_decisions=len(actor.training_actions),
+                    behavior_digest=(
+                        canonical_sha256(actor.training_actions)
+                        if capture_player_training else None
+                    ),
                     nature_draws=counts["draw_card"],
                     intents=counts["enemy_intent"],
                     trace_digest=canonical_sha256(transcript),
@@ -246,6 +252,7 @@ def _worker_main(
     shard: list[tuple[int, str]], dll: str, bindings: str,
     mode: str, max_boundaries: int, replay_every: int,
     reference_seed: int, results: Any,
+    capture_player_training: bool = False,
 ) -> None:
     # Queue handles cross the process boundary *only at spawn*, never
     # inside a ProcessPoolExecutor task queue. Keep one emulator process
@@ -254,7 +261,7 @@ def _worker_main(
         _initialize_h8_actor(transport, spec)
         rows = _shard(
             shard, dll, bindings, mode, max_boundaries,
-            replay_every, reference_seed)
+            replay_every, reference_seed, capture_player_training)
         results.put(("ok", rows))
     except BaseException:
         results.put(("error", traceback.format_exc()))
@@ -264,7 +271,8 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
             spec: H7PlayerSpec, mode: str, workers: int,
             actor_device: str, actor_max_batch: int,
             actor_delay_ms: float, max_boundaries: int,
-            replay_every: int, reference_seed: int) -> dict[str, Any]:
+            replay_every: int, reference_seed: int,
+            capture_player_training: bool = False) -> dict[str, Any]:
     indexed = list(enumerate(seeds))
     shards = [indexed[i::workers] for i in range(min(workers, len(seeds)))]
     began = time.perf_counter()
@@ -281,7 +289,7 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
                 target=_worker_main,
                 args=(server.transport, spec, shard, dll, bindings,
                       mode, max_boundaries, replay_every, reference_seed,
-                      results),
+                      results, capture_player_training),
             )
             for shard in shards
         ]
@@ -346,6 +354,7 @@ def _validate_pair(a: dict[str, Any], b: dict[str, Any]) -> None:
             "terminal_enemy_hp", "boundaries", "player_decisions",
             "nature_draws", "intents", "trace_digest",
             "journal_digest", "mechanics_sha256",
+            "captured_player_decisions", "behavior_digest",
         ):
             if left[key] != right[key]:
                 raise RuntimeError(
@@ -371,6 +380,11 @@ def main() -> None:
     p.add_argument("--actor-max-batch", type=int, default=16)
     p.add_argument("--actor-delay-ms", type=float, default=3.0)
     p.add_argument("--order", choices=("ab", "abba"), default="ab")
+    p.add_argument(
+        "--capture-player-training", action="store_true",
+        help="Also record exact H7 on-policy public behavior logprob/value "
+             "digest per source (does not perform PPO)",
+    )
     args = p.parse_args()
     if (args.workers < 1 or args.episodes < 16 or
             args.max_boundaries < 1 or args.replay_every < 1):
@@ -418,6 +432,7 @@ def main() -> None:
                 max_boundaries=args.max_boundaries,
                 replay_every=args.replay_every,
                 reference_seed=args.reference_seed,
+                capture_player_training=args.capture_player_training,
             )
             cohorts.append(x)
             print(
@@ -438,6 +453,7 @@ def main() -> None:
             emulator_dll_sha256=hashlib.sha256(
                 args.emulator_dll.read_bytes()).hexdigest(),
             chance_sampling="independent-reference-raw-weight-pilot-v1",
+            capture_player_training=args.capture_player_training,
             source_digest=canonical_sha256(seeds),
             order=order, paired_equivalence=True, cohorts=cohorts,
         )
