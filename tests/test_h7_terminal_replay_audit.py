@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from sts2_ai.nature.h5_curriculum import TRAIN_CELLS, cell_for_source, source_bank
-from tools.train_h7_reference_combat import terminal_replay_audit_indices, collect
+from tools.train_h7_reference_combat import collect, terminal_replay_audit_indices
 
 
 def test_stratified_indices_are_deterministic_cover_all_cells():
