@@ -431,14 +431,17 @@ def _options(decision: dict[str, Any]) -> str:
             f' <span title="Identical policy inputs">[ENCODER TIE: {len(equivalence)}]</span>'
             if len(equivalence) > 1 else ""
         )
+        # The menu payload is already public. Expose it as escaped
+        # hover text so action identities can be audited safely.
+        payload = _safe(json.dumps(action.get("payload", {}), sort_keys=True))
+        label = _safe(action.get("label", action_label(action)))
+        marker = "● " if selected else ""
+        score_text = f"{score:.3f}" if score is not None else "unavailable"
         items.append(
             f'<tr class="{"selected" if selected else ""}">'
-            f'<td>{"● " if selected else ""}'
-            f'{_safe(action.get("label", action_label(action)))}{diagnostic}</td>'
-            f'<td>{score:.3f}</td>' if score is not None else
-            f'<tr><td>{_safe(action.get("label", action_label(action)))}</td><td>unavailable</td>'
+            f'<td title="{payload}">{marker}{label}{diagnostic}</td>'
+            f"<td>{score_text}</td></tr>"
         )
-        items[-1] += "</tr>"
     return '<table><tr><th>Legal action</th><th>Logit</th></tr>' + "".join(items) + '</table>'
 
 
