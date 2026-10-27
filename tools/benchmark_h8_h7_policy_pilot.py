@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
-"""H8 + actual 14.66M H7 shared-CUDA player-policy integration pilot.
+"""Real 14.66M H7 Transformer inference through checked/native H8.
 
-Unlike the scripted H8 benchmark, this evaluates real source-visible H7
-public observations and *all* full-player-boundary legal actions through
-the pretrained/random frozen H7 Transformer. Nature samples from actual
-physical draw support and the source's weighted intent support.
+The default Nature sampler uses the exact H7 declared event-scoped Chance
+Law and original SeededLawSampler, obtained from a version-checked H8 API.
+The optional legacy sequential sampler remains for controlled diagnostics.
 
-STRICT LIMITS: H8 player sub-choices/other stochastic sites remain incomplete;
-they are reported as unsupported, never counted as completed combats. H8's
-temporary reference-weighted sampler here does not reproduce the old H7
-law's exact event-scoped reference RNG stream; no H7 vs H8 policy-quality
-claim is made. This pilot is solely a paired H8 checked/native performance
-and model-interface acceptance test, with matched H8 source/choice streams.
+Unimplemented player/other chance sites remain explicit unsupported/censored
+outcomes. Native-vs-checked H8 agreement alone does not prove legacy-H7
+equivalence; benchmark_h8_training_iteration runs the cross-runtime gate.
 """
 from __future__ import annotations
 
@@ -105,8 +101,8 @@ def _shard(
                                 + cell.scenario + ":" + cell.deck),
                 ),
             )
-            # Stable per-source independent reference-weighted choices.
-            # This sampler is not the H7 event-indexed reference sampler.
+            # Original H7 per-source reference-seed derivation, with
+            # event-scoped deterministic sampling below.
             nature_rng = random.Random(reference_seed + index * 1000003)
             event_sampler = SeededLawSampler(reference_seed + index * 1000003)
             nature_law_trace: list[tuple[str, str, str]] = []
@@ -407,6 +403,13 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
                         f"H8 workers timed out or crashed: {status}") from exc
                 if kind == "ok":
                     rows.extend(payload)
+                    print(
+                        f"[h8-h7-cohort] mode={mode} "
+                        f"workers_done={len(rows)}/{len(seeds)} "
+                        f"terminals={sum(x['status'] == 'terminal' for x in rows)} "
+                        f"elapsed_s={time.perf_counter()-began:.1f}",
+                        flush=True,
+                    )
                 else:
                     errors.append(str(payload))
             if errors:
