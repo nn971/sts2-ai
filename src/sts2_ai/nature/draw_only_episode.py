@@ -185,6 +185,7 @@ def play_draw_only_episode(
     replay: tuple[DrawOnlyStep, ...] | None = None,
     scenario: CombatScenario | None = None,
     deck_preset_id: str = BASELINE_DECK,
+    fixture_spec: dict[str, Any] | None = None,
     score_reference_q: bool = False,
     reward_version: str = "hp_preservation_v1",
     mcts_simulations: int = 0,
@@ -212,6 +213,13 @@ def play_draw_only_episode(
             or max_boundaries <= 0):
         raise ValueError("Invalid draw-only fixture configuration")
     selected = SCENARIOS[BASELINE_SCENARIO] if scenario is None else scenario
+    if fixture_spec is not None and (
+        entry_mode != "seeded-fixed-shrinker" or deck_preset_id != BASELINE_DECK
+        or selected.encounter_id != fixture_spec.get("encounter_id")
+        or selected.native_entry != fixture_spec.get("native_encounter_entry")
+        or selected.total_floor != fixture_spec.get("total_floor")
+    ):
+        raise DrawOnlyContractError("Incompatible structured research fixture")
     if deck_preset_id not in DECK_PRESETS:
         raise DrawOnlyContractError("Unsupported source-conditioned Silent deck preset")
     if selected.scenario_id not in SCENARIOS or SCENARIOS[selected.scenario_id] != selected:
@@ -232,6 +240,8 @@ def play_draw_only_episode(
             {} if deck_preset_id == BASELINE_DECK else
             {"fixture_deck_preset_id": deck_preset_id}
         )
+        if fixture_spec is not None:
+            deck_kwargs["fixture_spec"] = fixture_spec
         state = session.begin_seeded_semantic_combat(
             source_seed, act=selected.act,
             encounter_id=selected.encounter_id,
