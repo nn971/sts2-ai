@@ -28,6 +28,7 @@ from contextlib import ExitStack
 import queue
 import traceback
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import torch
@@ -436,6 +437,12 @@ def main() -> None:
              "separate fast performance pilot, not H7 reference-equivalent.",
     )
     p.add_argument(
+        "--compare-h7-legacy", action="store_true",
+        help="Require complete H8 combats, then compare exact terminal "
+             "outcome/HP/entire pilot hash to legacy H7 semantic reference "
+             "rollouts using the same model/source/Chance Law",
+    )
+    p.add_argument(
         "--capture-player-training", action="store_true",
         help="Also record exact H7 on-policy public behavior logprob/value "
              "digest per source (does not perform PPO)",
@@ -501,6 +508,53 @@ def main() -> None:
             )
         for x in cohorts[1:]:
             _validate_pair(cohorts[0], x)
+        legacy_comparison = None
+        if args.compare_h7_legacy:
+            if args.reference_law_mode != "event-keyed-v111":
+                raise RuntimeError(
+                    "Cross H7/H8 equivalence requires the exact declared law")
+            if any(x["statuses"] != {"terminal": len(seeds)} for x in cohorts):
+                raise RuntimeError(
+                    "Cross H7/H8 comparison requires complete supported "
+                    "terminal combats for every source in each H8 arm")
+            from train_h7_reference_combat import collect
+
+            old = collect(
+                seeds, spec=spec,
+                args=SimpleNamespace(
+                    emulator_dll=args.emulator_dll,
+                    emulator_bindings=args.emulator_bindings,
+                    emulator_revision=args.emulator_revision,
+                    workers=args.workers,
+                    max_boundaries=args.max_boundaries,
+                    actor_backend="shared",
+                    actor_device=args.actor_device,
+                    actor_max_batch=args.actor_max_batch,
+                    actor_delay_ms=args.actor_delay_ms,
+                    profile_actor=True,
+                ),
+                reference_seed=args.reference_seed,
+                capture=False,
+            )
+            legacy_episodes = old["episodes"]
+            for seed, ep in zip(seeds, legacy_episodes, strict=True):
+                h8 = cohorts[0]["trajectories"][seed]
+                if (h8["outcome"] != ep.outcome
+                        or h8["exit_hp"] != ep.exit_hp
+                        or h8["mechanics_sha256"] !=
+                            ep.terminal_fingerprint):
+                    raise RuntimeError(
+                        "Legacy H7/H8 complete terminal mechanics mismatch "
+                        f"for {seed}: h8={h8['mechanics_sha256']} "
+                        f"h7={ep.terminal_fingerprint}; "
+                        f"outcome={h8['outcome']}/{ep.outcome}, "
+                        f"HP={h8['exit_hp']}/{ep.exit_hp}")
+            legacy_comparison = dict(
+                all_terminal_fingerprints_identical=True,
+                complete_combats=len(seeds),
+                source_digest=canonical_sha256(seeds),
+                legacy_episodes=len(legacy_episodes),
+            )
         result = dict(
             schema="sts2-h8-h7-public-policy-inference-pilot-v1",
             evidence="real-H7-shared-Transformer-on-H8-not-legacy-H7-equivalent-RNG",
@@ -510,6 +564,7 @@ def main() -> None:
                 args.emulator_dll.read_bytes()).hexdigest(),
             chance_sampling=args.reference_law_mode,
             capture_player_training=args.capture_player_training,
+            legacy_h7_comparison=legacy_comparison,
             source_digest=canonical_sha256(seeds),
             order=order, paired_equivalence=True, cohorts=cohorts,
         )
