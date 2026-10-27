@@ -27,6 +27,7 @@ from sts2_ai.nature.combat_scenarios import (
 )
 from sts2_ai.nature.contextual_draw import restore_nature
 from sts2_ai.nature.draw_only_episode import DrawOnlyEpisode, play_draw_only_episode
+from sts2_ai.nature.protocol import canonical_sha256
 from sts2_ai.nature.two_site_opponent import TwoSiteNature
 
 _worker_session: Any = None
@@ -344,9 +345,7 @@ def draw_only_batch(
         ),
         "terminal_replay_audit_seed_digest": None
         if len(verified_indices) == len(seeds)
-        else __import__("hashlib").sha256(
-            "\\n".join(seeds[i] for i in terminal_replay_indices).encode("utf-8")
-        ).hexdigest(),
+        else canonical_sha256([seeds[i] for i in terminal_replay_indices]),
         "draw_mode": draw_mode,
         "scenario_pool": scenario_pool,
         "deck_pool": deck_pool,
