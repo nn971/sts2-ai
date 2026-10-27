@@ -19,9 +19,18 @@ The session still owns all mechanics and card/intent support.
 
 - It samples **actual player actions** from the frozen H7 model, including
   legal card plays, rather than always ending its turn.
-- A distinct Nature sampler uses the source weighted enemy-intent ticket
-  support and uniform eligible physical card IDs, with per-source seeded
-  randomness and no player hidden-state exposure.
+- The default `--reference-law-mode event-keyed-v111` requests the
+  exact declared v111 enemy-intent/draw Chance Law through H8's explicit
+  read-only `h8_reference_law` endpoint. The unchanged H7
+  `DeclaredLaw.from_pending` and `SeededLawSampler` implement
+  event-keyed reference sampling, preserving the old outcome IDs,
+  raw or source-verified weights and per-source RNG seed.
+- Optional `--reference-law-mode raw-weight-pilot` uses the compact
+  weighted-intent and eligible physical-card support with a sequential
+  seeded independent Nature RNG. This is a *faster preliminary mode*,
+  not an H7 Chance Law equivalence claim. The exact mode currently
+  incurs extra v111 event projection/hashes and is an explicit M3
+  typed-Chance-Law optimization target.
 - `h8_begin_seeded` now takes the existing H7 research deck preset
   exactly as the semantic source engine did. The H7 16 source cells are
   grouped and resolved before contact with the engine.
@@ -69,6 +78,7 @@ python -u tools/benchmark_h8_h7_policy_pilot.py \
   --workers 15 --episodes 128 --max-boundaries 1200 \
   --replay-every 8 --actor-device cuda \
   --actor-max-batch 16 --actor-delay-ms 3 \
+  --reference-law-mode event-keyed-v111 \
   --order abba \
   --output results/h8-h7-transformer-pilot-a10-128-abba.json
 ```
@@ -82,6 +92,12 @@ The output's `statuses.terminal` is the number of complete fights,
 whereas `player_choice`, `unsupported`, and `max_boundaries` describe
 nonterminal work; never substitute all 128 source count for completion.
 `terminal_combats_per_second` measures real terminal completions only.
+
+**Note:** The initial passing 32-boundary CPU CI measurement below
+used the earlier compact sequential raw-weight sampler. The new
+default event-keyed declared-law mode is the stronger reference
+compatibility gate and must be validated independently; do not equate
+the throughput of these two modes.
 
 ## Initial real-model CI acceptance
 
@@ -108,11 +124,15 @@ passed on [GitHub Actions run 40575127367](https://github.com/nn971/sts2-ai/acti
 
 ## Remaining blockers for valid H7 versus H8 training comparison
 
-1. The current Nature sampler uses source-weight-correct intent tickets
-   and eligible physical cards, but **not** the existing H7 reference
-   sampler's event-scoped RNG derivation. Implement the exact old
-   Chance Law/reference sampling protocol before a cross-emulator law
-   parity claim; do not allow H8 to silently use native RNG instead.
+1. The current default sampling is now **the exact H7 event-keyed
+   `DeclaredLaw` + `SeededLawSampler`** through a temporary v111
+   read-only law bridge. Replace that expensive compatibility projection
+   with an interchangeable **typed H8 Chance Law provider** returning
+   byte-for-byte equivalent event identities, conditioning, eligible
+   outcomes and weights. The cheaper sequential `raw-weight-pilot`
+   mode remains research-only and must never silently replace the
+   training reference law. A full legacy H7-vs-H8 law identity/trajectory
+   comparison remains to be completed.
 2. The existing `player_card_selection` and
    `draw_hook_action_choice` cases now resume through a checked
    v111 continuation with exact H7 fair-action filtering. Continue
