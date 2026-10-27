@@ -217,6 +217,9 @@ def _shard(
                 after_actor = policy.timings_snapshot()
                 rows.append(dict(
                     seed=seed, cell=cell.key, status=status,
+                    outcome=state.get("outcome"),
+                    exit_hp=state.get("exitHp"),
+                    terminal_enemy_hp=state.get("terminalEnemyHp"),
                     boundaries=len(transcript),
                     player_decisions=counts["player"],
                     nature_draws=counts["draw_card"],
@@ -339,7 +342,8 @@ def _validate_pair(a: dict[str, Any], b: dict[str, Any]) -> None:
     for seed, left in a["trajectories"].items():
         right = b["trajectories"][seed]
         for key in (
-            "cell", "status", "boundaries", "player_decisions",
+            "cell", "status", "outcome", "exit_hp",
+            "terminal_enemy_hp", "boundaries", "player_decisions",
             "nature_draws", "intents", "trace_digest",
             "journal_digest", "mechanics_sha256",
         ):
