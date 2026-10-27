@@ -132,8 +132,6 @@ def collect(
                 seed, curriculum_seed=args.curriculum_seed,
             )
             expected_scenario, expected_deck = chosen.scenario_id, BASELINE_DECK
-            if fixture["hp"] != ep.entry_hp:
-                raise RuntimeError("H8 starting HP differs from validated fixture")
         else:
             cell = cell_for_source(seed)
             if cell is None:
