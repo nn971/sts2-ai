@@ -75,6 +75,7 @@ def widen_phase_split(
 ) -> PhaseSplitNeuralModel:
     if (
         model.strategy.format_id != NEURAL_FORMAT
+        or not isinstance(model.combat, NeuralPolicyValueModel)
         or model.combat.format_id != TACTICAL_INSTANCES_FORMAT
     ):
         raise ValueError("Capacity widening expects semantic strategy and v8 instance combat")
