@@ -9,6 +9,9 @@ on:
       - 'tests/test_h7_combat_ppo.py'
       - 'src/sts2_ai/models/h7_batch_actor.py'
       - 'src/sts2_ai/nature/draw_only_workers.py'
+      - 'src/sts2_ai/nature/draw_only_episode.py'
+      - 'tests/test_nature_draw_only_player_choice.py'
+      - 'tests/test_h7_terminal_replay_audit.py'
       - 'tests/test_h7_batch_actor.py'
       - 'tools/benchmark_h7_rollouts.py'
       - '.github/workflows/h7-reference-combat-smoke.yml'
@@ -99,6 +102,38 @@ jobs:
           assert Path("ci-h7-shared/optimizer-checkpoint.pt").is_file()
           assert Path("ci-h7-shared/final-player.pt").is_file()
           PY
+      - name: Run stratified terminal-replay PPO integration (32 train, 16 eval)
+        working-directory: ai
+        run: |
+          python -u tools/train_h7_reference_combat.py \
+            --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings ../emulator/bindings/python \
+            --emulator-revision e56779ccd86725582af580925ca8242826ba2229 \
+            --output-root ci-h7-sampled --device cpu \
+            --width 32 --layers 1 --heads 4 --feedforward 64 \
+            --rounds 1 --episodes-per-round 32 --workers 2 \
+            --eval-every 1 --eval-episodes 16 \
+            --ppo-epochs 1 --ppo-minibatch 16 --ppo-sample-limit 64 \
+            --train-terminal-replay-every 8 \
+            --max-boundaries 1200 --execute
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path("ci-h7-sampled/progress.json").read_text())
+          row=report["history"][0]
+          assert row["train"]["combats"] == 32
+          assert len(row["train"]["by_cell"]) == 16
+          assert row["terminal_replay_audit"]["verified"] == 16
+          assert row["terminal_replay_audit"]["not_checked"] == 16
+          assert row["train"]["terminal_replay_verified"] == 16
+          assert row["train"]["terminal_replay_not_checked"] == 16
+          assert row["selection"]["combats"] == 16
+          assert row["selection"]["terminal_replay_verified"] == 16
+          assert row["selection"]["terminal_replay_not_checked"] == 0
+          assert row["updates"] > 0
+          assert Path("ci-h7-sampled/optimizer-checkpoint.pt").is_file()
+          assert Path("ci-h7-sampled/final-player.pt").is_file()
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -106,4 +141,5 @@ jobs:
           path: |
             ai/ci-h7-reference/progress.json
             ai/ci-h7-shared/progress.json
+            ai/ci-h7-sampled/progress.json
           if-no-files-found: ignore
