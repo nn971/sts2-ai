@@ -405,7 +405,7 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
                     rows.extend(payload)
                     print(
                         f"[h8-h7-cohort] mode={mode} "
-                        f"workers_done={len(rows)}/{len(seeds)} "
+                        f"sources_done={len(rows)}/{len(seeds)} "
                         f"terminals={sum(x['status'] == 'terminal' for x in rows)} "
                         f"elapsed_s={time.perf_counter()-began:.1f}",
                         flush=True,
