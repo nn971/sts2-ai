@@ -195,11 +195,17 @@ def main() -> None:
         "temperature": args.temperature,
         "ppo_epochs": args.ppo_epochs, "ppo_minibatch": args.ppo_minibatch,
         "ppo_sample_limit": args.ppo_sample_limit,
-        "actor_backend": args.actor_backend,
-        "actor_device": args.actor_device,
-        "actor_max_batch": args.actor_max_batch,
-        "actor_delay_ms": args.actor_delay_ms,
     }
+    # Preserve legacy H7 local-run fingerprints and resume compatibility.
+    # New backend-specific runs are explicitly fingerprinted.
+    if (args.actor_backend != "local" or args.actor_device != "cpu"
+            or args.actor_max_batch != 16 or args.actor_delay_ms != 3.0):
+        config["actor_inference"] = {
+            "backend": args.actor_backend,
+            "device": args.actor_device,
+            "max_batch": args.actor_max_batch,
+            "delay_ms": args.actor_delay_ms,
+        }
     fingerprint = canonical_sha256(config)
     print(json.dumps({
         "fingerprint": fingerprint, "parameter_target": asdict(config_model),
