@@ -18,6 +18,7 @@ import torch
 from sts2_ai.evaluation.h7_readiness import make_readiness_report
 from sts2_ai.models.h7_public_policy import H7PlayerSpec
 from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
+from sts2_ai.nature.corpus import file_sha256
 from sts2_ai.nature.h5_curriculum import source_bank
 from sts2_ai.nature.protocol import canonical_sha256
 
@@ -98,6 +99,10 @@ def main() -> None:
             "source_digest": canonical_sha256(seeds),
             "emulator_revision": args.emulator_revision,
             "emulator_dll": str(args.emulator_dll.resolve()),
+            "emulator_dll_sha256": file_sha256(args.emulator_dll),
+            "emulator_bindings_sha256": file_sha256(
+                args.emulator_bindings / "sts2_emulator" / "__init__.py"
+            ),
             "emulator_bindings": str(args.emulator_bindings.resolve()),
             "max_boundaries": args.max_boundaries,
             "study_seed": args.study_seed,
