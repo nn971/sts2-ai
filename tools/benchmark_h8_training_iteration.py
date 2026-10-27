@@ -105,8 +105,28 @@ def validate_legacy_parity(
                 abs(row["score"] - ep.score) > 1e-10 or
                 row["terminal_enemy_hp"] != ep.terminal_enemy_hp):
             raise RuntimeError("Legacy/H8 terminal reward or HP drift: " + seed)
-        if canonical_sha256(row["training_actions"]) != canonical_sha256(cap):
-            raise RuntimeError("Legacy/H8 on-policy behavior drift: " + seed)
+        if len(row["training_actions"]) != len(cap):
+            raise RuntimeError("Legacy/H8 on-policy record count drift: " + seed)
+        for offset, (h8_action, h7_action) in enumerate(zip(
+            row["training_actions"], cap, strict=True,
+        )):
+            # Shared CUDA inference can produce tiny roundoff differences
+            # under different microbatch groupings. Match source/public
+            # support, sampled action and frozen model exactly; permit
+            # only the PPO optimizer's existing 5e-4 FP acceptance window.
+            exact_fields = (
+                "source_support_identity", "source_observation",
+                "source_legal_actions", "observation", "legal_actions",
+                "chosen_index", "selected_id", "behavior_model_id",
+                "temperature", "action_scope",
+            )
+            if any(h8_action[k] != h7_action[k] for k in exact_fields):
+                raise RuntimeError(
+                    f"Legacy/H8 public behavior drift {seed} at {offset}")
+            if any(abs(float(h8_action[k]) - float(h7_action[k])) > 5e-4
+                   for k in ("behavior_logprob", "behavior_value")):
+                raise RuntimeError(
+                    f"Legacy/H8 behavior FP drift {seed} at {offset}")
         checked += 1
     return {"matching_source_trajectories": checked}
 
