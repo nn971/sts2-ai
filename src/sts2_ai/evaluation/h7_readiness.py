@@ -41,7 +41,7 @@ def make_readiness_report(
     victories = 0
     for expected_seed, episode in zip(seeds, episodes, strict=True):
         cell = cell_for_source(expected_seed)
-        if (cell not in TRAIN_CELLS
+        if (cell is None or cell not in TRAIN_CELLS
                 or episode.source_seed != expected_seed
                 or episode.scenario_id != cell.scenario
                 or episode.deck_preset_id != cell.deck
