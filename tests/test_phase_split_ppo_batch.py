@@ -5,6 +5,8 @@ import copy
 import json
 
 import pytest
+from test_enemy_instances_v8 import combat_frame, targeted
+from test_phase_split_selfplay import TwoPhaseToy
 
 from sts2_ai.emulator import LegalAction, Observation
 from sts2_ai.training.instance_combat import add_instance_parameters
@@ -16,8 +18,6 @@ from sts2_ai.training.phase_split_ppo_batch import (
 )
 from sts2_ai.training.phase_split_selfplay import _forward_decision, train_phase_split
 from sts2_ai.training.selfplay import PublicDecision
-from test_enemy_instances_v8 import combat_frame, targeted
-from test_phase_split_selfplay import TwoPhaseToy
 
 
 def decision(state: dict, actions: tuple[LegalAction, ...], *, phase: str) -> PublicDecision:

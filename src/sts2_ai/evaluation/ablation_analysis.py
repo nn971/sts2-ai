@@ -8,8 +8,8 @@ clustered on the original source run, never on individual fights.
 from __future__ import annotations
 
 import math
-from pathlib import Path
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from sts2_ai.evaluation.combat_diagnostics import diagnose_reports

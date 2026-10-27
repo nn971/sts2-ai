@@ -6,17 +6,18 @@ import random
 from typing import Any
 
 import pytest
+from test_neural_selfplay import zero_model
 
 from sts2_ai.agents import RandomAgent
 from sts2_ai.emulator import InformationPolicy, LegalAction, Observation, Transition
 from sts2_ai.emulator.episode_goal import (
-    NATIVE_ACT1_BOSS_GOAL, PROTOTYPE_THREE_ACT_GOAL,
+    NATIVE_ACT1_BOSS_GOAL,
+    PROTOTYPE_THREE_ACT_GOAL,
     certified_native_act1_clear,
 )
 from sts2_ai.emulator.run_environment import NATIVE_MAP_PROFILE, NATIVE_RESET_SCHEMA
 from sts2_ai.evaluation.run import play_run
 from sts2_ai.training.selfplay import collect_public_episode
-from test_neural_selfplay import zero_model
 
 POLICY = InformationPolicy("prototype-fair-v0")
 BOSS_RECORD = {"act": 1, "floor": 16, "room_type": 5, "node_id": "boss"}

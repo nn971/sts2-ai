@@ -344,7 +344,7 @@ def map_svg(nodes: Sequence[dict[str, Any]], routes: dict[str, set[str]],
             )
     for label, path in (route_paths or {}).items():
         color = "#30bd8a" if label == "a" else "#f5b14c"
-        for u, v in zip(path, path[1:]):
+        for u, v in zip(path, path[1:], strict=False):
             if u not in coords or v not in coords:
                 continue
             left, right = coords[u], coords[v]
@@ -433,7 +433,8 @@ def _options(decision: dict[str, Any]) -> str:
         )
         items.append(
             f'<tr class="{"selected" if selected else ""}">'
-            f'<td>{"● " if selected else ""}{_safe(action.get("label", action_label(action)))}{diagnostic}</td>'
+            f'<td>{"● " if selected else ""}'
+            f'{_safe(action.get("label", action_label(action)))}{diagnostic}</td>'
             f'<td>{score:.3f}</td>' if score is not None else
             f'<tr><td>{_safe(action.get("label", action_label(action)))}</td><td>unavailable</td>'
         )

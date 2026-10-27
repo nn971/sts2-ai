@@ -3,10 +3,9 @@ from __future__ import annotations
 
 import copy
 import json
-import math
-import random
 
 import pytest
+from test_tactical_state_v7 import frame
 
 from sts2_ai.emulator import LegalAction, Observation
 from sts2_ai.models.enemy_instances import (
@@ -17,10 +16,11 @@ from sts2_ai.models.enemy_instances import (
     instance_global_features,
 )
 from sts2_ai.models.neural import (
-    NEURAL_FORMAT, TACTICAL_INSTANCES_FORMAT, NeuralPolicyValueModel,
+    NEURAL_FORMAT,
+    TACTICAL_INSTANCES_FORMAT,
+    NeuralPolicyValueModel,
 )
 from sts2_ai.training.instance_combat import instance_forward
-from test_tactical_state_v7 import frame
 
 DIM = 128
 HIDDEN = 4
@@ -184,16 +184,17 @@ def test_pure_inference_equals_torch_training_forward() -> None:
 
 def test_v8_ppo_smoke_and_checkpoint_goal(tmp_path) -> None:
     pytest.importorskip("torch")
-    from test_act1_episode_goal import NativeScriptedBackend, _boss
+    from test_act1_episode_goal import NativeScriptedBackend
+
     from sts2_ai.emulator.episode_goal import NATIVE_ACT1_BOSS_GOAL
     from sts2_ai.training.phase_split_selfplay import train_phase_split
 
     class WithVisiblePositions(NativeScriptedBackend):
         def __init__(self) -> None:
             super().__init__()
-            for frame in self.frames:
-                if isinstance(frame.get("combat"), dict):
-                    for i, enemy in enumerate(frame["combat"]["enemies"]):
+            for snapshot in self.frames:
+                if isinstance(snapshot.get("combat"), dict):
+                    for i, enemy in enumerate(snapshot["combat"]["enemies"]):
                         enemy["formation_position"] = i
                         enemy["last_move_id"] = None
                         enemy.setdefault("block", 0)
@@ -259,15 +260,16 @@ def test_status_and_species_changes_affect_the_correct_target_only() -> None:
 def test_checkpoint_rejects_switching_from_v8_to_v7(tmp_path) -> None:
     pytest.importorskip("torch")
     from test_act1_episode_goal import NativeScriptedBackend
+
     from sts2_ai.emulator.episode_goal import NATIVE_ACT1_BOSS_GOAL
     from sts2_ai.training.phase_split_selfplay import train_phase_split
 
     class Fixture(NativeScriptedBackend):
         def __init__(self) -> None:
             super().__init__()
-            for frame in self.frames:
-                if isinstance(frame.get("combat"), dict):
-                    for index, enemy in enumerate(frame["combat"]["enemies"]):
+            for snapshot in self.frames:
+                if isinstance(snapshot.get("combat"), dict):
+                    for index, enemy in enumerate(snapshot["combat"]["enemies"]):
                         enemy.setdefault("formation_position", index)
                         enemy.setdefault("statuses", {})
                         enemy.setdefault("powers", [])

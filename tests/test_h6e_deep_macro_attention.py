@@ -63,13 +63,16 @@ def test_deep_shop_event_pointers_and_stable_offer_renaming():
 def test_deep_torch_batch_portable_parity_and_gradients():
     torch = pytest.importorskip("torch")
     from sts2_ai.training.enemy_attention import (
-        add_attention_parameters, add_deep_macro_parameters,
+        add_attention_parameters,
+        add_deep_macro_parameters,
     )
     from sts2_ai.training.instance_combat import add_instance_parameters
     from sts2_ai.training.macro_attention import macro_attention_forward
     from sts2_ai.training.neural import _export, _new_params
     from sts2_ai.training.phase_split_ppo_batch import (
-        collate, encode_decision, forward_batch,
+        collate,
+        encode_decision,
+        forward_batch,
     )
 
     frame, actions = _frame()

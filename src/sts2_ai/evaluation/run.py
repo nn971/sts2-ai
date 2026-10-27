@@ -174,7 +174,10 @@ def play_run(
             # The native goal is a certified boss-room completion before Act 2.
             # Historical full-run mode also recognizes Act-2 progress.
             act1_cleared=(
-                True if certified_goal_victory or (isinstance(act, int) and act >= 2) or outcome == "victory"
+                True if (
+                    certified_goal_victory or (isinstance(act, int) and act >= 2)
+                    or outcome == "victory"
+                )
                 else False if outcome == "defeat"
                 else None
             ),

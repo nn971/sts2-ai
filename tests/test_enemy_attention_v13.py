@@ -132,7 +132,9 @@ def test_batched_matches_reference_and_portable_for_mixed_enemy_counts() -> None
         assert batched_value[i].detach().item() == pytest.approx(value.detach().item(), abs=1e-5)
         assert value.detach().item() == pytest.approx(portable.value, abs=1e-5)
         for j, number in enumerate(portable.action_logits):
-            assert batched_logits[i, j].detach().item() == pytest.approx(logits[j].detach().item(), abs=1e-5)
+            assert batched_logits[i, j].detach().item() == pytest.approx(
+                logits[j].detach().item(), abs=1e-5,
+            )
             assert batched_logits[i, j].detach().item() == pytest.approx(number, abs=1e-5)
         if len(actions) < batch.mask.shape[1]:
             assert (batched_logits[i, len(actions):] < -1e8).all().item()

@@ -109,7 +109,7 @@ def search_player_action(
     root_node = tree.setdefault(root_key, _Node())
     terminals = cutoffs = total_boundaries = 0
     for sim in range(simulations):
-        digest = hashlib.sha256(f"{seed}:{sim}".encode("utf-8")).digest()
+        digest = hashlib.sha256(f"{seed}:{sim}".encode()).digest()
         sampler = SeededLawSampler(int.from_bytes(digest[:8], "big"))
         state = root
         created: list[Any] = []

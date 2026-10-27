@@ -130,8 +130,9 @@ def test_v7_inference_uses_exact_relic_counter() -> None:
 def test_v7_training_and_warm_start_migration(tmp_path) -> None:
     pytest.importorskip("torch")
     from test_phase_split_selfplay import TwoPhaseToy
-    from sts2_ai.models.phase_split import PhaseSplitNeuralModel
+
     from sts2_ai.models.neural import NEURAL_FORMAT
+    from sts2_ai.models.phase_split import PhaseSplitNeuralModel
     from sts2_ai.training.phase_split_selfplay import train_phase_split
 
     class ResourceToy(TwoPhaseToy):
