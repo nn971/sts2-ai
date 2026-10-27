@@ -37,6 +37,7 @@ from sts2_ai.models.h7_batch_actor import RemoteH7Policy, SharedH7Service
 from sts2_ai.models.h7_public_policy import H7PlayerSpec
 from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
 from sts2_ai.nature.combat_scenarios import SCENARIOS
+from sts2_ai.nature.draw_only_episode import fair_player_choice_actions 
 from sts2_ai.nature.h5_curriculum import cell_for_source, source_bank
 from sts2_ai.nature.protocol import canonical_sha256
 
@@ -111,15 +112,22 @@ def _shard(
             try:
                 for _ in range(max_boundaries):
                     kind = state["kind"]
-                    if kind in ("terminal", "unsupported", "player_choice"):
+                    if kind in ("terminal", "unsupported"):
                         status = kind
                         break
+                    if kind == "player_choice":
+                        pending = state.get("playerChoicePending")
+                        if (not isinstance(pending, dict) or pending.get("kind")
+                                not in ("player_card_selection",
+                                        "draw_hook_action_choice")):
+                            status = "unsupported_player_choice"
+                            break
                     token = dict(
                         h8_handle=handle,
                         runtime_id=state["runtimeId"],
                         boundary_version=state["boundaryVersion"],
                     )
-                    if kind == "player":
+                    if kind in ("player", "player_choice"):
                         frame = session.call(
                             "h8_observe", **token,
                             policy_id="prototype-fair-v0",
@@ -130,8 +138,13 @@ def _shard(
                             raise RuntimeError("Malformed H8 public policy frame")
                         if [a["actionId"] for a in menu] != state["playerActionIds"]:
                             raise RuntimeError("H8 public action/status mismatch")
-                        chosen = actor.choose(obs, menu)
-                        if chosen not in state["playerActionIds"]:
+                        allowed = (
+                            fair_player_choice_actions(
+                                state["playerChoicePending"], menu)
+                            if kind == "player_choice" else menu
+                        )
+                        chosen = actor.choose(obs, allowed)
+                        if chosen not in [a["actionId"] for a in allowed]:
                             raise RuntimeError("H7 actor selected outside source menu")
                         result = session.call("h8_step", **token, action_id=chosen)
                     elif kind == "enemy_intent":
@@ -162,8 +175,10 @@ def _shard(
                     counts[kind] += 1
                     state = nxt
                 else:
-                    if state["kind"] in ("terminal", "unsupported", "player_choice"):
+                    if state["kind"] in ("terminal", "unsupported"):
                         status = state["kind"]
+                    elif state["kind"] == "player_choice":
+                        status = "max_boundaries_player_choice"
                 execute_elapsed = time.perf_counter() - began
                 # Canonical hash is an explicit audit, never an inner step.
                 final_sha = session.call(
@@ -339,7 +354,7 @@ def main() -> None:
                 f"[h8-h7-pilot] {mode} {x['wall_seconds']:.2f}s "
                 f"full_combat={x['statuses'].get('terminal', 0)} "
                 f"unsupported={x['statuses'].get('unsupported', 0)} "
-                f"player_choice={x['statuses'].get('player_choice', 0)} "
+                f"unsupported_choice={x['statuses'].get('unsupported_player_choice', 0)} "
                 f"player/s={x['player_decisions_per_second']:.2f}",
                 flush=True,
             )
