@@ -291,3 +291,32 @@ def test_checkpoint_rejects_switching_from_v8_to_v7(tmp_path) -> None:
             Fixture(), tactical_state_encoding="public_resources",
             resume=True, **{**kwargs, "rounds": 2},
         )
+
+
+def test_instance_global_fair_native_missing_resources_are_explicit() -> None:
+    """Unpublished native resources must not be invented as empty piles."""
+    public = combat_frame()
+    complete = instance_global_features(public, DIM)
+
+    hidden = copy.deepcopy(public)
+    hidden["combat"].pop("draw_pile", None)
+    hidden["combat"].pop("relic_counters", None)
+    hidden["combat"]["draw_pile_count"] = 7
+    unexposed = instance_global_features(hidden, DIM)
+    assert unexposed != complete
+    assert unexposed == instance_global_features(copy.deepcopy(hidden), DIM)
+
+    for i in range(40):
+        assert unexposed.get(i, 0.0) == pytest.approx(
+            complete.get(i, 0.0), abs=1e-6,
+        )
+    assert build_model().evaluate(observation(hidden), (targeted(1), targeted(3)))
+
+    invalid = copy.deepcopy(hidden)
+    invalid["combat"]["draw_pile"] = "private shuffled IDs"
+    with pytest.raises(ValueError, match="Malformed public combat draw_pile"):
+        instance_global_features(invalid, DIM)
+    invalid = copy.deepcopy(hidden)
+    invalid["combat"]["relic_counters"] = {"private": 9}
+    with pytest.raises(ValueError, match="Malformed public combat relic_counters"):
+        instance_global_features(invalid, DIM)
