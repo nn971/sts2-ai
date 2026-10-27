@@ -100,7 +100,8 @@ def _one(
             fixture_seed=seed, fixture_id=(
                 f"draw-only:{entry_mode}"
                 if scenario_pool == (BASELINE_SCENARIO,) and deck_pool == (BASELINE_DECK,)
-                else f"draw-only:{entry_mode}:{chosen.scenario_id}:{deck}:{structural_index}"
+                else f"draw-only:{entry_mode}:{chosen.scenario_id}:{deck}"
+                + (f":{structural_index}" if structural_index is not None else "")
             ),
         ),
     )
