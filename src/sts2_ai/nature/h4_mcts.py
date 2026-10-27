@@ -31,7 +31,7 @@ class _Node:
     edges: dict[str, _Edge] = field(default_factory=dict)
 
 
-def _legal(state: Any) -> tuple[dict, list[dict]]:
+def _legal(state: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     obs, actions = state.observe(), state.actions()
     if state.boundary == "player_choice":
         from sts2_ai.nature.draw_only_episode import fair_player_choice_actions
@@ -41,7 +41,7 @@ def _legal(state: Any) -> tuple[dict, list[dict]]:
     return obs, actions
 
 
-def _select(node: _Node, actions: list[dict], exploration: float) -> str:
+def _select(node: _Node, actions: list[dict[str, Any]], exploration: float) -> str:
     ids = sorted(a["actionId"] for a in actions)
     for action in ids:
         if action not in node.edges or node.edges[action].visits == 0:
@@ -59,7 +59,7 @@ def _select(node: _Node, actions: list[dict], exploration: float) -> str:
     )
 
 
-def _cutoff_value(obs: dict | None, opening_enemy_hp: int,
+def _cutoff_value(obs: dict[str, Any] | None, opening_enemy_hp: int,
                   player_max_hp: int) -> float:
     """Public-state estimate at the search horizon, below any victory."""
     if not isinstance(obs, dict):
@@ -79,9 +79,9 @@ def _cutoff_value(obs: dict | None, opening_enemy_hp: int,
 
 def search_player_action(
     root: Any, *,
-    observation: dict,
-    legal_actions: list[dict],
-    rollout_choose: Callable[[dict, list[dict]], str],
+    observation: dict[str, Any],
+    legal_actions: list[dict[str, Any]],
+    rollout_choose: Callable[[dict[str, Any], list[dict[str, Any]]], str],
     simulations: int,
     seed: str,
     opening_enemy_hp: int,
