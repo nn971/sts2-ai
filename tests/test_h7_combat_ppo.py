@@ -101,3 +101,34 @@ def test_h7_ppo_uses_genuine_legal_actions_not_unseen_target(tmp_path: Path):
     _, _, episodes, captures = make_cohort(tmp_path)
     assert len(captures[0][0]["source_legal_actions"]) == len(legal())
     assert {a.kind for a in actions(("end_turn", {}))} == {"end_turn"}
+
+
+def test_h7_sampled_terminal_replay_requires_explicit_optimizer_opt_in(tmp_path: Path):
+    torch.set_num_threads(1)
+    net, spec, episodes, captures = make_cohort(tmp_path)
+    unchecked = list(episodes)
+    unchecked[1] = SimpleNamespace(**{
+        **vars(episodes[1]), "terminal_replay_verified": False,
+    })
+    policy_id = f"h7-{spec.model_sha256[:16]}"
+    learner = H7CombatPPO(net, temperature=0.85, epochs=1, minibatch=2)
+    with pytest.raises(ValueError, match="Only verified terminal"):
+        learner.update(tuple(unchecked), captures, behavior_model_id=policy_id, seed=9)
+    diagnostics = learner.update(
+        tuple(unchecked), captures, behavior_model_id=policy_id,
+        seed=9, allow_sampled_terminal_replay=True,
+    )
+    assert diagnostics["source_decisions"] == 2
+    assert diagnostics["updates"] == 1
+    # The episode provenance never changes: unchecked is still False.
+    assert unchecked[1].terminal_replay_verified is False
+
+    tampered = list(unchecked)
+    tampered[0] = SimpleNamespace(**{
+        **vars(unchecked[0]), "draw_mode": "learned",
+    })
+    with pytest.raises(ValueError, match="reference Chance Law"):
+        learner.update(
+            tuple(tampered), captures, behavior_model_id=policy_id,
+            seed=9, allow_sampled_terminal_replay=True,
+        )
