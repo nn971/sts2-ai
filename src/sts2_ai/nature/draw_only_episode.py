@@ -329,6 +329,13 @@ def play_draw_only_episode(
                             "Missing public combat entry HP/max HP"
                         )
                     entry_hp, max_hp = public_hp, public_max_hp
+                    if fixture_spec is not None and (
+                        entry_hp != fixture_spec["hp"]
+                        or max_hp != fixture_spec["max_hp"]
+                    ):
+                        raise DrawOnlyContractError(
+                            "Engine public HP differs from structured fixture"
+                        )
                     if reward_version == H4_REWARD:
                         opening_enemy_hp = opening_enemy_health(obs)
                         if opening_enemy_hp is None:
