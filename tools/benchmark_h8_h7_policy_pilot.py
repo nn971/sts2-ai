@@ -231,7 +231,7 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
             for shard in shards
         ]
         rows = [x for future in futures for x in future.result()]
-        server_stats = server.stats_snapshot()
+    server_stats = dict(server.metrics)
     wall = time.perf_counter() - began
     by_seed = {row["seed"]: row for row in rows}
     if len(rows) != len(seeds) or set(by_seed) != set(seeds):
