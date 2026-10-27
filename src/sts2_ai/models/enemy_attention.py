@@ -8,7 +8,9 @@ changing a single initial action logit or value estimate.
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, TypeVar
+
+_Key = TypeVar("_Key", int, str)
 
 ATTENTION_HEADS = 4
 ATTENTION_FIELDS = (
@@ -17,9 +19,9 @@ ATTENTION_FIELDS = (
 
 
 def contextualize_python(
-    embeddings: dict[int, list[float]],
+    embeddings: dict[_Key, list[float]],
     params: dict[str, Any], *, prefix: str = "attn_", heads: int = ATTENTION_HEADS,
-) -> dict[int, list[float]]:
+) -> dict[_Key, list[float]]:
     """Use IDs only as mapping keys; never embed or order them numerically."""
     if len(embeddings) < 2:
         return embeddings
@@ -35,7 +37,7 @@ def contextualize_python(
     queries = {i: matvec(params[f"{prefix}query"], embeddings[i]) for i in ids}
     keys = {i: matvec(params[f"{prefix}key"], embeddings[i]) for i in ids}
     values = {i: matvec(params[f"{prefix}value"], embeddings[i]) for i in ids}
-    result: dict[int, list[float]] = {}
+    result: dict[_Key, list[float]] = {}
     for i in ids:
         joined: list[float] = []
         for head in range(heads):
