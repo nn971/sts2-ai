@@ -195,7 +195,10 @@ def _shard(
                             )
                         result = session.call(
                             "h8_resolve_intent", **token, intent_id=chosen,
-                            provider_id="reference-weighted-h8-pilot",
+                            provider_id=(
+                                "h7-event-keyed-reference"
+                                if exact_law is not None
+                                else "h8-raw-weight-pilot"),
                         )
                     elif kind == "draw_card":
                         options = state["cardInstanceIds"]
@@ -216,7 +219,10 @@ def _shard(
                         result = session.call(
                             "h8_resolve_draw_card", **token,
                             card_instance_id=chosen,
-                            provider_id="reference-weighted-h8-pilot",
+                            provider_id=(
+                                "h7-event-keyed-reference"
+                                if exact_law is not None
+                                else "h8-raw-weight-pilot"),
                         )
                     else:
                         raise RuntimeError("Unknown H8 state kind " + str(kind))
