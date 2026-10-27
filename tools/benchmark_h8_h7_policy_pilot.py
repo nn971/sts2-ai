@@ -280,6 +280,15 @@ def _shard(
                 rows.append(dict(
                     seed=seed, cell=cell.key, status=status,
                     score=score,
+                    decision_sequence=[
+                        {"phase": (
+                            "nature:" + k if k in
+                            ("enemy_intent", "draw_card") else k),
+                         "selected_id": (
+                             "card_instance:" + str(v)
+                             if k == "draw_card" else v)}
+                        for k, v in transcript
+                    ],
                     player_steps=[
                         {"phase": k, "selected_id": v}
                         for k, v in transcript
@@ -437,7 +446,7 @@ def _validate_pair(a: dict[str, Any], b: dict[str, Any]) -> None:
         right = b["trajectories"][seed]
         for key in (
             "cell", "status", "outcome", "exit_hp", "score",
-            "player_steps", "chance_steps",
+            "player_steps", "chance_steps", "decision_sequence",
             "terminal_enemy_hp", "boundaries", "player_decisions",
             "nature_draws", "intents", "trace_digest",
             "journal_digest", "mechanics_sha256",
