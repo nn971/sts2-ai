@@ -29,3 +29,70 @@ jobs:
         run: python -m pytest -q tests/test_h8_structured_curriculum.py
       - name: Ruff on H8 changes
         run: ruff check src/sts2_ai/nature/research_combat_fixtures.py tests/test_h8_structured_curriculum.py
+
+  real-semantic-reference-ppo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ai
+          submodules: false
+      - uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          # Isolated research branch, never the active Nature or Inspector line.
+          ref: research/a10-structured-combat-fixtures-20261027
+          path: emulator
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: CPU-only H7 dependencies
+        working-directory: ai
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e '.[dev]'
+      - name: Build research semantic engine
+        working-directory: emulator
+        run: |
+          dotnet restore Sts2Emulator.sln
+          dotnet build Sts2Emulator.sln -c Release --no-restore
+          dotnet test tests/Sts2Emulator.Core.Tests -c Release --no-build --filter FullyQualifiedName~ResearchCombatFixtureV111Tests
+      - name: Four distinct A10 research fixtures through actual reference-law PPO
+        working-directory: ai
+        run: |
+          set -eu
+          REV="$(git -C ../emulator rev-parse HEAD)"
+          python -u tools/train_h7_reference_combat.py \
+            --curriculum h8 --curriculum-seed 20261027 \
+            --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings ../emulator/bindings/python \
+            --emulator-revision "$REV" \
+            --output-root ci-h8-a10 --device cpu \
+            --width 32 --layers 1 --heads 4 --feedforward 64 \
+            --rounds 1 --episodes-per-round 4 --workers 2 \
+            --eval-every 1 --eval-episodes 4 \
+            --ppo-epochs 1 --ppo-minibatch 8 --ppo-sample-limit 64 \
+            --max-boundaries 1200 --execute
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path('ci-h8-a10/progress.json').read_text())
+          rows=report['history']
+          assert len(rows) == 1
+          assert rows[0]['train']['combats'] == 4
+          assert len(rows[0]['train']['by_cell']) == 4
+          assert rows[0]['selection']['combats'] == 4
+          assert rows[0]['updates'] > 0
+          assert Path('ci-h8-a10/final-player.pt').is_file()
+          print('[h8] real emulator, 4 terminal reference-law combats, PPO update verified')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: h8-a10-real-reference-ppo-smoke
+          path: ai/ci-h8-a10/progress.json
+          if-no-files-found: ignore
