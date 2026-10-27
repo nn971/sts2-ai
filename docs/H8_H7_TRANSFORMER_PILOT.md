@@ -83,6 +83,29 @@ whereas `player_choice`, `unsupported`, and `max_boundaries` describe
 nonterminal work; never substitute all 128 source count for completion.
 `terminal_combats_per_second` measures real terminal completions only.
 
+## Initial real-model CI acceptance
+
+The first paired-source CPU run using all **16 curated A10 source cells**,
+two H8 .NET emulator processes and the **14,659,972-parameter H7 model**
+passed on [GitHub Actions run 40575127367](https://github.com/nn971/sts2-ai/actions/runs/40575127367).
+
+- **All 16** checked/native H8 source trajectories matched the complete
+  decision/action transcripts, immutable journals and full mechanics SHA.
+- Checked: **19.75 s** for 16 seeded sessions; native: **15.23 s**
+  (1.30x faster at that short capped workload on shared **CPU** inference).
+  Exact actor and source RNG are held fixed between the two H8 arms.
+- At the deliberately short **32 boundary cap**, **one** combat reached
+  terminal; 15 were capped; no unsupported player/decision boundary was
+  reported. Thus **this is not 16 completed combats** and is in no way
+  a comparison against the user's H7 shared-CUDA 128-combat baseline.
+- A larger **200-boundary** paired CPU integration workflow is the next
+  acceptance checkpoint. Target workstation benchmark remains
+  15 workers / 128 A10 source cells / shared CUDA at 1200 max boundaries.
+- Prior failed CI attempts exposed an incorrect
+  `multiprocessing.Queue` task pickle pattern. The live model pilot
+  now uses explicit spawn-time shared queues and one persistent emulator
+  worker per shard; this is validated by the passing real-model run.
+
 ## Remaining blockers for valid H7 versus H8 training comparison
 
 1. The current Nature sampler uses source-weight-correct intent tickets
