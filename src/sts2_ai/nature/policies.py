@@ -10,6 +10,7 @@ import math
 import random
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from typing import Any
 
 from .protocol import ChanceEvent, NatureProposal, canonical_sha256
 
@@ -95,7 +96,7 @@ def enumerate_finite_choices(
     )
 
 
-def policy_fingerprint(policy_id: str, config: dict) -> str:
+def policy_fingerprint(policy_id: str, config: dict[str, Any]) -> str:
     if not policy_id:
         raise ValueError("Missing Nature policy identity")
     return canonical_sha256([policy_id, config])
