@@ -24,7 +24,7 @@ ARM_FIELDS = frozenset({"arm", "nature_update"})
 
 
 def _finite_nonnegative(value: object, label: str) -> float:
-    if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value < 0:
         raise ValueError(f"Invalid training budget metric: {label}")
     return float(value)
 
@@ -93,8 +93,8 @@ def _ordinary_source_matrix(
                 rel_tol=1e-10, abs_tol=1e-10,
             )):
         raise ValueError("Recomputed holdout score differs from published result")
-    def grouped(dataset: list[dict[str, Any]]) -> dict[str, dict[tuple[str, str], dict]]:
-        groups: dict[str, dict[tuple[str, str], dict]] = defaultdict(dict)
+    def grouped(dataset: list[dict[str, Any]]) -> dict[str, dict[tuple[str, str], dict[str, Any]]]:
+        groups: dict[str, dict[tuple[str, str], dict[str, Any]]] = defaultdict(dict)
         for row in dataset:
             if row["arm"] != "ordinary":
                 continue
