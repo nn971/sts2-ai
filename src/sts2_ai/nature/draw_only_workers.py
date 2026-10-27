@@ -112,6 +112,7 @@ def _one(
             ),
         ),
     )
+    episode_started = time.perf_counter() if before is not None else 0.0
     result = play_draw_only_episode(
         _worker_session, source_seed=seed, reference_seed=reference_seed,
         nature=nature, emulator_revision=_worker_revision,
@@ -130,12 +131,12 @@ def _one(
         raise RuntimeError("Draw-only frozen player checksum drift")
     if before is not None:
         after = _worker_model.timings_snapshot()
-        _worker_telemetry.put((
-            index, {
-                key: float(after[key]) - float(before[key])
-                for key in after
-            },
-        ))
+        timings = {
+            key: float(after[key]) - float(before[key])
+            for key in after
+        }
+        timings["episode_wall_seconds"] = time.perf_counter() - episode_started
+        _worker_telemetry.put((index, timings))
     return index, result, os.getpid(), tuple(actor.training_actions)
 
 
