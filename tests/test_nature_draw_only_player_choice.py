@@ -158,3 +158,50 @@ def test_player_choice_replay_rejects_wrong_source_support():
     altered[1] = replace(altered[1], support_id="different-source-support")
     with pytest.raises(DrawOnlyContractError, match="replay transition mismatch"):
         play_draw_only_episode(FakeSession(), replay=tuple(altered), **kw)
+
+
+def test_terminal_audit_can_be_skipped_without_falsifying_verification():
+    class SessionWithoutReplay(FakeSession):
+        def load_semantic_snapshot(self, _snapshot):
+            raise AssertionError("Unselected combat must not replay its terminal")
+
+    kw = dict(
+        source_seed="choice-fixture", reference_seed=19,
+        nature=TwoSiteNature(seed=13), emulator_revision="pinned",
+        entry_mode="seeded-fixed-shrinker", draw_mode="reference",
+        player_choose=lambda _, actions: actions[0]["actionId"],
+    )
+    unchecked = play_draw_only_episode(
+        SessionWithoutReplay(), verify_terminal_replay=False, **kw,
+    )
+    checked = play_draw_only_episode(FakeSession(), **kw)
+    assert unchecked.outcome == checked.outcome == "victory"
+    assert unchecked.decisions == checked.decisions
+    assert unchecked.terminal_fingerprint == checked.terminal_fingerprint
+    assert unchecked.terminal_replay_verified is False
+    assert checked.terminal_replay_verified is True
+    assert unchecked.digest != checked.digest
+
+    with pytest.raises(ValueError, match="requires terminal verification"):
+        play_draw_only_episode(
+            FakeSession(), replay=checked.decisions,
+            verify_terminal_replay=False, **kw,
+        )
+
+
+def test_failed_selected_terminal_replay_still_rejects_combat():
+    class CorruptedSnapshot(FakeSession):
+        def load_semantic_snapshot(self, snapshot):
+            restored = super().load_semantic_snapshot(snapshot)
+            restored.fingerprint = "tampered-terminal"
+            return restored
+
+    with pytest.raises(DrawOnlyContractError, match="terminal snapshot"):
+        play_draw_only_episode(
+            CorruptedSnapshot(),
+            source_seed="choice-fixture", reference_seed=19,
+            nature=TwoSiteNature(seed=13), emulator_revision="pinned",
+            entry_mode="seeded-fixed-shrinker", draw_mode="reference",
+            player_choose=lambda _, actions: actions[0]["actionId"],
+            verify_terminal_replay=True,
+        )
