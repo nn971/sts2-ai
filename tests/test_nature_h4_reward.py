@@ -31,7 +31,7 @@ def test_reject_missing_terminal_hp_and_invalid_opening():
         boss_progress_score(
             "defeat", player_exit_hp=0, player_max_hp=70,
             opening_enemy_hp=200, terminal_enemy_hp=None)
-    with pytest.raises(ValueError, match="opening enemy"):
+    with pytest.raises(ValueError, match="Missing opening enemies"):
         opening_enemy_health({"combat": {"enemies": []}})
 
 

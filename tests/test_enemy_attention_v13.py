@@ -159,7 +159,7 @@ def test_default_initialized_gate_is_zero_and_export_format_works() -> None:
     add_attention_parameters(params, 32, torch)
     assert torch.count_nonzero(params["attn_gate"]).item() == 0
     assert params["attn_query"].shape == (32, 32)
-    with pytest.raises(ValueError, match="multiple of four"):
+    with pytest.raises(ValueError, match="divisible by head count"):
         add_attention_parameters({}, 33, torch)
     model = attention_model()
     strategy_raw = build_model().to_dict()

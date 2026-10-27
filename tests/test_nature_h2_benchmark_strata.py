@@ -26,15 +26,15 @@ POOL = ("shrinker-a10", "nibbits-a10")
 
 def test_h2_balanced_source_generation_is_exact_and_reproducible():
     seeds = balanced_h2_source_seeds(
-        "selection", 128, POOL, DECK_PRESETS,
+        "selection", 120, POOL, DECK_PRESETS,
     )
     assert seeds == balanced_h2_source_seeds(
-        "selection", 128, tuple(reversed(POOL)),
+        "selection", 120, tuple(reversed(POOL)),
         tuple(reversed(DECK_PRESETS)),
     )
-    assert len(set(seeds)) == 128
+    assert len(set(seeds)) == 120
     assert set(seeds).isdisjoint(balanced_h2_source_seeds(
-        "confirmation", 128, POOL, DECK_PRESETS,
+        "confirmation", 120, POOL, DECK_PRESETS,
     ))
     assert set(seeds).isdisjoint({
         f"nature-h1-frozen-selection-{i:08d}" for i in range(128)
@@ -46,8 +46,8 @@ def test_h2_balanced_source_generation_is_exact_and_reproducible():
             deck_for_seed(seed, DECK_PRESETS),
         )
         counts[key] = counts.get(key, 0) + 1
-    assert len(counts) == 8
-    assert set(counts.values()) == {16}
+    assert len(counts) == len(POOL) * len(DECK_PRESETS)
+    assert set(counts.values()) == {10}
 
 
 @pytest.mark.parametrize("split,count,scenarios", [
@@ -63,7 +63,7 @@ def test_h2_balanced_screen_rejects_invalid_design(split, count, scenarios):
 
 
 
-def test_h2_training_rounds_have_balanced_12_cell_contexts():
+def test_h2_training_rounds_have_balanced_current_cell_contexts():
     pool = ("mawler-a10", "cubex-a10", "vine-shambler-a10")
     counts_total = {}
     all_seeds = set()
@@ -86,9 +86,9 @@ def test_h2_training_rounds_have_balanced_12_cell_contexts():
             )
             counts[key] = counts.get(key, 0) + 1
             counts_total[key] = counts_total.get(key, 0) + 1
-        assert len(counts) == 12
-        assert sorted(counts.values()) == [21] * 8 + [22] * 4
-    assert set(counts_total.values()) == {64}
+        assert len(counts) == len(pool) * len(DECK_PRESETS)
+        assert sorted(counts.values()) == [14] * 14 + [15] * 4
+    assert sorted(counts_total.values()) == [42] * 6 + [43] * 12
     assert not all_seeds.intersection(
         balanced_h2_training_source_seeds(101, 0, 256, pool, DECK_PRESETS)
     )
