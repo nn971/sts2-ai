@@ -111,7 +111,7 @@ def balanced_h2_training_source_seeds(
 
 def reference_by_configuration(
     cohorts: list[tuple[Any, ...]], *, bootstrap_seed: int = 61673,
-) -> dict[str, dict]:
+) -> dict[str, dict[str, Any]]:
     """Summarize exact replayed reference combats by joint enemy/deck cell.
 
     Bootstrap resamples *source* scores averaged over reference replicates.
