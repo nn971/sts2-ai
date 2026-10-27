@@ -113,10 +113,84 @@ def summarize(episodes: tuple[Any, ...]) -> dict[str, Any]:
     }
 
 
+def collect_h8(
+    seeds: tuple[str, ...], *, spec: H7PlayerSpec, args: Any,
+    reference_seed: int, capture: bool,
+) -> dict[str, Any]:
+    """Use the validated native H8 reference-law path for an H7 PPO cohort.
+
+    H8 shares exactly the H7 public actor, source bank, Chance Law and reward.
+    It keeps only sampled explicit mechanics hashes/journals during training;
+    the runtime still owns its complete reproducible decision journal.
+    """
+    from benchmark_h8_h7_policy_pilot import _cohort
+    from benchmark_h8_training_iteration import validate_training_cohort
+
+    if getattr(args, "actor_backend", "local") != "shared":
+        raise ValueError("H8 training requires the shared actor backend")
+    audit_every = (
+        getattr(args, "train_terminal_replay_every", 1)
+        if capture else 1
+    )
+    audit_indices = terminal_replay_audit_indices(seeds, audit_every)
+    audit_set = frozenset(audit_indices)
+    h8 = _cohort(
+        seeds,
+        dll=str(args.emulator_dll.resolve()),
+        bindings=str(args.emulator_bindings.resolve()),
+        spec=spec, mode="native", workers=args.workers,
+        actor_device=args.actor_device,
+        actor_max_batch=args.actor_max_batch,
+        actor_delay_ms=args.actor_delay_ms,
+        max_boundaries=args.max_boundaries,
+        replay_every=audit_every,
+        replay_indices=audit_set,
+        reference_seed=reference_seed,
+        capture_player_training=capture,
+        chance_sampling="event-law",
+        audit_mechanics=False,
+    )
+    episodes, captures = validate_training_cohort(
+        h8, seeds, replay_every=audit_every,
+        replay_indices=audit_set, require_capture=capture,
+    )
+    for seed, ep in zip(seeds, episodes, strict=True):
+        cell = cell_for_source(seed)
+        if cell is None:
+            raise RuntimeError("H8 collected an uncurated H7 source")
+        ep.scenario_id = cell.scenario
+        ep.deck_preset_id = cell.deck
+        if ep.reward_version != H4_REWARD:
+            raise RuntimeError("H8 reward differs from H7 PPO")
+    return {
+        "episodes": episodes,
+        "player_rollouts": captures,
+        "source_count": len(episodes),
+        "process_count": h8["workers"],
+        "elapsed_seconds": h8["wall_seconds"],
+        "actor_metrics": {
+            "server": h8["actor_metrics"],
+            "rollout_boundaries": h8["all_boundaries"],
+            "player_decisions": h8["player_decisions"],
+            "terminal_combats_per_second": h8["terminal_combats_per_second"],
+        },
+        "terminal_replay_verified": len(audit_indices),
+        "terminal_replay_not_checked": len(seeds) - len(audit_indices),
+        "terminal_replay_audit_seed_digest": (
+            None if len(audit_indices) == len(seeds)
+            else canonical_sha256([seeds[i] for i in audit_indices])
+        ),
+    }
+
+
 def collect(
     seeds: tuple[str, ...], *, spec: H7PlayerSpec, args: Any,
     reference_seed: int, capture: bool,
 ) -> dict[str, Any]:
+    if getattr(args, "rollout_backend", "legacy-h7") == "h8-native":
+        return collect_h8(
+            seeds, spec=spec, args=args, reference_seed=reference_seed,
+            capture=capture)
     # This object is inert: draws are explicitly routed to the original
     # reference Chance Law by draw_mode="reference"; it is never trained.
     inert_nature = PpoDrawNature(seed=109, mix=0.75)
@@ -187,6 +261,9 @@ def main() -> None:
     p.add_argument("--ppo-epochs", type=int, default=3)
     p.add_argument("--ppo-minibatch", type=int, default=64)
     p.add_argument("--ppo-sample-limit", type=int, default=4096)
+    p.add_argument("--rollout-backend", choices=("legacy-h7", "h8-native"),
+                   default="legacy-h7",
+                   help="Use existing checked semantic H7 or native H8 event-law combat")
     p.add_argument("--actor-backend", choices=("local", "shared"), default="local")
     p.add_argument("--actor-device", default="cpu")
     p.add_argument("--actor-max-batch", type=int, default=16)
@@ -208,6 +285,8 @@ def main() -> None:
             or args.eval_episodes % len(TRAIN_CELLS)
             or args.study_seed < 0 or args.train_terminal_replay_every < 1):
         p.error("Invalid H7 balanced-source or PPO configuration")
+    if args.rollout_backend == "h8-native" and args.actor_backend != "shared":
+        p.error("--rollout-backend h8-native requires --actor-backend shared")
     config_model = H7Config(
         width=args.width, layers=args.layers, heads=args.heads,
         feedforward=args.feedforward,
@@ -241,6 +320,13 @@ def main() -> None:
     }
     # Preserve legacy H7 local-run fingerprints and resume compatibility.
     # New backend-specific runs are explicitly fingerprinted.
+    if args.rollout_backend != "legacy-h7":
+        config["rollout_backend"] = {
+            "name": args.rollout_backend,
+            "reference_law": "h7-declared-event-scoped-v1",
+            "native_optimized": True,
+            "mechanics_audit": "stratified-sampled-v1",
+        }
     if (args.actor_backend != "local" or args.actor_device != "cpu"
             or args.actor_max_batch != 16 or args.actor_delay_ms != 3.0):
         config["actor_inference"] = {
@@ -335,6 +421,7 @@ def main() -> None:
             },
             "rollout_seconds": batch["elapsed_seconds"],
             "actor_metrics": batch["actor_metrics"],
+            "rollout_backend": args.rollout_backend,
             **diagnostics,
         }
         if (index + 1) % args.eval_every == 0 or index + 1 == args.rounds:
@@ -368,7 +455,7 @@ def main() -> None:
             "config": config, "history": history,
         }, indent=2) + "\n", encoding="utf-8")
         print(
-            f"[h7] round={index+1}/{args.rounds} "
+            f"[h7:{args.rollout_backend}] round={index+1}/{args.rounds} "
             f"wins={row['train']['wins']}/{row['train']['combats']} "
             f"score={row['train']['mean_score']:.4f} "
             f"decisions={row['decisions']} kl={row['approx_kl']:.5f} "
