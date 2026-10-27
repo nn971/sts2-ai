@@ -37,6 +37,27 @@ from sts2_ai.training.h7_combat_ppo import H7_PPO_SCHEMA, H7CombatPPO
 RUN_SCHEMA = "sts2-h7-reference-combat-run-v1"
 
 
+def terminal_replay_audit_indices(seeds: tuple[str, ...], every: int) -> tuple[int, ...]:
+    """Deterministic pre-outcome audit: at least one combat per source cell.
+
+    Audits are selected before rollout by original seed ordering, independently
+    of outcomes, worker scheduling, actor action selection and RNG draws.
+    """
+    if type(every) is not int or every < 1 or not seeds:
+        raise ValueError("Invalid terminal replay audit rate")
+    seen: dict[str, int] = {}
+    indices: list[int] = []
+    for index, seed in enumerate(seeds):
+        cell = cell_for_source(seed)
+        if cell is None:
+            raise ValueError("Terminal audit cannot sample uncurated sources")
+        ordinal = seen.get(cell.key, 0)
+        if ordinal % every == 0:
+            indices.append(index)
+        seen[cell.key] = ordinal + 1
+    return tuple(indices)
+
+
 def atomic_torch(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
@@ -64,6 +85,12 @@ def summarize(episodes: tuple[Any, ...]) -> dict[str, Any]:
         ]
         return {
             "combats": len(items),
+            "terminal_replay_verified": sum(
+                bool(x.terminal_replay_verified) for x in items
+            ),
+            "terminal_replay_not_checked": sum(
+                not x.terminal_replay_verified for x in items
+            ),
             "wins": len(wins),
             "defeats": len(defeats),
             "mean_score": statistics.mean(x.score for x in items),
@@ -93,6 +120,12 @@ def collect(
     # This object is inert: draws are explicitly routed to the original
     # reference Chance Law by draw_mode="reference"; it is never trained.
     inert_nature = PpoDrawNature(seed=109, mix=0.75)
+    audit_every = (
+        getattr(args, "train_terminal_replay_every", 1)
+        if capture else 1
+    )
+    audit_indices = terminal_replay_audit_indices(seeds, audit_every)
+    audit_set = frozenset(audit_indices)
     cohort = draw_only_batch(
         seeds, nature=inert_nature, spec=spec,
         emulator_command=("dotnet", str(args.emulator_dll.resolve()), "prototype-ai-jsonl"),
@@ -108,19 +141,24 @@ def collect(
         actor_max_batch=getattr(args, "actor_max_batch", 16),
         actor_delay_ms=getattr(args, "actor_delay_ms", 3.0),
         profile_actor=getattr(args, "profile_actor", False),
+        terminal_replay_indices=audit_indices,
     )
     episodes = cohort["episodes"]
     if len(episodes) != len(seeds):
         raise RuntimeError("H7 source world lost during collection")
-    for seed, ep in zip(seeds, episodes, strict=True):
+    for index, (seed, ep) in enumerate(zip(seeds, episodes, strict=True)):
         cell = cell_for_source(seed)
         if (cell is None or ep.source_seed != seed
                 or ep.scenario_id != cell.scenario
                 or ep.deck_preset_id != cell.deck
                 or ep.draw_mode != "reference" or ep.reward_version != H4_REWARD
                 or ep.outcome not in ("victory", "defeat")
-                or not ep.terminal_replay_verified):
+                or ep.terminal_replay_verified != (index in audit_set)):
             raise RuntimeError("H7 nonterminal or incompatible reference-law combat")
+    if (cohort["terminal_replay_verified"] != len(audit_indices)
+            or cohort["terminal_replay_not_checked"] !=
+            len(seeds) - len(audit_indices)):
+        raise RuntimeError("H7 source audit count drift")
     return cohort
 
 
@@ -154,6 +192,11 @@ def main() -> None:
     p.add_argument("--actor-max-batch", type=int, default=16)
     p.add_argument("--actor-delay-ms", type=float, default=3.0)
     p.add_argument("--profile-actor", action="store_true")
+    p.add_argument(
+        "--train-terminal-replay-every", type=int, default=1,
+        help="Audit one terminal per N episodes in each source cell; 1 means all. "
+             "Selection/held-out evaluations always replay every terminal.",
+    )
     p.add_argument("--resume", action="store_true")
     p.add_argument("--execute", action="store_true")
     args = p.parse_args()
@@ -163,7 +206,7 @@ def main() -> None:
             or args.episodes_per_round < len(TRAIN_CELLS)
             or args.eval_episodes < len(TRAIN_CELLS)
             or args.eval_episodes % len(TRAIN_CELLS)
-            or args.study_seed < 0):
+            or args.study_seed < 0 or args.train_terminal_replay_every < 1):
         p.error("Invalid H7 balanced-source or PPO configuration")
     config_model = H7Config(
         width=args.width, layers=args.layers, heads=args.heads,
@@ -205,6 +248,12 @@ def main() -> None:
             "device": args.actor_device,
             "max_batch": args.actor_max_batch,
             "delay_ms": args.actor_delay_ms,
+        }
+    if args.train_terminal_replay_every != 1:
+        config["terminal_replay_audit"] = {
+            "policy": "stratified-per-cell-preoutcome-v1",
+            "train_every": args.train_terminal_replay_every,
+            "evaluation_every": 1,
         }
     fingerprint = canonical_sha256(config)
     print(json.dumps({
@@ -269,11 +318,21 @@ def main() -> None:
             batch["episodes"], batch["player_rollouts"],
             behavior_model_id=f"h7-{spec.model_sha256[:16]}",
             seed=args.study_seed * 1000003 + index,
+            allow_sampled_terminal_replay=(
+                args.train_terminal_replay_every > 1
+            ),
         )
         row: dict[str, Any] = {
             "round": index + 1, "behavior_sha256": spec.model_sha256,
             "source_digest": canonical_sha256(seeds),
             "train": summarize(batch["episodes"]),
+            "terminal_replay_audit": {
+                "policy": "stratified-per-cell-preoutcome-v1",
+                "every": args.train_terminal_replay_every,
+                "verified": batch["terminal_replay_verified"],
+                "not_checked": batch["terminal_replay_not_checked"],
+                "verified_source_digest": batch["terminal_replay_audit_seed_digest"],
+            },
             "rollout_seconds": batch["elapsed_seconds"],
             "actor_metrics": batch["actor_metrics"],
             **diagnostics,
