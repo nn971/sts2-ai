@@ -422,6 +422,9 @@ def main() -> None:
             "rollout_seconds": batch["elapsed_seconds"],
             "actor_metrics": batch["actor_metrics"],
             "rollout_backend": args.rollout_backend,
+            "training_iteration_seconds": (
+                batch["elapsed_seconds"] + diagnostics["total_update_seconds"]
+            ),
             **diagnostics,
         }
         if (index + 1) % args.eval_every == 0 or index + 1 == args.rounds:
@@ -454,12 +457,26 @@ def main() -> None:
             "schema": RUN_SCHEMA, "fingerprint": fingerprint,
             "config": config, "history": history,
         }, indent=2) + "\n", encoding="utf-8")
+        batching = batch["actor_metrics"].get("server", {})
+        if batching:
+            requests, batches = batching.get("requests", 0), batching.get("batches", 0)
+            print(
+                f"[h7:{args.rollout_backend}:actor] "
+                f"requests={requests} batches={batches} "
+                f"mean_batch={requests / batches if batches else 0:.2f} "
+                f"forward_s={batching.get('forward_seconds', 0):.3f} "
+                f"collate_s={batching.get('collate_seconds', 0):.3f}",
+                flush=True,
+            )
         print(
             f"[h7:{args.rollout_backend}] round={index+1}/{args.rounds} "
             f"wins={row['train']['wins']}/{row['train']['combats']} "
             f"score={row['train']['mean_score']:.4f} "
             f"decisions={row['decisions']} kl={row['approx_kl']:.5f} "
-            f"rollout_s={row['rollout_seconds']:.1f}",
+            f"rollout_s={row['rollout_seconds']:.1f} "
+            f"ppo_s={row['total_update_seconds']:.1f} "
+            f"ratio_verify_s={row['ratio_verification_seconds']:.1f} "
+            f"optimizer_s={row['optimizer_seconds']:.1f}",
             flush=True,
         )
     learner.model.save_checkpoint(args.output_root / "final-player.pt")
