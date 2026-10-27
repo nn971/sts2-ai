@@ -48,7 +48,7 @@ jobs:
             --emulator-dll external-h8-emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
             --emulator-bindings external-h8-emulator/bindings/python \
             --emulator-revision "$(git -C external-h8-emulator rev-parse HEAD)" \
-            --workers 2 --episodes 16 --max-boundaries 32 \
+            --workers 2 --episodes 16 --max-boundaries 200 \
             --replay-every 8 --actor-device cpu --order ab \
             --output /tmp/h8-h7-public-policy-pilot-ci.json
       - name: Upload validation report
