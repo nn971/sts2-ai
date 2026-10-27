@@ -38,6 +38,7 @@ from sts2_ai.models.h7_public_policy import H7PlayerSpec
 from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
 from sts2_ai.nature.combat_scenarios import SCENARIOS
 from sts2_ai.nature.draw_only_episode import fair_player_choice_actions
+from sts2_ai.nature.draw_only_p0 import DeclaredLaw, SeededLawSampler
 from sts2_ai.nature.h5_curriculum import cell_for_source, source_bank
 from sts2_ai.nature.protocol import canonical_sha256
 
@@ -75,6 +76,7 @@ def _shard(
     dll: str, bindings: str,
     mode: str, max_boundaries: int, replay_every: int,
     reference_seed: int, capture_player_training: bool = False,
+    reference_law_mode: str = "event-keyed-v111",
 ) -> list[dict[str, Any]]:
     sys.path.insert(0, bindings)
     from sts2_emulator import Session
@@ -104,6 +106,8 @@ def _shard(
             # Stable per-source independent reference-weighted choices.
             # This sampler is not the H7 event-indexed reference sampler.
             nature_rng = random.Random(reference_seed + index * 1000003)
+            nature_law_sampler = SeededLawSampler(
+                reference_seed + index * 1000003)
             before_actor = policy.timings_snapshot()
             began = time.perf_counter()
             state = session.call(
@@ -145,6 +149,18 @@ def _shard(
                         runtime_id=state["runtimeId"],
                         boundary_version=state["boundaryVersion"],
                     )
+                    exact_law = None
+                    if (reference_law_mode == "event-keyed-v111"
+                            and kind in ("enemy_intent", "draw_card")):
+                        # Explicit source-authentic declared law request.
+                        # Temporary v111 projection is used only for the
+                        # reproducible reference-law acceptance experiment;
+                        # native H8 typed law projection remains M3 work.
+                        pending = session.call(
+                            "h8_reference_law", **token)["pending"]
+                        exact_law = DeclaredLaw.from_pending(pending)
+                        if exact_law.operation != kind:
+                            raise RuntimeError("H8 typed reference law site mismatch")
                     if kind in ("player", "player_choice"):
                         frame = session.call(
                             "h8_observe", **token,
@@ -166,10 +182,17 @@ def _shard(
                             raise RuntimeError("H7 actor selected outside source menu")
                         result = session.call("h8_step", **token, action_id=chosen)
                     elif kind == "enemy_intent":
-                        chosen = _choose_weighted(
-                            nature_rng, state["intentIds"],
-                            state["intentRawWeights"],
-                        )
+                        if exact_law is not None:
+                            if list(exact_law.outcome_ids) != state["intentIds"]:
+                                raise RuntimeError(
+                                    "H8 exact intent law support mismatch")
+                            chosen = exact_law.outcome_ids[
+                                nature_law_sampler.sample(exact_law)]
+                        else:
+                            chosen = _choose_weighted(
+                                nature_rng, state["intentIds"],
+                                state["intentRawWeights"],
+                            )
                         result = session.call(
                             "h8_resolve_intent", **token, intent_id=chosen,
                             provider_id="reference-weighted-h8-pilot",
@@ -178,7 +201,18 @@ def _shard(
                         options = state["cardInstanceIds"]
                         if not options:
                             raise RuntimeError("Empty controlled draw support")
-                        chosen = options[nature_rng.randrange(len(options))]
+                        if exact_law is not None:
+                            expected = [
+                                f"card_instance:{card}" for card in options
+                            ]
+                            if list(exact_law.outcome_ids) != expected:
+                                raise RuntimeError(
+                                    "H8 exact physical draw support mismatch")
+                            outcome = exact_law.outcome_ids[
+                                nature_law_sampler.sample(exact_law)]
+                            chosen = int(outcome.removeprefix("card_instance:"))
+                        else:
+                            chosen = options[nature_rng.randrange(len(options))]
                         result = session.call(
                             "h8_resolve_draw_card", **token,
                             card_instance_id=chosen,
@@ -256,6 +290,7 @@ def _worker_main(
     mode: str, max_boundaries: int, replay_every: int,
     reference_seed: int, results: Any,
     capture_player_training: bool = False,
+    reference_law_mode: str = "event-keyed-v111",
 ) -> None:
     # Queue handles cross the process boundary *only at spawn*, never
     # inside a ProcessPoolExecutor task queue. Keep one emulator process
@@ -264,7 +299,8 @@ def _worker_main(
         _initialize_h8_actor(transport, spec)
         rows = _shard(
             shard, dll, bindings, mode, max_boundaries,
-            replay_every, reference_seed, capture_player_training)
+            replay_every, reference_seed, capture_player_training,
+            reference_law_mode)
         results.put(("ok", rows))
     except BaseException:
         results.put(("error", traceback.format_exc()))
@@ -275,7 +311,8 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
             actor_device: str, actor_max_batch: int,
             actor_delay_ms: float, max_boundaries: int,
             replay_every: int, reference_seed: int,
-            capture_player_training: bool = False) -> dict[str, Any]:
+            capture_player_training: bool = False,
+            reference_law_mode: str = "event-keyed-v111") -> dict[str, Any]:
     indexed = list(enumerate(seeds))
     shards = [indexed[i::workers] for i in range(min(workers, len(seeds)))]
     began = time.perf_counter()
@@ -292,7 +329,8 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
                 target=_worker_main,
                 args=(server.transport, spec, shard, dll, bindings,
                       mode, max_boundaries, replay_every, reference_seed,
-                      results, capture_player_training),
+                      results, capture_player_training,
+                      reference_law_mode),
             )
             for shard in shards
         ]
@@ -384,6 +422,14 @@ def main() -> None:
     p.add_argument("--actor-delay-ms", type=float, default=3.0)
     p.add_argument("--order", choices=("ab", "abba"), default="ab")
     p.add_argument(
+        "--reference-law-mode",
+        choices=("event-keyed-v111", "raw-weight-pilot"),
+        default="event-keyed-v111",
+        help="Exact H7 reference law is audit-compatible but temporarily "
+             "costs legacy event projection; raw-weight mode is only a "
+             "separate fast performance pilot, not H7 reference-equivalent.",
+    )
+    p.add_argument(
         "--capture-player-training", action="store_true",
         help="Also record exact H7 on-policy public behavior logprob/value "
              "digest per source (does not perform PPO)",
@@ -436,6 +482,7 @@ def main() -> None:
                 replay_every=args.replay_every,
                 reference_seed=args.reference_seed,
                 capture_player_training=args.capture_player_training,
+                reference_law_mode=args.reference_law_mode,
             )
             cohorts.append(x)
             print(
@@ -455,7 +502,7 @@ def main() -> None:
             parameters=params, emulator_revision=args.emulator_revision,
             emulator_dll_sha256=hashlib.sha256(
                 args.emulator_dll.read_bytes()).hexdigest(),
-            chance_sampling="independent-reference-raw-weight-pilot-v1",
+            chance_sampling=args.reference_law_mode,
             capture_player_training=args.capture_player_training,
             source_digest=canonical_sha256(seeds),
             order=order, paired_equivalence=True, cohorts=cohorts,
