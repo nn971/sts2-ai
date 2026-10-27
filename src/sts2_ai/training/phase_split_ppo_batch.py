@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import random
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -93,6 +94,8 @@ def encode_decision(
     if not 0 <= decision.chosen_index < len(decision.legal_actions):
         raise ValueError("Chosen PPO action lies outside legal menu")
 
+    state_fn: Callable[[dict[str, Any], int], dict[int, float]]
+    action_fn: Callable[[dict[str, Any], str, str, int], dict[int, float]]
     if decision.phase == "strategy":
         state_fn = (
             macro_global_features
@@ -146,31 +149,43 @@ def encode_decision(
             decision.phase, state_tensor, action_tensor, decision.chosen_index,
         )
 
-    nodes = (
-        macro_card_operation_object_vectors(state, decision.legal_actions, dimension)
-        if decision.phase == "strategy" and strategy_encoding == "macro_card_ops"
-        else macro_deep_object_vectors(state, decision.legal_actions, dimension)
-        if decision.phase == "strategy" and strategy_encoding == "macro_deep"
-        else macro_object_vectors(state, decision.legal_actions, dimension)
-        if decision.phase == "strategy"
-        else enemy_instance_vectors(state, dimension)
-    )
-    ids = list(nodes)  # order is arbitrary but IDs only select the correct slot
-    slot = {instance_id: i for i, instance_id in enumerate(ids)}
+    if decision.phase == "strategy":
+        if strategy_encoding == "macro_card_ops":
+            macro_nodes = macro_card_operation_object_vectors(
+                state, decision.legal_actions, dimension,
+            )
+            macro_target = macro_card_operation_action_target
+        elif strategy_encoding == "macro_deep":
+            macro_nodes = macro_deep_object_vectors(state, decision.legal_actions, dimension)
+            macro_target = macro_deep_action_target
+        else:
+            macro_nodes = macro_object_vectors(state, decision.legal_actions, dimension)
+            macro_target = macro_action_target
+        vectors = list(macro_nodes.values())
+        macro_slots = {key: i for i, key in enumerate(macro_nodes)}
+        target_slots = [
+            macro_slots[target] if (target := macro_target(
+                state, action, macro_nodes,
+            )) is not None else -1
+            for action in decision.legal_actions
+        ]
+    else:
+        enemy_nodes = enemy_instance_vectors(state, dimension)
+        vectors = list(enemy_nodes.values())
+        enemy_slots = {key: i for i, key in enumerate(enemy_nodes)}
+        target_slots = [
+            enemy_slots[target] if (target := action_target_instance(
+                action.payload_json, enemy_nodes,
+            )) is not None else -1
+            for action in decision.legal_actions
+        ]
+    # The two phases have disjoint key types. Keep their target resolution
+    # separate so ephemeral enemy IDs and macro object IDs cannot alias.
     enemy_tensor = (
-        torch.tensor([_dense(nodes[key], dimension) for key in ids], dtype=torch.float32)
-        if ids else torch.empty((0, dimension), dtype=torch.float32)
+        torch.tensor([_dense(vector, dimension) for vector in vectors], dtype=torch.float32)
+        if vectors else torch.empty((0, dimension), dtype=torch.float32)
     )
-    target_tensor = torch.tensor([
-        slot[target] if (target := (
-            (macro_card_operation_action_target if strategy_encoding == "macro_card_ops"
-             else macro_deep_action_target if strategy_encoding == "macro_deep"
-             else macro_action_target)(state, action, nodes)
-            if decision.phase == "strategy" else
-            action_target_instance(action.payload_json, nodes)
-        )) is not None else -1
-        for action in decision.legal_actions
-    ], dtype=torch.long)
+    target_tensor = torch.tensor(target_slots, dtype=torch.long)
     return EncodedDecision(
         decision.phase, state_tensor, action_tensor, decision.chosen_index,
         enemy_tensor, target_tensor,
