@@ -56,16 +56,33 @@ def _choose_weighted(rng: random.Random, options: list[Any],
     raise RuntimeError("Unreachable weighted intent selector")
 
 
+_worker_transport: Any = None
+_worker_spec: H7PlayerSpec | None = None
+_worker_policy: RemoteH7Policy | None = None
+
+
+def _initialize_h8_actor(transport: Any, spec: H7PlayerSpec) -> None:
+    """Inherit shared Queue handles at process spawn, never submit them as tasks."""
+    global _worker_transport, _worker_spec, _worker_policy
+    _worker_transport = transport
+    _worker_spec = spec
+    _worker_policy = RemoteH7Policy(
+        transport, slot=transport.allocate_slot())
+
+
 def _shard(
     indexed_seeds: list[tuple[int, str]],
-    dll: str, bindings: str, spec: H7PlayerSpec, transport: Any,
+    dll: str, bindings: str,
     mode: str, max_boundaries: int, replay_every: int,
     reference_seed: int,
 ) -> list[dict[str, Any]]:
     sys.path.insert(0, bindings)
     from sts2_emulator import Session
 
-    policy = RemoteH7Policy(transport, slot=transport.allocate_slot())
+    if _worker_policy is None or _worker_spec is None:
+        raise RuntimeError("H8 shared inference worker not initialized")
+    policy = _worker_policy
+    spec = _worker_spec
     native = mode == "native"
     rows = []
     with Session(["dotnet", dll, "prototype-ai-jsonl"]) as session:
@@ -237,10 +254,12 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
         ))
         pool = stack.enter_context(ProcessPoolExecutor(
             max_workers=len(shards), mp_context=ctx,
+            initializer=_initialize_h8_actor,
+            initargs=(server.transport, spec),
         ))
         futures = [
             pool.submit(
-                _shard, shard, dll, bindings, spec, server.transport,
+                _shard, shard, dll, bindings,
                 mode, max_boundaries, replay_every, reference_seed,
             )
             for shard in shards
