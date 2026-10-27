@@ -26,6 +26,7 @@ from sts2_ai.nature.combat_scenarios import (
 )
 from sts2_ai.nature.contextual_draw import restore_nature
 from sts2_ai.nature.draw_only_episode import DrawOnlyEpisode, play_draw_only_episode
+from sts2_ai.nature.research_combat_fixtures import fixture_from_source
 from sts2_ai.nature.two_site_opponent import TwoSiteNature
 
 _worker_session: Any = None
@@ -73,13 +74,22 @@ def _one(
     reward_version: str = "hp_preservation_v1",
     mcts_simulations: int = 0, mcts_max_boundaries: int = 24,
     mcts_combat_budget: int = 4000,
+    structured_curriculum_seed: int | None = None,
 ) -> tuple[int, DrawOnlyEpisode, int, tuple[dict[str, Any], ...]]:
     if (_worker_session is None or _worker_spec is None or _worker_model is None
             or _worker_revision is None):
         raise RuntimeError("Draw-only worker was not initialized")
     spec = _worker_spec
-    chosen = scenario_for_seed(seed, scenario_pool)
-    deck = deck_for_seed(seed, deck_pool)
+    fixture_spec = None
+    structural_index = None
+    if structured_curriculum_seed is not None:
+        chosen, fixture_spec, structural_index = fixture_from_source(
+            seed, curriculum_seed=structured_curriculum_seed,
+        )
+        deck = BASELINE_DECK
+    else:
+        chosen = scenario_for_seed(seed, scenario_pool)
+        deck = deck_for_seed(seed, deck_pool)
     nature = restore_nature(nature_checkpoint)
     actual_draw_mode = "reference" if index < reference_count else draw_mode
     actor = FrozenP0Player(
@@ -90,7 +100,7 @@ def _one(
             fixture_seed=seed, fixture_id=(
                 f"draw-only:{entry_mode}"
                 if scenario_pool == (BASELINE_SCENARIO,) and deck_pool == (BASELINE_DECK,)
-                else f"draw-only:{entry_mode}:{chosen.scenario_id}:{deck}"
+                else f"draw-only:{entry_mode}:{chosen.scenario_id}:{deck}:{structural_index}"
             ),
         ),
     )
@@ -100,7 +110,7 @@ def _one(
         player_choose=actor.choose, player_model_id=spec.policy_id,
         draw_mode=actual_draw_mode, entry_mode=entry_mode,
         max_boundaries=max_boundaries, scenario=chosen,
-        deck_preset_id=deck,
+        deck_preset_id=deck, fixture_spec=fixture_spec,
         score_reference_q=score_reference_q, reward_version=reward_version,
         mcts_simulations=mcts_simulations,
         mcts_max_boundaries=mcts_max_boundaries,
@@ -123,6 +133,7 @@ def _job(
     reward_version: str = "hp_preservation_v1",
     mcts_simulations: int = 0, mcts_max_boundaries: int = 24,
     mcts_combat_budget: int = 4000,
+    structured_curriculum_seed: int | None = None,
 ) -> tuple[int, DrawOnlyEpisode, int, tuple[dict[str, Any], ...]]:
     try:
         return _one(
@@ -130,7 +141,7 @@ def _job(
             entry_mode, max_boundaries, scenario_pool, deck_pool,
             capture_player_training, reference_count, score_reference_q,
             reward_version, mcts_simulations, mcts_max_boundaries,
-            mcts_combat_budget,
+            mcts_combat_budget, structured_curriculum_seed,
         )
     except Exception:
         raise RuntimeError(
@@ -153,6 +164,7 @@ def draw_only_batch(
     reward_version: str = "hp_preservation_v1",
     mcts_simulations: int = 0, mcts_max_boundaries: int = 24,
     mcts_combat_budget: int = 4000,
+    structured_curriculum_seed: int | None = None,
 ) -> dict[str, Any]:
     """Return original ordered episodes with real C# process provenance."""
     if (not seeds or len(set(seeds)) != len(seeds)
@@ -178,13 +190,22 @@ def draw_only_batch(
         if spec.temperature <= 0:
             raise ValueError("Invalid sampled frozen-player temperature")
     spec.load_pinned()
+    if structured_curriculum_seed is not None and (
+        type(structured_curriculum_seed) is not int
+        or structured_curriculum_seed < 0
+        or entry_mode != "seeded-fixed-shrinker"
+    ):
+        raise ValueError("H8 structured fixtures require opt-in fixed combat entry")
     if entry_mode != "seeded-fixed-shrinker" and (
         scenario_pool != (BASELINE_SCENARIO,) or deck_pool != (BASELINE_DECK,)
     ):
         raise ValueError("Conditioned scenario pool requires fixed-combat entry")
     for seed in seeds:
-        scenario_for_seed(seed, scenario_pool)
-        deck_for_seed(seed, deck_pool)
+        if structured_curriculum_seed is not None:
+            fixture_from_source(seed, curriculum_seed=structured_curriculum_seed)
+        else:
+            scenario_for_seed(seed, scenario_pool)
+            deck_for_seed(seed, deck_pool)
     elapsed = time.perf_counter()
     checkpoint = nature.dump()
     ordered: list[DrawOnlyEpisode | None] = [None] * len(seeds)
@@ -206,7 +227,7 @@ def draw_only_batch(
                 scenario_pool, deck_pool,
                 capture_player_training, reference_count, score_reference_q,
                 reward_version, mcts_simulations, mcts_max_boundaries,
-                mcts_combat_budget,
+                mcts_combat_budget, structured_curriculum_seed,
             ): (index, seed)
             for index, seed in enumerate(seeds)
         }
@@ -243,6 +264,7 @@ def draw_only_batch(
         "process_count": len(process_ids),
         "emulator_revision": emulator_revision,
         "source_count": len(results),
+        "structured_curriculum_seed": structured_curriculum_seed,
         "draw_mode": draw_mode,
         "scenario_pool": scenario_pool,
         "deck_pool": deck_pool,
