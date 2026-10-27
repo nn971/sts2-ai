@@ -69,10 +69,16 @@ class H7CombatPPO:
         episode: Any, captured: tuple[dict[str, Any], ...],
         *, behavior_model_id: str, temperature: float,
         gamma: float, gae_lambda: float,
+        allow_sampled_terminal_replay: bool = False,
     ) -> list[PreparedH7]:
         if (episode.outcome not in ("victory", "defeat")
-                or not episode.terminal_replay_verified):
-            raise ValueError("Only verified terminal reference-law combats enter H7 PPO")
+                or type(episode.terminal_replay_verified) is not bool
+                or (not allow_sampled_terminal_replay
+                    and not episode.terminal_replay_verified)):
+            raise ValueError("Only authorized terminal reference-law combats enter H7 PPO")
+        # Unchecked episodes remain explicitly marked False in the episode
+        # transcript. Sampled mode is permitted only by the source-audited H7
+        # training collector, never by the strict default PPO interface.
         if episode.draw_mode != "reference":
             raise ValueError("H7 PPO must sample from the reference Chance Law")
         score = float(episode.score)
@@ -143,6 +149,7 @@ class H7CombatPPO:
         self, episodes: tuple[Any, ...],
         captures: tuple[tuple[dict[str, Any], ...], ...],
         *, behavior_model_id: str, seed: int,
+        allow_sampled_terminal_replay: bool = False,
     ) -> dict[str, float | int]:
         if len(episodes) != len(captures) or not episodes:
             raise ValueError("H7 update requires complete aligned on-policy episodes")
@@ -152,6 +159,7 @@ class H7CombatPPO:
                 ep, cap, behavior_model_id=behavior_model_id,
                 temperature=self.temperature, gamma=self.gamma,
                 gae_lambda=self.gae_lambda,
+                allow_sampled_terminal_replay=allow_sampled_terminal_replay,
             ))
         if len(prepared) < 2:
             raise ValueError("H7 PPO requires at least two source-public decisions")
