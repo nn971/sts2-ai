@@ -111,7 +111,7 @@ def encode_decision(
                      if strategy_encoding == "macro_attention"
                      else neural_action_features)
     elif decision.phase == "combat":
-        state_fn = {
+        candidate_state_fn = {
             "legacy": state_features,
             "structured": tactical_state_features,
             "relational": relational_tactical_state_features,
@@ -120,8 +120,9 @@ def encode_decision(
             "enemy_instances": instance_global_features,
             "enemy_attention": instance_global_features,
         }.get(encoding)
-        if state_fn is None:
+        if candidate_state_fn is None:
             raise ValueError("Unknown tactical feature schema")
+        state_fn = candidate_state_fn
         action_fn = (
             instance_action_features if encoding in ("enemy_instances", "enemy_attention")
             else public_resources_tactical_action_features
