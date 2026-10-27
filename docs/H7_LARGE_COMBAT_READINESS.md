@@ -75,9 +75,11 @@ not claim GPU train-step throughput, steady-state memory use, or gameplay streng
    configurations with coherent deck, encounter, relic, potion, HP and
    upgrade data. Split by actual configurations and independent worlds.
    Never fabricate 200 cells from 16 configurations by reusing seeds.
-4. **Checkpoint equivalence:** validate end-to-end interrupted-versus-
-   uninterrupted PPO with restored AdamW, Torch RNG, actor and source
-   seeds, on a pinned emulator. Retain old H7 and H4/H5/H6 formats.
+4. **Checkpoint equivalence:** a synthetic H7 contract test now compares
+   resumed versus uninterrupted next-round model weights and AdamW buffers
+   using the same freshly recaptured source actor. Next validate the same
+   equivalence end-to-end on a pinned emulator, including Torch RNG, actor
+   and source seeds. Retain old H7 and H4/H5/H6 formats.
 5. **Full-size learning curves:** 15 rollout workers where feasible,
    independent scratch initializations, long runs with persistent
    per-round logs and checkpoint restoration. Compare 256x4 and
