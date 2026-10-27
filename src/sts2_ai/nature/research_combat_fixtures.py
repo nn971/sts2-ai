@@ -47,13 +47,16 @@ _SOURCE = re.compile(
 def _roll(curriculum_seed: int, index: int, domain: str, ordinal: int) -> int:
     return int.from_bytes(hashlib.sha256(
         f"{DISTRIBUTION}:{curriculum_seed}:{index}:{domain}:{ordinal}"
-        .encode("utf-8")
+        .encode()
     ).digest()[:8], "big")
 
 
 def fixture_for_index(index: int, *, curriculum_seed: int = 20261027) -> dict[str, Any]:
     """Produce the C#-validated snake_case JSON fixture, independent of RNG seed."""
-    if type(index) is not int or index < 0 or type(curriculum_seed) is not int or curriculum_seed < 0:
+    if (
+        type(index) is not int or index < 0
+        or type(curriculum_seed) is not int or curriculum_seed < 0
+    ):
         raise ValueError("Invalid structural fixture index/curriculum seed")
     encounter_id, native_entry, floor, row = ENCOUNTERS[
         _roll(curriculum_seed, index, "encounter", 0) % len(ENCOUNTERS)
