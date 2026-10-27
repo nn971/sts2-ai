@@ -131,7 +131,7 @@ def sample_snapshot_curriculum(
 
 
 def _snapshot_episode(
-    backend: EmulatorBackend, state: object, model: PhaseSplitNeuralModel, *,
+    backend: EmulatorBackend, state: str, model: PhaseSplitNeuralModel, *,
     episode_seed: str, actor_seed: int, temperature: float,
     max_decisions: int,
 ) -> Episode:
