@@ -53,19 +53,21 @@ def main() -> None:
 
     torch.set_num_threads(1)
     with tempfile.TemporaryDirectory(prefix="sts2-h7-readiness-") as tmp:
-        path = Path(tmp) / "h7-actor.pt"
         if args.player_checkpoint:
-            model = SharedObjectTransformer.load_checkpoint(args.player_checkpoint)
+            path = args.player_checkpoint
+            model = SharedObjectTransformer.load_checkpoint(path)
             start = "existing-h7-checkpoint"
         else:
+            path = Path(tmp) / "h7-actor.pt"
             torch.manual_seed(args.study_seed)
             model = SharedObjectTransformer(H7Config(
                 width=args.width, layers=args.layers, heads=args.heads,
                 feedforward=args.feedforward,
             ))
+            model.save_checkpoint(path)
             start = "fresh-random-weights"
         parameter_count = sum(param.numel() for param in model.parameters())
-        model.save_checkpoint(path)
+        model_config = asdict(model.config)
         del model
         spec = H7PlayerSpec.from_file(
             path, seed=args.actor_seed, temperature=0.85, greedy=False,
@@ -92,9 +94,7 @@ def main() -> None:
         )
         report.update({
             "initialization": start,
-            "model_config": asdict(
-                SharedObjectTransformer.load_checkpoint(path).config
-            ),
+            "model_config": model_config,
             "source_digest": canonical_sha256(seeds),
             "emulator_revision": args.emulator_revision,
             "emulator_dll": str(args.emulator_dll.resolve()),
