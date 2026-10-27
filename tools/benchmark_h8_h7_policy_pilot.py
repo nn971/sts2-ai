@@ -216,6 +216,10 @@ def _shard(
                 )["replayVerified"]:
                     raise RuntimeError("H8 journal failed deterministic replay")
                 after_actor = policy.timings_snapshot()
+                if (capture_player_training and
+                        len(actor.training_actions) != actor.decisions):
+                    raise RuntimeError(
+                        "H8 H7 player choices missing on-policy behavior records")
                 rows.append(dict(
                     seed=seed, cell=cell.key, status=status,
                     outcome=state.get("outcome"),
