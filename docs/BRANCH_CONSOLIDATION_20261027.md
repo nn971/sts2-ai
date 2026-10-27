@@ -57,3 +57,40 @@ as a replacement for the V20 macro actor.
 
 The canonical branch will be proposed to `main` for review, retaining
 the original research branches and unmerged draft PRs as traceable history.
+
+
+## Validation and compatibility audit
+
+- Integration branch created by a three-parent merge (H6-F, H7, main).
+  Direct ancestry comparisons show the integrated branch is ahead of each
+  parent without missing commits.
+- H6-F V20 card operations, H6-D/E action semantics, macro attention, and
+  H7 public Torch Transformer forward/backward checks have passed focused
+  CI on the integration branch. H7 reference-law real P0 PPO smoke also
+  passed on integration
+  [run 40452658661](https://github.com/nn971/sts2-ai/actions/runs/40452658661).
+- Repository-wide Ruff initially found 18 historical style errors and
+  now passes; an H6-C escaped HTML action tooltip test exposed an actual
+  replay regression and was repaired (the public payload is escaped
+  before being included in the tooltip).
+- `parent-ci` remains red due to strict typing debt: initially **139 mypy
+  errors across 42 files**, with missing optional Torch in the parent CI
+  environment and numerous legacy typing issues. Track this in
+  [issue #113](https://github.com/nn971/sts2-ai/issues/113). This must
+  stay visible; do not claim full green CI or quietly disable mypy.
+- The historical H2 emulator pin supports only four conditioned deck
+  presets; the later H5 boss presets had accidentally widened
+  `DECK_PRESETS` used by its old tests. H2 tests/CI now use the pinned
+  four-deck curriculum explicitly, preserving its original 8/12-cell
+  comparisons rather than pretending the old emulator supports H5 decks.
+- The legacy native-run `enemy_instances` PPO smoke exposed missing
+  public `draw_pile`/`relic_counters` arrays. The global encoder now
+  uses V6 public features and explicit missingness markers for absent
+  arrays, retaining the previous V8 calculation when both lists exist.
+  Explicitly malformed present arrays remain errors. Re-run the real
+  native batched PPO CI before relying on this path.
+
+Other historical research CI may require additional compatibility
+repairs. The original-game fidelity and native RNG inspector are not
+gates. Do not combine these integration smoke outcomes into a claim that
+H7 is a strong combat agent.
