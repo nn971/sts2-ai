@@ -74,7 +74,10 @@ class PortableTypedEncoder:
         }
 
     def _lookup(self, table: str, key: str) -> list[float]:
-        return self.params[table + ".weight"][self.maps[table].get(key, 0)]
+        return [
+            float(value)
+            for value in self.params[table + ".weight"][self.maps[table].get(key, 0)]
+        ]
 
     def _numerical(self, kind_idx: int, field: str, value: float) -> list[float]:
         field_embed = self._lookup("numeric_fields", field)

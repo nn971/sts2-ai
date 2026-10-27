@@ -656,6 +656,8 @@ def train_phase_split(
                 combat_objective=combat_objective,
             )
             if freeze_combat:
+                if frozen_combat is None:
+                    raise ValueError("Frozen-combat checkpoint has no combat model")
                 model.combat = frozen_combat
             planned_seeds = [
                 f"{seed_prefix}-{index}-{j}" for j in range(episodes_per_round)
@@ -730,10 +732,12 @@ def train_phase_split(
             if optimizer_method == "ppo":
                 if ppo_backend == "batched":
                     from sts2_ai.training.phase_split_ppo_batch import (
-                        ppo_update_batched as ppo_update,
+                        ppo_update_batched,
                     )
                 else:
-                    from sts2_ai.training.phase_split_ppo import ppo_update
+                    from sts2_ai.training.phase_split_ppo import (
+                        ppo_update as ppo_update_reference,
+                    )
 
                 strategy_only = (
                     [(replace(ep, decisions=tuple(
@@ -742,27 +746,31 @@ def train_phase_split(
                      for ep, target in run_targets]
                     if freeze_combat else run_targets
                 )
-                ppo = ppo_update(
-                    torch=torch,
-                    run_targets=strategy_only,
-                    local_targets=local_targets,
-                    params=params,
-                    optimizers=optimizers,
-                    dimension=dimension,
-                    encoding=tactical_state_encoding,
-                    temperature=temperature,
-                    gamma=ppo_gamma,
-                    gae_lambda=ppo_gae_lambda,
-                    epochs=ppo_epochs,
-                    batch_size=ppo_batch_size,
-                    sample_limit=ppo_sample_limit,
-                    clip_epsilon=ppo_clip_epsilon,
-                    value_weight=value_weight,
-                    entropy_weight=entropy_weight,
-                    seed=seed + index * 1000003,
-                    **({"strategy_encoding": strategy_encoding}
-                       if ppo_backend == "batched" else {}),
-                )
+                ppo_kwargs: dict[str, Any] = {
+                    "torch": torch,
+                    "run_targets": strategy_only,
+                    "local_targets": local_targets,
+                    "params": params,
+                    "optimizers": optimizers,
+                    "dimension": dimension,
+                    "encoding": tactical_state_encoding,
+                    "temperature": temperature,
+                    "gamma": ppo_gamma,
+                    "gae_lambda": ppo_gae_lambda,
+                    "epochs": ppo_epochs,
+                    "batch_size": ppo_batch_size,
+                    "sample_limit": ppo_sample_limit,
+                    "clip_epsilon": ppo_clip_epsilon,
+                    "value_weight": value_weight,
+                    "entropy_weight": entropy_weight,
+                    "seed": seed + index * 1000003,
+                }
+                if ppo_backend == "batched":
+                    ppo = ppo_update_batched(
+                        **ppo_kwargs, strategy_encoding=strategy_encoding,
+                    )
+                else:
+                    ppo = ppo_update_reference(**ppo_kwargs)
                 steps = ppo.steps
                 strategic_count = ppo.counts["strategy"]
                 tactical_count = ppo.counts["combat"]
@@ -1048,5 +1056,7 @@ def train_phase_split(
         combat_objective=combat_objective,
     )
     if freeze_combat:
+        if frozen_combat is None:
+            raise ValueError("Frozen-combat checkpoint has no combat model")
         final.combat = frozen_combat
     return final, tuple(rows)

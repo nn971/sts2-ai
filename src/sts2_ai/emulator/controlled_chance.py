@@ -65,7 +65,10 @@ class NatureJsonlProcess:
             line = self._process.stdout.readline()
             if not line:
                 raise ControlledChanceUnavailable("Nature emulator JSONL disconnected")
-            result = json.loads(line)
+            decoded = json.loads(line)
+            if not isinstance(decoded, dict):
+                raise ControlledChanceUnavailable("Malformed Nature response object")
+            result: dict[str, Any] = decoded
             if result.get("requestId") != request_id:
                 raise ControlledChanceUnavailable("Nature response request-id mismatch")
             if result.get("ok") is not True:
@@ -187,7 +190,10 @@ class IsolatedNatureBridge:
         response = self.wire.call("nature_save", nature_handle=boundary.handle)
         if response.get("kind") != boundary.kind:
             raise ControlledChanceUnavailable("Nature snapshot kind mismatch")
-        return response["snapshot"]
+        snapshot = response.get("snapshot")
+        if not isinstance(snapshot, str) or not snapshot:
+            raise ControlledChanceUnavailable("Missing Nature snapshot")
+        return snapshot
 
     def load(self, snapshot: str, *, kind: str) -> IsolatedBoundary:
         return IsolatedBoundary.decode(
@@ -199,7 +205,10 @@ class IsolatedNatureBridge:
             "nature_release_many",
             nature_handles=[x.handle for x in boundaries],
         )
-        return response["released"]
+        released = response.get("released")
+        if type(released) is not int or released < 0:
+            raise ControlledChanceUnavailable("Malformed Nature release count")
+        return released
 
     def run_fixture(
         self, policy: NaturePolicy, *, seed: str, kind: str, act: int,

@@ -214,7 +214,10 @@ def first_legal_player(
 ) -> str:
     if not actions:
         raise P0SemanticInterfaceError("No legal public player actions")
-    return actions[0]["actionId"]
+    action_id = actions[0].get("actionId")
+    if not isinstance(action_id, str) or not action_id:
+        raise P0SemanticInterfaceError("Malformed legal public player action")
+    return action_id
 
 
 def strike_first_player(
@@ -237,10 +240,14 @@ def strike_first_player(
 
             payload = json.loads(action.get("payloadJson", "{}"))
             if hand.get(payload.get("CardInstanceId")) == preferred:
-                return action["actionId"]
+                action_id = action.get("actionId")
+                if isinstance(action_id, str) and action_id:
+                    return action_id
     for action in actions:
         if action.get("kind") == "end_turn":
-            return action["actionId"]
+            action_id = action.get("actionId")
+            if isinstance(action_id, str) and action_id:
+                return action_id
     return first_legal_player(_observation, actions)
 
 

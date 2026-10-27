@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from sts2_ai.emulator.semantic_p0_combat import _pending_event
+from sts2_ai.nature.contextual_draw import ContextualDrawNature
 from sts2_ai.nature.protocol import canonical_sha256
 from sts2_ai.nature.two_site_opponent import PilotChoice, TwoSiteNature
 
@@ -116,7 +117,7 @@ class DeclaredLaw:
         if law.get("siteId") != pending.get("siteId"):
             raise DrawOnlyContractError("Chance Law site differs from pending request")
         event_id = pending.get("eventId")
-        if (not cls._valid_identifier(event_id)
+        if (not isinstance(event_id, str) or not event_id
                 or law.get("eventId") != event_id):
             raise DrawOnlyContractError("Chance Law event identity mismatch")
         for name in ("lawId", "supportFingerprint", "conditioningPolicyId",
@@ -248,7 +249,7 @@ class SeededLawSampler:
 
 @dataclass
 class DrawOnlyRouter:
-    nature: TwoSiteNature
+    nature: TwoSiteNature | ContextualDrawNature
     reference: SeededLawSampler
 
     def choose(
@@ -317,7 +318,10 @@ class DrawOnlyRouter:
         if (proposal.selected_id != ids[proposal.selected_index]
                 or law.outcome_ids[proposal.selected_index] not in law.outcome_ids):
             raise DrawOnlyContractError("Draw Nature proposed an illegal instance")
-        q = math.exp(proposal.log_q)
+        log_q = proposal.log_q
+        if log_q is None or not math.isfinite(log_q):
+            raise DrawOnlyContractError("Invalid learned Nature log probability")
+        q = math.exp(log_q)
         if not 0 < q <= 1:
             raise DrawOnlyContractError("Invalid learned Nature proposal")
         return RoutedChoice(
@@ -327,6 +331,6 @@ class DrawOnlyRouter:
             selected_outcome_id=law.outcome_ids[proposal.selected_index],
             selected_index=proposal.selected_index,
             log_p=math.log(law.probabilities[proposal.selected_index]),
-            log_q=proposal.log_q, controller="learned-draw",
+            log_q=log_q, controller="learned-draw",
             nature_choice=choice,
         )

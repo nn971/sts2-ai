@@ -11,7 +11,7 @@ import json
 import math
 import random
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from typing import Any
@@ -323,6 +323,7 @@ def collect_snapshot_cohort(
         grouped, workers=workers, max_decisions=max_decisions,
     )
     results: list[Episode | None] = [None] * len(selected)
+    batches_returned: Iterable[tuple[tuple[int, Episode], ...]]
     if pool is None:
         batches_returned = (
             tuple(

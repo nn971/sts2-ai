@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import math
-from collections import Counter
+from collections import Counter, defaultdict
+from collections.abc import MutableMapping
 from typing import Any
 
 TACTICAL_STATE_SCHEMA = "sts2-tactical-public-state-v4"
@@ -287,7 +288,8 @@ PUBLIC_RESOURCES_TACTICAL_STATE_SCHEMA = "sts2-tactical-public-state-v7-resource
 
 
 def _visible_resource_tokens(
-    result: Counter[str], prefix: str, value: object, *, depth: int = 0,
+    result: MutableMapping[str, float], prefix: str,
+    value: object, *, depth: int = 0,
 ) -> None:
     """Flatten public item-local metadata, never transient instance identifiers."""
     if depth > 3:
@@ -345,7 +347,7 @@ def public_resources_tactical_state_features(
     ):
         raise ValueError("Draw-pile count disagrees with public draw-pile contents")
 
-    tokens: Counter[str] = Counter()
+    tokens: defaultdict[str, float] = defaultdict(float)
 
     # Multisets are invariant under rearrangement of the observed arrays.
     for zone in ("draw_pile", "discard_pile", "exhaust_pile", "hand"):

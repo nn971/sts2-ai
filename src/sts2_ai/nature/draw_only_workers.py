@@ -66,7 +66,7 @@ def _initialize(
 
 def _one(
     index: int, seed: str, reference_seed: int,
-    nature_checkpoint: dict, draw_mode: str, entry_mode: str,
+    nature_checkpoint: dict[str, Any], draw_mode: str, entry_mode: str,
     max_boundaries: int, scenario_pool: tuple[str, ...],
     deck_pool: tuple[str, ...], capture_player_training: bool = False,
     reference_count: int = 0, score_reference_q: bool = False,
@@ -74,7 +74,8 @@ def _one(
     mcts_simulations: int = 0, mcts_max_boundaries: int = 24,
     mcts_combat_budget: int = 4000,
 ) -> tuple[int, DrawOnlyEpisode, int, tuple[dict[str, Any], ...]]:
-    if _worker_session is None or _worker_spec is None or _worker_model is None:
+    if (_worker_session is None or _worker_spec is None or _worker_model is None
+            or _worker_revision is None):
         raise RuntimeError("Draw-only worker was not initialized")
     spec = _worker_spec
     chosen = scenario_for_seed(seed, scenario_pool)
@@ -114,7 +115,7 @@ def _one(
 
 def _job(
     index: int, seed: str, reference_seed: int,
-    nature_checkpoint: dict, draw_mode: str, entry_mode: str,
+    nature_checkpoint: dict[str, Any], draw_mode: str, entry_mode: str,
     max_boundaries: int, scenario_pool: tuple[str, ...],
     deck_pool: tuple[str, ...],
     capture_player_training: bool = False, reference_count: int = 0,

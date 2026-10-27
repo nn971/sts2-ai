@@ -223,13 +223,19 @@ def extract_combat_objects(state: dict[str, Any]) -> ObjectSet:
         relic_counters[key] = row.get("trigger_counts")
     for relic in _records(state.get("relics"), "relics"):
         ident = _identifier(relic, "relic_id", "relic")
-        num: dict[str, float] = {}
-        cat: list[str] = []
+        relic_numeric: dict[str, float] = {}
+        relic_categorical: list[str] = []
         if "state" in relic:
-            _flatten("state", relic["state"], num, cat)
+            _flatten("state", relic["state"], relic_numeric, relic_categorical)
         if ident in relic_counters:
-            _flatten("trigger_counts", relic_counters.pop(ident), num, cat)
-        objects.append(_token("relic", ident, "owned", ObjectRef("relic", ident), num, cat))
+            _flatten(
+                "trigger_counts", relic_counters.pop(ident),
+                relic_numeric, relic_categorical,
+            )
+        objects.append(_token(
+            "relic", ident, "owned", ObjectRef("relic", ident),
+            relic_numeric, relic_categorical,
+        ))
     if relic_counters:
         raise ValueError("Relic counter references an unowned relic")
 
@@ -238,11 +244,14 @@ def extract_combat_objects(state: dict[str, Any]) -> ObjectSet:
         if type(slot) is not int or slot < 0:
             raise ValueError("Potion has invalid public slot")
         ident = _identifier(potion, "potion_id", "potion")
-        num: dict[str, float] = {}
-        cat: list[str] = []
+        potion_numeric: dict[str, float] = {}
+        potion_categorical: list[str] = []
         if "state" in potion:
-            _flatten("state", potion["state"], num, cat)
-        objects.append(_token("potion", ident, "held", ObjectRef("potion", slot), num, cat))
+            _flatten("state", potion["state"], potion_numeric, potion_categorical)
+        objects.append(_token(
+            "potion", ident, "held", ObjectRef("potion", slot),
+            potion_numeric, potion_categorical,
+        ))
 
     player = ObjectRef("global", "player")
     def append_effects(owner: ObjectRef, powers: object, statuses: object = None) -> None:
@@ -277,19 +286,21 @@ def extract_combat_objects(state: dict[str, Any]) -> ObjectSet:
     for enemy in _records(combat.get("enemies"), "combat.enemies"):
         instance = _instance(enemy, "enemy")
         ident = _identifier(enemy, "enemy_id", "enemy")
-        num: dict[str, float] = {}
-        cat: list[str] = []
+        enemy_numeric: dict[str, float] = {}
+        enemy_categorical: list[str] = []
         for k in (
             "hp", "block", "formation_position",
             "intent_damage", "intent_hits", "intent_base_damage",
         ):
             if k in enemy and enemy[k] is not None:
-                num[k] = _number(enemy[k], "enemy." + k)
+                enemy_numeric[k] = _number(enemy[k], "enemy." + k)
         for k in ("move_id", "last_move_id"):
             if k in enemy:
-                _flatten(k, enemy[k], num, cat)
+                _flatten(k, enemy[k], enemy_numeric, enemy_categorical)
         ref = ObjectRef("enemy", instance)
-        objects.append(_token("enemy", ident, "living", ref, num, cat))
+        objects.append(_token(
+            "enemy", ident, "living", ref, enemy_numeric, enemy_categorical,
+        ))
         append_effects(ref, enemy.get("powers"), enemy.get("statuses"))
 
     return ObjectSet(OBJECT_SCHEMA, tuple(objects))

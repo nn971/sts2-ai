@@ -43,11 +43,17 @@ def _legal(state: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
 
 
 def _select(node: _Node, actions: list[dict[str, Any]], exploration: float) -> str:
-    ids = sorted(a["actionId"] for a in actions)
-    for action in ids:
-        if action not in node.edges or node.edges[action].visits == 0:
-            node.edges.setdefault(action, _Edge())
-            return action
+    ids: list[str] = []
+    for action in actions:
+        action_id = action.get("actionId")
+        if not isinstance(action_id, str) or not action_id:
+            raise ValueError("MCTS action has no public action ID")
+        ids.append(action_id)
+    ids.sort()
+    for action_id in ids:
+        if action_id not in node.edges or node.edges[action_id].visits == 0:
+            node.edges.setdefault(action_id, _Edge())
+            return action_id
     return max(
         ids,
         key=lambda key: (
@@ -67,14 +73,17 @@ def _cutoff_value(obs: dict[str, Any] | None, opening_enemy_hp: int,
         return 0.0
     hp = obs.get("hp", 0)
     enemies = obs.get("combat", {}).get("enemies", [])
-    if not isinstance(hp, int) or not isinstance(enemies, list):
+    if type(hp) is not int or not isinstance(enemies, list):
         return 0.0
-    remaining = sum(
-        max(0, e.get("hp", 0)) for e in enemies
-        if isinstance(e, dict) and isinstance(e.get("hp"), int)
-    )
-    progress = max(0., min(1., 1. - remaining / opening_enemy_hp))
-    health = max(0., min(1., hp / player_max_hp))
+    remaining = 0
+    for enemy in enemies:
+        if not isinstance(enemy, dict):
+            continue
+        enemy_hp = enemy.get("hp")
+        if type(enemy_hp) is int:
+            remaining += max(0, enemy_hp)
+    progress = max(0.0, min(1.0, 1.0 - remaining / opening_enemy_hp))
+    health = max(0.0, min(1.0, hp / player_max_hp))
     return min(0.999, 0.5 * progress + 0.5 * health)
 
 
@@ -122,8 +131,12 @@ def search_player_action(
                 if state.terminal:
                     if state.outcome not in ("victory", "defeat"):
                         raise RuntimeError("MCTS reached invalid terminal outcome")
-                    terminal_hp = (state.status().get("terminalEnemyHp")
-                                   if state.outcome == "defeat" else None)
+                    terminal_hp: int | None = None
+                    if state.outcome == "defeat":
+                        terminal_value = state.status().get("terminalEnemyHp")
+                        if type(terminal_value) is not int:
+                            raise RuntimeError("MCTS terminal state lacks enemy HP")
+                        terminal_hp = terminal_value
                     value = boss_progress_score(
                         state.outcome,
                         player_exit_hp=state.exit_hp,

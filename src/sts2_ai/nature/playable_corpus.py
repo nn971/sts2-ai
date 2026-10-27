@@ -46,7 +46,7 @@ from sts2_ai.nature.policies import (
     ScriptedNature,
     UniformNature,
 )
-from sts2_ai.nature.protocol import canonical_sha256
+from sts2_ai.nature.protocol import NaturePolicy, canonical_sha256
 
 PLAYABLE_CORPUS_SCHEMA = "sts2-ai-nature-playable-coverage-corpus-v1"
 PLAYABLE_RECORD_SCHEMA = "sts2-ai-nature-playable-coverage-record-v1"
@@ -87,7 +87,9 @@ def _initialize(command: tuple[str, ...], revision: str) -> None:
     Finalize(None, _close_worker, exitpriority=10)
 
 
-def _initial_policy(mode: str, seed: int, fixture: NatureFixture):
+def _initial_policy(
+    mode: str, seed: int, fixture: NatureFixture,
+) -> NaturePolicy:
     if mode == "first":
         return FirstLegalNature()
     if mode == "last":
@@ -122,14 +124,22 @@ def _status(exc: Exception) -> tuple[str, str | None, str | None]:
     raise exc
 
 
-def _run_once(fixture: NatureFixture, policy: Any, *, cap: int):
+def _run_once(
+    fixture: NatureFixture, policy: Any, *, cap: int,
+) -> tuple[
+    str, str | None, str | None, str | None,
+    tuple[PlayableDecision, ...], tuple[str, ...],
+]:
     if _worker_isolated is None or _worker_playable is None:
         raise RuntimeError("Playable worker is not initialized")
     decisions: list[PlayableDecision] = []
     attempted: list[str] = []
 
     def choose(frame: Any) -> str:
-        action = frame.action_ids[0]
+        action_ids = frame.action_ids
+        if not action_ids or not isinstance(action_ids[0], str):
+            raise RuntimeError("Playable frame has no valid legal action")
+        action = action_ids[0]
         attempted.append(action)
         return action
 
@@ -149,7 +159,10 @@ def _run_once(fixture: NatureFixture, policy: Any, *, cap: int):
         )
         if tuple(decisions) != result.decisions:
             raise RuntimeError("Playable callback disagrees with returned trace")
-        terminal_fingerprint = result.terminal_fingerprint
+        fingerprint = result.terminal_fingerprint
+        if not isinstance(fingerprint, str) or not fingerprint:
+            raise RuntimeError("Playable terminal result has no fingerprint")
+        terminal_fingerprint = fingerprint
     except (ControlledChanceUnavailable, RuntimeError) as exc:
         status, site, operation = _status(exc)
     return (
@@ -158,7 +171,9 @@ def _run_once(fixture: NatureFixture, policy: Any, *, cap: int):
     )
 
 
-def _run_job(index: int, fixture: NatureFixture, manifest: dict[str, Any]):
+def _run_job(
+    index: int, fixture: NatureFixture, manifest: dict[str, Any],
+) -> tuple[int, dict[str, Any], int]:
     policy = _initial_policy(
         manifest["nature_mode"], manifest["nature_seed"], fixture,
     )

@@ -24,7 +24,8 @@ ARM_FIELDS = frozenset({"arm", "nature_update"})
 
 
 def _finite_nonnegative(value: object, label: str) -> float:
-    if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value < 0:
+    if (not isinstance(value, (int, float)) or isinstance(value, bool)
+            or not math.isfinite(value) or value < 0):
         raise ValueError(f"Invalid training budget metric: {label}")
     return float(value)
 

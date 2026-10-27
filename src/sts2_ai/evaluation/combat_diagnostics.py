@@ -43,7 +43,9 @@ def _identity(report: dict[str, Any]) -> tuple[str, str, str, int, str]:
     )
 
 
-def validate_reports(reports: Mapping[int, dict[str, Any]]) -> tuple[dict, list]:
+def validate_reports(
+    reports: Mapping[int, dict[str, Any]],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     if len(reports) < 2:
         raise ValueError("Diagnostic needs at least two checkpoints")
     first = reports[min(reports)]
@@ -215,7 +217,7 @@ def diagnose_reports(
     output["first_to_last"] = shift
 
     last = reports[ordered[-1]]["rows"]
-    encounters: dict[str, list[dict]] = defaultdict(list)
+    encounters: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for r in last:
         encounters[" + ".join(r["enemy_ids"])].append(r)
     output["final_enemy_regressions"] = sorted(

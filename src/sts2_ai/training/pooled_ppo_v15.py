@@ -277,9 +277,12 @@ def prepare_pooled_samples(
                         _action_tokens(decision.legal_actions, objects)
                         if isinstance(head, RelationalObjectTorch) else None
                     )
-                    v, logits = head.forward_prepared(
-                        objects, bindings if bindings is not None else refs, baseline,
-                    )
+                    if isinstance(head, RelationalObjectTorch):
+                        if bindings is None:
+                            raise ValueError("Relational head is missing action bindings")
+                        v, logits = head.forward_prepared(objects, bindings, baseline)
+                    else:
+                        v, logits = head.forward_prepared(objects, refs, baseline)
                     old = torch.nn.functional.log_softmax(logits / temperature, dim=0)
                     logprob = float(old[decision.chosen_index].item())
                     value = float(v.item())
@@ -468,26 +471,29 @@ def ppo_update_pooled(
         for start in range(0, len(order), batch_size):
             chosen = order[start:start + batch_size]
             if isinstance(head, RelationalObjectTorch):
-                if any(rows[k].action_bindings is None for k in chosen):
-                    raise ValueError("Missing v15d action-role bindings")
+                batch_rows = [rows[k] for k in chosen]
+                action_bindings = []
+                topologies = []
+                compiled_features = []
+                for row in batch_rows:
+                    bindings = row.action_bindings
+                    if bindings is None:
+                        raise ValueError("Missing v15d action-role bindings")
+                    action_bindings.append(bindings)
+                    topology = row.relational_topology
+                    if topology is None:
+                        topology = prepare_relational_topology(row.objects, bindings)
+                    topologies.append(topology)
+                    features = row.compiled_features
+                    if features is None:
+                        features = head.embedding.prepare(row.objects)
+                    compiled_features.append(features)
                 values, logits_batch = head.forward_batch_prepared(
-                    [rows[k].objects for k in chosen],
-                    [rows[k].action_bindings for k in chosen],
-                    [rows[k].baseline for k in chosen],
-                    topologies=[
-                        rows[k].relational_topology
-                        if rows[k].relational_topology is not None
-                        else prepare_relational_topology(
-                            rows[k].objects, rows[k].action_bindings,
-                        )
-                        for k in chosen
-                    ],
-                    features=[
-                        rows[k].compiled_features
-                        if rows[k].compiled_features is not None
-                        else head.embedding.prepare(rows[k].objects)
-                        for k in chosen
-                    ],
+                    [row.objects for row in batch_rows],
+                    action_bindings,
+                    [row.baseline for row in batch_rows],
+                    topologies=topologies,
+                    features=compiled_features,
                 )
                 loss, actor_mean, critic_mean, entropy_mean = batched_ppo_loss(
                     torch, values, logits_batch,
@@ -748,7 +754,7 @@ def train_pooled_combat_ppo(
     )
     optimizer = torch.optim.AdamW(head.module.parameters(), lr=learning_rate)
     revision = str(getattr(backend, "emulator_revision", "test-backend"))
-    config = {
+    config: dict[str, Any] = {
         "version": POOLED_PPO_VERSION, "emulator_revision": revision,
         "base_sha256": _hash_json(base.to_dict()),
         "vocabulary_sha256": _hash_json(vocabulary.to_dict()),
@@ -772,14 +778,15 @@ def train_pooled_combat_ppo(
     if snapshot_recipes is not None:
         # This changes the fingerprint only for the new opt-in mode.
         # Existing v15l checkpoint fingerprints and resumption remain intact.
-        config["snapshot_curriculum"] = {
+        snapshot_config: dict[str, Any] = {
             "sampling": snapshot_sampling,
             "recipe_sha256": _hash_json([asdict(r) for r in snapshot_recipes]),
         }
         if importance_sampler is not None:
-            config["snapshot_curriculum"]["target_balance"] = snapshot_target_balance
-            config["snapshot_curriculum"]["priority_mix"] = snapshot_priority_mix
-            config["snapshot_curriculum"]["priority_version"] = "hp-tier-proxy-v1"
+            snapshot_config["target_balance"] = snapshot_target_balance
+            snapshot_config["priority_mix"] = snapshot_priority_mix
+            snapshot_config["priority_version"] = "hp-tier-proxy-v1"
+        config["snapshot_curriculum"] = snapshot_config
     fingerprint = _hash_json(config)
     rows: list[PooledTrainingRound] = []
     if resume:

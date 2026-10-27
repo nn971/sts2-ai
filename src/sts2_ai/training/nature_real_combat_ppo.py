@@ -116,11 +116,15 @@ def validate_recorded_action(
         )
 
     lp, value = raw.get("behavior_logprob"), raw.get("behavior_value")
-    if any(type(x) not in (int, float) or not math.isfinite(x) for x in (lp, value)):
+    if (not isinstance(lp, (int, float)) or isinstance(lp, bool)
+            or not math.isfinite(lp)
+            or not isinstance(value, (int, float)) or isinstance(value, bool)
+            or not math.isfinite(value)):
         raise RealPlayerPpoError("Missing/nonfinite behavior log-probability or value")
-    if lp > 1e-10:
+    logprob, behavior_value = float(lp), float(value)
+    if logprob > 1e-10:
         raise RealPlayerPpoError("Behavior log probability exceeds zero")
-    return PublicDecision(observation, actions, chosen, "combat"), float(lp), float(value)
+    return PublicDecision(observation, actions, chosen, "combat"), logprob, behavior_value
 
 
 def prepare_real_combat_ppo_samples(
@@ -215,9 +219,12 @@ def prepare_real_combat_ppo_samples(
                     _action_tokens(decision.legal_actions, objects)
                     if isinstance(head, RelationalObjectTorch) else None
                 )
-                v, logits = head.forward_prepared(
-                    objects, bindings if bindings is not None else refs, baseline,
-                )
+                if isinstance(head, RelationalObjectTorch):
+                    if bindings is None:
+                        raise RealPlayerPpoError("Missing relational action bindings")
+                    v, logits = head.forward_prepared(objects, bindings, baseline)
+                else:
+                    v, logits = head.forward_prepared(objects, refs, baseline)
                 lp = torch.nn.functional.log_softmax(
                     logits / temperature, dim=0
                 )[decision.chosen_index].item()

@@ -164,22 +164,26 @@ def encode_decision(
             macro_target = macro_action_target
         vectors = list(macro_nodes.values())
         macro_slots = {key: i for i, key in enumerate(macro_nodes)}
-        target_slots = [
-            macro_slots[target] if (target := macro_target(
-                state, action, macro_nodes,
-            )) is not None else -1
-            for action in decision.legal_actions
-        ]
+        target_slots = []
+        for action in decision.legal_actions:
+            macro_target_id = macro_target(state, action, macro_nodes)
+            target_slots.append(
+                macro_slots[macro_target_id]
+                if macro_target_id is not None else -1
+            )
     else:
         enemy_nodes = enemy_instance_vectors(state, dimension)
         vectors = list(enemy_nodes.values())
         enemy_slots = {key: i for i, key in enumerate(enemy_nodes)}
-        target_slots = [
-            enemy_slots[target] if (target := action_target_instance(
+        target_slots = []
+        for action in decision.legal_actions:
+            target_instance = action_target_instance(
                 action.payload_json, enemy_nodes,
-            )) is not None else -1
-            for action in decision.legal_actions
-        ]
+            )
+            target_slots.append(
+                enemy_slots[target_instance]
+                if target_instance is not None else -1
+            )
     # The two phases have disjoint key types. Keep their target resolution
     # separate so ephemeral enemy IDs and macro object IDs cannot alias.
     enemy_tensor = (
@@ -212,11 +216,16 @@ def collate(
             raise ValueError("Inconsistent instance encoder batch")
         return PaddedBatch(states, actions, mask, chosen, None, None, None)
 
-    if any(item.enemies is None or item.targets is None for item in records):
+    enemy_rows = [item.enemies for item in records]
+    if any(enemies is None for enemies in enemy_rows) or any(
+        item.targets is None for item in records
+    ):
         raise ValueError("Missing instance enemy/target tensors")
     # A minimum of one padded enemy slot permits gather() even for an
     # empty enemy set. Padding must never contribute to the pooled context.
-    max_enemies = max(1, *(int(item.enemies.shape[0]) for item in records))
+    max_enemies = max(
+        1, *(int(enemies.shape[0]) for enemies in enemy_rows if enemies is not None),
+    )
     dimension = states.shape[1]
     padded_enemies = torch.zeros(
         (len(records), max_enemies, dimension), dtype=torch.float32,
@@ -228,6 +237,8 @@ def collate(
         (len(records), actions.shape[1]), -1, dtype=torch.long,
     )
     for index, item in enumerate(records):
+        if item.enemies is None or item.targets is None:
+            raise ValueError("Missing instance enemy/target tensors")
         size = item.enemies.shape[0]
         if size:
             padded_enemies[index, :size] = item.enemies

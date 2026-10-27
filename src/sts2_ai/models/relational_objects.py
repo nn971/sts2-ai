@@ -199,7 +199,8 @@ class RelationalObjectTorch:
                 self.policy_gate = nn.Parameter(torch.zeros(()))
                 self.value_gate = nn.Parameter(torch.zeros(()))
 
-        self.module = Network(self.embedding.module, width)
+        # Network is defined dynamically against the installed Torch module.
+        self.module: Any = Network(self.embedding.module, width)
 
     def forward_prepared(
         self, objects: ObjectSet,
@@ -711,7 +712,7 @@ class PortableRelationalObjectModel:
                 q = self._project("cross_q", _plus(shared, kind_vec))
                 keys = [self._project("cross_k", row) for row in subset]
                 values = [self._project("cross_v", row) for row in subset]
-                attended = []
+                attended: list[float] = []
                 for head in range(HEADS):
                     span = slice(head * hd, (head + 1) * hd)
                     scores = [

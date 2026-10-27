@@ -14,6 +14,7 @@ import os
 import sys
 import time
 import traceback
+from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict
 from multiprocessing.util import Finalize
@@ -74,7 +75,9 @@ def _execute_job_inner(
         raise RuntimeError("Semantic emulator worker is not initialized")
     nature = TwoSiteNature.restore(nature_state)
     if _worker_player_spec is None:
-        choose = strike_first_player
+        choose: Callable[[dict[str, Any], list[dict[str, Any]]], str] = (
+            strike_first_player
+        )
         policy_id = "fair-strike-defend-then-end-turn-v1"
         episode_actor_seed = None
     else:
@@ -89,7 +92,13 @@ def _execute_job_inner(
             greedy=_worker_player_spec.greedy,
             action_scope=_worker_player_spec.action_scope,
         )
-        choose = actor.choose
+        def choose_frozen(
+            observation: dict[str, Any],
+            raw_actions: list[dict[str, Any]],
+        ) -> str:
+            return actor.choose(observation, raw_actions)
+
+        choose = choose_frozen
         policy_id = _worker_player_spec.policy_id
     first = play_real_two_site(
         _worker_session, fixture, emulator_revision=_worker_revision,

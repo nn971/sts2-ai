@@ -14,6 +14,7 @@ import math
 import random
 from collections import defaultdict
 from dataclasses import dataclass, field
+from typing import Any
 
 from .semantic import SemanticEvent, SemanticProposal
 

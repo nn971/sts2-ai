@@ -13,7 +13,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from statistics import fmean
-from typing import Any
+from typing import Any, cast
 
 from sts2_ai.agents.base import Agent, Decision
 from sts2_ai.emulator import (
@@ -71,7 +71,7 @@ def _room_type(data: Mapping[str, Any]) -> int:
     ]
     if len(matching) != 1 or type(matching[0].get("room_type")) is not int:
         raise ValueError("Cannot identify combat room type from the public map")
-    return matching[0]["room_type"]
+    return cast(int, matching[0]["room_type"])
 
 
 def _ids(data: Mapping[str, Any], field: str, id_key: str) -> tuple[str, ...]:
@@ -386,33 +386,43 @@ def evaluate_model_suite(
                 ):
                     raise ValueError("Recipes from one run have inconsistent prefixes")
                 segment = recipe.action_ids[len(prefix):]
+
+                def replay_progress(
+                    count: int, total: int, *, run_seed: str = seed,
+                    floor: int = recipe.floor,
+                ) -> None:
+                    callback = on_replay_progress
+                    if callback is not None:
+                        callback(run_seed, floor, count, total)
+
                 handle = _advance(
                     backend, handle, segment,
-                    on_progress=(
-                        (lambda count, total, run_seed=seed, floor=recipe.floor:
-                         on_replay_progress(run_seed, floor, count, total))
-                        if on_replay_progress is not None else None
-                    ),
+                    on_progress=(replay_progress
+                                 if on_replay_progress is not None else None),
                     progress_every=combat_progress_every,
                 )
                 prefix = recipe.action_ids
                 _verify(backend, handle, recipe)
-                outcomes = {
-                    label: play_combat(
+                outcomes: dict[str, CombatResult] = {}
+                for label, model_agent in models.items():
+                    def combat_progress(
+                        decisions: int, *, run_seed: str = seed,
+                        floor: int = recipe.floor, model_name: str = label,
+                    ) -> None:
+                        callback = on_combat_progress
+                        if callback is not None:
+                            callback(run_seed, floor, model_name, decisions)
+
+                    outcomes[label] = play_combat(
                         backend,
                         backend.fork(handle),
                         agent_factory(label, recipe)
-                        if agent_factory is not None else agent,
+                        if agent_factory is not None else model_agent,
                         max_decisions=max_combat_decisions,
                         progress_every=combat_progress_every,
-                        on_progress=(
-                            (lambda decisions, model_name=label, floor=recipe.floor, run_seed=seed:
-                             on_combat_progress(run_seed, floor, model_name, decisions))
-                            if on_combat_progress is not None else None
-                        ),
+                        on_progress=(combat_progress
+                                     if on_combat_progress is not None else None),
                     )
-                    for label, agent in models.items()
-                }
                 entry = MultiCombatResult(
                     seed=seed, floor=recipe.floor, tier=recipe.tier,
                     progress=recipe.progress, enemy_ids=recipe.enemy_ids,

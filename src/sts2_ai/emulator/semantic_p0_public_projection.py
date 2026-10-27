@@ -9,7 +9,7 @@ The original source observation is not mutated.
 """
 from __future__ import annotations
 
-import json
+from copy import deepcopy
 from typing import Any
 
 PROJECTION = "sts2-ai-p0-public-count-piles-v1"
@@ -26,11 +26,11 @@ def project_public_p0_observation(source: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Privileged Nature state must never reach player projection")
     if source.get("p0_public_projection") is not None:
         raise ValueError("Cannot project a previously modified P0 observation")
-    public = json.loads(json.dumps(source))
+    public = deepcopy(source)
     combat = public["combat"]
     opaque: list[str] = []
 
-    def normalize(container: dict, key: str, *, marker: str) -> None:
+    def normalize(container: dict[str, Any], key: str, *, marker: str) -> None:
         value = container.get(key)
         if isinstance(value, list) and all(isinstance(row, dict) for row in value):
             return
@@ -112,6 +112,6 @@ def project_public_enemy_slot_for_legacy_instances(source: dict[str, Any]) -> di
             not isinstance(enemy.get("enemy_id"), str) or
             not enemy.get("enemy_id")):
         raise ValueError("Cannot derive public slot for malformed enemy identity")
-    projected = json.loads(json.dumps(source))
+    projected = deepcopy(source)
     projected["combat"]["enemies"][0]["formation_position"] = 0
     return projected

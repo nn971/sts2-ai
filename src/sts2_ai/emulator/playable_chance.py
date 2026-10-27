@@ -159,10 +159,12 @@ class PlayableNatureBridge:
         actions = raw.get("actions")
         if not isinstance(observation, dict) or not isinstance(actions, list):
             raise ControlledChanceUnavailable("Invalid public observation or actions")
-        ids = tuple(a.get("actionId") for a in actions if isinstance(a, dict))
-        if (len(ids) != len(actions) or
-                any(not isinstance(x, str) or not x for x in ids) or
-                len(set(ids)) != len(ids)):
+        raw_ids = [a.get("actionId") for a in actions if isinstance(a, dict)]
+        if (len(raw_ids) != len(actions) or
+                any(not isinstance(x, str) or not x for x in raw_ids)):
+            raise ControlledChanceUnavailable("Malformed public action menu")
+        ids = tuple(x for x in raw_ids if isinstance(x, str))
+        if len(set(ids)) != len(ids):
             raise ControlledChanceUnavailable("Malformed public action menu")
         if raw.get("terminal") is not False or not isinstance(raw.get("observationHash"), str):
             raise ControlledChanceUnavailable("Player-boundary status/hash mismatch")
@@ -194,7 +196,10 @@ class PlayableNatureBridge:
         raw = self.wire.call("controlled_save", controlled_handle=frame.handle)
         if raw.get("schemaId") != PLAYABLE_SCHEMA or not isinstance(raw.get("snapshot"), str):
             raise ControlledChanceUnavailable("Playable snapshot schema mismatch")
-        return raw["snapshot"]
+        snapshot = raw.get("snapshot")
+        if not isinstance(snapshot, str):
+            raise ControlledChanceUnavailable("Playable snapshot schema mismatch")
+        return snapshot
 
     def load(self, snapshot: str) -> PlayableBoundary:
         if not snapshot:

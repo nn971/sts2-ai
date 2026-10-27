@@ -12,6 +12,7 @@ import os
 import sys
 import time
 import traceback
+from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing.util import Finalize
 from pathlib import Path
@@ -28,6 +29,7 @@ from sts2_ai.nature.protocol import canonical_sha256
 from sts2_ai.nature.two_site_opponent import TwoSiteNature
 
 BATCH_SCHEMA = "sts2-ai-paired-ordinary-nature-batch-v1"
+ActionChooser = Callable[[dict[str, Any], list[dict[str, Any]]], str]
 _worker_session: Any | None = None
 _worker_player_model: Any | None = None
 _worker_player_spec: FrozenPlayerSpec | None = None
@@ -76,7 +78,7 @@ def _job_inner(
         raise ValueError("Player PPO requires a real exported sampled player model")
     actors: dict[str, FrozenP0Player] = {}
 
-    def factory(_arm: str):
+    def factory(_arm: str) -> ActionChooser:
         if _worker_player_spec is None:
             from sts2_ai.emulator.semantic_p0_combat import strike_first_player
             return strike_first_player
@@ -124,6 +126,7 @@ def _job_inner(
             arm: actors[arm].training_actions
             for arm in ("nature", "ordinary")
         }
+        assert _worker_player_spec is not None
         row["ppo_behavior_model_sha256"] = _worker_player_spec.model_sha256
     row["pair_digest"] = canonical_sha256(row)
     return index, row, os.getpid()

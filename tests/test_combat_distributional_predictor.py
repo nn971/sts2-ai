@@ -114,7 +114,7 @@ def test_all_defeats_still_fit_survival_without_fictitious_hp_targets() -> None:
     pytest.importorskip("torch")
     samples = [example(f"defeat-{i}", 0.0, False) for i in range(5)]
     model = fit_distributional_predictor(
-        samples, dimension=16, hidden=4, epochs=2,
+        samples, dimension=25, hidden=4, epochs=2,
     )
     prediction = model.predict(samples[0].entry_public_json)
     assert sum(prediction.joint_hp_probabilities) == pytest.approx(1.0)

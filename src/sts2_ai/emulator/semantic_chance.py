@@ -185,4 +185,7 @@ class SemanticNatureBridge:
         result = self.wire.call(
             "semantic_release_many", semantic_handles=[x.handle for x in frames]
         )
-        return result["released"]
+        released = result.get("released")
+        if type(released) is not int or released < 0:
+            raise SemanticCapabilityUnavailable("Malformed semantic release count")
+        return released

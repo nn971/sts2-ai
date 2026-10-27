@@ -239,18 +239,56 @@ class NeuralPolicyValueModel:
             if raw["format"] in (TACTICAL_ATTENTION_FORMAT, MACRO_ATTENTION_FORMAT,
                                  MACRO_SEMANTIC_FORMAT, MACRO_DEEP_FORMAT,
                                  MACRO_CARD_OPERATIONS_FORMAT) else None,
-            **({
-                "attn2_query": _matrix(raw["attn2_query"], hidden, hidden),
-                "attn2_key": _matrix(raw["attn2_key"], hidden, hidden),
-                "attn2_value": _matrix(raw["attn2_value"], hidden, hidden),
-                "attn2_output": _matrix(raw["attn2_output"], hidden, hidden),
-                "attn2_gate": _vector(raw["attn2_gate"], hidden),
-                "macro_ffn_in": _matrix(raw["macro_ffn_in"], 4 * hidden, hidden),
-                "macro_ffn_in_bias": _vector(raw["macro_ffn_in_bias"], 4 * hidden),
-                "macro_ffn_out": _matrix(raw["macro_ffn_out"], hidden, 4 * hidden),
-                "macro_ffn_out_bias": _vector(raw["macro_ffn_out_bias"], hidden),
-                "macro_ffn_gate": _vector(raw["macro_ffn_gate"], hidden),
-            } if raw["format"] in (MACRO_DEEP_FORMAT, MACRO_CARD_OPERATIONS_FORMAT) else {}),
+            attn2_query=(
+                _matrix(raw["attn2_query"], hidden, hidden)
+                if raw["format"] in (MACRO_DEEP_FORMAT, MACRO_CARD_OPERATIONS_FORMAT)
+                else None
+            ),
+            attn2_key=(
+                _matrix(raw["attn2_key"], hidden, hidden)
+                if raw["format"] in (MACRO_DEEP_FORMAT, MACRO_CARD_OPERATIONS_FORMAT)
+                else None
+            ),
+            attn2_value=(
+                _matrix(raw["attn2_value"], hidden, hidden)
+                if raw["format"] in (MACRO_DEEP_FORMAT, MACRO_CARD_OPERATIONS_FORMAT)
+                else None
+            ),
+            attn2_output=(
+                _matrix(raw["attn2_output"], hidden, hidden)
+                if raw["format"] in (MACRO_DEEP_FORMAT, MACRO_CARD_OPERATIONS_FORMAT)
+                else None
+            ),
+            attn2_gate=(
+                _vector(raw["attn2_gate"], hidden)
+                if raw["format"] in (MACRO_DEEP_FORMAT, MACRO_CARD_OPERATIONS_FORMAT)
+                else None
+            ),
+            macro_ffn_in=(
+                _matrix(raw["macro_ffn_in"], 4 * hidden, hidden)
+                if raw["format"] in (MACRO_DEEP_FORMAT, MACRO_CARD_OPERATIONS_FORMAT)
+                else None
+            ),
+            macro_ffn_in_bias=(
+                _vector(raw["macro_ffn_in_bias"], 4 * hidden)
+                if raw["format"] in (MACRO_DEEP_FORMAT, MACRO_CARD_OPERATIONS_FORMAT)
+                else None
+            ),
+            macro_ffn_out=(
+                _matrix(raw["macro_ffn_out"], hidden, 4 * hidden)
+                if raw["format"] in (MACRO_DEEP_FORMAT, MACRO_CARD_OPERATIONS_FORMAT)
+                else None
+            ),
+            macro_ffn_out_bias=(
+                _vector(raw["macro_ffn_out_bias"], hidden)
+                if raw["format"] in (MACRO_DEEP_FORMAT, MACRO_CARD_OPERATIONS_FORMAT)
+                else None
+            ),
+            macro_ffn_gate=(
+                _vector(raw["macro_ffn_gate"], hidden)
+                if raw["format"] in (MACRO_DEEP_FORMAT, MACRO_CARD_OPERATIONS_FORMAT)
+                else None
+            ),
         )
 
     @classmethod
@@ -402,7 +440,10 @@ class NeuralPolicyValueModel:
         logits = []
         for action in legal_actions:
             target_id = action_target_instance(action.payload_json, instances)
-            target = individual.get(target_id, [0.0] * self.hidden)
+            target = (
+                individual.get(target_id, [0.0] * self.hidden)
+                if target_id is not None else [0.0] * self.hidden
+            )
             action_features = instance_action_features(
                 state, action.kind, action.payload_json, self.dimension,
             )
@@ -470,7 +511,10 @@ class NeuralPolicyValueModel:
                 else macro_deep_action_target if self.format_id == MACRO_DEEP_FORMAT
                 else macro_action_target
             )(state, action, objects)
-            target = individual.get(key, [0.0] * self.hidden)
+            target = (
+                individual.get(key, [0.0] * self.hidden)
+                if key is not None else [0.0] * self.hidden
+            )
             projected = _sparse_matvec(
                 self.action_weight,
                 (macro_card_operation_action_features

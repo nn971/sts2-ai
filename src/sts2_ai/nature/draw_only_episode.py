@@ -174,7 +174,7 @@ def fair_player_choice_actions(
 
 def play_draw_only_episode(
     session: DrawOnlySession, *, source_seed: str, reference_seed: int,
-    nature: TwoSiteNature,
+    nature: TwoSiteNature | ContextualDrawNature,
     emulator_revision: str,
     player_choose: Callable[[dict[str, Any], list[dict[str, Any]]], str] =
         strike_first_player,
@@ -252,7 +252,9 @@ def play_draw_only_episode(
     choices: list[PilotChoice] = []
     opening = state.status().get("sourceOpeningFingerprint")
     first_public = None
-    entry_hp = max_hp = opening_enemy_hp = None
+    entry_hp: int | None = None
+    max_hp: int | None = None
+    opening_enemy_hp: int | None = None
     mcts_rollouts = mcts_search_boundaries = mcts_cutoff_rollouts = 0
     mcts_searched_decisions = mcts_greedy_fallback_decisions = 0
     draw_count = nontrivial_count = reference_intent_count = 0
@@ -310,9 +312,19 @@ def play_draw_only_episode(
                     actions = fair_player_choice_actions(state.pending, actions)
                 if first_public is None:
                     first_public = canonical_sha256(obs)
-                    entry_hp, max_hp = obs.get("hp"), obs.get("max_hp")
+                    public_hp, public_max_hp = obs.get("hp"), obs.get("max_hp")
+                    if (type(public_hp) is not int
+                            or type(public_max_hp) is not int or public_max_hp <= 0):
+                        raise DrawOnlyContractError(
+                            "Missing public combat entry HP/max HP"
+                        )
+                    entry_hp, max_hp = public_hp, public_max_hp
                     if reward_version == H4_REWARD:
                         opening_enemy_hp = opening_enemy_health(obs)
+                        if opening_enemy_hp is None:
+                            raise DrawOnlyContractError(
+                                "Missing public opening enemy health for H4 reward"
+                            )
                 menu_hash = canonical_sha256(
                     [obs, actions] if phase == "player" else
                     [obs, actions, state.pending]
@@ -332,6 +344,10 @@ def play_draw_only_episode(
                     )
                     if local_horizon >= 4:
                         from sts2_ai.nature.h4_mcts import search_player_action
+                        if opening_enemy_hp is None or type(max_hp) is not int:
+                            raise DrawOnlyContractError(
+                                "H4 MCTS needs public opening and player HP"
+                            )
                         action_id, search_stats = search_player_action(
                             state, observation=obs, legal_actions=actions,
                             rollout_choose=player_choose,
@@ -384,7 +400,8 @@ def play_draw_only_episode(
             raise DrawOnlyContractError("CENSORED: no terminal combat before cap")
         if (state.outcome not in ("victory", "defeat") or
                 type(state.exit_hp) is not int or state.boundary != "terminal"
-                or state.pending is not None or entry_hp is None or max_hp is None
+                or state.pending is not None or type(entry_hp) is not int
+                or type(max_hp) is not int
                 or first_public is None):
             raise DrawOnlyContractError("Malformed genuine terminal combat")
         if replay is not None and len(replay) != len(decisions):
@@ -393,14 +410,24 @@ def play_draw_only_episode(
         held.append(restored)
         if restored.fingerprint != state.fingerprint:
             raise DrawOnlyContractError("Private terminal snapshot replay mismatch")
-        terminal_enemy_hp = (state.status().get("terminalEnemyHp")
-                             if reward_version == H4_REWARD else None)
-        score = (_score(state.outcome, entry_hp, max_hp, state.exit_hp)
-                 if reward_version == "hp_preservation_v1" else
-                 boss_progress_score(
-                     state.outcome, player_exit_hp=state.exit_hp,
-                     player_max_hp=max_hp, opening_enemy_hp=opening_enemy_hp,
-                     terminal_enemy_hp=terminal_enemy_hp))
+        terminal_enemy_hp: int | None = None
+        if reward_version == H4_REWARD:
+            if opening_enemy_hp is None:
+                raise DrawOnlyContractError("H4 reward lacks opening enemy health")
+            terminal_value = state.status().get("terminalEnemyHp")
+            if state.outcome == "defeat":
+                if type(terminal_value) is not int:
+                    raise DrawOnlyContractError(
+                        "H4 defeat lacks public terminal enemy health"
+                    )
+                terminal_enemy_hp = terminal_value
+            score = boss_progress_score(
+                state.outcome, player_exit_hp=state.exit_hp,
+                player_max_hp=max_hp, opening_enemy_hp=opening_enemy_hp,
+                terminal_enemy_hp=terminal_enemy_hp,
+            )
+        else:
+            score = _score(state.outcome, entry_hp, max_hp, state.exit_hp)
         return DrawOnlyEpisode(
             schema=DRAW_ONLY_SCHEMA, emulator_revision=emulator_revision,
             source_seed=source_seed, reference_seed=reference_seed,

@@ -11,8 +11,8 @@ improves general gameplay from smoke tests.
 """
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import asdict, dataclass
 from typing import Any, Protocol
 
@@ -113,7 +113,7 @@ class ArmResult:
 
 def without_committed_intents(observation: dict[str, Any]) -> dict[str, Any]:
     """Remove ONLY intent-specific publicly committed fields for the opening check."""
-    copy = json.loads(json.dumps(observation))
+    copy = deepcopy(observation)
     for enemy in copy.get("combat", {}).get("enemies", []):
         for key in list(enemy):
             if key.replace("_", "").lower() in {
