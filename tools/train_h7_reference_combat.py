@@ -123,8 +123,21 @@ def collect_h8(
     It keeps only sampled explicit mechanics hashes/journals during training;
     the runtime still owns its complete reproducible decision journal.
     """
-    from benchmark_h8_h7_policy_pilot import _cohort
-    from benchmark_h8_training_iteration import validate_training_cohort
+    # Work equally when invoked as a tools/ CLI script and when imported
+    # as tools.train_h7_reference_combat by test suites or other callers.
+    try:
+        from benchmark_h8_h7_policy_pilot import _cohort
+        from benchmark_h8_training_iteration import validate_training_cohort
+    except ModuleNotFoundError as exc:
+        if exc.name not in {
+            "benchmark_h8_h7_policy_pilot",
+            "benchmark_h8_training_iteration",
+        }:
+            raise
+        from tools.benchmark_h8_h7_policy_pilot import _cohort
+        from tools.benchmark_h8_training_iteration import (
+            validate_training_cohort,
+        )
 
     if getattr(args, "actor_backend", "local") != "shared":
         raise ValueError("H8 training requires the shared actor backend")
