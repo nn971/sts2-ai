@@ -2,6 +2,19 @@
 
 Research infrastructure for building an AI that can make strong **whole-run strategic decisions** in *Slay the Spire 2*.
 
+## Integrated research baseline (H6-F + H7)
+
+The active **AI integration snapshot** combines H6-F's V20 macro card-selection
+operation semantics and H7's scratch-initialized shared Transformer combat trainer.
+Historical H4/H5/H6 checkpoints and versioned inference stay intact.
+See [branch consolidation](docs/BRANCH_CONSOLIDATION_20261027.md),
+[H6-F semantics](docs/H6F_CARD_SELECTION_SEMANTICS.md) and
+[H7 runbook](docs/H7_SHARED_TRANSFORMER_COMBAT.md).
+
+H7's real-emulator one-round PPO smoke is **integration evidence** only.
+Its macro head is not wired to H6-F's operation-aware choices and
+must not be used for macro PPO until representation coverage is verified.
+
 **Nature development:** see [Desired Nature Training Implementation](docs/DESIRED_NATURE_TRAINING_IMPLEMENTATION.md), [N0–N4 groundwork](docs/NATURE_GROUNDWORK_RUNBOOK.md), and [N3 isolated 15-worker corpus](docs/NATURE_N3_CORPUS_RUNBOOK.md), plus the [semantic-event adapter](docs/NATURE_SEMANTIC_ADAPTER_N1N2.md). Typed policies, an isolated HP/intent bridge, exact synthetic chance-gradient checks, and resumable replay infrastructure are implemented on the Nature PR stack. Full playable controlled combat and learned Nature training depend on the [missing emulator interfaces](docs/NATURE_EMULATOR_INTERFACE_GAPS.md); existing v15 training remains unchanged.
 
 The long-term objective is an agent that reasons jointly about:
@@ -44,6 +57,15 @@ sts2-emulator  <---  sts2-ai
 ```
 
 `sts2-ai` may reason about the value of a decision. `sts2-emulator` only determines what the decision mechanically does.
+
+## Experiment evidence rule
+
+All training, agent, sampling and Nature comparisons follow the
+[project-wide experiment evidence standard](docs/EXPERIMENT_EVIDENCE_STANDARD.md).
+**Short runs (including 20-round pilots) establish only smoke/diagnostic
+evidence.** Feature-quality conclusions require substantial
+learning-curve coverage, matched compute and native-RNG evaluation,
+independent training seeds, and quantified training/evaluation uncertainty.
 
 ## Current status
 
