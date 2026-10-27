@@ -41,6 +41,7 @@ from sts2_ai.nature.combat_scenarios import SCENARIOS
 from sts2_ai.nature.draw_only_episode import fair_player_choice_actions
 from sts2_ai.nature.draw_only_p0 import DeclaredLaw, SeededLawSampler 
 from sts2_ai.nature.h5_curriculum import cell_for_source, source_bank
+from sts2_ai.nature.h4_reward import boss_progress_score, opening_enemy_health
 from sts2_ai.nature.protocol import canonical_sha256
 
 
@@ -109,6 +110,9 @@ def _shard(
             nature_rng = random.Random(reference_seed + index * 1000003)
             event_sampler = SeededLawSampler(reference_seed)
             nature_law_trace: list[tuple[str, str, str]] = []
+            opening_hp: int | None = None
+            opening_max_hp: int | None = None
+            initial_enemies_hp: int | None = None
             before_actor = policy.timings_snapshot()
             began = time.perf_counter()
             state = session.call(
@@ -159,6 +163,13 @@ def _shard(
                         menu = frame["actions"]
                         if not isinstance(obs, dict) or not isinstance(menu, list):
                             raise RuntimeError("Malformed H8 public policy frame")
+                        if opening_hp is None:
+                            opening_hp, opening_max_hp = obs.get("hp"), obs.get("max_hp")
+                            initial_enemies_hp = opening_enemy_health(obs)
+                            if (type(opening_hp) is not int or
+                                    type(opening_max_hp) is not int or
+                                    opening_max_hp < 1):
+                                raise RuntimeError("Missing H8 entry public HP")
                         if [a["actionId"] for a in menu] != state["playerActionIds"]:
                             raise RuntimeError("H8 public action/status mismatch")
                         allowed = (
@@ -255,8 +266,37 @@ def _shard(
                 )["replayVerified"]:
                     raise RuntimeError("H8 journal failed deterministic replay")
                 after_actor = policy.timings_snapshot()
+                score = None
+                if status == "terminal":
+                    if (opening_hp is None or opening_max_hp is None or
+                            initial_enemies_hp is None):
+                        raise RuntimeError("Terminal H8 episode lacks a public opening")
+                    score = boss_progress_score(
+                        state.get("outcome"),
+                        player_exit_hp=state.get("exitHp"),
+                        player_max_hp=opening_max_hp,
+                        opening_enemy_hp=initial_enemies_hp,
+                        terminal_enemy_hp=state.get("terminalEnemyHp"))
                 rows.append(dict(
                     seed=seed, cell=cell.key, status=status,
+                    score=score,
+                    player_steps=[
+                        {"phase": k, "selected_id": v}
+                        for k, v in transcript
+                        if k in ("player", "player_choice")
+                    ],
+                    chance_steps=[
+                        {"phase": "nature:" + k,
+                         "selected_id": (
+                             v if k == "enemy_intent" else
+                             "card_instance:" + str(v))}
+                        for k, v in transcript
+                        if k in ("enemy_intent", "draw_card")
+                    ],
+                    training_actions=(
+                        tuple(actor.training_actions)
+                        if capture_player_training else None
+                    ),
                     outcome=state.get("outcome"),
                     exit_hp=state.get("exitHp"),
                     terminal_enemy_hp=state.get("terminalEnemyHp"),
@@ -396,7 +436,8 @@ def _validate_pair(a: dict[str, Any], b: dict[str, Any]) -> None:
     for seed, left in a["trajectories"].items():
         right = b["trajectories"][seed]
         for key in (
-            "cell", "status", "outcome", "exit_hp",
+            "cell", "status", "outcome", "exit_hp", "score",
+            "player_steps", "chance_steps",
             "terminal_enemy_hp", "boundaries", "player_decisions",
             "nature_draws", "intents", "trace_digest",
             "journal_digest", "mechanics_sha256",
