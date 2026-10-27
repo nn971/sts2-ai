@@ -14,6 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import torch
+from train_h7_reference_combat import collect
 
 from sts2_ai.evaluation.h7_readiness import make_readiness_report
 from sts2_ai.models.h7_public_policy import H7PlayerSpec
@@ -21,8 +22,6 @@ from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
 from sts2_ai.nature.corpus import file_sha256
 from sts2_ai.nature.h5_curriculum import source_bank
 from sts2_ai.nature.protocol import canonical_sha256
-
-from train_h7_reference_combat import collect
 
 
 def main() -> None:
