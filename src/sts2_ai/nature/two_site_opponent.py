@@ -236,17 +236,22 @@ class TwoSiteNature:
             for k, v in weights.items()
         ):
             raise ValueError("Malformed Nature weights")
-        seed = data.get("seed")
-        mix = data.get("mix")
-        learning_rate = data.get("learning_rate")
-        score_clip = data.get("score_clip")
-        revision = data.get("revision")
-        if (type(seed) is not int or type(revision) is not int
-                or any(type(x) not in (float, int) or not math.isfinite(x)
-                       for x in (mix, learning_rate, score_clip))):
-            raise ValueError("Malformed Nature optimizer parameters")
+        def integer(key: str) -> int:
+            value = data.get(key)
+            if type(value) is not int:
+                raise ValueError(f"Malformed Nature integer parameter {key}")
+            return value
+
+        def number(key: str) -> float:
+            value = data.get(key)
+            if (not isinstance(value, (int, float)) or isinstance(value, bool)
+                    or not math.isfinite(value)):
+                raise ValueError(f"Malformed Nature numeric parameter {key}")
+            return float(value)
+
         return cls(
-            seed=seed, mix=float(mix), learning_rate=float(learning_rate),
-            score_clip=float(score_clip), revision=revision,
-            weights=dict(weights),
+            seed=integer("seed"), mix=number("mix"),
+            learning_rate=number("learning_rate"),
+            score_clip=number("score_clip"),
+            revision=integer("revision"), weights=dict(weights),
         )
