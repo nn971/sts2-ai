@@ -10,7 +10,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from test_shared_transformer_h7 import actions, frame, legal, model  # noqa: E402
+from test_shared_transformer_h7 import frame, legal, model  # noqa: E402
 
 from sts2_ai.emulator.protocol import LegalAction, Observation  # noqa: E402
 from sts2_ai.emulator.semantic_p0_frozen_player import FrozenP0Player  # noqa: E402
