@@ -30,12 +30,17 @@ The session still owns all mechanics and card/intent support.
   Acceptance compares each source's chosen physical IDs, player actions,
   decision journal and **complete mechanics SHA**; 1-in-8 replay audits
   are selected by *global source index*.
-- Nested `player_choice` and other unsupported H8 boundary types
-  **stop** the pilot with explicit per-type counts, and never count as
+- Existing nested `player_card_selection` and
+  `draw_hook_action_choice` boundaries are resumed by H8's checked
+  v111 continuation, with the exact H7 fair-action menu restriction.
+  Unknown other subchoice types and unsupported stochastic boundaries
+  **stop** the pilot with explicit per-type counts; they never count as
   terminal combats or PPO trajectories.
 - A dedicated paired-repository CI builds emulator source, tests
   public observation/weighted-sampling invariants, then attempts
   H7 public inference for 16 A10 cells on shared CPU inference.
+  The worker IPC uses explicit spawn-time queue inheritance; the
+  shared actor has exactly one outstanding request per worker.
   Production benchmarking uses shared CUDA.
 
 ## Run on target workstation (fish)
@@ -85,11 +90,12 @@ nonterminal work; never substitute all 128 source count for completion.
    sampler's event-scoped RNG derivation. Implement the exact old
    Chance Law/reference sampling protocol before a cross-emulator law
    parity claim; do not allow H8 to silently use native RNG instead.
-2. The current H8 `player_choice` boundary is explicitly unsupported
-   for this model pilot; resume nested player card-selection and draw-hook
-   fair menus with exact H7 `fair_player_choice_actions` semantics.
-   Migrate additional stochastic sites, including random targets,
-   costs and generated cards, or retain exact checked fallback.
+2. The existing `player_card_selection` and
+   `draw_hook_action_choice` cases now resume through a checked
+   v111 continuation with exact H7 fair-action filtering. Continue
+   migrating any remaining nested player choices and stochastic sites
+   (random targets, costs, generated cards) through typed H8 cursors
+   or an exact checked fallback.
 3. Promote this pilot to `draw_only_workers` once full source-valid
    H7 16-cell terminal combats and audited on-policy source logprobs
    can be gathered. Build a matched H7-legacy vs H8-native 15-worker,
