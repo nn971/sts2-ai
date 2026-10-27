@@ -75,7 +75,7 @@ class H7CombatPPO:
                 or type(episode.terminal_replay_verified) is not bool
                 or (not allow_sampled_terminal_replay
                     and not episode.terminal_replay_verified)):
-            raise ValueError("Only authorized terminal reference-law combats enter H7 PPO")
+            raise ValueError("Only verified terminal reference-law combats enter H7 PPO unless sampled audit is explicitly authorized")
         # Unchecked episodes remain explicitly marked False in the episode
         # transcript. Sampled mode is permitted only by the source-audited H7
         # training collector, never by the strict default PPO interface.
