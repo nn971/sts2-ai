@@ -118,18 +118,18 @@ def play_controlled_fixture(
                 event = frame.event
                 proposal = nature.propose(event)
                 proposal.validate(event)
-                child = playable.resolve(frame, proposal.selected_index)
+                playable_child = playable.resolve(frame, proposal.selected_index)
                 append("nature", frame.fingerprint, event.event_id,
-                       str(proposal.selected_index), child.fingerprint)
+                       str(proposal.selected_index), playable_child.fingerprint)
             else:
                 player_frame = playable.observe(frame)
                 action = player_choose(player_frame)
-                child = playable.step(frame, action)
+                playable_child = playable.step(frame, action)
                 append("player", frame.fingerprint,
                        canonical_sha256([player_frame.observation_hash,
                                          player_frame.action_ids]),
-                       action, child.fingerprint)
-            frame = child
+                       action, playable_child.fingerprint)
+            frame = playable_child
             playable_handles.append(frame)
         return PlayableTrajectory(
             isolated.emulator_revision, nature.policy_id,
