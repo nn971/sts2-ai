@@ -133,7 +133,7 @@ class TwoSiteNature:
         self, event: SemanticEvent, *,
         context_key: str, candidate_features: tuple[str, ...],
         episode_key: str,
-        public_observation: dict | None = None,
+        public_observation: dict[str, Any] | None = None,
     ) -> tuple[SemanticProposal, PilotChoice]:
         self._keys(event, context_key, candidate_features)
         base = self.legal_baseline(event)
@@ -236,9 +236,17 @@ class TwoSiteNature:
             for k, v in weights.items()
         ):
             raise ValueError("Malformed Nature weights")
+        seed = data.get("seed")
+        mix = data.get("mix")
+        learning_rate = data.get("learning_rate")
+        score_clip = data.get("score_clip")
+        revision = data.get("revision")
+        if (type(seed) is not int or type(revision) is not int
+                or any(type(x) not in (float, int) or not math.isfinite(x)
+                       for x in (mix, learning_rate, score_clip))):
+            raise ValueError("Malformed Nature optimizer parameters")
         return cls(
-            seed=int(data["seed"]), mix=float(data["mix"]),
-            learning_rate=float(data["learning_rate"]),
-            score_clip=float(data["score_clip"]),
-            revision=int(data["revision"]), weights=dict(weights),
+            seed=seed, mix=float(mix), learning_rate=float(learning_rate),
+            score_clip=float(score_clip), revision=revision,
+            weights=dict(weights),
         )
