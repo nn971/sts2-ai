@@ -84,6 +84,7 @@ def test_h7_adamw_resume_matches_uninterrupted_next_round(tmp_path):
     torch = pytest.importorskip("torch")
     from test_h7_combat_ppo import make_cohort
     from test_shared_transformer_h7 import frame, legal, model
+
     from sts2_ai.emulator.semantic_p0_frozen_player import FrozenP0Player
     from sts2_ai.models.h7_public_policy import H7PlayerSpec
     from sts2_ai.training.h7_combat_ppo import H7CombatPPO
