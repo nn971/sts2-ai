@@ -1,0 +1,60 @@
+name: h8-h7-shared-transformer-pilot
+
+on:
+  push:
+    branches:
+      - research/h8-h7-shared-transformer-pilot-20261028
+    paths:
+      - 'tools/benchmark_h8_h7_policy_pilot.py'
+      - 'tests/test_h8_h7_policy_pilot.py'
+      - '.github/workflows/h8-h7-shared-transformer-pilot.yml'
+  pull_request:
+    paths:
+      - 'tools/benchmark_h8_h7_policy_pilot.py'
+      - 'tests/test_h8_h7_policy_pilot.py'
+      - '.github/workflows/h8-h7-shared-transformer-pilot.yml'
+  workflow_dispatch:
+
+jobs:
+  source-real-h7-policy-on-h8:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: research/h8-h7-public-policy-bridge-20261028
+          path: external-h8-emulator
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned-policy and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[neural,dev]'
+      - name: Build source H8 emulator
+        run: |
+          dotnet restore external-h8-emulator/Sts2Emulator.sln
+          dotnet build external-h8-emulator/Sts2Emulator.sln -c Release --no-restore -m:1
+      - name: Validate H8 H7-policy pilot contracts
+        run: python -m pytest tests/test_h8_h7_policy_pilot.py -q
+      - name: Real H7 policy inference on all 16 H8 source cells (CPU CI)
+        run: |
+          python -u tools/benchmark_h8_h7_policy_pilot.py \
+            --emulator-dll external-h8-emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings external-h8-emulator/bindings/python \
+            --emulator-revision "$(git -C external-h8-emulator rev-parse HEAD)" \
+            --workers 2 --episodes 16 --max-boundaries 200 \
+            --replay-every 8 --actor-device cpu --order ab \
+            --output /tmp/h8-h7-public-policy-pilot-ci.json
+      - name: Upload validation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: h8-h7-public-policy-pilot-cpu
+          path: /tmp/h8-h7-public-policy-pilot-ci.json
+          if-no-files-found: ignore
