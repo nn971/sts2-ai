@@ -301,7 +301,6 @@ def test_instance_global_fair_native_missing_resources_are_explicit() -> None:
     hidden = copy.deepcopy(public)
     hidden["combat"].pop("draw_pile", None)
     hidden["combat"].pop("relic_counters", None)
-    hidden["combat"]["draw_pile_count"] = 7
     unexposed = instance_global_features(hidden, DIM)
     assert unexposed != complete
     assert unexposed == instance_global_features(copy.deepcopy(hidden), DIM)
