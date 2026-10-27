@@ -1,0 +1,115 @@
+name: nature-groundwork
+on:
+  push:
+    paths:
+      - 'src/sts2_ai/nature/**'
+      - 'src/sts2_ai/emulator/controlled_chance.py'
+      - 'src/sts2_ai/emulator/playable_chance.py'
+      - 'src/sts2_ai/emulator/semantic_chance.py'
+      - 'src/sts2_ai/emulator/semantic_p0_combat.py'
+      - 'tools/try_nature_real_combat.py'
+      - 'src/sts2_ai/training/chance_importance.py'
+      - 'src/sts2_ai/training/nature_oracle.py'
+      - 'src/sts2_ai/training/two_site_combat_toy.py'
+      - 'tests/test_nature_*.py'
+      - 'tests/test_chance_importance.py'
+      - 'tools/inspect_nature_rollout.py'
+      - 'tools/inspect_nature_playable.py'
+      - 'tools/collect_nature_playable_coverage.py'
+      - 'tools/try_two_site_nature_toy.py'
+      - 'tests/test_nature_playable_corpus.py'
+      - 'tests/fixtures/fake_nature_playable_jsonl.py'
+      - 'tools/collect_nature_isolated.py'
+      - 'tools/benchmark_nature_workers.py'
+      - 'tests/test_nature_corpus_n3.py'
+      - 'tests/test_nature_semantic_*.py'
+      - 'tests/fixtures/fake_nature_jsonl.py'
+      - '.github/workflows/nature-groundwork.yml'
+  pull_request:
+    paths:
+      - 'src/sts2_ai/nature/**'
+      - 'src/sts2_ai/emulator/controlled_chance.py'
+      - 'src/sts2_ai/emulator/playable_chance.py'
+      - 'src/sts2_ai/emulator/semantic_chance.py'
+      - 'src/sts2_ai/emulator/semantic_p0_combat.py'
+      - 'tools/try_nature_real_combat.py'
+      - 'src/sts2_ai/training/chance_importance.py'
+      - 'src/sts2_ai/training/nature_oracle.py'
+      - 'src/sts2_ai/training/two_site_combat_toy.py'
+      - 'tests/test_nature_*.py'
+      - 'tests/test_chance_importance.py'
+      - 'tools/inspect_nature_rollout.py'
+      - 'tools/inspect_nature_playable.py'
+      - 'tools/collect_nature_playable_coverage.py'
+      - 'tools/try_two_site_nature_toy.py'
+      - 'tests/test_nature_playable_corpus.py'
+      - 'tests/fixtures/fake_nature_playable_jsonl.py'
+      - 'tools/collect_nature_isolated.py'
+      - 'tools/benchmark_nature_workers.py'
+      - 'tests/test_nature_corpus_n3.py'
+      - 'tests/test_nature_semantic_*.py'
+      - 'tests/fixtures/fake_nature_jsonl.py'
+      - '.github/workflows/nature-groundwork.yml'
+  workflow_dispatch:
+
+jobs:
+  pure-nature:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - name: Check new Nature code only
+        run: >-
+          python -m ruff check
+          src/sts2_ai/nature
+          src/sts2_ai/training/two_site_combat_toy.py
+          tools/try_two_site_nature_toy.py
+          tests/test_nature_two_site_pilot.py
+          tests/test_nature_real_p0.py
+          tools/collect_nature_isolated.py
+          tools/benchmark_nature_workers.py
+          tests/test_nature_corpus_n3.py
+          tests/fixtures/fake_nature_jsonl.py
+          src/sts2_ai/emulator/controlled_chance.py
+          src/sts2_ai/emulator/playable_chance.py
+          tests/test_nature_playable_fixture.py
+          src/sts2_ai/emulator/semantic_chance.py
+          src/sts2_ai/emulator/semantic_p0_combat.py
+          tools/try_nature_real_combat.py
+          tests/test_nature_real_p0.py
+          tests/test_nature_semantic_n1n2.py
+          tests/test_nature_semantic_oracle.py
+          src/sts2_ai/training/chance_importance.py
+          src/sts2_ai/training/nature_oracle.py
+          tests/test_nature_protocol.py
+          tests/test_nature_emulator_integration.py
+          tests/test_nature_gradient_reference.py
+          tests/test_chance_importance.py
+          tools/inspect_nature_rollout.py
+          tools/inspect_nature_playable.py
+          tools/collect_nature_playable_coverage.py
+          tests/test_nature_playable_corpus.py
+          tests/fixtures/fake_nature_playable_jsonl.py
+      - name: Strict isolated protocol and exact-oracle tests
+        run: >-
+          python -m pytest -q
+          tests/test_nature_protocol.py
+          tests/test_nature_emulator_integration.py
+          tests/test_nature_gradient_reference.py
+          tests/test_chance_importance.py
+          tests/test_nature_corpus_n3.py
+          tests/test_nature_semantic_n1n2.py
+          tests/test_nature_semantic_oracle.py
+          tests/test_nature_playable_fixture.py
+          tests/test_nature_playable_corpus.py
+          tests/test_nature_two_site_pilot.py
+      - name: Toy intent/draw Nature combat A/B smoke
+        run: >-
+          python -u tools/try_two_site_nature_toy.py
+          --rounds 20 --episodes-per-batch 24
+          --evaluation-episodes 256 --seeds 29 30 31
+          --output /tmp/nature-two-site-toy.json
+      - run: python -m compileall -q tools/try_two_site_nature_toy.py src/sts2_ai/training/two_site_combat_toy.py tools/collect_nature_playable_coverage.py tests/fixtures/fake_nature_playable_jsonl.py tools/inspect_nature_rollout.py tools/inspect_nature_playable.py tools/collect_nature_isolated.py tools/benchmark_nature_workers.py src/sts2_ai/nature

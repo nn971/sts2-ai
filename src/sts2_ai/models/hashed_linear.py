@@ -255,6 +255,53 @@ def tactical_action_features(
             break
     return _hash_features(tokens, dimension)
 
+
+def public_resources_tactical_action_features(
+    state: dict[str, Any], action_kind: str, action_payload_json: str,
+    dimension: int,
+) -> dict[int, float]:
+    """v7 targeted-action context retains visible status/power stack quantities.
+
+    Instance IDs select the *public* enemy, but are never tokens themselves:
+    identical enemies in symmetric states remain interchangeable.
+    """
+    features = tactical_action_features(
+        state, action_kind, action_payload_json, dimension,
+    )
+    combat = state.get("combat")
+    if not isinstance(combat, dict):
+        return features
+    payload = _action_payload(action_payload_json)
+    instance_id = _int_field(payload, "TargetEnemyId", "target_enemy_id")
+    if instance_id is None:
+        return features
+    extra: list[tuple[str, float]] = []
+    for enemy in _dict_items(combat.get("enemies")):
+        if enemy.get("instance_id") != instance_id:
+            continue
+        for power in _dict_items(enemy.get("powers")):
+            power_id = power.get("power_id")
+            count = power.get("stacks")
+            if isinstance(power_id, str) and isinstance(count, int):
+                extra.append((f"v7:target:power={power_id}|stacks={count}", 1.0))
+                extra.append((
+                    f"v7:target:power={power_id}|magnitude",
+                    max(-1.0, min(1.0, count / 10.0)),
+                ))
+        statuses = enemy.get("statuses")
+        if isinstance(statuses, dict):
+            for status_id, count in statuses.items():
+                if isinstance(status_id, str) and isinstance(count, int):
+                    extra.append((f"v7:target:status={status_id}|stacks={count}", 1.0))
+                    extra.append((
+                        f"v7:target:status={status_id}|magnitude",
+                        max(-1.0, min(1.0, count / 10.0)),
+                    ))
+        break
+    for index, value in _hash_features(extra, dimension).items():
+        features[index] = max(-8.0, min(8.0, features.get(index, 0.0) + value))
+    return features
+
 def state_dict(payload_json: str) -> dict[str, Any]:
     return _state_dict(payload_json)
 

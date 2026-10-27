@@ -20,30 +20,54 @@ import tempfile
 import time
 from collections.abc import Callable
 from contextlib import ExitStack
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
 from sts2_ai.emulator import EmulatorBackend, JsonlEmulatorBackend, Observation
+from sts2_ai.emulator.episode_goal import (
+    PROTOTYPE_THREE_ACT_GOAL,
+    require_episode_goal,
+)
 from sts2_ai.emulator.run_environment import LEGACY, require_environment
 from sts2_ai.models.hashed_linear import (
     neural_action_features,
+    public_resources_tactical_action_features,
     state_dict,
     state_features,
     tactical_action_features,
 )
+from sts2_ai.models.macro_objects import (
+    MACRO_ATTENTION_FORMAT,
+    MACRO_CARD_OPERATIONS_FORMAT,
+    MACRO_DEEP_FORMAT,
+    MACRO_SEMANTIC_FORMAT,
+)
 from sts2_ai.models.neural import (
+    NEURAL_FORMAT,
+    TACTICAL_ATTENTION_FORMAT,
+    TACTICAL_DAMAGE_FORMAT,
     TACTICAL_FORMAT,
+    TACTICAL_INSTANCES_FORMAT,
     TACTICAL_RELATIONAL_FORMAT,
+    TACTICAL_RESOURCES_FORMAT,
     TACTICAL_STRUCTURED_FORMAT,
     NeuralPolicyValueModel,
 )
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.models.tactical_state import (
+    damage_tactical_state_features,
+    public_resources_tactical_state_features,
     relational_tactical_state_features,
     tactical_state_features,
 )
 from sts2_ai.training.combat_outcomes import CombatOutcome
+from sts2_ai.training.enemy_attention import (
+    add_attention_parameters,
+    add_deep_macro_parameters,
+)
+from sts2_ai.training.instance_combat import add_instance_parameters, instance_forward
+from sts2_ai.training.macro_attention import macro_attention_forward
 from sts2_ai.training.neural import _dense, _export, _forward, _new_params
 from sts2_ai.training.parallel_rollouts import (
     collect_parallel,
@@ -61,6 +85,7 @@ from sts2_ai.training.selfplay import (
 
 SPLIT_TRAINING_VERSION = "sts2-phase-split-reinforce-v2-hp-monotonicity"
 BALANCED_TRAINING_VERSION = "sts2-phase-split-reinforce-v3-phase-mean"
+PPO_TRAINING_VERSION = "sts2-phase-split-tactical-gae-strategy-mc-ppo-v1"
 SPLIT_CHECKPOINT_FORMAT = "sts2-phase-split-training-checkpoint-v1"
 HP_FIRST_TACTICAL_OBJECTIVE = "hp_first"
 
@@ -87,6 +112,7 @@ class PhaseSplitRound:
     mean_victory_exit_hp_fraction: float | None = None
     mean_potions_used_per_combat: float | None = None
     mean_victory_hp_lost_fraction: float | None = None
+    auxiliary_reward_weight: float | None = None
 
 
 def _higher_hp_public_pair(
@@ -119,10 +145,29 @@ def _forward_decision(
     decision: PublicDecision, params: dict[str, Any],
     dimension: int, torch: Any, *,
     tactical_state_encoding: str = "legacy",
+    strategy_encoding: str = "legacy",
 ) -> tuple[Any, Any]:
     state = state_dict(decision.observation.payload_json)
+    if (
+        decision.phase == "strategy"
+        and strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep",
+        "macro_card_ops")
+    ):
+        return macro_attention_forward(
+            state, decision.legal_actions, params, dimension, torch,
+            semantic_actions=strategy_encoding == "macro_semantic",
+            deep_actions=strategy_encoding == "macro_deep",
+            card_operations=strategy_encoding == "macro_card_ops",
+        )
+    if (decision.phase == "combat" and
+            tactical_state_encoding in ("enemy_instances", "enemy_attention")):
+        return instance_forward(state, decision.legal_actions, params, dimension, torch)
     feature_fn_state = (
-        relational_tactical_state_features
+        public_resources_tactical_state_features
+        if decision.phase == "combat" and tactical_state_encoding == "public_resources"
+        else damage_tactical_state_features
+        if decision.phase == "combat" and tactical_state_encoding == "relational_damage"
+        else relational_tactical_state_features
         if decision.phase == "combat" and tactical_state_encoding == "relational"
         else tactical_state_features
         if decision.phase == "combat" and tactical_state_encoding == "structured"
@@ -133,7 +178,9 @@ def _forward_decision(
         dtype=torch.float32,
     )
     feature_fn = (
-        tactical_action_features if decision.phase == "combat"
+        public_resources_tactical_action_features
+        if decision.phase == "combat" and tactical_state_encoding == "public_resources"
+        else tactical_action_features if decision.phase == "combat"
         else neural_action_features
     )
     actions_x = torch.tensor([
@@ -147,17 +194,31 @@ def _export_split(
     strategy_params: dict[str, Any], combat_params: dict[str, Any],
     dimension: int, hidden: int, *, model_id: str, trained: bool,
     tactical_state_encoding: str = "legacy",
+    strategy_encoding: str = "legacy",
     combat_objective: str = "continuation",
 ) -> PhaseSplitNeuralModel:
     return PhaseSplitNeuralModel(
         strategy=_export(
             strategy_params, dimension, hidden,
             model_id=model_id + "-strategy", value_head_trained=trained,
+            format_id=(MACRO_CARD_OPERATIONS_FORMAT if strategy_encoding == "macro_card_ops"
+                       else MACRO_DEEP_FORMAT if strategy_encoding == "macro_deep"
+                       else MACRO_SEMANTIC_FORMAT if strategy_encoding == "macro_semantic"
+                       else MACRO_ATTENTION_FORMAT
+                       if strategy_encoding == "macro_attention" else NEURAL_FORMAT),
         ),
         combat=_export(
             combat_params, dimension, hidden,
             model_id=model_id + "-combat", value_head_trained=trained,
             format_id=(
+                TACTICAL_ATTENTION_FORMAT
+                if tactical_state_encoding == "enemy_attention" else
+                TACTICAL_INSTANCES_FORMAT
+                if tactical_state_encoding == "enemy_instances" else
+                TACTICAL_RESOURCES_FORMAT
+                if tactical_state_encoding == "public_resources" else
+                TACTICAL_DAMAGE_FORMAT
+                if tactical_state_encoding == "relational_damage" else
                 TACTICAL_RELATIONAL_FORMAT
                 if tactical_state_encoding == "relational" else
                 TACTICAL_STRUCTURED_FORMAT
@@ -299,19 +360,50 @@ def train_phase_split(
     auxiliary_weight: float = 0.4, boundary_weight: float = 0.25,
     hp_monotonic_weight: float = 0.2,
     tactical_state_encoding: str = "legacy",
+    strategy_encoding: str = "legacy",
     loss_normalization: str = "legacy_episode_sum",
+    optimizer_method: str = "reinforce",
+    ppo_backend: str = "reference",
+    ppo_epochs: int = 3,
+    ppo_batch_size: int = 128,
+    ppo_sample_limit: int = 4096,
+    ppo_clip_epsilon: float = 0.2,
+    ppo_gamma: float = 0.995,
+    ppo_gae_lambda: float = 0.98,
     combat_objective: str = "continuation",
     combat_advantage_baseline: str = "critic",
     win_anneal_threshold: int = 16, max_decisions: int = 4096,
     temperature_start: float = 0.05, temperature_end: float = 0.035,
     temperature_decay_rounds: int = 20,
     seed: int = 19, seed_prefix: str = "phase-split-v1",
-    workers: int = 1, environment: str = LEGACY,
+    workers: int = 1, environment: str = LEGACY, ascension: int = 0,
     warm_start: Path | None = None,
     checkpoint: Path | None = None, resume: bool = False,
+    freeze_combat: bool = False,
     combat_samples_dir: Path | None = None,
     progress: Callable[[PhaseSplitRound], None] | None = None,
+    excluded_training_seeds: frozenset[str] = frozenset(),
+    episode_goal_version: str = PROTOTYPE_THREE_ACT_GOAL,
 ) -> tuple[PhaseSplitNeuralModel, tuple[PhaseSplitRound, ...]]:
+    require_episode_goal(episode_goal_version, environment)
+    if type(ascension) is not int or not 0 <= ascension <= 10:
+        raise ValueError("Ascension must be an integer from 0 through 10")
+    if freeze_combat and warm_start is None:
+        raise ValueError("Frozen-combat macro training requires a pinned warm start")
+    if freeze_combat and optimizer_method != "ppo":
+        raise ValueError("Frozen-combat macro training requires PPO")
+    if strategy_encoding not in (
+        "legacy", "macro_attention", "macro_semantic", "macro_deep", "macro_card_ops",
+    ):
+        raise ValueError("Unknown strategy encoding")
+    if strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep",
+    "macro_card_ops") and not (
+        freeze_combat and optimizer_method == "ppo" and ppo_backend == "batched"
+    ):
+        raise ValueError("Macro attention requires frozen-combat batched PPO")
+    if strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep",
+    "macro_card_ops") and hidden % 4:
+        raise ValueError("Macro attention hidden width must be divisible by four")
     if min(rounds, episodes_per_round, dimension, hidden, max_decisions, workers) <= 0:
         raise ValueError("Expected positive sizes and worker count")
     if combat_objective not in ("continuation", "hp_first", "hp_preservation"):
@@ -324,12 +416,38 @@ def train_phase_split(
         raise ValueError("Leave-one-run-out requires an HP-based combat objective")
     if loss_normalization not in ("legacy_episode_sum", "phase_mean"):
         raise ValueError("Loss normalization must be legacy_episode_sum or phase_mean")
-    if tactical_state_encoding not in ("legacy", "structured", "relational"):
-        raise ValueError("Tactical state encoding must be legacy or structured")
+    if optimizer_method not in ("reinforce", "ppo"):
+        raise ValueError("Unknown phase-split optimizer")
+    if ppo_backend not in ("reference", "batched"):
+        raise ValueError("PPO backend must be reference or batched")
+    if optimizer_method != "ppo" and ppo_backend != "reference":
+        raise ValueError("Batched backend requires PPO")
+    if optimizer_method == "ppo":
+        if combat_advantage_baseline != "critic":
+            raise ValueError("PPO uses its own GAE critic baseline, not leave-one-run-out")
+        if hp_monotonic_weight:
+            raise ValueError("PPO currently requires hp_monotonic_weight=0")
+        if min(ppo_epochs, ppo_batch_size, ppo_sample_limit) <= 0:
+            raise ValueError("PPO epoch/batch/sample sizes must be positive")
+        if not 0 < ppo_clip_epsilon < 1:
+            raise ValueError("Invalid PPO clipping")
+        if not 0 < ppo_gamma <= 1 or not 0 <= ppo_gae_lambda <= 1:
+            raise ValueError("Invalid PPO gamma/lambda")
+    if tactical_state_encoding not in (
+        "legacy", "structured", "relational", "relational_damage",
+        "public_resources", "enemy_instances", "enemy_attention",
+    ):
+        raise ValueError("Unsupported tactical state encoding")
     if tactical_state_encoding == "structured" and dimension <= 32:
         raise ValueError("Structured tactical state requires dimension > 32")
     if tactical_state_encoding == "relational" and dimension <= 36:
         raise ValueError("Relational tactical state requires dimension > 36")
+    if tactical_state_encoding == "relational_damage" and dimension <= 40:
+        raise ValueError("Damage-aware tactical state requires dimension > 40")
+    if tactical_state_encoding in ("enemy_instances", "enemy_attention") and dimension <= 40:
+        raise ValueError("Enemy-instance tactical state requires dimension > 40")
+    if tactical_state_encoding == "public_resources" and dimension <= 40:
+        raise ValueError("Public-resource tactical state requires dimension > 40")
     if not 0.0 <= boundary_weight <= 1.0:
         raise ValueError("Boundary bootstrapping weight must lie in [0, 1]")
     if not 0.0 <= hp_monotonic_weight <= 1.0:
@@ -350,11 +468,21 @@ def train_phase_split(
         "strategy": _new_params(dimension, hidden, torch),
         "combat": _new_params(dimension, hidden, torch),
     }
+    if strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep", "macro_card_ops"):
+        add_instance_parameters(params["strategy"], dimension, hidden, torch)
+        add_attention_parameters(params["strategy"], hidden, torch)
+        if strategy_encoding in ("macro_deep", "macro_card_ops"):
+            add_deep_macro_parameters(params["strategy"], hidden, torch)
+    if tactical_state_encoding in ("enemy_instances", "enemy_attention"):
+        add_instance_parameters(params["combat"], dimension, hidden, torch)
+    if tactical_state_encoding == "enemy_attention":
+        add_attention_parameters(params["combat"], hidden, torch)
     optimizers = {
         phase: torch.optim.AdamW(list(weights.values()), lr=learning_rate)
         for phase, weights in params.items()
     }
     warm_sha: str | None = None
+    frozen_combat = None
     if warm_start is not None:
         raw_bytes = warm_start.read_bytes()
         warm_sha = hashlib.sha256(raw_bytes).hexdigest()
@@ -364,8 +492,12 @@ def train_phase_split(
         if raw.get("format") == "sts2-phase-split-policy-value-v1":
             warm = PhaseSplitNeuralModel.from_dict(raw)
             sources = {"strategy": warm.strategy, "combat": warm.combat}
+            if freeze_combat:
+                frozen_combat = warm.combat
             previous_combat_objective = warm.combat_value_objective
         else:
+            if freeze_combat:
+                raise ValueError("Frozen combat requires a phase-split checkpoint")
             # Tactical-v3 extends v2 semantic tokens with target context.
             # Both heads warm-start approximately: normalization changes with
             # extra features, so the action distributions are not identical.
@@ -373,11 +505,21 @@ def train_phase_split(
             sources = {"strategy": base, "combat": base}
             previous_combat_objective = "continuation"
         expected_tactical_format = (
+            TACTICAL_ATTENTION_FORMAT
+            if tactical_state_encoding == "enemy_attention" else
+            TACTICAL_INSTANCES_FORMAT
+            if tactical_state_encoding == "enemy_instances" else
+            TACTICAL_RESOURCES_FORMAT
+            if tactical_state_encoding == "public_resources" else
+            TACTICAL_DAMAGE_FORMAT
+            if tactical_state_encoding == "relational_damage" else
             TACTICAL_RELATIONAL_FORMAT
             if tactical_state_encoding == "relational" else
             TACTICAL_STRUCTURED_FORMAT
             if tactical_state_encoding == "structured" else TACTICAL_FORMAT
         )
+        if freeze_combat and sources["combat"].format_id != expected_tactical_format:
+            raise ValueError("Frozen combat encoding must match checkpoint exactly")
         for phase, source in sources.items():
             if (source.dimension, source.hidden) != (dimension, hidden):
                 raise ValueError("Warm-start dimensions must match")
@@ -387,12 +529,16 @@ def train_phase_split(
             # state and value projections across a format migration.
             migrating_tactical = (
                 phase == "combat" and source.format_id != expected_tactical_format
+                and not (source.format_id == TACTICAL_INSTANCES_FORMAT
+                         and expected_tactical_format == TACTICAL_ATTENTION_FORMAT)
             )
             migrating_combat_value = (
                 phase == "combat" and previous_combat_objective != combat_objective
             )
             with torch.no_grad():
                 for name, weight in params[phase].items():
+                    if not hasattr(source, name) or getattr(source, name) is None:
+                        continue  # Newly initialized v8-specific parameters.
                     if migrating_tactical and name in (
                         "state_weight", "state_bias", "value_weight", "value_bias"
                     ):
@@ -406,6 +552,11 @@ def train_phase_split(
                     weight.copy_(torch.tensor(
                         getattr(source, name), dtype=weight.dtype
                     ))
+    if freeze_combat:
+        # Defense in depth: H6 removes every tactical training sample before
+        # calling PPO, and the original combat JSON object is always used for
+        # inference and export. A zero LR protects accidental future updates.
+        optimizers["combat"].param_groups[0]["lr"] = 0.0
     revision = getattr(backend, "emulator_revision", "test-backend")
     config = {
         "version": (
@@ -426,8 +577,30 @@ def train_phase_split(
         "warm_sha": warm_sha,
     }
     # Legacy fingerprints remain compatible with earlier checkpoints.
+    # The new goal deliberately changes which episodes count as victories,
+    # so it MUST have a distinct checkpoint fingerprint.
+    if episode_goal_version != PROTOTYPE_THREE_ACT_GOAL:
+        config["episode_goal_version"] = episode_goal_version
+    if ascension:
+        config["ascension"] = ascension
+    if optimizer_method == "ppo":
+        if ppo_backend != "reference":
+            config["ppo_backend"] = ppo_backend
+        config.update({
+            "optimizer_method": optimizer_method,
+            "ppo_epochs": ppo_epochs,
+            "ppo_batch_size": ppo_batch_size,
+            "ppo_sample_limit": ppo_sample_limit,
+            "ppo_clip_epsilon": ppo_clip_epsilon,
+            "ppo_gamma": ppo_gamma,
+            "ppo_gae_lambda": ppo_gae_lambda,
+        })
     if tactical_state_encoding != "legacy":
         config["tactical_state_encoding"] = tactical_state_encoding
+    if strategy_encoding != "legacy":
+        config["strategy_encoding"] = strategy_encoding
+    if freeze_combat:
+        config["freeze_combat"] = True
     if combat_objective != "continuation":
         config["combat_objective"] = combat_objective
     if combat_advantage_baseline != "critic":
@@ -479,11 +652,27 @@ def train_phase_split(
                 params["strategy"], params["combat"], dimension, hidden,
                 model_id=f"phase-split-before-round-{index}", trained=index > 0,
                 tactical_state_encoding=tactical_state_encoding,
+                strategy_encoding=strategy_encoding,
                 combat_objective=combat_objective,
             )
-            seeds = [
+            if freeze_combat:
+                if frozen_combat is None:
+                    raise ValueError("Frozen-combat checkpoint has no combat model")
+                model.combat = frozen_combat
+            planned_seeds = [
                 f"{seed_prefix}-{index}-{j}" for j in range(episodes_per_round)
             ]
+            excluded = [s for s in planned_seeds if s in excluded_training_seeds]
+            seeds = [s for s in planned_seeds if s not in excluded_training_seeds]
+            if not seeds:
+                raise ValueError(f"Every training seed excluded in round {index + 1}")
+            if excluded:
+                print(
+                    f"[split-excluded] round {index + 1}: explicitly excluded "
+                    f"{len(excluded)} unsupported emulator seed(s): "
+                    f"{', '.join(excluded)}; no rollout, loss, or reward recorded",
+                    flush=True,
+                )
             start = time.perf_counter()
             if pool is None:
                 cohort = tuple(collect_public_episode(
@@ -491,12 +680,16 @@ def train_phase_split(
                     actor_rng=random.Random(episode_actor_seed(seed, run_seed)),
                     max_decisions=max_decisions, environment=environment,
                     temperature=temperature,
+                    episode_goal_version=episode_goal_version,
+                    ascension=ascension, greedy_combat=freeze_combat,
                 ) for run_seed in seeds)
             else:
                 cohort = collect_parallel(
                     pool, model, seeds, base_seed=seed,
                     max_decisions=max_decisions, policy_id="prototype-fair-v0",
                     environment=environment, temperature=temperature,
+                    episode_goal_version=episode_goal_version,
+                    ascension=ascension, greedy_combat=freeze_combat,
                 )
             rollout_seconds = time.perf_counter() - start
             completed = [ep for ep in cohort if ep.completed]
@@ -505,8 +698,14 @@ def train_phase_split(
             )
             run_targets = [(ep, _bounded_return(ep, alpha)) for ep in completed]
             local_targets: list[list[tuple[CombatOutcome, float]]] = []
-            for episode, run_target in run_targets:
-                local_targets.append([
+            if freeze_combat:
+                # H6 trains only strategy. Its rewards are run-level; there is
+                # no need to evaluate combat-boundary targets, fit combat
+                # values, encode tactical features, or differentiate combat.
+                local_targets = [[] for _ in run_targets]
+            else:
+                for episode, run_target in run_targets:
+                    local_targets.append([
                     (
                         segment,
                         (
@@ -526,173 +725,228 @@ def train_phase_split(
                 _other_run_combat_baselines(local_targets)
                 if combat_advantage_baseline == "leave_one_run_out" else None
             )
+            combat_targets: list[float]
+            monotonic_terms: list[Any]
+            losses: list[float]
             optimizer_started = time.perf_counter()
-            for optimizer in optimizers.values():
-                optimizer.zero_grad()
-            strategic_count = tactical_count = 0
-            combat_targets: list[float] = []
-            losses: list[float] = []
-            phase_counts = {
-                phase: sum(
-                    dec.phase == phase
-                    for episode, _ in run_targets for dec in episode.decisions
+            if optimizer_method == "ppo":
+                if ppo_backend == "batched":
+                    from sts2_ai.training.phase_split_ppo_batch import (
+                        ppo_update_batched,
+                    )
+                else:
+                    from sts2_ai.training.phase_split_ppo import (
+                        ppo_update as ppo_update_reference,
+                    )
+
+                strategy_only = (
+                    [(replace(ep, decisions=tuple(
+                        d for d in ep.decisions if d.phase == "strategy"
+                    ), combat_outcomes=()), target)
+                     for ep, target in run_targets]
+                    if freeze_combat else run_targets
                 )
-                for phase in ("strategy", "combat")
-            }
-            diagnostic_totals = {
-                phase: {"policy": 0.0, "value_mse": 0.0, "entropy": 0.0}
-                for phase in phase_counts
-            }
-            for episode_index, (episode, run_target) in enumerate(run_targets):
-                # Every target uses outcomes observed under the frozen cohort policy.
-                targets = [run_target] * len(episode.decisions)
-                tactical_baselines: dict[int, float] = {}
-                for j, (segment, local_target) in enumerate(
-                    local_targets[episode_index]
-                ):
-                    combat_targets.append(local_target)
-                    for d in range(segment.start_decision, segment.end_decision):
-                        if episode.decisions[d].phase != "combat":
-                            raise ValueError("Combat segment includes a strategy decision")
-                        targets[d] = local_target
-                        if other_run_baselines is not None:
-                            tactical_baselines[d] = other_run_baselines[episode_index][j]
-                phase_terms: dict[str, dict[str, list[Any]]] = {
-                    phase: {"policy": [], "value_mse": [], "entropy": []}
+                ppo_kwargs: dict[str, Any] = {
+                    "torch": torch,
+                    "run_targets": strategy_only,
+                    "local_targets": local_targets,
+                    "params": params,
+                    "optimizers": optimizers,
+                    "dimension": dimension,
+                    "encoding": tactical_state_encoding,
+                    "temperature": temperature,
+                    "gamma": ppo_gamma,
+                    "gae_lambda": ppo_gae_lambda,
+                    "epochs": ppo_epochs,
+                    "batch_size": ppo_batch_size,
+                    "sample_limit": ppo_sample_limit,
+                    "clip_epsilon": ppo_clip_epsilon,
+                    "value_weight": value_weight,
+                    "entropy_weight": entropy_weight,
+                    "seed": seed + index * 1000003,
+                }
+                if ppo_backend == "batched":
+                    ppo = ppo_update_batched(
+                        **ppo_kwargs, strategy_encoding=strategy_encoding,
+                    )
+                else:
+                    ppo = ppo_update_reference(**ppo_kwargs)
+                steps = ppo.steps
+                strategic_count = ppo.counts["strategy"]
+                tactical_count = ppo.counts["combat"]
+                phase_diagnostics = ppo.phase
+                losses = [ppo.loss] if ppo.loss is not None else []
+                monotonic_terms = []
+                combat_targets = [
+                    target for group in local_targets for _, target in group
+                ]
+            else:
+                for optimizer in optimizers.values():
+                    optimizer.zero_grad()
+                strategic_count = tactical_count = 0
+                combat_targets = []
+                losses = []
+                phase_counts = {
+                    phase: sum(
+                        dec.phase == phase
+                        for episode, _ in run_targets for dec in episode.decisions
+                    )
+                    for phase in ("strategy", "combat")
+                }
+                diagnostic_totals = {
+                    phase: {"policy": 0.0, "value_mse": 0.0, "entropy": 0.0}
                     for phase in phase_counts
                 }
-                for decision_index, (decision, target) in enumerate(
-                    zip(episode.decisions, targets, strict=True)
-                ):
-                    phase = decision.phase
-                    if phase not in params:
-                        raise ValueError("Unknown decision phase")
-                    if phase == "combat":
-                        tactical_count += 1
-                    else:
-                        strategic_count += 1
-                    value, logits = _forward_decision(
-                        decision, params[phase], dimension, torch,
-                        tactical_state_encoding=tactical_state_encoding,
-                    )
-                    log_probs = torch.nn.functional.log_softmax(
-                        logits / temperature, dim=0,
-                    )
-                    probs = log_probs.exp()
-                    target_tensor = torch.tensor(target, dtype=torch.float32)
-                    if phase == "combat" and other_run_baselines is not None:
-                        if decision_index not in tactical_baselines:
-                            raise ValueError("Combat action lacks a resolved combat outcome")
-                        advantage = target_tensor - tactical_baselines[decision_index]
-                    else:
-                        advantage = target_tensor - value.detach()
-                    phase_terms[phase]["policy"].append(
-                        -log_probs[decision.chosen_index] * advantage
-                    )
-                    phase_terms[phase]["value_mse"].append(
-                        (value - target_tensor).square()
-                    )
-                    phase_terms[phase]["entropy"].append(
-                        -(probs * log_probs).sum()
-                    )
-                if loss_normalization == "legacy_episode_sum":
-                    # Preserve old behavior exactly for reproducibility.
-                    policy_terms = [
-                        x for phase in phase_counts for x in phase_terms[phase]["policy"]
-                    ]
-                    value_terms = [
-                        x for phase in phase_counts for x in phase_terms[phase]["value_mse"]
-                    ]
-                    entropy_terms = [
-                        x for phase in phase_counts for x in phase_terms[phase]["entropy"]
-                    ]
-                    if policy_terms:
-                        loss = (
-                            torch.stack(policy_terms).sum()
-                            + value_weight * torch.stack(value_terms).mean()
-                            - entropy_weight * torch.stack(entropy_terms).mean()
-                        ) / max(1, len(run_targets))
-                        loss.backward()
-                        losses.append(float(loss.detach()))
-                else:
-                    # Each phase has the SAME overall weight regardless of how
-                    # many card plays or map choices occur in a cohort.
-                    # Mean reduction also makes entropy/value coefficients
-                    # meaningful relative to the policy gradient.
-                    for phase, total in phase_counts.items():
-                        if not total or not phase_terms[phase]["policy"]:
-                            continue
-                        terms = phase_terms[phase]
-                        loss = (
-                            torch.stack(terms["policy"]).sum()
-                            + value_weight * torch.stack(terms["value_mse"]).sum()
-                            - entropy_weight * torch.stack(terms["entropy"]).sum()
-                        ) / total
-                        loss.backward()
-                        losses.append(float(loss.detach()))
-                for phase, phase_components in phase_terms.items():
-                    for name, component_tensors in phase_components.items():
-                        if component_tensors:
-                            diagnostic_totals[phase][name] += sum(
-                                float(tensor.detach())
-                                for tensor in component_tensors
-                            )
-            phase_diagnostics = {
-                phase: {
-                    key: total / phase_counts[phase]
-                    for key, total in terms.items()
-                }
-                for phase, terms in diagnostic_totals.items()
-                if phase_counts[phase]
-            }
-            # Direct combat-boundary feedback to the strategic continuation
-            # critic: for otherwise identical future resources, slightly more
-            # HP is normally preferable. This does NOT fix a potion/HP rate.
-            monotonic_terms = []
-            for ep, _ in run_targets:
-                for segment in ep.combat_outcomes:
-                    if segment.result != "victory" or not segment.exit_public_json:
-                        continue
-                    pair = _higher_hp_public_pair(segment.exit_public_json)
-                    if pair is None:
-                        continue
-                    lower, higher, delta = pair
-                    low_x = torch.tensor(
-                        _dense(state_features(lower, dimension), dimension),
-                        dtype=torch.float32,
-                    )
-                    high_x = torch.tensor(
-                        _dense(state_features(higher, dimension), dimension),
-                        dtype=torch.float32,
-                    )
-                    low_value, _ = _forward(
-                        params["strategy"], low_x, None, torch,
-                    )
-                    high_value, _ = _forward(
-                        params["strategy"], high_x, None, torch,
-                    )
-                    monotonic_terms.append(torch.relu(
-                        low_value - high_value + 0.04 * delta
-                    ))
-            if monotonic_terms and hp_monotonic_weight:
-                (hp_monotonic_weight * torch.stack(monotonic_terms).mean()).backward()
-
-            steps = 0
-            if strategic_count or tactical_count:
-                for phase, count in (
-                    ("strategy", strategic_count), ("combat", tactical_count)
-                ):
-                    if count:
-                        torch.nn.utils.clip_grad_norm_(
-                            list(params[phase].values()), max_norm=5.0
+                for episode_index, (episode, run_target) in enumerate(run_targets):
+                    # Every target uses outcomes observed under the frozen cohort policy.
+                    targets = [run_target] * len(episode.decisions)
+                    tactical_baselines: dict[int, float] = {}
+                    for j, (segment, local_target) in enumerate(
+                        local_targets[episode_index]
+                    ):
+                        combat_targets.append(local_target)
+                        for d in range(segment.start_decision, segment.end_decision):
+                            if episode.decisions[d].phase != "combat":
+                                raise ValueError("Combat segment includes a strategy decision")
+                            targets[d] = local_target
+                            if other_run_baselines is not None:
+                                tactical_baselines[d] = other_run_baselines[episode_index][j]
+                    phase_terms: dict[str, dict[str, list[Any]]] = {
+                        phase: {"policy": [], "value_mse": [], "entropy": []}
+                        for phase in phase_counts
+                    }
+                    for decision_index, (decision, target) in enumerate(
+                        zip(episode.decisions, targets, strict=True)
+                    ):
+                        phase = decision.phase
+                        if phase not in params:
+                            raise ValueError("Unknown decision phase")
+                        if phase == "combat":
+                            tactical_count += 1
+                        else:
+                            strategic_count += 1
+                        value, logits = _forward_decision(
+                            decision, params[phase], dimension, torch,
+                            tactical_state_encoding=tactical_state_encoding,
                         )
-                        optimizers[phase].step()
-                        steps += 1
+                        log_probs = torch.nn.functional.log_softmax(
+                            logits / temperature, dim=0,
+                        )
+                        probs = log_probs.exp()
+                        target_tensor = torch.tensor(target, dtype=torch.float32)
+                        if phase == "combat" and other_run_baselines is not None:
+                            if decision_index not in tactical_baselines:
+                                raise ValueError("Combat action lacks a resolved combat outcome")
+                            advantage = target_tensor - tactical_baselines[decision_index]
+                        else:
+                            advantage = target_tensor - value.detach()
+                        phase_terms[phase]["policy"].append(
+                            -log_probs[decision.chosen_index] * advantage
+                        )
+                        phase_terms[phase]["value_mse"].append(
+                            (value - target_tensor).square()
+                        )
+                        phase_terms[phase]["entropy"].append(
+                            -(probs * log_probs).sum()
+                        )
+                    if loss_normalization == "legacy_episode_sum":
+                        # Preserve old behavior exactly for reproducibility.
+                        policy_terms = [
+                            x for phase in phase_counts for x in phase_terms[phase]["policy"]
+                        ]
+                        value_terms = [
+                            x for phase in phase_counts for x in phase_terms[phase]["value_mse"]
+                        ]
+                        entropy_terms = [
+                            x for phase in phase_counts for x in phase_terms[phase]["entropy"]
+                        ]
+                        if policy_terms:
+                            loss = (
+                                torch.stack(policy_terms).sum()
+                                + value_weight * torch.stack(value_terms).mean()
+                                - entropy_weight * torch.stack(entropy_terms).mean()
+                            ) / max(1, len(run_targets))
+                            loss.backward()
+                            losses.append(float(loss.detach()))
+                    else:
+                        # Each phase has the SAME overall weight regardless of how
+                        # many card plays or map choices occur in a cohort.
+                        # Mean reduction also makes entropy/value coefficients
+                        # meaningful relative to the policy gradient.
+                        for phase, total in phase_counts.items():
+                            if not total or not phase_terms[phase]["policy"]:
+                                continue
+                            terms = phase_terms[phase]
+                            loss = (
+                                torch.stack(terms["policy"]).sum()
+                                + value_weight * torch.stack(terms["value_mse"]).sum()
+                                - entropy_weight * torch.stack(terms["entropy"]).sum()
+                            ) / total
+                            loss.backward()
+                            losses.append(float(loss.detach()))
+                    for phase, phase_components in phase_terms.items():
+                        for name, component_tensors in phase_components.items():
+                            if component_tensors:
+                                diagnostic_totals[phase][name] += sum(
+                                    float(tensor.detach())
+                                    for tensor in component_tensors
+                                )
+                phase_diagnostics = {
+                    phase: {
+                        key: total / phase_counts[phase]
+                        for key, total in terms.items()
+                    }
+                    for phase, terms in diagnostic_totals.items()
+                    if phase_counts[phase]
+                }
+                # Direct combat-boundary feedback to the strategic continuation
+                # critic: for otherwise identical future resources, slightly more
+                # HP is normally preferable. This does NOT fix a potion/HP rate.
+                monotonic_terms = []
+                for ep, _ in run_targets:
+                    for segment in ep.combat_outcomes:
+                        if segment.result != "victory" or not segment.exit_public_json:
+                            continue
+                        pair = _higher_hp_public_pair(segment.exit_public_json)
+                        if pair is None:
+                            continue
+                        lower, higher, delta = pair
+                        low_x = torch.tensor(
+                            _dense(state_features(lower, dimension), dimension),
+                            dtype=torch.float32,
+                        )
+                        high_x = torch.tensor(
+                            _dense(state_features(higher, dimension), dimension),
+                            dtype=torch.float32,
+                        )
+                        low_value, _ = _forward(
+                            params["strategy"], low_x, None, torch,
+                        )
+                        high_value, _ = _forward(
+                            params["strategy"], high_x, None, torch,
+                        )
+                        monotonic_terms.append(torch.relu(
+                            low_value - high_value + 0.04 * delta
+                        ))
+                if monotonic_terms and hp_monotonic_weight:
+                    (hp_monotonic_weight * torch.stack(monotonic_terms).mean()).backward()
+
+                steps = 0
+                if strategic_count or tactical_count:
+                    for phase, count in (
+                        ("strategy", strategic_count), ("combat", tactical_count)
+                    ):
+                        if count:
+                            torch.nn.utils.clip_grad_norm_(
+                                list(params[phase].values()), max_norm=5.0
+                            )
+                            optimizers[phase].step()
+                            steps += 1
             victories += sum(ep.won for ep in completed)
             row = PhaseSplitRound(
-                round_index=index, played=episodes_per_round,
+                round_index=index, played=len(cohort),
                 completed=len(completed),
-                censored=episodes_per_round - len(completed),
+                censored=len(cohort) - len(completed),
                 wins=sum(ep.won for ep in completed),
                 combat_victories=sum(
                     o.result == "victory" for ep in cohort for o in ep.combat_outcomes
@@ -715,6 +969,7 @@ def train_phase_split(
                 rollout_seconds=rollout_seconds,
                 optimizer_seconds=time.perf_counter() - optimizer_started,
                 hp_monotonic_pairs=len(monotonic_terms),
+                auxiliary_reward_weight=alpha,
                 phase_loss_diagnostics=phase_diagnostics,
                 mean_victory_exit_hp_fraction=(
                     sum(
@@ -792,10 +1047,16 @@ def train_phase_split(
                         temporary.unlink(missing_ok=True)
             if progress is not None:
                 progress(row)
-    return _export_split(
+    final = _export_split(
         params["strategy"], params["combat"], dimension, hidden,
         model_id=f"phase-split-v1-{fingerprint[:12]}-{rounds}",
         trained=bool(rows and any(x.optimization_steps for x in rows)),
         tactical_state_encoding=tactical_state_encoding,
+        strategy_encoding=strategy_encoding,
         combat_objective=combat_objective,
-    ), tuple(rows)
+    )
+    if freeze_combat:
+        if frozen_combat is None:
+            raise ValueError("Frozen-combat checkpoint has no combat model")
+        final.combat = frozen_combat
+    return final, tuple(rows)

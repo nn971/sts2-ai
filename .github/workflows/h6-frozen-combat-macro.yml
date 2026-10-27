@@ -1,0 +1,100 @@
+name: h6-frozen-combat-macro
+
+on:
+  push:
+    paths:
+      - 'src/sts2_ai/models/phase_split.py'
+      - 'src/sts2_ai/training/phase_split_selfplay.py'
+      - 'tools/train_phase_split.py'
+      - 'tests/test_h6_native_count_pile.py'
+      - 'tests/test_h6_frozen_combat_macro.py'
+      - 'tests/test_h6_dense_reward.py'
+      - 'tests/test_h6_native_reset_profiles.py'
+      - 'tests/test_h6_public_enemy_position.py'
+      - 'src/sts2_ai/models/enemy_instances.py'
+      - 'src/sts2_ai/emulator/run_environment.py'
+      - '.github/workflows/h6-frozen-combat-macro.yml'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  frozen-combat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ai
+          submodules: false
+      - uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: 0469424fc20679fd81c0d5e4ee8d9a484ec19108
+          path: ai/emulator
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        working-directory: ai
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e '.[dev]'
+      - name: Lint H6 code
+        working-directory: ai
+        run: |
+          python -m ruff check src/sts2_ai/models/phase_split.py tests/test_h6_frozen_combat_macro.py tests/test_h6_native_count_pile.py tests/test_h6_macro_evaluation.py tests/test_h6_native_reset_profiles.py tests/test_h6_public_enemy_position.py tools/evaluate_h6_macro.py tests/test_h6_dense_reward.py
+      - name: Train and resume with immutable combat in toy emulator
+        working-directory: ai
+        run: |
+          python -m pytest -q tests/test_h6_dense_reward.py tests/test_h6_frozen_combat_macro.py tests/test_h6_native_count_pile.py tests/test_h6_macro_evaluation.py tests/test_h6_native_reset_profiles.py tests/test_h6_public_enemy_position.py
+      - name: Build pinned native-Overgrowth emulator
+        working-directory: ai/emulator
+        run: |
+          dotnet restore Sts2Emulator.sln
+          dotnet build Sts2Emulator.sln -c Release --no-restore
+      - name: Verify H6 legacy RNG and Power-card lifecycle boundaries
+        working-directory: ai/emulator
+        run: dotnet test tests/Sts2Emulator.Core.Tests/Sts2Emulator.Core.Tests.csproj -c Release --no-build --filter 'FullyQualifiedName~LegacyNativeEventGoldBoundaryTests|FullyQualifiedName~LegacyFisherYatesRegisteredSiteTests|FullyQualifiedName~PrototypePowerCardCompletionLifecycleTests'
+      - name: Native A10 run smoke with H6 frozen combat
+        working-directory: ai
+        run: |
+          python - <<'PY'
+          import json, sys
+          sys.path.insert(0, 'tests')
+          from test_nature_h3_joint_player import specimen
+          with open('ci-h6-combat-backbone.json', 'w') as stream:
+              json.dump(specimen().to_dict(), stream)
+          PY
+          python -u tools/train_phase_split.py \
+            --warm-start ci-h6-combat-backbone.json --freeze-combat \
+            --optimizer-method ppo --ppo-backend batched \
+            --tactical-state-encoding enemy_instances \
+            --combat-objective hp_preservation \
+            --hp-monotonic-weight 0 --combat-advantage-baseline critic \
+            --dimension 128 --hidden 4 --ascension 10 \
+            --rounds 1 --episodes 2 --workers 2 --eval-seeds 1 \
+            --max-decisions 512 \
+            --train-seed-prefix h6-ci-native-train \
+            --eval-seed-prefix h6-ci-native-selection \
+            --checkpoint ci-h6-macro-checkpoint.pt \
+            --output ci-h6-macro.json --report ci-h6-macro-report.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          baseline = json.loads(Path('ci-h6-combat-backbone.json').read_text())
+          output = json.loads(Path('ci-h6-macro.json').read_text())
+          report = json.loads(Path('ci-h6-macro-report.json').read_text())
+          assert output['combat'] == baseline['combat']
+          assert report['freeze_combat'] is True
+          assert report['win_anneal_threshold'] == 256
+          assert report['rounds'][0]['auxiliary_reward_weight'] > 0
+          assert report['ascension'] == 10
+          assert report['environment'] == 'native-overgrowth'
+          assert report['episode_goal_version'] == 'native-act1-boss-v1'
+          assert report['rounds'][0]['tactical_decisions'] == 0
+          assert len(report['heldout']) == 1
+          assert Path('ci-h6-macro-checkpoint.pt').exists()
+          PY

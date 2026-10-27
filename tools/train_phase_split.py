@@ -12,10 +12,20 @@ from pathlib import Path
 from sts2_ai.agents import NeuralGreedyAgent
 from sts2_ai.agents.phase_split_agent import PhaseSplitGreedyAgent
 from sts2_ai.emulator import FAIR_POLICY_ID, InformationPolicy, JsonlEmulatorBackend
+from sts2_ai.emulator.episode_goal import (
+    EPISODE_GOALS,
+    NATIVE_ACT1_BOSS_GOAL,
+)
 from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH
 from sts2_ai.evaluation import play_run
+from sts2_ai.evaluation.baseline_cache import (
+    baseline_identity,
+    load_cache,
+    save_cache,
+)
 from sts2_ai.training.phase_split_selfplay import (
     BALANCED_TRAINING_VERSION,
+    PPO_TRAINING_VERSION,
     SPLIT_TRAINING_VERSION,
     PhaseSplitRound,
     train_phase_split,
@@ -31,9 +41,24 @@ def main() -> None:
     p.add_argument("--rounds", type=int, default=5)
     p.add_argument("--episodes", type=int, default=32)
     p.add_argument("--workers", type=int, default=4)
+    p.add_argument("--ascension", type=int, default=0,
+                   help="Run difficulty; H6 frozen-combat runs require 10")
     p.add_argument("--dimension", type=int, default=128)
     p.add_argument("--hidden", type=int, default=32)
     p.add_argument("--learning-rate", type=float, default=0.003)
+    p.add_argument("--optimizer-method", choices=("reinforce", "ppo"), default="reinforce")
+    p.add_argument("--ppo-backend", choices=("reference", "batched"), default="reference",
+                   help="Reference per-decision PPO or cached batched PPO")
+    p.add_argument("--ppo-epochs", type=int, default=3)
+    p.add_argument("--ppo-batch-size", type=int, default=128)
+    p.add_argument("--ppo-sample-limit", type=int, default=4096)
+    p.add_argument("--ppo-clip-epsilon", type=float, default=0.2)
+    p.add_argument("--ppo-gamma", type=float, default=0.995)
+    p.add_argument("--ppo-gae-lambda", type=float, default=0.98)
+    p.add_argument(
+        "--train-seed-prefix", default="phase-split-v1",
+        help="Isolate training seeds from prior experiments; stable across resumes",
+    )
     p.add_argument(
         "--loss-normalization",
         choices=("phase_mean", "legacy_episode_sum"),
@@ -53,17 +78,52 @@ def main() -> None:
     p.add_argument("--hp-monotonic-weight", type=float, default=0.2)
     p.add_argument(
         "--tactical-state-encoding",
-        choices=("legacy", "structured", "relational"),
+        choices=(
+            "legacy", "structured", "relational", "relational_damage",
+            "public_resources", "enemy_instances", "enemy_attention",
+        ),
         default="relational",
-        help="v5 enemy/intent relational features; v4 structured or legacy for ablation",
+        help="v5/v6 relational, v7 resources, or v8 species-aware enemy instances",
+    )
+    p.add_argument(
+        "--strategy-encoding",
+        choices=("legacy", "macro_attention", "macro_semantic", "macro_deep",
+                 "macro_card_ops"),
+        default="legacy",
+        help="V20: opt-in operation-aware deep macro attention (frozen batched PPO)",
     )
     p.add_argument("--temperature-start", type=float, default=0.05)
     p.add_argument("--temperature-end", type=float, default=0.035)
     p.add_argument("--temperature-decay-rounds", type=int, default=20)
     p.add_argument("--max-decisions", type=int, default=4096)
+    p.add_argument(
+        "--win-anneal-threshold", type=int, default=None,
+        help=(
+            "Number of training victories before auxiliary defeat shaping vanishes; "
+            "defaults to 256 for frozen-combat H6 runs and 16 otherwise"
+        ),
+    )
     p.add_argument("--eval-seeds", type=int, default=16)
+    p.add_argument(
+        "--episode-goal", choices=EPISODE_GOALS, default=NATIVE_ACT1_BOSS_GOAL,
+        help="Certified Act-1 boss clear is terminal victory, or historical prototype goal",
+    )
+    p.add_argument(
+        "--eval-seed-prefix", default="phase-split-heldout-v1",
+        help="Stable heldout seed prefix; use a fresh prefix for new experiments",
+    )
     p.add_argument("--seed", type=int, default=19)
+    p.add_argument(
+        "--exclude-train-seed", action="append", default=[],
+        help="Explicitly omit unsupported run seeds from training; recorded in report",
+    )
     p.add_argument("--warm-start", type=Path)
+    p.add_argument("--freeze-combat", action="store_true",
+                   help="H6: preserve warm-start combat model exactly, train strategy only")
+    p.add_argument(
+        "--baseline-eval-cache", type=Path,
+        help="Reuse the fixed warm-start evaluation only when its identity matches",
+    )
     p.add_argument("--checkpoint", type=Path)
     p.add_argument("--combat-samples-dir", type=Path)
     p.add_argument("--resume", action="store_true")
@@ -71,8 +131,25 @@ def main() -> None:
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--report", type=Path, required=True)
     args = p.parse_args()
+    # H6-A2: retain meaningful progress targets beyond the first 16 clears.
+    # Explicit --win-anneal-threshold 16 still reproduces historical H6-A.
+    if args.win_anneal_threshold is None:
+        args.win_anneal_threshold = 256 if args.freeze_combat else 16
+    if args.freeze_combat and (not args.warm_start or args.optimizer_method != "ppo"):
+        p.error("--freeze-combat requires --warm-start and --optimizer-method ppo")
+    if args.freeze_combat and args.ascension != 10:
+        p.error("H6 frozen-combat training requires --ascension 10")
+    if args.strategy_encoding in ("macro_attention", "macro_semantic", "macro_deep") and not (
+        args.freeze_combat and args.optimizer_method == "ppo"
+        and args.ppo_backend == "batched"
+    ):
+        p.error("Macro attention requires frozen-combat batched PPO")
+    if args.win_anneal_threshold < 1:
+        p.error("--win-anneal-threshold must be positive")
     if args.eval_seeds < 1:
         p.error("--eval-seeds must be positive")
+    if not args.eval_seed_prefix:
+        p.error("--eval-seed-prefix must not be empty")
     started = time.perf_counter()
     combat_baseline = args.combat_advantage_baseline or (
         "leave_one_run_out" if args.combat_objective == "hp_preservation"
@@ -92,7 +169,9 @@ def main() -> None:
             f"victory_exit_hp_fraction={row.mean_victory_exit_hp_fraction} "
             f"victory_hp_lost_fraction={row.mean_victory_hp_lost_fraction} "
             f"potions_used_per_combat={row.mean_potions_used_per_combat} "
-            f"run_target={row.mean_run_return} loss={row.mean_loss} "
+            f"run_target={row.mean_run_return} "
+            f"aux_reward_weight={row.auxiliary_reward_weight} "
+            f"loss={row.mean_loss} "
             f"phase_diagnostics={row.phase_loss_diagnostics} "
             f"updates={row.optimization_steps} "
             f"rollouts={row.rollout_seconds:.1f}s "
@@ -104,19 +183,34 @@ def main() -> None:
         f"[split] start | rounds={args.rounds} episodes={args.episodes} "
         f"workers={args.workers} boundary_weight={args.boundary_weight} "
         f"tactical_state_encoding={args.tactical_state_encoding} "
+        f"strategy_encoding={args.strategy_encoding} "
+        f"optimizer_method={args.optimizer_method} ppo_backend={args.ppo_backend} "
         f"loss_normalization={args.loss_normalization} "
         f"combat_objective={args.combat_objective} "
         f"combat_advantage_baseline={combat_baseline} "
-        f"resume={args.resume} warm_start={args.warm_start or 'none'}"
+        f"resume={args.resume} goal={args.episode_goal} "
+        f"win_anneal_threshold={args.win_anneal_threshold} "
+        f"warm_start={args.warm_start or 'none'}"
     )
     with JsonlEmulatorBackend(build=args.build) as backend:
         model, rows = train_phase_split(
             backend, rounds=args.rounds, episodes_per_round=args.episodes,
             workers=args.workers, dimension=args.dimension, hidden=args.hidden,
+            ascension=args.ascension,
             learning_rate=args.learning_rate,
+            optimizer_method=args.optimizer_method,
+            ppo_backend=args.ppo_backend,
+            ppo_epochs=args.ppo_epochs,
+            ppo_batch_size=args.ppo_batch_size,
+            ppo_sample_limit=args.ppo_sample_limit,
+            ppo_clip_epsilon=args.ppo_clip_epsilon,
+            ppo_gamma=args.ppo_gamma,
+            ppo_gae_lambda=args.ppo_gae_lambda,
+            seed_prefix=args.train_seed_prefix,
             boundary_weight=args.boundary_weight,
             hp_monotonic_weight=args.hp_monotonic_weight,
             tactical_state_encoding=args.tactical_state_encoding,
+            strategy_encoding=args.strategy_encoding,
             loss_normalization=args.loss_normalization,
             combat_objective=args.combat_objective,
             combat_advantage_baseline=combat_baseline,
@@ -125,21 +219,33 @@ def main() -> None:
             temperature_decay_rounds=args.temperature_decay_rounds,
             max_decisions=args.max_decisions,
             seed=args.seed, warm_start=args.warm_start,
+            freeze_combat=args.freeze_combat,
             checkpoint=args.checkpoint, resume=args.resume,
             combat_samples_dir=args.combat_samples_dir,
             environment=NATIVE_OVERGROWTH, progress=progress,
+            excluded_training_seeds=frozenset(args.exclude_train_seed),
+            episode_goal_version=args.episode_goal,
+            win_anneal_threshold=args.win_anneal_threshold,
         )
         model.save(args.output)
+        if args.freeze_combat:
+            from sts2_ai.models.phase_split import PhaseSplitNeuralModel
+            original = PhaseSplitNeuralModel.load(args.warm_start)
+            saved = PhaseSplitNeuralModel.load(args.output)
+            if saved.combat.to_dict() != original.combat.to_dict():
+                raise RuntimeError("H6 frozen combat checkpoint changed during training")
         log(f"[split] model exported: {args.output}")
         agent = PhaseSplitGreedyAgent(model)
         evaluations = []
         for index in range(args.eval_seeds):
             item = play_run(
                 backend, agent,
-                seed=f"phase-split-heldout-v1-{index}",
+                seed=f"{args.eval_seed_prefix}-{index}",
                 policy=InformationPolicy(FAIR_POLICY_ID),
                 max_decisions=args.max_decisions,
                 environment=NATIVE_OVERGROWTH,
+                episode_goal_version=args.episode_goal,
+                ascension=args.ascension,
             )
             evaluations.append({
                 "seed": item.seed,
@@ -148,6 +254,9 @@ def main() -> None:
                 "floor": item.terminal_floor,
                 "progress": item.frontier_progress,
                 "censored": item.censored,
+                "act1_cleared": item.act1_cleared,
+                "full_game_victory": item.full_game_victory,
+                "episode_goal_version": item.episode_goal_version,
                 "boss": (
                     asdict(item.boss_progress)
                     if item.boss_progress is not None else None
@@ -160,37 +269,65 @@ def main() -> None:
             )
         baseline_evaluations = []
         if args.warm_start is not None:
-            raw = json.loads(args.warm_start.read_text())
-            baseline_agent = (
-                PhaseSplitGreedyAgent.load(args.warm_start)
-                if raw.get("format") == "sts2-phase-split-policy-value-v1"
-                else NeuralGreedyAgent.load(args.warm_start)
+            baseline_key = baseline_identity(
+                warm_start=args.warm_start,
+                emulator_revision=backend.emulator_revision,
+                seed_prefix=args.eval_seed_prefix,
+                count=args.eval_seeds,
+                episode_goal=args.episode_goal,
+                max_decisions=args.max_decisions,
+                environment=NATIVE_OVERGROWTH,
+                policy_id=FAIR_POLICY_ID,
             )
-            for index in range(args.eval_seeds):
-                item = play_run(
-                    backend, baseline_agent,
-                    seed=f"phase-split-heldout-v1-{index}",
-                    policy=InformationPolicy(FAIR_POLICY_ID),
-                    max_decisions=args.max_decisions,
-                    environment=NATIVE_OVERGROWTH,
+            cached = (
+                load_cache(args.baseline_eval_cache, baseline_key)
+                if args.baseline_eval_cache is not None else None
+            )
+            if cached is not None:
+                baseline_evaluations = cached
+                log(f"[baseline-eval] reused {len(cached)} keyed cached results")
+            else:
+                raw = json.loads(args.warm_start.read_text())
+                baseline_agent = (
+                    PhaseSplitGreedyAgent.load(args.warm_start)
+                    if raw.get("format") == "sts2-phase-split-policy-value-v1"
+                    else NeuralGreedyAgent.load(args.warm_start)
                 )
-                baseline_evaluations.append({
-                    "seed": item.seed,
-                    "outcome": item.outcome,
-                    "act": item.terminal_act,
-                    "floor": item.terminal_floor,
-                    "progress": item.frontier_progress,
-                    "censored": item.censored,
-                    "boss": (
-                        asdict(item.boss_progress)
-                        if item.boss_progress is not None else None
-                    ),
-                })
-                log(
-                    f"[baseline-eval] {index + 1}/{args.eval_seeds} "
-                    f"act={item.terminal_act} floor={item.terminal_floor} "
-                    f"outcome={item.outcome}"
-                )
+                for index in range(args.eval_seeds):
+                    item = play_run(
+                        backend, baseline_agent,
+                        seed=f"{args.eval_seed_prefix}-{index}",
+                        policy=InformationPolicy(FAIR_POLICY_ID),
+                        max_decisions=args.max_decisions,
+                        environment=NATIVE_OVERGROWTH,
+                        episode_goal_version=args.episode_goal,
+                        ascension=args.ascension,
+                    )
+                    baseline_evaluations.append({
+                        "seed": item.seed,
+                        "outcome": item.outcome,
+                        "act": item.terminal_act,
+                        "floor": item.terminal_floor,
+                        "progress": item.frontier_progress,
+                        "censored": item.censored,
+                        "act1_cleared": item.act1_cleared,
+                        "full_game_victory": item.full_game_victory,
+                        "episode_goal_version": item.episode_goal_version,
+                        "boss": (
+                            asdict(item.boss_progress)
+                            if item.boss_progress is not None else None
+                        ),
+                    })
+                    log(
+                        f"[baseline-eval] {index + 1}/{args.eval_seeds} "
+                        f"act={item.terminal_act} floor={item.terminal_floor} "
+                        f"outcome={item.outcome}"
+                    )
+                if args.baseline_eval_cache is not None:
+                    save_cache(
+                        args.baseline_eval_cache, baseline_key, baseline_evaluations,
+                    )
+                    log("[baseline-eval] saved keyed baseline cache")
         paired = (
             [
                 new["progress"] - old["progress"]
@@ -202,8 +339,28 @@ def main() -> None:
         report = {
             "schema": "sts2-phase-split-experiment-v1",
             "training_version": (
-                BALANCED_TRAINING_VERSION if args.loss_normalization == "phase_mean"
+                PPO_TRAINING_VERSION if args.optimizer_method == "ppo"
+                else BALANCED_TRAINING_VERSION
+                if args.loss_normalization == "phase_mean"
                 else SPLIT_TRAINING_VERSION
+            ),
+            "optimizer_method": args.optimizer_method,
+            "freeze_combat": args.freeze_combat,
+            "ascension": args.ascension,
+            "ppo_backend": args.ppo_backend,
+            "episode_goal_version": args.episode_goal,
+            "win_anneal_threshold": args.win_anneal_threshold,
+            "train_seed_prefix": args.train_seed_prefix,
+            "excluded_training_seeds": sorted(set(args.exclude_train_seed)),
+            "ppo_hyperparameters": (
+                {
+                    "epochs": args.ppo_epochs,
+                    "batch_size": args.ppo_batch_size,
+                    "sample_limit": args.ppo_sample_limit,
+                    "clip_epsilon": args.ppo_clip_epsilon,
+                    "gamma": args.ppo_gamma,
+                    "gae_lambda": args.ppo_gae_lambda,
+                } if args.optimizer_method == "ppo" else None
             ),
             "loss_normalization": args.loss_normalization,
             "combat_objective": args.combat_objective,
@@ -231,13 +388,15 @@ def main() -> None:
             ),
             "hp_monotonic_weight": args.hp_monotonic_weight,
             "tactical_state_encoding": args.tactical_state_encoding,
+            "strategy_encoding": args.strategy_encoding,
+            "eval_seed_prefix": args.eval_seed_prefix,
             "warm_start": str(args.warm_start) if args.warm_start else None,
         }
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(json.dumps(report, indent=2) + "\n")
         log(
             f"[split] done | report={args.report} "
-            f"act1_clears={sum(x['act'] is not None and x['act'] >= 2 for x in evaluations)}"
+            f"act1_clears={sum(x['act1_cleared'] is True for x in evaluations)}"
         )
 
 

@@ -19,10 +19,13 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install -U pip
-      - run: python -m pip install -e '.[dev]'
+      - run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: python -m pip install -e '.[neural,dev]'
       - run: python -m ruff check src tests tools/benchmark_coupled_belief.py
-      - run: python -m mypy src/sts2_ai
+      # Execute behavioral regressions independently of typing cleanup.
+      # Strict mypy remains a required failing gate until its debt is repaired.
       - run: python -m pytest
+      - run: python -m mypy src/sts2_ai
       - name: Reproducible coupled belief survival benchmark
         run: |
           python tools/benchmark_coupled_belief.py \

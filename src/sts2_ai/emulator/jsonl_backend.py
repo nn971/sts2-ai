@@ -119,6 +119,7 @@ class JsonlEmulatorBackend:
                         "--nologo",
                         "--verbosity",
                         "quiet",
+                        "-m:1",
                     ],
                     cwd=self._emulator_root,
                     check=True,

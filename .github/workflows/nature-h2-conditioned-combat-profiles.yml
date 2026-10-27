@@ -1,0 +1,124 @@
+name: nature-h2-conditioned-combat-profiles
+
+on:
+  push:
+    paths:
+      - 'src/sts2_ai/nature/combat_scenarios.py'
+      - 'src/sts2_ai/nature/h2_benchmark.py'
+      - 'src/sts2_ai/nature/draw_only_p0.py'
+      - 'src/sts2_ai/nature/draw_only_episode.py'
+      - 'src/sts2_ai/nature/draw_only_workers.py'
+      - 'tests/test_nature_h2_challenge_profiles.py'
+      - 'tests/test_nature_draw_only_law.py'
+      - 'tests/test_nature_h2_benchmark_strata.py'
+      - 'tools/probe_nature_h2_combat_profiles.py'
+      - 'tools/train_draw_only_nature_h1.py'
+      - 'tools/benchmark_nature_h1_frozen_players.py'
+      - '.github/workflows/nature-h2-conditioned-combat-profiles.yml'
+  pull_request:
+    paths:
+      - 'src/sts2_ai/nature/combat_scenarios.py'
+      - 'src/sts2_ai/nature/h2_benchmark.py'
+      - 'src/sts2_ai/nature/draw_only_p0.py'
+      - 'src/sts2_ai/nature/draw_only_episode.py'
+      - 'src/sts2_ai/nature/draw_only_workers.py'
+      - 'tests/test_nature_h2_challenge_profiles.py'
+      - 'tests/test_nature_draw_only_law.py'
+      - 'tests/test_nature_h2_benchmark_strata.py'
+      - 'tools/probe_nature_h2_combat_profiles.py'
+      - 'tools/train_draw_only_nature_h1.py'
+      - 'tools/benchmark_nature_h1_frozen_players.py'
+      - '.github/workflows/nature-h2-conditioned-combat-profiles.yml'
+  workflow_dispatch:
+
+jobs:
+  h2-context-replay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ai
+      - uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: 9588c0c7d8c96310ac2300308dc19fb9a68e2aef
+          path: emulator
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Install AI
+        working-directory: ai
+        run: python -m pip install -e '.[dev]'
+      - name: Python layout, source partitions, replay tests
+        working-directory: ai
+        run: |
+          python -m ruff check src/sts2_ai/nature/combat_scenarios.py src/sts2_ai/nature/h2_benchmark.py src/sts2_ai/nature/draw_only_p0.py src/sts2_ai/nature/draw_only_episode.py src/sts2_ai/nature/draw_only_workers.py tools/probe_nature_h2_combat_profiles.py tools/benchmark_nature_h1_frozen_players.py tools/train_draw_only_nature_h1.py tests/test_nature_h2_challenge_profiles.py tests/test_nature_h2_benchmark_strata.py tests/test_nature_draw_only_law.py
+          python -m pytest -q tests/test_nature_h2_challenge_profiles.py tests/test_nature_h2_benchmark_strata.py tests/test_nature_draw_only_law.py tests/test_nature_draw_only_player_choice.py tests/test_nature_h1_frozen_model_reuse.py tests/test_nature_draw_only_h1.py
+      - name: Build source-pinned emulator
+        working-directory: emulator
+        run: |
+          dotnet restore Sts2Emulator.sln
+          dotnet build Sts2Emulator.sln -c Release --no-restore
+      - name: Real alternate conditioned combat and terminal replay
+        working-directory: ai
+        run: |
+          python -u tools/probe_nature_h2_combat_profiles.py \
+            --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings ../emulator/bindings/python \
+            --emulator-revision 9588c0c7d8c96310ac2300308dc19fb9a68e2aef
+
+      - name: Real C# conditioned deck full-combat and replay gate
+        working-directory: ai
+        run: |
+          python - <<'PY'
+          import sys
+          sys.path.insert(0, '../emulator/bindings/python')
+          from sts2_emulator import Session
+          from sts2_ai.nature.combat_scenarios import SCENARIOS
+          from sts2_ai.nature.draw_only_episode import play_draw_only_episode
+          from sts2_ai.nature.two_site_opponent import TwoSiteNature
+          from sts2_ai.emulator.semantic_p0_combat import strike_first_player
+          # Reproduce the four decks supported by the pinned H2 emulator;
+          # H5's two boss deck presets were added after this source revision.
+          h2_decks = (
+              'silent-starter-v1', 'silent-strike-heavy-v1',
+              'silent-defend-heavy-v1', 'silent-poison-kit-v1',
+          )
+          cmd = ['dotnet', '../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll', 'prototype-ai-jsonl']
+          with Session(cmd) as session:
+              for scenario_id in (
+                  'shrinker-a10', 'nibbits-a10',
+                  'mawler-a10', 'cubex-a10', 'vine-shambler-a10',
+              ):
+                  for deck in h2_decks:
+                      opts = dict(
+                          source_seed='h2-ci-'+scenario_id+'-'+deck,
+                          reference_seed=88,
+                          nature=TwoSiteNature(seed=7),
+                          emulator_revision='9588c0c7d8c96310ac2300308dc19fb9a68e2aef',
+                          player_choose=strike_first_player,
+                          player_model_id='test-only-strike-first',
+                          entry_mode='seeded-fixed-shrinker',
+                          draw_mode='reference',
+                          scenario=SCENARIOS[scenario_id],
+                          deck_preset_id=deck,
+                      )
+                      one = play_draw_only_episode(session, **opts)
+                      two = play_draw_only_episode(
+                          session, **{**opts, 'replay': one.decisions},
+                      )
+                      assert one.digest == two.digest
+                      assert one.terminal_replay_verified and two.terminal_replay_verified
+                      assert one.nontrivial_draw_count > 0
+                      assert one.scenario_id == scenario_id
+                      assert one.deck_preset_id == deck
+                      print(
+                          f'[nature-h2] scenario={scenario_id} deck={deck} '
+                          f'outcome={one.outcome} hp={one.exit_hp} '
+                          f'draws={one.nontrivial_draw_count} replay=PASS',
+                          flush=True,
+                      )
+          PY

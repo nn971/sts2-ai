@@ -13,14 +13,32 @@ from pathlib import Path
 from typing import Any
 
 from sts2_ai.emulator import LegalAction, Observation
+from sts2_ai.emulator.semantic_p0_public_projection import (
+    project_public_p0_observation,
+)
+from sts2_ai.models.macro_objects import (
+    MACRO_ATTENTION_FORMAT,
+    MACRO_CARD_OPERATIONS_FORMAT,
+    MACRO_DEEP_FORMAT,
+    MACRO_SEMANTIC_FORMAT,
+)
 from sts2_ai.models.neural import (
     NEURAL_FORMAT,
+    TACTICAL_ATTENTION_FORMAT,
+    TACTICAL_DAMAGE_FORMAT,
     TACTICAL_FORMAT,
+    TACTICAL_INSTANCES_FORMAT,
     TACTICAL_RELATIONAL_FORMAT,
+    TACTICAL_RESOURCES_FORMAT,
     TACTICAL_STRUCTURED_FORMAT,
     NeuralPolicyValueModel,
 )
+from sts2_ai.models.pooled_objects import POOLED_OBJECT_FORMAT, PortablePooledObjectModel
 from sts2_ai.models.protocol import PolicyValueEstimate
+from sts2_ai.models.relational_objects import (
+    RELATIONAL_OBJECT_FORMAT,
+    PortableRelationalObjectModel,
+)
 
 PHASE_SPLIT_FORMAT = "sts2-phase-split-policy-value-v1"
 
@@ -35,7 +53,7 @@ def observation_phase(observation: Observation) -> str:
 @dataclass(slots=True)
 class PhaseSplitNeuralModel:
     strategy: NeuralPolicyValueModel
-    combat: NeuralPolicyValueModel
+    combat: NeuralPolicyValueModel | PortablePooledObjectModel | PortableRelationalObjectModel
     model_id: str
     combat_value_objective: str = "continuation"
 
@@ -44,10 +62,17 @@ class PhaseSplitNeuralModel:
             raise ValueError("Phase-split model requires a model identifier")
         if self.combat_value_objective not in ("continuation", "hp_first", "hp_preservation"):
             raise ValueError("Unsupported combat value objective")
-        if self.strategy.format_id != NEURAL_FORMAT:
+        if self.strategy.format_id not in (
+            NEURAL_FORMAT, MACRO_ATTENTION_FORMAT, MACRO_SEMANTIC_FORMAT,
+            MACRO_DEEP_FORMAT, MACRO_CARD_OPERATIONS_FORMAT,
+        ):
             raise ValueError("Strategy head must use the semantic action format")
         if self.combat.format_id not in (
-            TACTICAL_FORMAT, TACTICAL_STRUCTURED_FORMAT, TACTICAL_RELATIONAL_FORMAT
+            TACTICAL_FORMAT, TACTICAL_STRUCTURED_FORMAT, TACTICAL_RELATIONAL_FORMAT,
+            TACTICAL_DAMAGE_FORMAT, TACTICAL_RESOURCES_FORMAT,
+            TACTICAL_INSTANCES_FORMAT,
+            TACTICAL_ATTENTION_FORMAT, POOLED_OBJECT_FORMAT,
+            RELATIONAL_OBJECT_FORMAT,
         ):
             raise ValueError("Combat head must use target-aware tactical format")
         if (self.strategy.dimension, self.strategy.hidden) != (
@@ -58,8 +83,36 @@ class PhaseSplitNeuralModel:
     def evaluate(
         self, observation: Observation, legal_actions: Sequence[LegalAction]
     ) -> PolicyValueEstimate:
-        model = self.combat if observation_phase(observation) == "combat" else self.strategy
-        return model.evaluate(observation, legal_actions)
+        if observation_phase(observation) != "combat":
+            return self.strategy.evaluate(observation, legal_actions)
+        # Native Overgrowth publishes the actual draw-pile COUNT but does not
+        # reveal individual card identities, and may omit relic-counter arrays.
+        # v7/v8/v13 tactical encoders require explicit public array fields.
+        # Reuse the audited count-only projection from the semantic P0 bridge:
+        # keep the real count and mark identities/counters UNKNOWN, never
+        # manufacture cards or expose private draw order. Older complete
+        # public observations remain unchanged.
+        frame = json.loads(observation.payload_json)
+        combat = frame.get("combat")
+        if (
+            self.combat.format_id in (
+                TACTICAL_RESOURCES_FORMAT,
+                TACTICAL_INSTANCES_FORMAT,
+                TACTICAL_ATTENTION_FORMAT,
+            )
+            and isinstance(combat, dict)
+            and type(combat.get("draw_pile_count")) is int
+            and not isinstance(combat.get("draw_pile"), list)
+        ):
+            from sts2_ai.nature.protocol import canonical_sha256
+
+            projected = project_public_p0_observation(frame)
+            observation = Observation(
+                observation.policy_id,
+                json.dumps(projected, sort_keys=True, separators=(",", ":")),
+                canonical_sha256(projected),
+            )
+        return self.combat.evaluate(observation, legal_actions)
 
     def to_dict(self) -> dict[str, Any]:
         payload = {
@@ -84,7 +137,13 @@ class PhaseSplitNeuralModel:
             raise ValueError("Invalid phase-split model id")
         return cls(
             NeuralPolicyValueModel.from_dict(raw["strategy"]),
-            NeuralPolicyValueModel.from_dict(raw["combat"]),
+            (
+                PortablePooledObjectModel.from_dict(raw["combat"])
+                if raw["combat"].get("format") == POOLED_OBJECT_FORMAT
+                else PortableRelationalObjectModel.from_dict(raw["combat"])
+                if raw["combat"].get("format") == RELATIONAL_OBJECT_FORMAT
+                else NeuralPolicyValueModel.from_dict(raw["combat"])
+            ),
             model_id,
             combat_value_objective=str(raw.get("combat_value_objective", "continuation")),
         )

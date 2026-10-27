@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import hashlib
 import math
-from collections import Counter
+from collections import Counter, defaultdict
+from collections.abc import MutableMapping
 from typing import Any
 
 TACTICAL_STATE_SCHEMA = "sts2-tactical-public-state-v4"
 NUMERIC_COORDINATES = 32
 RELATIONAL_NUMERIC_COORDINATES = 36
 RELATIONAL_TACTICAL_STATE_SCHEMA = "sts2-tactical-public-state-v5-relational"
+DAMAGE_NUMERIC_COORDINATES = 40
+DAMAGE_TACTICAL_STATE_SCHEMA = "sts2-tactical-public-state-v6-base-and-modified-damage"
 
 
 def _number(value: object) -> float:
@@ -46,6 +49,7 @@ def _add_tokens(
 def tactical_state_features(
     state: dict[str, Any], dimension: int, *,
     relational: bool = False,
+    damage_aware: bool = False,
 ) -> dict[int, float]:
     """Encode visible tactical state, optionally preserving enemy/intent binding.
 
@@ -53,7 +57,10 @@ def tactical_state_features(
     relational enemy tokens and optional player-visible damage/hit numerics.
     Nothing is inferred from game content, private RNG, or future moves.
     """
+    if damage_aware and not relational:
+        raise ValueError("Damage-aware tactical features require relational encoding")
     reserved = (
+        DAMAGE_NUMERIC_COORDINATES if damage_aware else
         RELATIONAL_NUMERIC_COORDINATES if relational else NUMERIC_COORDINATES
     )
     if dimension <= reserved:
@@ -120,6 +127,7 @@ def tactical_state_features(
         # intent_damage denotes visible per-hit damage; intent_hits denotes
         # visible hit count, with a single hit as the fallback.
         public_attacks: list[tuple[float, float]] = []
+        base_attacks: list[tuple[float, float, float]] = []
         for enemy in enemies:
             if not isinstance(enemy.get("move_id"), str):
                 continue  # A hidden/unknown intent must stay hidden.
@@ -132,6 +140,12 @@ def tactical_state_features(
                 or raw_damage < 0
             ):
                 continue
+            valid_hits = (
+                isinstance(raw_hits, int) and not isinstance(raw_hits, bool)
+                and 1 <= raw_hits <= 100
+            )
+            if damage_aware and not valid_hits:
+                continue  # v6 does not infer a missing or invalid hit count.
             hits = (
                 float(raw_hits)
                 if isinstance(raw_hits, int) and not isinstance(raw_hits, bool)
@@ -139,12 +153,30 @@ def tactical_state_features(
                 else 1.0
             )
             public_attacks.append((float(raw_damage), hits))
+            if damage_aware:
+                raw_base = enemy.get("intent_base_damage")
+                if (
+                    isinstance(raw_base, (int, float))
+                    and not isinstance(raw_base, bool)
+                    and math.isfinite(raw_base)
+                    and raw_base >= 0
+                ):
+                    base_attacks.append((float(raw_base), float(raw_damage), hits))
         values.extend([
             sum(d * h for d, h in public_attacks) / 100.0,
             max((d * h for d, h in public_attacks), default=0.0) / 100.0,
             sum(h for _, h in public_attacks) / 10.0,
             len(public_attacks) / 5.0,
         ])
+        if damage_aware:
+            values.extend([
+                sum(base * hits for base, _, hits in base_attacks) / 100.0,
+                max((base * hits for base, _, hits in base_attacks), default=0.0)
+                / 100.0,
+                sum((modified - base) * hits for base, modified, hits in base_attacks)
+                / 100.0,
+                len(base_attacks) / 5.0,
+            ])
     features = {
         i: min(8.0, max(-8.0, value))
         for i, value in enumerate(values) if value != 0.0
@@ -183,6 +215,28 @@ def tactical_state_features(
             block_value = _number(enemy.get("block"))
             tokens[f"relation:{prefix}|hp10={max(0, int(hp_value)) // 10}"] += 1
             tokens[f"relation:{prefix}|block10={max(0, int(block_value)) // 10}"] += 1
+            if damage_aware and isinstance(move_id, str) and move_id:
+                raw_base = enemy.get("intent_base_damage")
+                modified = enemy.get("intent_damage")
+                relation_hits = enemy.get("intent_hits")
+                if (
+                    isinstance(raw_base, (int, float))
+                    and not isinstance(raw_base, bool)
+                    and math.isfinite(raw_base) and raw_base >= 0
+                    and isinstance(modified, (int, float))
+                    and not isinstance(modified, bool)
+                    and math.isfinite(modified) and modified >= 0
+                    and isinstance(relation_hits, int)
+                    and not isinstance(relation_hits, bool)
+                    and 1 <= relation_hits <= 100
+                ):
+                    # Bind the *same enemy* to both threat values and hit
+                    # count; a global sum would lose attack attribution.
+                    threat = (
+                        f"base5={int(raw_base) // 5}|modified5={int(modified) // 5}"
+                        f"|hits={relation_hits}"
+                    )
+                    tokens[f"relation:{prefix}|{threat}"] += 1
             # Powers/statuses must remain associated with their owner.
             for power in _objects(enemy.get("powers")):
                 power_id = power.get("power_id")
@@ -199,7 +253,8 @@ def tactical_state_features(
         tokens[f"boss:{boss}"] += 1
     for token, count in tokens.items():
         digest = hashlib.sha256(
-            (("tactical-state-v5:" if relational else "tactical-state-v4:")
+            (("tactical-state-v6:" if damage_aware else
+              "tactical-state-v5:" if relational else "tactical-state-v4:")
              + token).encode("utf-8")
         ).digest()
         index = reserved + (
@@ -216,3 +271,161 @@ def relational_tactical_state_features(
 ) -> dict[int, float]:
     """v5 public-only features retaining each enemy's announced move."""
     return tactical_state_features(state, dimension, relational=True)
+
+
+def damage_tactical_state_features(
+    state: dict[str, Any], dimension: int,
+) -> dict[int, float]:
+    """v6 relational enemy intents with displayed base and current damage."""
+    return tactical_state_features(
+        state, dimension, relational=True, damage_aware=True
+    )
+
+
+# v7 adds player-visible inventories and exact modifier quantities. Legacy v4-v6
+# hash schemas remain bit-for-bit unchanged for existing trained models.
+PUBLIC_RESOURCES_TACTICAL_STATE_SCHEMA = "sts2-tactical-public-state-v7-resources"
+
+
+def _visible_resource_tokens(
+    result: MutableMapping[str, float], prefix: str,
+    value: object, *, depth: int = 0,
+) -> None:
+    """Flatten public item-local metadata, never transient instance identifiers."""
+    if depth > 3:
+        return
+    if isinstance(value, dict):
+        for key in sorted(value):
+            if key in ("instance_id", "persistent_card_instance_id"):
+                continue
+            _visible_resource_tokens(
+                result, f"{prefix}|{key}", value[key], depth=depth + 1,
+            )
+    elif isinstance(value, list):
+        result[f"{prefix}|length={len(value)}"] += 1
+        for item in value:
+            _visible_resource_tokens(result, prefix + "|item", item, depth=depth + 1)
+    elif isinstance(value, bool):
+        result[f"{prefix}|value={str(value).lower()}"] += 1
+    elif isinstance(value, str):
+        result[f"{prefix}|value={value}"] += 1
+    elif isinstance(value, (int, float)) and math.isfinite(float(value)):
+        result[f"{prefix}|number={value}"] += 1
+
+
+def public_resources_tactical_state_features(
+    state: dict[str, Any], dimension: int,
+) -> dict[int, float]:
+    """v7: use public unordered draw pile, relic progress and exact power stacks.
+
+    The base v6 coordinates remain defined but categorical features are
+    deliberately extended under a distinct model format. Do not reuse v6
+    state weights under this format without an explicit migration.
+    """
+    features = damage_tactical_state_features(state, dimension)
+    combat = state.get("combat")
+    if not isinstance(combat, dict):
+        raise ValueError("Resource encoder requires a public combat frame")
+    draw_pile = combat.get("draw_pile")
+    relic_counters = combat.get("relic_counters")
+    if not isinstance(draw_pile, list) or not isinstance(relic_counters, list):
+        raise ValueError("Resource encoder requires visible draw_pile and relic_counters")
+    visible_count = combat.get("draw_pile_count")
+    # The selected P0 semantic Nature fixture exposes only the public NUMBER
+    # of unobserved draw-pile cards. Its fair projection intentionally does
+    # not invent identities for the old model's known-card list.
+    opaque_p0 = (
+        state.get("p0_public_projection")
+        == "sts2-ai-p0-public-count-piles-v1"
+        and combat.get("draw_pile_opaque") is True
+    )
+    if opaque_p0 and draw_pile:
+        raise ValueError("Opaque public P0 draw pile must not contain card identities")
+    if (
+        isinstance(visible_count, int) and not isinstance(visible_count, bool)
+        and len(draw_pile) != visible_count and not opaque_p0
+    ):
+        raise ValueError("Draw-pile count disagrees with public draw-pile contents")
+
+    tokens: defaultdict[str, float] = defaultdict(float)
+
+    # Multisets are invariant under rearrangement of the observed arrays.
+    for zone in ("draw_pile", "discard_pile", "exhaust_pile", "hand"):
+        for card in _objects(combat.get(zone)):
+            card_id = card.get("card_id")
+            if not isinstance(card_id, str) or not card_id:
+                continue
+            prefix = f"zone={zone}|card={card_id}"
+            tokens[prefix] += 1
+            level = card.get("upgrade_level", 0)
+            if isinstance(level, int) and not isinstance(level, bool):
+                tokens[f"{prefix}|upgrade={level}"] += 1
+            if card.get("is_temporary") is True:
+                tokens[f"{prefix}|temporary"] += 1
+            for field in ("affliction", "state"):
+                metadata = card.get(field)
+                if metadata is not None:
+                    _visible_resource_tokens(tokens, f"{prefix}|{field}", metadata)
+
+    for relic in _objects(state.get("relics")):
+        relic_id = relic.get("relic_id")
+        if isinstance(relic_id, str) and relic_id:
+            _visible_resource_tokens(
+                tokens, f"relic={relic_id}|state", relic.get("state"),
+            )
+
+    def stacks(prefix: str, amount: object) -> None:
+        if not isinstance(amount, (int, float)) or isinstance(amount, bool):
+            return
+        if not math.isfinite(amount):
+            return
+        # Exact tokens distinguish stack counts; named magnitude features
+        # also generalize between nearby values and beyond training ranges.
+        tokens[f"{prefix}|stacks={amount}"] += 1
+        tokens[f"{prefix}|magnitude"] += max(-8.0, min(8.0, float(amount) / 5.0))
+
+    for power in _objects(combat.get("player_powers")):
+        power_id = power.get("power_id")
+        if isinstance(power_id, str):
+            stacks(f"player|power={power_id}", power.get("stacks"))
+
+    for enemy in _objects(combat.get("enemies")):
+        enemy_id = enemy.get("enemy_id")
+        if not isinstance(enemy_id, str):
+            continue
+        move = enemy.get("move_id")
+        hp_bin = max(0, int(_number(enemy.get("hp")))) // 10
+        block_bin = max(0, int(_number(enemy.get("block")))) // 10
+        owner = (
+            f"enemy={enemy_id}|move={move if isinstance(move, str) else 'unknown'}"
+            f"|hp10={hp_bin}|block10={block_bin}"
+        )
+        # Associate stacks with their specific enemy state, not a global bag.
+        for power in _objects(enemy.get("powers")):
+            power_id = power.get("power_id")
+            if isinstance(power_id, str):
+                stacks(f"{owner}|power={power_id}", power.get("stacks"))
+        statuses = enemy.get("statuses")
+        if isinstance(statuses, dict):
+            for status_id, count in statuses.items():
+                if isinstance(status_id, str):
+                    stacks(f"{owner}|status={status_id}", count)
+
+    for relic_counter in _objects(relic_counters):
+        relic_id = relic_counter.get("relic_id")
+        counts = relic_counter.get("trigger_counts")
+        if not isinstance(relic_id, str) or not isinstance(counts, list):
+            raise ValueError("Malformed public relic counter")
+        for trigger_index, value in enumerate(counts):
+            stacks(f"relic={relic_id}|trigger={trigger_index}", value)
+
+    # The v7-specific tokens occupy only the existing categorical region;
+    # scalar v6 coordinates (health, energy, visible attack damage) survive.
+    reserved = DAMAGE_NUMERIC_COORDINATES
+    for token, weight in sorted(tokens.items()):
+        digest = hashlib.sha256(("tactical-state-v7:" + token).encode()).digest()
+        index = reserved + int.from_bytes(digest[:8], "big") % (dimension - reserved)
+        features[index] = max(
+            -8.0, min(8.0, features.get(index, 0.0) + max(-8.0, min(8.0, weight / 8.0)))
+        )
+    return features

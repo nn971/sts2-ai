@@ -1,0 +1,86 @@
+name: nature-h3-reference-importance-ppo
+
+on:
+  push:
+    paths:
+      - 'src/sts2_ai/nature/joint_player_ppo.py'
+      - 'src/sts2_ai/nature/reference_importance.py'
+      - 'src/sts2_ai/nature/draw_only_p0.py'
+      - 'src/sts2_ai/nature/draw_only_episode.py'
+      - 'src/sts2_ai/training/phase_split_ppo_batch.py'
+      - 'src/sts2_ai/nature/draw_only_workers.py'
+      - 'tools/train_joint_player_nature_h3.py'
+      - 'tests/test_nature_h3_joint_player.py'
+      - 'tests/test_nature_h3_reference_importance.py'
+      - '.github/workflows/nature-h3-joint-ppo.yml'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  joint-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ai
+          submodules: false
+      - uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: c254bd99816ac2b89b350ec132fe1cfbb27dfac6
+          path: emulator
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Install training dependencies
+        working-directory: ai
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e '.[dev]'
+      - name: Lint and unit regression
+        working-directory: ai
+        run: |
+          python -m ruff check src/sts2_ai/nature/joint_player_ppo.py src/sts2_ai/nature/reference_importance.py src/sts2_ai/nature/draw_only_p0.py src/sts2_ai/nature/draw_only_episode.py src/sts2_ai/nature/draw_only_workers.py src/sts2_ai/training/phase_split_ppo_batch.py tools/train_joint_player_nature_h3.py tests/test_nature_h3_joint_player.py tests/test_nature_h3_reference_importance.py
+          python -m pytest -q tests/test_nature_h3_joint_player.py tests/test_nature_h3_reference_importance.py tests/test_nature_ppo_draw.py tests/test_nature_h2_challenge_profiles.py tests/test_phase_split_ppo_batch.py
+      - name: Build pinned emulator
+        working-directory: emulator
+        run: |
+          dotnet restore Sts2Emulator.sln
+          dotnet build Sts2Emulator.sln -c Release --no-restore
+      - name: Actual A10 shared-cohort PPO and two-arm replay
+        working-directory: ai
+        run: |
+          python - <<'PY'
+          import json, sys
+          sys.path.insert(0, 'tests')
+          from test_nature_h3_joint_player import specimen
+          with open('ci-v8-player.json', 'w') as f:
+              json.dump(specimen().to_dict(), f)
+          PY
+          python -u tools/train_joint_player_nature_h3.py \
+            --player-model ci-v8-player.json \
+            --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings ../emulator/bindings/python \
+            --emulator-revision c254bd99816ac2b89b350ec132fe1cfbb27dfac6 \
+            --output-root ci-h3-joint --workers 4 --player-target reference-is \
+            --rounds 1 --episodes-per-round 12 --eval-every 1 --eval-episodes 12 \
+            --execute
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          d=json.loads(Path('ci-h3-joint/progress.json').read_text())
+          assert len(d['rows'])==1
+          m=d['rows'][0]
+          assert m['reference_training_combats']==3
+          assert m['player_is_fraction_reference']==0.25
+          assert m['player_is_effective_samples']>0
+          assert m['learned_nature_training_combats']==9
+          assert m['player_ppo_steps']>0 and m['nature_optimizer_steps']>0
+          assert m['holdout']['eval_source_count']==12
+          assert Path('ci-h3-joint/joint-checkpoint.pt').exists()
+          print('H3 real-combat joint PPO PASS')
+          PY

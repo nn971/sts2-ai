@@ -1,0 +1,85 @@
+name: nature-p0-real-combat
+
+on:
+  push:
+    paths:
+      - 'src/sts2_ai/emulator/semantic_p0_combat.py'
+      - 'src/sts2_ai/emulator/semantic_p0_frozen_player.py'
+      - 'tests/test_nature_frozen_p0_player.py'
+      - 'tools/make_nature_p0_test_model.py'
+      - 'src/sts2_ai/nature/real_combat_workers.py'
+      - 'tools/try_nature_real_combat.py'
+      - 'tests/test_nature_real_p0.py'
+      - '.github/workflows/nature-p0-real-combat.yml'
+  pull_request:
+    paths:
+      - 'src/sts2_ai/emulator/semantic_p0_combat.py'
+      - 'src/sts2_ai/emulator/semantic_p0_frozen_player.py'
+      - 'tests/test_nature_frozen_p0_player.py'
+      - 'tools/make_nature_p0_test_model.py'
+      - 'src/sts2_ai/nature/real_combat_workers.py'
+      - 'tools/try_nature_real_combat.py'
+      - 'tests/test_nature_real_p0.py'
+      - '.github/workflows/nature-p0-real-combat.yml'
+  workflow_dispatch:
+
+jobs:
+  pinned-p0-emulator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ai
+      - uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: 22e6114db7c58990163892e28ce23abd2fa03024
+          path: emulator
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install AI tests and lint
+        working-directory: ai
+        run: python -m pip install -e '.[dev]'
+      - name: Validate P0 Python contract
+        working-directory: ai
+        run: |
+          python -m ruff check src/sts2_ai/emulator/semantic_p0_combat.py src/sts2_ai/emulator/semantic_p0_frozen_player.py src/sts2_ai/nature/real_combat_workers.py tools/try_nature_real_combat.py tools/make_nature_p0_test_model.py tests/test_nature_real_p0.py tests/test_nature_frozen_p0_player.py
+          python -m pytest -q tests/test_nature_real_p0.py tests/test_nature_frozen_p0_player.py
+      - name: Build pinned original-combat mechanics
+        working-directory: emulator
+        run: |
+          dotnet restore Sts2Emulator.sln
+          dotnet build Sts2Emulator.sln -c Release --no-restore
+      - name: Real source-pinned Silent end-to-end semantic Nature rollouts
+        working-directory: ai
+        run: >-
+          python -u tools/try_nature_real_combat.py
+          --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll
+          --emulator-bindings ../emulator/bindings/python
+          --emulator-revision 22e6114db7c58990163892e28ce23abd2fa03024
+          --mode rollout --episodes 15 --workers 15
+          --seed 29 --output /tmp/nature-p0-15-real.json
+      - name: Portable frozen v15-shaped player inference on real C# combat
+        working-directory: ai
+        run: |
+          python -u tools/make_nature_p0_test_model.py --output /tmp/nature-p0-untrained-model.json
+          python -u tools/try_nature_real_combat.py \
+            --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings ../emulator/bindings/python \
+            --emulator-revision 22e6114db7c58990163892e28ce23abd2fa03024 \
+            --player-model /tmp/nature-p0-untrained-model.json \
+            --mode rollout --episodes 4 --workers 4 \
+            --seed 29 --output /tmp/nature-p0-untrained-player-bridge.json
+      - name: Tiny real Nature optimizer direction smoke (NOT feature-value evidence)
+        working-directory: ai
+        run: >-
+          python -u tools/try_nature_real_combat.py
+          --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll
+          --emulator-bindings ../emulator/bindings/python
+          --emulator-revision 22e6114db7c58990163892e28ce23abd2fa03024
+          --mode nature-smoke --rounds 2 --episodes 4
+          --workers 4 --seed 29 --output /tmp/nature-p0-learn-smoke.json

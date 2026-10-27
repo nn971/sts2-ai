@@ -19,6 +19,11 @@ ENVIRONMENTS = (NATIVE_OVERGROWTH, LEGACY)
 # Versioned native Overgrowth public bridge contract.
 NATIVE_RESET_SCHEMA = "prototype-native-overgrowth-reset-v1"
 NATIVE_MAP_PROFILE = "native-overgrowth-map-structure-v0.111.0-v1"
+# The pinned native context-stream map generator advertises a new, explicit
+# version. Both are real 16-floor Overgrowth maps; neither permits the
+# six-floor prototype to masquerade as a native run.
+NATIVE_MAP_PROFILE_CONTEXT = "native-overgrowth-map-native-rng-v0.111.0-v1"
+NATIVE_MAP_PROFILES = frozenset((NATIVE_MAP_PROFILE, NATIVE_MAP_PROFILE_CONTEXT))
 
 
 def require_environment(backend: EmulatorBackend, environment: str) -> None:
@@ -39,8 +44,10 @@ def require_environment(backend: EmulatorBackend, environment: str) -> None:
         )
 
 
-def validate_native_start(observation: Observation) -> None:
-    """Verify visible evidence of real native-shaped initialization."""
+def validate_native_start(observation: Observation, ascension: int = 0) -> None:
+    """Verify native opening including the A5+ starter-curse replacement."""
+    if type(ascension) is not int or not 0 <= ascension <= 10:
+        raise ValueError("Native opening ascension must be between 0 and 10")
     from .jsonl_backend import JsonlBridgeError
 
     raw = json.loads(observation.payload_json)
@@ -48,8 +55,12 @@ def validate_native_start(observation: Observation) -> None:
         raise JsonlBridgeError("Native Overgrowth reset gave malformed public observation")
     map_nodes = raw.get("map")
     deck = raw.get("deck")
+    required_curse = (
+        "proto.curse.ascenders_bane" if ascension >= 5
+        else "proto.common.restlessness"
+    )
     if (
-        raw.get("map_generation_profile_id") != NATIVE_MAP_PROFILE
+        raw.get("map_generation_profile_id") not in NATIVE_MAP_PROFILES
         or raw.get("act") != 1
         or raw.get("floor") != 0
         or raw.get("event_id") != "proto.native.event.neow"
@@ -57,7 +68,7 @@ def validate_native_start(observation: Observation) -> None:
         or 16 not in [node.get("floor") for node in map_nodes if isinstance(node, dict)]
         or not isinstance(deck, list)
         or sum(
-            card.get("card_id") == "proto.common.restlessness"
+            card.get("card_id") == required_curse
             for card in deck if isinstance(card, dict)
         ) != 1
         or len(deck) != 13
@@ -65,7 +76,7 @@ def validate_native_start(observation: Observation) -> None:
         raise JsonlBridgeError(
             "Native Overgrowth reset failed public checks: expected Act 1 "
             "16-floor map, Neow opening event and 13-card Silent deck with "
-            "Restlessness. Refusing to train on a substituted prototype."
+            f"{required_curse}. Refusing to train on a substituted prototype."
         )
 
 
@@ -84,7 +95,8 @@ def reset_training_run(
     state = native_reset(seed, ascension)
     try:
         validate_native_start(
-            backend.observe(state, InformationPolicy("prototype-fair-v0"))
+            backend.observe(state, InformationPolicy("prototype-fair-v0")),
+            ascension=ascension,
         )
     except BaseException:
         backend.release_many([state])
