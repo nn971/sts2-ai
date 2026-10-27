@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import random
 import statistics
+from typing import Any
 
 from sts2_ai.nature.combat_scenarios import (
     SCENARIOS,
@@ -46,7 +47,7 @@ def balanced_h2_source_seeds(
         configuration_key(scenario, deck): 0
         for scenario in scenario_pool for deck in deck_pool
     }
-    chosen = []
+    chosen: list[str] = []
     index = 0
     while len(chosen) < count:
         seed = f"nature-h2-v8-{split}-{index:08d}"
@@ -89,7 +90,7 @@ def balanced_h2_training_source_seeds(
     for i in range(extra):
         quota[cells[(round_index * extra + i) % len(cells)]] += 1
 
-    selected = []
+    selected: list[str] = []
     accepted = dict.fromkeys(cells, 0)
     probe = 0
     while len(selected) < count:
@@ -109,7 +110,7 @@ def balanced_h2_training_source_seeds(
 
 
 def reference_by_configuration(
-    cohorts: list[tuple], *, bootstrap_seed: int = 61673,
+    cohorts: list[tuple[Any, ...]], *, bootstrap_seed: int = 61673,
 ) -> dict[str, dict]:
     """Summarize exact replayed reference combats by joint enemy/deck cell.
 
