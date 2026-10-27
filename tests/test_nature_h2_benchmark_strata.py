@@ -8,10 +8,7 @@ import pytest
 from test_nature_draw_only_h1 import episode
 from test_nature_h1_frozen_model_reuse import Episode
 
-from sts2_ai.nature.combat_scenarios import (
-    deck_for_seed,
-    scenario_for_seed,
-)
+from sts2_ai.nature.combat_scenarios import deck_for_seed, scenario_for_seed
 from sts2_ai.nature.h2_benchmark import (
     balanced_h2_source_seeds,
     balanced_h2_training_source_seeds,
