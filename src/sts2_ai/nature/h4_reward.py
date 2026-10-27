@@ -6,6 +6,8 @@ then normalized survivor HP or damage to the original enemy formation.
 """
 from __future__ import annotations
 
+from typing import Any
+
 H4_REWARD = "boss_progress_v2"
 
 
@@ -40,7 +42,7 @@ def boss_progress_score(
     return max(0.0, 1.0 - terminal_enemy_hp / opening_enemy_hp)
 
 
-def opening_enemy_health(observation: dict) -> int:
+def opening_enemy_health(observation: dict[str, Any]) -> int:
     """Read visible opening enemy HP from the first fair player observation."""
     combat = observation.get("combat")
     if not isinstance(combat, dict):
