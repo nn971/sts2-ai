@@ -75,6 +75,8 @@ def _shard(
     mode: str, max_boundaries: int, replay_every: int,
     reference_seed: int, capture_player_training: bool = False,
     chance_sampling: str = "event-law",
+    replay_indices: frozenset[int] | None = None,
+    audit_mechanics: bool = True,
 ) -> list[dict[str, Any]]:
     sys.path.insert(0, bindings)
     from sts2_emulator import Session
@@ -245,18 +247,29 @@ def _shard(
                     elif state["kind"] == "player_choice":
                         status = "max_boundaries_player_choice"
                 execute_elapsed = time.perf_counter() - began
-                # Canonical hash is an explicit audit, never an inner step.
-                final_sha = session.call(
-                    "h8_audit_state_fingerprint",
-                    h8_handle=handle,
-                )["fingerprint"]
-                history = session.call(
-                    "h8_decision_history",
-                    h8_handle=handle,
-                )["decisions"]
-                if len(history) != len(transcript):
+                # Training keeps the actual terminal and sampled replay
+                # checks, but skips full mechanics serialization / journal
+                # materialization on every unsampled source. The paired
+                # research benchmark still opts in to complete auditing.
+                audited = (index % replay_every == 0
+                           if replay_indices is None else
+                           index in replay_indices)
+                full_audit = audit_mechanics or audited
+                final_sha = (
+                    session.call(
+                        "h8_audit_state_fingerprint",
+                        h8_handle=handle,
+                    )["fingerprint"] if full_audit else None
+                )
+                history = (
+                    session.call(
+                        "h8_decision_history",
+                        h8_handle=handle,
+                    )["decisions"] if full_audit else None
+                )
+                if ((history is not None and len(history) != len(transcript))
+                        or state["decisionCount"] != len(transcript)):
                     raise RuntimeError("H8 player/Nature history count mismatch")
-                audited = index % replay_every == 0
                 if audited and not session.call(
                     "h8_replay_audit", h8_handle=handle
                 )["replayVerified"]:
@@ -315,7 +328,8 @@ def _shard(
                     nature_draws=counts["draw_card"],
                     intents=counts["enemy_intent"],
                     trace_digest=canonical_sha256(transcript),
-                    journal_digest=canonical_sha256(history),
+                    journal_digest=(canonical_sha256(history)
+                                    if history is not None else None),
                     reference_law_steps=[
                         {"event_id": event_id, "law_id": law_id,
                          "selected_id": outcome_id}
@@ -347,6 +361,8 @@ def _worker_main(
     reference_seed: int, results: Any,
     capture_player_training: bool = False,
     chance_sampling: str = "event-law",
+    replay_indices: frozenset[int] | None = None,
+    audit_mechanics: bool = True,
 ) -> None:
     # Queue handles cross the process boundary *only at spawn*, never
     # inside a ProcessPoolExecutor task queue. Keep one emulator process
@@ -356,7 +372,7 @@ def _worker_main(
         rows = _shard(
             shard, dll, bindings, mode, max_boundaries,
             replay_every, reference_seed, capture_player_training,
-            chance_sampling)
+            chance_sampling, replay_indices, audit_mechanics)
         results.put(("ok", rows))
     except BaseException:
         results.put(("error", traceback.format_exc()))
@@ -368,7 +384,14 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
             actor_delay_ms: float, max_boundaries: int,
             replay_every: int, reference_seed: int,
             capture_player_training: bool = False,
-            chance_sampling: str = "event-law") -> dict[str, Any]:
+            chance_sampling: str = "event-law",
+            replay_indices: frozenset[int] | None = None,
+            audit_mechanics: bool = True) -> dict[str, Any]:
+    if (replay_indices is not None and
+            (not replay_indices or
+             any(type(i) is not int or i < 0 or i >= len(seeds)
+                 for i in replay_indices))):
+        raise ValueError("Invalid H8 preselected terminal replay indices")
     indexed = list(enumerate(seeds))
     shards = [indexed[i::workers] for i in range(min(workers, len(seeds)))]
     began = time.perf_counter()
@@ -385,7 +408,8 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
                 target=_worker_main,
                 args=(server.transport, spec, shard, dll, bindings,
                       mode, max_boundaries, replay_every, reference_seed,
-                      results, capture_player_training, chance_sampling),
+                      results, capture_player_training, chance_sampling,
+                      replay_indices, audit_mechanics),
             )
             for shard in shards
         ]
