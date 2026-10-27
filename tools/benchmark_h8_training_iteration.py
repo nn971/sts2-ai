@@ -20,7 +20,12 @@ from typing import Any
 
 import torch
 
-from benchmark_h8_h7_policy_pilot import _cohort
+try:
+    from benchmark_h8_h7_policy_pilot import _cohort
+except ModuleNotFoundError as exc:
+    if exc.name != "benchmark_h8_h7_policy_pilot":
+        raise
+    from tools.benchmark_h8_h7_policy_pilot import _cohort
 from sts2_ai.models.h7_public_policy import H7PlayerSpec
 from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
 from sts2_ai.nature.draw_only_workers import draw_only_batch
