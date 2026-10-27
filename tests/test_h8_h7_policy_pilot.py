@@ -45,6 +45,11 @@ def test_h8_pilot_rejects_same_choices_but_different_mechanics():
         "player_decisions": 1, "nature_draws": 1, "intents": 1,
         "trace_digest": "same", "journal_digest": "same",
         "mechanics_sha256": "aaa",
+        "outcome": "victory", "exit_hp": 66, "terminal_enemy_hp": None,
+        "score": 1.9, "player_steps": [], "chance_steps": [],
+        "decision_sequence": [], "reference_law_steps": [],
+        "reference_event_digest": "identical",
+        "captured_player_decisions": 0, "behavior_digest": None,
     }
     left = {"source_digest": "x", "trajectories": {"a": row}}
     _validate_pair(left, left)
