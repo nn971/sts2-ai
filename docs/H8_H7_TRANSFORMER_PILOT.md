@@ -88,6 +88,21 @@ the **same actual H7 model** rather than creating deterministic fresh
 random weights; in either case the whole A/B/B/A run has an unchanged
 frozen model and source cohort.
 
+For a separate, strict **full legacy H7 versus native H8** terminal
+comparison, add `--compare-h7-legacy` to the command. This will run the
+existing legacy H7 `collect` with the **same frozen checkpoint**, the
+same 16-cell A10 source bank and the exact event-keyed Chance Law. It
+requires every H8 cohort to have reached `terminal` and then compares
+each fight's victory/defeat, exit HP, and **complete terminal pilot SHA**.
+It fails on any divergence rather than dropping an unsupported combat.
+
+To audit compatibility with upcoming PPO on-policy behavior capture,
+add `--capture-player-training`: this uses the existing
+`FrozenP0Player` training records and compares the SHA of every
+source-public observation, legal action list, sampled action,
+behavior log-probability and value across the checked/native H8 arms.
+The pilot captures **records only**; it does not update model weights.
+
 The output's `statuses.terminal` is the number of complete fights,
 whereas `player_choice`, `unsupported`, and `max_boundaries` describe
 nonterminal work; never substitute all 128 source count for completion.
