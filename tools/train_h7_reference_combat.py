@@ -103,6 +103,11 @@ def collect(
         scenario_pool=SCENARIO_POOL, deck_pool=DECK_POOL,
         capture_player_training=capture, reward_version=H4_REWARD,
         progress_every=max(1, len(seeds) // 4),
+        actor_backend=getattr(args, "actor_backend", "local"),
+        actor_device=getattr(args, "actor_device", "cpu"),
+        actor_max_batch=getattr(args, "actor_max_batch", 16),
+        actor_delay_ms=getattr(args, "actor_delay_ms", 3.0),
+        profile_actor=getattr(args, "profile_actor", False),
     )
     episodes = cohort["episodes"]
     if len(episodes) != len(seeds):
@@ -144,6 +149,11 @@ def main() -> None:
     p.add_argument("--ppo-epochs", type=int, default=3)
     p.add_argument("--ppo-minibatch", type=int, default=64)
     p.add_argument("--ppo-sample-limit", type=int, default=4096)
+    p.add_argument("--actor-backend", choices=("local", "shared"), default="local")
+    p.add_argument("--actor-device", default="cpu")
+    p.add_argument("--actor-max-batch", type=int, default=16)
+    p.add_argument("--actor-delay-ms", type=float, default=3.0)
+    p.add_argument("--profile-actor", action="store_true")
     p.add_argument("--resume", action="store_true")
     p.add_argument("--execute", action="store_true")
     args = p.parse_args()
@@ -185,6 +195,10 @@ def main() -> None:
         "temperature": args.temperature,
         "ppo_epochs": args.ppo_epochs, "ppo_minibatch": args.ppo_minibatch,
         "ppo_sample_limit": args.ppo_sample_limit,
+        "actor_backend": args.actor_backend,
+        "actor_device": args.actor_device,
+        "actor_max_batch": args.actor_max_batch,
+        "actor_delay_ms": args.actor_delay_ms,
     }
     fingerprint = canonical_sha256(config)
     print(json.dumps({
@@ -255,6 +269,7 @@ def main() -> None:
             "source_digest": canonical_sha256(seeds),
             "train": summarize(batch["episodes"]),
             "rollout_seconds": batch["elapsed_seconds"],
+            "actor_metrics": batch["actor_metrics"],
             **diagnostics,
         }
         if (index + 1) % args.eval_every == 0 or index + 1 == args.rounds:
