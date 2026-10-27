@@ -1,0 +1,72 @@
+name: h7-combined-emulator-hotpath
+
+on:
+  pull_request:
+    paths:
+      - 'emulator'
+      - 'docs/H7_COMBINED_EMULATOR_HOTPATH.md'
+      - '.github/workflows/h7-combined-emulator-hotpath.yml'
+  workflow_dispatch:
+
+jobs:
+  combined-real-combat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Require exact combined research emulator pin
+        run: |
+          actual=$(git rev-parse HEAD:emulator)
+          test "$actual" = "bfbcc394a2d6f09927d8935b52a3518e1613d934"
+          test "$(git -C emulator rev-parse HEAD)" = "$actual"
+      - name: Build pinned semantic emulator
+        run: |
+          dotnet restore emulator/Sts2Emulator.sln
+          dotnet build emulator/Sts2Emulator.sln -c Release --no-restore -m:1
+      - name: Install CPU Torch and H7 dependencies
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e '.[dev]'
+      - name: Exercise combined performance contract on 32 true A10 combats
+        run: |
+          python -u tools/train_h7_reference_combat.py \
+            --emulator-dll emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings emulator/bindings/python \
+            --emulator-revision bfbcc394a2d6f09927d8935b52a3518e1613d934 \
+            --output-root ci-h7-combined --device cpu \
+            --width 32 --layers 1 --heads 4 --feedforward 64 \
+            --rounds 1 --episodes-per-round 32 --workers 2 \
+            --eval-every 1 --eval-episodes 16 \
+            --ppo-epochs 1 --ppo-minibatch 16 --ppo-sample-limit 64 \
+            --actor-backend shared --actor-device cpu \
+            --actor-max-batch 2 --actor-delay-ms 10 \
+            --train-terminal-replay-every 8 --execute
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          d=json.loads(Path('ci-h7-combined/progress.json').read_text())
+          h=d['history'][0]
+          assert d['config']['emulator_revision'] == 'bfbcc394a2d6f09927d8935b52a3518e1613d934'
+          assert h['train']['combats'] == 32
+          assert h['train']['terminal_replay_verified'] == 16
+          assert h['train']['terminal_replay_not_checked'] == 16
+          assert h['selection']['combats'] == 16
+          assert h['selection']['terminal_replay_verified'] == 16
+          assert h['selection']['terminal_replay_not_checked'] == 0
+          assert h['updates'] > 0
+          assert Path('ci-h7-combined/optimizer-checkpoint.pt').is_file()
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: h7-combined-emulator-diagnostics
+          path: ci-h7-combined/progress.json
+          if-no-files-found: ignore
