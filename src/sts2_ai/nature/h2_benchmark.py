@@ -67,9 +67,10 @@ def balanced_h2_training_source_seeds(
 ) -> tuple[str, ...]:
     """Balanced source-context quota per training round, without outcome filtering.
 
-    Rotate extra slots over the current scenario-by-deck cross product.
-    For six decks and three encounters, 256 episodes span 18 cells with
-    counts 14/15; consecutive rounds rotate which cells get the extras. The namespace includes
+    Rotate extra slots over the caller's scenario-by-deck cross product.
+    The original H2 study uses four decks and three encounters (12 cells,
+    with 21/22 episodes per 256-episode round). Later deck pools are explicit
+    separate experiments, not implicit additions to the H2 protocol. The namespace includes
     the training seed and round for disjoint resumable workers.
     """
     if (type(training_seed) is not int or type(round_index) is not int
