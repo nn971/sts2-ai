@@ -24,7 +24,8 @@ import sys
 import tempfile
 import time
 from collections import Counter
-from concurrent.futures import ProcessPoolExecutor
+import queue
+import traceback
 from contextlib import ExitStack
 from dataclasses import asdict
 from pathlib import Path
@@ -237,6 +238,25 @@ def _shard(
     return rows
 
 
+def _worker_main(
+    transport: Any, spec: H7PlayerSpec,
+    shard: list[tuple[int, str]], dll: str, bindings: str,
+    mode: str, max_boundaries: int, replay_every: int,
+    reference_seed: int, results: Any,
+) -> None:
+    # Queue handles cross the process boundary *only at spawn*, never
+    # inside a ProcessPoolExecutor task queue. Keep one emulator process
+    # alive for the entire shard; return only plain JSON-like results.
+    try:
+        _initialize_h8_actor(transport, spec)
+        rows = _shard(
+            shard, dll, bindings, mode, max_boundaries,
+            replay_every, reference_seed)
+        results.put(("ok", rows))
+    except BaseException:
+        results.put(("error", traceback.format_exc()))
+
+
 def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
             spec: H7PlayerSpec, mode: str, workers: int,
             actor_device: str, actor_max_batch: int,
@@ -252,19 +272,46 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
             workers=len(shards), device=actor_device,
             max_batch=actor_max_batch, max_delay_ms=actor_delay_ms,
         ))
-        pool = stack.enter_context(ProcessPoolExecutor(
-            max_workers=len(shards), mp_context=ctx,
-            initializer=_initialize_h8_actor,
-            initargs=(server.transport, spec),
-        ))
-        futures = [
-            pool.submit(
-                _shard, shard, dll, bindings,
-                mode, max_boundaries, replay_every, reference_seed,
+        results = ctx.Queue(maxsize=len(shards) + 1)
+        processes = [
+            ctx.Process(
+                target=_worker_main,
+                args=(server.transport, spec, shard, dll, bindings,
+                      mode, max_boundaries, replay_every, reference_seed,
+                      results),
             )
             for shard in shards
         ]
-        rows = [x for future in futures for x in future.result()]
+        for process in processes:
+            process.start()
+        rows: list[dict[str, Any]] = []
+        errors = []
+        try:
+            for _ in shards:
+                try:
+                    kind, payload = results.get(timeout=900)
+                except queue.Empty as exc:
+                    status = [(p.pid, p.exitcode) for p in processes]
+                    raise RuntimeError(
+                        f"H8 workers timed out or crashed: {status}") from exc
+                if kind == "ok":
+                    rows.extend(payload)
+                else:
+                    errors.append(str(payload))
+            if errors:
+                raise RuntimeError("H8 worker failure:\\n" +
+                                   "\\n".join(errors))
+        finally:
+            for process in processes:
+                process.join(timeout=10)
+                if process.is_alive():
+                    process.terminate()
+                    process.join(timeout=10)
+            results.close()
+        if any(process.exitcode != 0 for process in processes):
+            raise RuntimeError(
+                "H8 worker process exited abnormally: " +
+                str([(p.pid, p.exitcode) for p in processes]))
     server_stats = dict(server.metrics)
     wall = time.perf_counter() - began
     by_seed = {row["seed"]: row for row in rows}
