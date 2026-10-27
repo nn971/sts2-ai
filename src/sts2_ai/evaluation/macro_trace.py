@@ -198,7 +198,7 @@ class TraceRecorder:
             if action.action_id == choice.action.action_id:
                 selected = i
             score = float(evaluation.action_logits[i])
-            row = {
+            row: dict[str, Any] = {
                 "action_id": action.action_id,
                 "kind": action.kind,
                 "payload": _payload(action),
@@ -543,10 +543,14 @@ def _first_disagreement_table(traces: Sequence[dict[str, Any]],
     aa, bb = keyed(a), keyed(b)
     if aa.keys() != bb.keys():
         return '<p>Menus differ; matched-action scores are not directly comparable.</p>'
-    order = sorted(aa, key=lambda key: max(
-        aa[key][0] if aa[key][0] is not None else -math.inf,
-        bb[key][0] if bb[key][0] is not None else -math.inf,
-    ), reverse=True)
+    def maximum_score(key: tuple[str, str]) -> float:
+        left, right = aa[key][0], bb[key][0]
+        return max(
+            left if left is not None else -math.inf,
+            right if right is not None else -math.inf,
+        )
+
+    order = sorted(aa, key=maximum_score, reverse=True)
     cells = []
     for key in order:
         one, two = aa[key], bb[key]
