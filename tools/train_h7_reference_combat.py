@@ -28,7 +28,13 @@ from sts2_ai.nature.h5_curriculum import (
     SCENARIO_POOL,
     TRAIN_CELLS,
     cell_for_source,
-    source_bank,
+    source_bank as h5_source_bank,
+)
+from sts2_ai.nature.combat_scenarios import BASELINE_DECK
+from sts2_ai.nature.research_combat_fixtures import (
+    audited_corpus,
+    fixture_from_source,
+    source_bank as h8_source_bank,
 )
 from sts2_ai.nature.ppo_draw import PpoDrawNature
 from sts2_ai.nature.protocol import canonical_sha256
@@ -54,7 +60,10 @@ def atomic_torch(path: Path, payload: dict[str, Any]) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def summarize(episodes: tuple[Any, ...]) -> dict[str, Any]:
+def summarize(
+    episodes: tuple[Any, ...], *, curriculum: str = "h5",
+    curriculum_seed: int = 20261027,
+) -> dict[str, Any]:
     def summary(items: list[Any]) -> dict[str, float | int | None]:
         wins = [x for x in items if x.outcome == "victory"]
         defeats = [x for x in items if x.outcome == "defeat"]
@@ -76,10 +85,17 @@ def summarize(episodes: tuple[Any, ...]) -> dict[str, Any]:
         }
     cells: dict[str, list[Any]] = {}
     for ep in episodes:
-        cell = cell_for_source(ep.source_seed)
-        if cell is None:
-            raise ValueError("H7 uncurated combat source")
-        cells.setdefault(cell.key, []).append(ep)
+        if curriculum == "h8":
+            _, fixture, index = fixture_from_source(
+                ep.source_seed, curriculum_seed=curriculum_seed,
+            )
+            key = f"fixture-{index:04d}:{fixture['encounter_id']}"
+        else:
+            cell = cell_for_source(ep.source_seed)
+            if cell is None:
+                raise ValueError("H7 uncurated combat source")
+            key = cell.key
+        cells.setdefault(key, []).append(ep)
     return {
         **summary(list(episodes)),
         "by_cell": {name: summary(items) for name, items in sorted(cells.items())},
@@ -101,6 +117,9 @@ def collect(
         reference_seed=reference_seed, draw_mode="reference",
         workers=args.workers, max_boundaries=args.max_boundaries,
         scenario_pool=SCENARIO_POOL, deck_pool=DECK_POOL,
+        structured_curriculum_seed=(
+            args.curriculum_seed if args.curriculum == "h8" else None
+        ),
         capture_player_training=capture, reward_version=H4_REWARD,
         progress_every=max(1, len(seeds) // 4),
     )
@@ -108,10 +127,19 @@ def collect(
     if len(episodes) != len(seeds):
         raise RuntimeError("H7 source world lost during collection")
     for seed, ep in zip(seeds, episodes, strict=True):
-        cell = cell_for_source(seed)
-        if (cell is None or ep.source_seed != seed
-                or ep.scenario_id != cell.scenario
-                or ep.deck_preset_id != cell.deck
+        if args.curriculum == "h8":
+            chosen, fixture, _ = fixture_from_source(
+                seed, curriculum_seed=args.curriculum_seed,
+            )
+            expected_scenario, expected_deck = chosen.scenario_id, BASELINE_DECK
+        else:
+            cell = cell_for_source(seed)
+            if cell is None:
+                raise RuntimeError("H7 uncurated source cell")
+            expected_scenario, expected_deck = cell.scenario, cell.deck
+        if (ep.source_seed != seed
+                or ep.scenario_id != expected_scenario
+                or ep.deck_preset_id != expected_deck
                 or ep.draw_mode != "reference" or ep.reward_version != H4_REWARD
                 or ep.outcome not in ("victory", "defeat")
                 or not ep.terminal_replay_verified):
@@ -133,6 +161,10 @@ def main() -> None:
     p.add_argument("--eval-every", type=int, default=5)
     p.add_argument("--eval-episodes", type=int, default=160)
     p.add_argument("--study-seed", type=int, default=73127)
+    p.add_argument("--curriculum", choices=("h5", "h8"), default="h5")
+    p.add_argument("--curriculum-seed", type=int, default=20261027)
+    p.add_argument("--train-specs", type=int, default=256)
+    p.add_argument("--heldout-specs", type=int, default=64)
     p.add_argument("--actor-seed", type=int, default=31337)
     p.add_argument("--reference-seed", type=int, default=23387)
     p.add_argument("--width", type=int, default=384)
@@ -150,11 +182,23 @@ def main() -> None:
     if (min(args.rounds, args.episodes_per_round, args.workers,
             args.max_boundaries, args.eval_every, args.ppo_epochs,
             args.ppo_minibatch) < 1 or args.ppo_sample_limit < 2
-            or args.episodes_per_round < len(TRAIN_CELLS)
-            or args.eval_episodes < len(TRAIN_CELLS)
-            or args.eval_episodes % len(TRAIN_CELLS)
+            or (args.curriculum == "h5" and (
+                args.episodes_per_round < len(TRAIN_CELLS)
+                or args.eval_episodes < len(TRAIN_CELLS)
+                or args.eval_episodes % len(TRAIN_CELLS)))
+            or args.curriculum_seed < 0
+            or (args.curriculum == "h8" and (
+                args.train_specs != 256 or args.heldout_specs != 64))
             or args.study_seed < 0):
         p.error("Invalid H7 balanced-source or PPO configuration")
+    if args.curriculum == "h8":
+        # Structural census is cheap and must finish before any GPU/process use.
+        corpus = audited_corpus(
+            args.train_specs + args.heldout_specs,
+            curriculum_seed=args.curriculum_seed,
+        )
+        if len({str(item) for item in corpus}) != len(corpus):
+            p.error("H8 structural fixture duplication detected")
     config_model = H7Config(
         width=args.width, layers=args.layers, heads=args.heads,
         feedforward=args.feedforward,
@@ -175,7 +219,14 @@ def main() -> None:
             else None
         ),
         "chance_law": "reference", "combat_reward": H4_REWARD,
-        "curriculum": "h5-16-train-cells", "training_cells": len(TRAIN_CELLS),
+        "curriculum": (
+            "h8-structured-a10-v1" if args.curriculum == "h8"
+            else "h5-16-train-cells"
+        ),
+        "training_cells": args.train_specs if args.curriculum == "h8"
+                          else len(TRAIN_CELLS),
+        "curriculum_seed": args.curriculum_seed if args.curriculum == "h8" else None,
+        "heldout_specs": args.heldout_specs if args.curriculum == "h8" else None,
         "rounds": args.rounds, "episodes_per_round": args.episodes_per_round,
         "workers": args.workers, "max_boundaries": args.max_boundaries,
         "eval_every": args.eval_every, "eval_episodes": args.eval_episodes,
@@ -236,9 +287,15 @@ def main() -> None:
             snapshot, seed=args.actor_seed, temperature=args.temperature,
             greedy=False,
         )
-        seeds = source_bank(
-            "train", args.episodes_per_round,
-            study_seed=args.study_seed, round_index=index,
+        seeds = (
+            h8_source_bank(
+                "train", args.episodes_per_round, study_seed=args.study_seed,
+                round_index=index,
+            ) if args.curriculum == "h8"
+            else h5_source_bank(
+                "train", args.episodes_per_round,
+                study_seed=args.study_seed, round_index=index,
+            )
         )
         batch = collect(
             seeds, spec=spec, args=args,
@@ -253,7 +310,8 @@ def main() -> None:
         row: dict[str, Any] = {
             "round": index + 1, "behavior_sha256": spec.model_sha256,
             "source_digest": canonical_sha256(seeds),
-            "train": summarize(batch["episodes"]),
+            "train": summarize(batch["episodes"], curriculum=args.curriculum,
+                               curriculum_seed=args.curriculum_seed),
             "rollout_seconds": batch["elapsed_seconds"],
             **diagnostics,
         }
@@ -264,14 +322,20 @@ def main() -> None:
                 selection_model, seed=args.actor_seed,
                 temperature=1.0, greedy=True,
             )
-            eval_seeds = source_bank(
-                "selection", args.eval_episodes, study_seed=args.study_seed,
+            eval_seeds = (
+                h8_source_bank(
+                    "selection", args.eval_episodes, study_seed=args.study_seed,
+                ) if args.curriculum == "h8"
+                else h5_source_bank(
+                    "selection", args.eval_episodes, study_seed=args.study_seed,
+                )
             )
             heldout = collect(
                 eval_seeds, spec=selection, args=args,
                 reference_seed=args.reference_seed + 700000003, capture=False,
             )
-            row["selection"] = summarize(heldout["episodes"])
+            row["selection"] = summarize(heldout["episodes"], curriculum=args.curriculum,
+                                         curriculum_seed=args.curriculum_seed)
             row["selection_digest"] = canonical_sha256(eval_seeds)
         history.append(row)
         atomic_torch(checkpoint, {

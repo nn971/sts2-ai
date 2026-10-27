@@ -11,7 +11,8 @@ from pathlib import Path
 from train_h7_reference_combat import collect, summarize
 
 from sts2_ai.models.h7_public_policy import H7PlayerSpec
-from sts2_ai.nature.h5_curriculum import source_bank
+from sts2_ai.nature.h5_curriculum import source_bank as h5_source_bank
+from sts2_ai.nature.research_combat_fixtures import source_bank as h8_source_bank
 from sts2_ai.nature.protocol import canonical_sha256
 
 SCHEMA = "sts2-h7-independent-reference-combat-evaluation-v1"
@@ -40,6 +41,8 @@ def main() -> None:
     p.add_argument("--split", choices=("confirmation", "zero-shot"), default="confirmation")
     p.add_argument("--runs", type=int, default=160)
     p.add_argument("--study-seed", type=int, default=73127)
+    p.add_argument("--curriculum", choices=("h5", "h8"), default="h5")
+    p.add_argument("--curriculum-seed", type=int, default=20261027)
     p.add_argument("--reference-seed", type=int, default=23387)
     p.add_argument("--actor-seed", type=int, default=31337)
     p.add_argument("--output", type=Path, required=True)
@@ -51,12 +54,20 @@ def main() -> None:
         if not separator or not label or label in entries:
             p.error("--player must use unique label=path")
         entries[label] = Path(path)
-    divisor = 3 if args.split == "zero-shot" else 16
+    divisor = 1 if args.curriculum == "h8" else (
+        3 if args.split == "zero-shot" else 16
+    )
     if args.runs < divisor or args.runs % divisor or args.workers < 1:
-        p.error("H7 evaluation must balance supported cells exactly")
-    seeds = source_bank(args.split, args.runs, study_seed=args.study_seed)
+        p.error("H7 evaluation must balance the selected source curriculum")
+    seeds = (
+        h8_source_bank(args.split, args.runs, study_seed=args.study_seed)
+        if args.curriculum == "h8"
+        else h5_source_bank(args.split, args.runs, study_seed=args.study_seed)
+    )
     config = {
         "schema": SCHEMA, "split": args.split,
+        "curriculum": args.curriculum,
+        "curriculum_seed": args.curriculum_seed if args.curriculum == "h8" else None,
         "source_digest": canonical_sha256(seeds),
         "emulator_revision": args.emulator_revision,
         "models": {name: H7PlayerSpec.from_file(
@@ -76,7 +87,8 @@ def main() -> None:
             reference_seed=args.reference_seed + 900000007,
             capture=False,
         )
-        arms[label] = summarize(result["episodes"])
+        arms[label] = summarize(result["episodes"], curriculum=args.curriculum,
+                                curriculum_seed=args.curriculum_seed)
         scores[label] = [ep.score for ep in result["episodes"]]
         print(
             f"[h7-eval] {label}: wins={arms[label]['wins']}/{args.runs} "
