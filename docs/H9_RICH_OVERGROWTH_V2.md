@@ -50,8 +50,19 @@ formation resolution already used by full-run fidelity: weak Slimes uses its
 three encounter-local RNG calls; normal formations use the native resolver;
 elite and boss fixtures reuse registered fixed source formations including
 named slots and leader references. Original v1 entry behavior remains
-separate. The patch is pushed, but local rerun and complete-combat
-acceptance remain pending. Do not start PPO until the native test passes.
+separate.
+
+The next local run (13/16 passing) exposed two more integration problems:
+the prototype six-floor map has guaranteed Elite nodes on floor 3 rather than
+floor 2, and enemy starting powers had duplicated subscriber application orders
+across multiple enemies. The emulator now uses Elite room identity and
+floor 3 (row 2) for rich fixtures, plus global application-order assignment
+for rich initial enemy powers; the Python source generator has the matching
+elite floor metadata. Opening tests now assert room identity, floor and
+global order uniqueness.
+
+These fixes are pushed, but local rerun and complete-combat acceptance
+remain pending. Do not start PPO until the native test passes.
 
 ## Required acceptance on local checkout
 
