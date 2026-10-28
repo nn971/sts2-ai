@@ -10,6 +10,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import threading
+from copy import deepcopy
 from typing import Any
 
 from sts2_ai.nature.combat_scenarios import SCENARIOS, CombatScenario
@@ -250,50 +252,59 @@ def _rich_roll(curriculum_seed: int, index: int, domain: str, ordinal: int) -> i
     ).digest()[:8], "big")
 
 
-def rich_fixture_for_index(
-    index: int, *, curriculum_seed: int = 20261028,
+# Source indices denote distinct structures, not merely independent RNG labels.
+# Repeated starter-like loadouts get a deterministic replacement in the SAME tier.
+_RICH_SPECS: dict[int, list[dict[str, Any]]] = {}
+_RICH_KEYS: dict[int, set[str]] = {}
+_RICH_LOCK = threading.Lock()
+
+
+def _rich_fixture_candidate(
+    index: int, *, curriculum_seed: int, attempt: int,
 ) -> dict[str, Any]:
-    """Stratified, versioned Overgrowth research mixture; no native frequency claim."""
-    if type(index) is not int or index < 0 or type(curriculum_seed) is not int or curriculum_seed < 0:
-        raise ValueError("Invalid rich research fixture index/seed")
+    draw_index = index if attempt == 0 else index + attempt * 1_000_003
+
+    def roll(domain: str, ordinal: int = 0) -> int:
+        return _rich_roll(curriculum_seed, draw_index, domain, ordinal)
+
     bucket = index % 20
     tier = 0 if bucket < 6 else 1 if bucket < 14 else 2 if bucket < 17 else 3
     pool = RICH_TIERS[tier]
     encounter_id, native_entry, floor, row = pool[
-        _rich_roll(curriculum_seed, index, "encounter", 0) % len(pool)
+        roll("encounter", 0) % len(pool)
     ]
-    mode = _rich_roll(curriculum_seed, index, "deck-mode", 0) % 4
-    archetype = _rich_roll(curriculum_seed, index, "archetype", 0) % len(RICH_ARCHETYPES)
+    mode = roll("deck-mode", 0) % 4
+    archetype = roll("archetype", 0) % len(RICH_ARCHETYPES)
     strikes = 5 - (0, 1, 2, 3)[mode]
     defends = 5 - (0, 0, 1, 2)[mode]
     cards = [("proto.silent.strike", 0)] * strikes + [
         ("proto.silent.defend", 0)
     ] * defends + [("proto.silent.neutralize", 0), ("proto.silent.survivor", 0)]
     amount = (0, 5, 9, 13)[mode] + (
-        _rich_roll(curriculum_seed, index, "deck-size", 0)
+        roll("deck-size", 0)
         % (3, 3, 4, 5)[mode]
     )
     for ordinal in range(amount):
         pool = (RICH_ARCHETYPES[archetype]
-                if _rich_roll(curriculum_seed, index, "archetype-choice", ordinal) % 4
+                if roll("archetype-choice", ordinal) % 4
                 else RICH_ADDITIONS)
-        card_id = pool[_rich_roll(curriculum_seed, index, "card", ordinal) % len(pool)]
-        level = int(_rich_roll(curriculum_seed, index, "upgrade", ordinal) % 4 == 0)
+        card_id = pool[roll("card", ordinal) % len(pool)]
+        level = int(roll("upgrade", ordinal) % 4 == 0)
         cards.append((card_id, level))
     cards.sort()
-    extras = _rich_roll(curriculum_seed, index, "relic-count", 0) % 3
+    extras = roll("relic-count", 0) % 3
     relics = ["proto.relic.silent_ring"]
     if extras:
-        first = _rich_roll(curriculum_seed, index, "relic", 0) % len(RICH_RELICS)
+        first = roll("relic", 0) % len(RICH_RELICS)
         relics.append(RICH_RELICS[first])
     if extras == 2:
-        second = (first + 1 + _rich_roll(curriculum_seed, index, "relic", 1)
+        second = (first + 1 + roll("relic", 1)
                   % (len(RICH_RELICS) - 1)) % len(RICH_RELICS)
         relics.append(RICH_RELICS[second])
     potions: list[str | None] = [None, None]
-    for ordinal in range(_rich_roll(curriculum_seed, index, "potion-count", 0) % 3):
+    for ordinal in range(roll("potion-count", 0) % 3):
         potions[ordinal] = RICH_POTIONS[
-            _rich_roll(curriculum_seed, index, "potion-kind", ordinal) % len(RICH_POTIONS)
+            roll("potion-kind", ordinal) % len(RICH_POTIONS)
         ]
     return {
         "encounter_id": encounter_id, "native_encounter_entry": native_entry,
@@ -304,12 +315,44 @@ def rich_fixture_for_index(
                else (30, 40, 50, 60, 70) if tier == 1
                else (40, 50, 60, 70) if tier == 2
                else (50, 60, 70))[
-            _rich_roll(curriculum_seed, index, "hp", 0)
+            roll("hp", 0)
             % (6 if tier == 0 else 5 if tier == 1 else 4 if tier == 2 else 3)
         ],
         "max_hp": 70, "act": 1, "ascension": 10,
         "distribution_id": RICH_DISTRIBUTION,
     }
+
+
+def rich_fixture_for_index(
+    index: int, *, curriculum_seed: int = 20261028,
+) -> dict[str, Any]:
+    """One distinct deterministic rich fixture per structural source index.
+
+    If a structural candidate collides with an earlier one, resample at the
+    same ordinal and tier. A process-local prefix cache gives stable results
+    even when indices are requested out of order.
+    """
+    if (type(index) is not int or index < 0
+            or type(curriculum_seed) is not int or curriculum_seed < 0):
+        raise ValueError("Invalid rich research fixture index/seed")
+    with _RICH_LOCK:
+        specs = _RICH_SPECS.setdefault(curriculum_seed, [])
+        seen = _RICH_KEYS.setdefault(curriculum_seed, set())
+        while len(specs) <= index:
+            ordinal = len(specs)
+            for attempt in range(100):
+                candidate = _rich_fixture_candidate(
+                    ordinal, curriculum_seed=curriculum_seed,
+                    attempt=attempt,
+                )
+                key = structural_key(candidate)
+                if key not in seen:
+                    specs.append(candidate)
+                    seen.add(key)
+                    break
+            else:
+                raise RuntimeError("Rich curriculum exhausted unique fixtures")
+        return deepcopy(specs[index])
 
 
 def rich_source_bank(
