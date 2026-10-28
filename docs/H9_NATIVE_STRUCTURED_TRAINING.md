@@ -104,6 +104,54 @@ python -u tools/evaluate_h7_reference_combat.py \
   --execute
 ```
 
+
+## After the 80-round run: sealed two-stage generalization
+
+The completed training run already contains frozen R70, R75 and R80 checkpoints
+at `models/player-r0070.pt`, `models/player-r0075.pt`, and
+`models/player-r0080.pt`, plus initial `models/player-r0000.pt`.
+Do not rerun training or change any of these checkpoints.
+
+1. **Confirmation**: greedy R70/R75/R80 policies, all 256 trained structural
+   configurations, two fresh reference-stochastic worlds each (512 combats
+   per model). Select maximum mean `boss_progress_v2` reward; ties by win
+   count, then earlier round. No zero-shot results may influence selection.
+2. **Sealed structural zero-shot**: selected policy versus initial R0 policy,
+   all 64 never-trained structural configurations, four independent worlds
+   per configuration (256 combats per model).
+3. Produce encounter-specific win/score/exit-HP tables and paired score and
+   win-rate bootstrap intervals **clustered by configuration** (not by
+   individual stochastic replica). The holdout shares the curated game
+   mechanics/card pools: it measures combinations unseen during training.
+
+Run from the existing fish checkout with the compiled emulator:
+
+```fish
+cd ~/projects/sts2-ai
+git pull --ff-only
+source .venv/bin/activate.fish
+set emu ~/projects/sts2-emulator
+set dll $emu/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll
+set rev (git -C $emu rev-parse HEAD)
+
+python -u tools/run_h9_generalization.py \
+  --run-root results/h9-structured-a10-r80 \
+  --output-dir results/h9-generalization-a10 \
+  --emulator-dll $dll --emulator-bindings $emu/bindings/python \
+  --emulator-revision $rev \
+  --workers 15 --actor-device cuda --execute
+```
+
+The run writes `results/h9-generalization-a10/confirmation.json`,
+`zero-shot.json` and `report.json`. If interrupted, it reuses a stage only
+after verifying checkpoint hashes, exact source digest, DLL and bindings
+SHA-256, all terminal outcomes, and full replay coverage. A failed confirmation
+stage cannot trigger zero-shot. Neither stage modifies model checkpoints.
+
+If the evaluation emulator revision differs from the training revision,
+the runner warns and the report records both. Prefer the pinned training
+build for strict comparability; both comparison arms always share the same
+evaluation build. Generalization is within the restricted research distribution.
 ## Acceptance and limitations
 
 Passing source generator tests only proves structural distinctness/namespace
