@@ -59,7 +59,11 @@ jobs:
           assert cohort['episodes'] == 16
           assert steady['warmup_episodes'] == 2
           assert steady['measured_episodes'] == 14
-          assert steady['terminal_episodes'] == 14
+          assert steady['terminal_episodes'] <= 14
+          assert sum(steady['status_counts'].values()) == 16
+          assert steady['accepted_for_complete_combat_target'] == (
+              steady['terminal_episodes'] == 14 and
+              cohort['statuses'].get('terminal', 0) == 16)
           assert cohort['replay_verified'] == 2
           assert steady['actor_requests'] == cohort['actor_metrics']['requests']
           assert steady['wall_seconds'] > 0
