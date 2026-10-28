@@ -544,7 +544,6 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
              measure_rpc: bool = False,
              actor_collation: str = "legacy",
              actor_batch_trace: bool = False,
-             actor_overlap: bool = True,
              local_reference_nature: bool = False,
              inline_player_frame: bool = False) -> dict[str, Any]:
     if (replay_indices is not None and
@@ -569,7 +568,6 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
             max_batch=actor_max_batch, max_delay_ms=actor_delay_ms,
             collation=actor_collation,
             batch_trace=actor_batch_trace,
-            overlap=actor_overlap,
         ))
         results = ctx.Queue(maxsize=len(shards) + 1)
         processes = [
@@ -763,9 +761,6 @@ def main() -> None:
                         "fill-window, collation, forward and reply timings; "
                         "reset together with actor counters after warmup")
     p.add_argument("--actor-delay-ms", type=float, default=3.0)
-    p.add_argument("--no-actor-overlap", action="store_true",
-                   help="Disable concurrent CPU collation and CUDA inference "
-                        "to measure the same optimized model serially")
     p.add_argument("--actor-collation",
                    choices=("legacy", "packed", "packed-contiguous"),
                    default="legacy",
@@ -852,7 +847,6 @@ def main() -> None:
                 measure_rpc=args.measure_rpc,
                 actor_collation=args.actor_collation,
                 actor_batch_trace=args.actor_batch_trace,
-                actor_overlap=not args.no_actor_overlap,
                 local_reference_nature=args.local_reference_nature,
                 inline_player_frame=args.inline_player_frame,
             )
@@ -935,7 +929,7 @@ def main() -> None:
             inline_player_frame=args.inline_player_frame,
             actor_max_batch=args.actor_max_batch,
             actor_batch_trace=args.actor_batch_trace,
-            actor_overlap=not args.no_actor_overlap,
+            actor_overlap=False,
             actor_delay_ms=args.actor_delay_ms,
             actor_device=args.actor_device,
             cohorts=cohorts,
