@@ -7,6 +7,7 @@ Requires an already-built pinned semantic-combat emulator and Python bindings.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import json
 import os
 import statistics
@@ -17,6 +18,10 @@ from typing import Any
 
 import torch
 
+from sts2_ai.nature.adaptive_rich_curriculum import (
+    AdaptiveRichProgress, encounter_mean_rewards, probe_sources,
+    weighted_train_sources, FAMILIES,
+)
 from sts2_ai.models.h7_public_policy import H7PlayerSpec
 from sts2_ai.models.shared_game_objects import SHARED_OBJECT_SCHEMA
 from sts2_ai.models.shared_transformer import H7_MODEL_FORMAT, H7Config, SharedObjectTransformer
@@ -55,7 +60,16 @@ def _source_meta(seed: str, args: Any) -> tuple[str, str, str]:
 
 
 def _source_bank(split: str, count: int, *, args: Any,
-                 round_index: int = 0) -> tuple[str, ...]:
+                 round_index: int = 0,
+                 adaptive_weights: dict[str, float] | None = None) -> tuple[str, ...]:
+    if adaptive_weights is not None:
+        if split != "train" or getattr(args, "curriculum", "") != "h9-rich":
+            raise ValueError("Adaptive sampling is only for H9 training")
+        return weighted_train_sources(
+            count, round_index=round_index, study_seed=args.study_seed,
+            curriculum_seed=args.structured_curriculum_seed,
+            weights=adaptive_weights,
+        )
     if getattr(args, "curriculum", "h5") == "h9-rich":
         return rich_source_bank(
             split, count, study_seed=args.study_seed, round_index=round_index,
@@ -335,6 +349,12 @@ def main() -> None:
     p.add_argument("--ppo-sample-limit", type=int, default=4096)
     p.add_argument("--curriculum", choices=("h5", "h8-structured", "h9-rich"),
                    default="h5")
+    p.add_argument("--adaptive-rich", action="store_true",
+                   help="Opt-in H9 per-encounter learning-progress sampling")
+    p.add_argument("--adaptive-interval", type=int, default=10,
+                   help="PPO rounds between fixed training-pool reward probes")
+    p.add_argument("--adaptive-probes-per-encounter", type=int, default=6,
+                   help="Fixed probe combats for each of the 21 encounters")
     p.add_argument("--structured-curriculum-seed", type=int,
                    default=20261027)
     p.add_argument("--actor-collation", choices=("legacy", "packed",
@@ -371,6 +391,12 @@ def main() -> None:
             or args.study_seed < 0 or args.train_terminal_replay_every < 1
             or args.structured_curriculum_seed < 0):
         p.error("Invalid H7 balanced-source or PPO configuration")
+    if args.adaptive_rich and (
+        args.curriculum != "h9-rich"
+        or args.adaptive_interval < 1
+        or args.adaptive_probes_per_encounter < 1
+    ):
+        p.error("Adaptive sampling requires H9 rich and positive probe settings")
     if args.rollout_backend == "h8-native" and args.actor_backend != "shared":
         p.error("--rollout-backend h8-native requires --actor-backend shared")
     if args.curriculum in ("h8-structured", "h9-rich") and args.rollout_backend != "h8-native":
@@ -447,6 +473,15 @@ def main() -> None:
             "train_every": args.train_terminal_replay_every,
             "evaluation_every": 1,
         }
+    if args.adaptive_rich:
+        config["adaptive_curriculum"] = {
+            "schema": "sts2-h9-rich-learning-progress-v1",
+            "interval": args.adaptive_interval,
+            "probes_per_family": args.adaptive_probes_per_encounter,
+            "beta": 0.7, "alpha": 0.5, "epsilon": 0.01,
+            "train_pool": 1024, "families": len(FAMILIES),
+            "probe_source_partition": "train",
+        }
     if args.initialize_from_model is not None:
         config["initialize_from_sha256"] = file_sha256(args.initialize_from_model)
     fingerprint = canonical_sha256(config)
@@ -479,6 +514,7 @@ def main() -> None:
     model_dir = args.output_root / "models"
     progress = args.output_root / "progress.json"
     history: list[dict[str, Any]] = []
+    adaptive = AdaptiveRichProgress() if args.adaptive_rich else None
     if args.resume:
         if not checkpoint.is_file():
             p.error("H7 --resume requires optimizer-checkpoint.pt")
@@ -488,6 +524,10 @@ def main() -> None:
         learner.model.load_state_dict(saved["model"], strict=True)
         learner.optimizer.load_state_dict(saved["optimizer"])
         history = saved["history"]
+        if adaptive is not None:
+            adaptive = AdaptiveRichProgress.from_dict(saved["adaptive_state"])
+            if adaptive.evaluations != 1 + len(history) // args.adaptive_interval:
+                p.error("Adaptive checkpoint feedback does not match PPO rounds")
         if len(history) > args.rounds:
             p.error("H7 resume history longer than configured run")
         torch.set_rng_state(saved["torch_rng"])
@@ -496,6 +536,37 @@ def main() -> None:
     elif checkpoint.exists() or (model_dir.exists() and any(model_dir.iterdir())):
         p.error("H7 output contains an existing run; use --resume")
     model_dir.mkdir(parents=True, exist_ok=True)
+    adaptive_probes: tuple[str, ...] = ()
+    if adaptive is not None:
+        adaptive_probes = probe_sources(
+            study_seed=args.study_seed,
+            curriculum_seed=args.structured_curriculum_seed,
+            per_family=args.adaptive_probes_per_encounter,
+        )
+        if adaptive.previous is None:
+            # Measure the starting model before the first PPO update.
+            baseline_path = model_dir / "adaptive-initial.pt"
+            learner.model.save_checkpoint(baseline_path)
+            baseline = collect(
+                adaptive_probes,
+                spec=H7PlayerSpec.from_file(
+                    baseline_path, seed=args.actor_seed,
+                    temperature=1.0, greedy=True,
+                ),
+                args=args, reference_seed=args.reference_seed + 800000003,
+                capture=False,
+            )
+            feedback = adaptive.update(encounter_mean_rewards(
+                baseline["episodes"],
+                curriculum_seed=args.structured_curriculum_seed,
+                expected_per_family=args.adaptive_probes_per_encounter,
+            ))
+            print(
+                "[h9-adaptive] baseline completed "
+                f"families={len(FAMILIES)} probes={len(adaptive_probes)} "
+                f"mean_reward={statistics.mean(feedback['means'].values()):.4f}",
+                flush=True,
+            )
 
     for index in range(len(history), args.rounds):
         snapshot = model_dir / f"player-r{index:04d}.pt"
@@ -504,8 +575,10 @@ def main() -> None:
             snapshot, seed=args.actor_seed, temperature=args.temperature,
             greedy=False,
         )
+        weights_for_round = dict(adaptive.weights) if adaptive is not None else None
         seeds = _source_bank(
             "train", args.episodes_per_round, args=args, round_index=index,
+            adaptive_weights=weights_for_round,
         )
         batch = collect(
             seeds, spec=spec, args=args,
@@ -541,6 +614,15 @@ def main() -> None:
             ),
             **diagnostics,
         }
+        if adaptive is not None:
+            counts = Counter(
+                _source_meta(seed, args)[0].removeprefix("rich-")
+                for seed in seeds
+            )
+            row["adaptive_sampling"] = {
+                "encounters": dict(sorted(counts.items())),
+                "weights": weights_for_round,
+            }
         if (index + 1) % args.eval_every == 0 or index + 1 == args.rounds:
             selection_model = model_dir / f"player-r{index+1:04d}.pt"
             learner.model.save_checkpoint(selection_model)
@@ -559,8 +641,41 @@ def main() -> None:
                 heldout["episodes"], curriculum=args.curriculum,
                 curriculum_seed=args.structured_curriculum_seed)
             row["selection_digest"] = canonical_sha256(eval_seeds)
+        if adaptive is not None and (index + 1) % args.adaptive_interval == 0:
+            probe_path = model_dir / f"player-r{index+1:04d}.pt"
+            learner.model.save_checkpoint(probe_path)
+            probe = collect(
+                adaptive_probes,
+                spec=H7PlayerSpec.from_file(
+                    probe_path, seed=args.actor_seed,
+                    temperature=1.0, greedy=True,
+                ),
+                args=args, reference_seed=args.reference_seed + 800000003,
+                capture=False,
+            )
+            feedback = adaptive.update(encounter_mean_rewards(
+                probe["episodes"],
+                curriculum_seed=args.structured_curriculum_seed,
+                expected_per_family=args.adaptive_probes_per_encounter,
+            ))
+            row["adaptive_feedback"] = {
+                **feedback, "probe_digest": canonical_sha256(adaptive_probes),
+            }
+            ranked = sorted(
+                FAMILIES, key=lambda name: adaptive.weights[name], reverse=True,
+            )
+            print(
+                f"[h9-adaptive] round={index+1} "
+                + "top=" + ", ".join(
+                    f"{name.removeprefix('proto.encounter.')}:{adaptive.weights[name]:.3f}"
+                    for name in ranked[:5]
+                ),
+                flush=True,
+            )
         history.append(row)
         atomic_torch(checkpoint, {
+            **({"adaptive_state": adaptive.to_dict()} if adaptive is not None
+               else {}),
             "schema": RUN_SCHEMA, "fingerprint": fingerprint,
             "model": learner.model.state_dict(),
             "optimizer": learner.optimizer.state_dict(),
