@@ -172,7 +172,7 @@ def fixture_from_source(
 RICH_DISTRIBUTION = "silent-a10-overgrowth-rich-v2"
 _RICH_SOURCE = re.compile(
     r"^h9-rich-(train|selection|confirmation|zero-shot)-v2-"
-    r"(\\d+)-(\\d+)-(\\d+)-(\\d+)$"
+    r"(\d+)-(\d+)-(\d+)-(\d+)$"
 )
 RICH_ENCOUNTERS = (
     ("proto.encounter.shrinker_beetle_weak", "ShrinkerBeetleWeak", 2, 1),
@@ -297,8 +297,12 @@ def rich_fixture_for_index(
         "total_floor": floor, "map_column": 3, "map_row": row,
         "deck": [{"card_id": card, "upgrade_level": level} for card, level in cards],
         "relic_ids": relics, "potion_ids": potions,
-        "hp": (20, 30, 40, 50, 60, 70)[
-            _rich_roll(curriculum_seed, index, "hp", 0) % 6
+        "hp": ((20, 30, 40, 50, 60, 70) if tier == 0
+               else (30, 40, 50, 60, 70) if tier == 1
+               else (40, 50, 60, 70) if tier == 2
+               else (50, 60, 70))[
+            _rich_roll(curriculum_seed, index, "hp", 0)
+            % (6 if tier == 0 else 5 if tier == 1 else 4 if tier == 2 else 3)
         ],
         "max_hp": 70, "act": 1, "ascension": 10,
         "distribution_id": RICH_DISTRIBUTION,
