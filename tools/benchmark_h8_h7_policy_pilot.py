@@ -81,6 +81,7 @@ def _shard(
     steady_barrier: Any = None,
     warmup_per_worker: int = 0,
     measure_rpc: bool = False,
+    local_reference_nature: bool = False,
 ) -> list[dict[str, Any]]:
     sys.path.insert(0, bindings)
     from sts2_emulator import Session
@@ -140,8 +141,9 @@ def _shard(
             )
             # Original H7 per-source reference-seed derivation, with
             # event-scoped deterministic sampling below.
-            nature_rng = random.Random(reference_seed + index * 1000003)
-            event_sampler = SeededLawSampler(reference_seed + index * 1000003)
+            episode_reference_seed = reference_seed + index * 1000003
+            nature_rng = random.Random(episode_reference_seed)
+            event_sampler = SeededLawSampler(episode_reference_seed)
             nature_law_trace: list[tuple[str, str, str]] = []
             opening_hp: int | None = None
             opening_max_hp: int | None = None
@@ -164,6 +166,8 @@ def _shard(
                 use_native_draw_transition=native,
                 use_native_player_end_turn=native,
                 use_trusted_intent=native,
+                **({"local_reference_seed": episode_reference_seed}
+                   if local_reference_nature else {}),
             )["result"]
             handle = state["h8Handle"]
             counts: Counter[str] = Counter()
@@ -213,8 +217,31 @@ def _shard(
                         chosen = actor.choose(obs, allowed)
                         if chosen not in [a["actionId"] for a in allowed]:
                             raise RuntimeError("H7 actor selected outside source menu")
-                        result = call("h8_step", **token, action_id=chosen)
+                        result = call(
+                            "h8_step", **token, action_id=chosen,
+                            **({"local_reference_seed": episode_reference_seed}
+                               if local_reference_nature else {}),
+                        )
                     elif kind in ("enemy_intent", "draw_card"):
+                        if local_reference_nature:
+                            # The in-process reference provider consumes
+                            # consecutive Nature sites before returning to
+                            # the externally controlled player. This branch
+                            # also handles any unusual nested continuation
+                            # that returns an exposed chance boundary.
+                            result = call(
+                                "h8_continue_reference", **token,
+                                local_reference_seed=episode_reference_seed,
+                            )
+                            if result["resolvedNatureDecisions"] < 1:
+                                raise RuntimeError(
+                                    "H8 local reference Nature made no progress")
+                            nxt = result["result"]
+                            if nxt["boundaryVersion"] <= state["boundaryVersion"]:
+                                raise RuntimeError(
+                                    "H8 local reference Nature did not advance")
+                            state = nxt
+                            continue
                         if chance_sampling == "event-law":
                             # The original H7 event-keyed SeededLawSampler
                             # consumes exact emulator-authored Chance Law
@@ -271,10 +298,14 @@ def _shard(
                     else:
                         raise RuntimeError("Unknown H8 state kind " + str(kind))
                     nxt = result["result"]
-                    if nxt["boundaryVersion"] != state["boundaryVersion"] + 1:
+                    if (nxt["boundaryVersion"] <= state["boundaryVersion"]
+                            or (not local_reference_nature and
+                                nxt["boundaryVersion"] !=
+                                state["boundaryVersion"] + 1)):
                         raise RuntimeError("H8 boundary skipped/duplicated")
-                    transcript.append((kind, chosen))
-                    counts[kind] += 1
+                    if not local_reference_nature:
+                        transcript.append((kind, chosen))
+                        counts[kind] += 1
                     state = nxt
                 else:
                     if state["kind"] in ("terminal", "unsupported"):
@@ -300,8 +331,30 @@ def _shard(
                     call(
                         "h8_decision_history",
                         h8_handle=handle,
-                    )["decisions"] if full_audit else None
+                    )["decisions"] if full_audit or local_reference_nature else None
                 )
+                if local_reference_nature:
+                    # The exact externally replayable player/Nature journal
+                    # is materialized ONCE per fight, rather than after each
+                    # draw and intent. It supplies every skipped Nature choice.
+                    transcript = []
+                    for entry in history:
+                        event_kind = entry["kind"]
+                        if event_kind == "player":
+                            selected_id = entry["actionId"]
+                        elif event_kind == "intent":
+                            event_kind = "enemy_intent"
+                            selected_id = entry["intentId"]
+                        elif event_kind == "draw_card":
+                            selected_id = entry["cardInstanceId"]
+                        else:
+                            raise RuntimeError(
+                                "Unsupported H8 local reference journal entry")
+                        transcript.append((event_kind, selected_id))
+                    counts = Counter(k for k, _ in transcript)
+                    if actor.decisions != counts["player"] + counts["player_choice"]:
+                        raise RuntimeError(
+                            "H8 local reference journal disagrees with player")
                 if ((history is not None and len(history) != len(transcript))
                         or state["decisionCount"] != len(transcript)):
                     raise RuntimeError("H8 player/Nature history count mismatch")
@@ -382,7 +435,8 @@ def _shard(
                     ],
                     reference_event_digest=(
                         canonical_sha256(nature_law_trace)
-                        if chance_sampling == "event-law" else None
+                        if chance_sampling == "event-law" and
+                        not local_reference_nature else None
                     ),
                     mechanics_sha256=final_sha,
                     replay_verified=audited,
@@ -437,6 +491,7 @@ def _worker_main(
     steady_barrier: Any = None,
     warmup_per_worker: int = 0,
     measure_rpc: bool = False,
+    local_reference_nature: bool = False,
 ) -> None:
     # Queue handles cross the process boundary *only at spawn*, never
     # inside a ProcessPoolExecutor task queue. Keep one emulator process
@@ -447,7 +502,8 @@ def _worker_main(
             shard, dll, bindings, mode, max_boundaries,
             replay_every, reference_seed, capture_player_training,
             chance_sampling, replay_indices, audit_mechanics,
-            profile_emulator, steady_barrier, warmup_per_worker, measure_rpc)
+            profile_emulator, steady_barrier, warmup_per_worker, measure_rpc,
+            local_reference_nature)
         results.put(("ok", rows))
     except BaseException:
         results.put(("error", traceback.format_exc()))
@@ -466,7 +522,8 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
              warmup_per_worker: int = 0,
              measure_rpc: bool = False,
              actor_collation: str = "legacy",
-             actor_batch_trace: bool = False) -> dict[str, Any]:
+             actor_batch_trace: bool = False,
+             local_reference_nature: bool = False) -> dict[str, Any]:
     if (replay_indices is not None and
             (not replay_indices or
              any(type(i) is not int or i < 0 or i >= len(seeds)
@@ -498,7 +555,8 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
                       mode, max_boundaries, replay_every, reference_seed,
                       results, capture_player_training, chance_sampling,
                       replay_indices, audit_mechanics, profile_emulator,
-                      steady_barrier, warmup_per_worker, measure_rpc),
+                      steady_barrier, warmup_per_worker, measure_rpc,
+                      local_reference_nature),
             )
             for shard in shards
         ]
@@ -667,6 +725,11 @@ def main() -> None:
                         "retain original H8 sequential sampler for diagnosis")
     p.add_argument("--actor-device", default="cuda")
     p.add_argument("--actor-max-batch", type=int, default=16)
+    p.add_argument("--local-reference-nature", action="store_true",
+                   help="Opt into H8 in-process event-keyed reference Nature; "
+                        "eliminates per-draw and intent chance-law/resolution "
+                        "RPCs. Uses a new reference RNG algorithm, so compare "
+                        "throughput across independently source-valid runs.")
     p.add_argument("--actor-batch-trace", action="store_true",
                    help="Collect per-batch occupancy, padded tensor shapes, "
                         "fill-window, collation, forward and reply timings; "
@@ -755,6 +818,7 @@ def main() -> None:
                 measure_rpc=args.measure_rpc,
                 actor_collation=args.actor_collation,
                 actor_batch_trace=args.actor_batch_trace,
+                local_reference_nature=args.local_reference_nature,
             )
             cohorts.append(x)
             print(
@@ -825,6 +889,7 @@ def main() -> None:
             profile_emulator=args.profile_emulator,
             sampled_mechanics_audit=args.sampled_mechanics_audit,
             actor_collation=args.actor_collation,
+            local_reference_nature=args.local_reference_nature,
             actor_max_batch=args.actor_max_batch,
             actor_batch_trace=args.actor_batch_trace,
             actor_delay_ms=args.actor_delay_ms,
