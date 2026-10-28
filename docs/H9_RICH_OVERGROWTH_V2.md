@@ -220,6 +220,75 @@ benchmarks. Keep the original structured-v1 distribution as a separate
 regression. Inspect training progress and independent native Act 1
 results after the run; no claim of improved generalization yet.
 
+## R40 PPO progress and next checkpoint comparison (2026-10-29)
+
+The user-provided `progress(7).json` confirms the planned **40/40 rich-H9
+rounds, 256 episodes per round, 10,240 training combats**, all using
+emulator `7a69ce40cb6c34bf2082092d2cbe8bfe970a4378`, frozen-R80
+initialization, and 15 workers. PPO updates completed, with no
+nonterminal-cohort exceptions. Training replay was stratified/sampled;
+selection evaluations replay every terminal.
+
+Fixed 256-source greedy **selection** evaluation every five rounds:
+
+| Round | Selection wins | Mean score | Weak | Normal | Elite | Boss |
+| --- | --- | --- | --- | --- | --- | --- |
+| 5 | 194 | 1.2792 | 76/78 | 86/104 | 25/38 | 7/36 |
+| 10 | 200 | 1.2934 | 78/78 | 90/104 | 24/38 | 8/36 |
+| 15 | 199 | 1.2874 | 78/78 | 89/104 | 24/38 | 8/36 |
+| 20 | 200 | 1.3132 | 78/78 | 92/104 | 25/38 | 5/36 |
+| 25 | 202 | 1.3195 | 78/78 | 93/104 | 24/38 | 7/36 |
+| 30 | 206 | 1.3210 | 78/78 | 93/104 | 27/38 | 8/36 |
+| 35 | **208** | **1.3306** | 77/78 | 93/104 | **27/38** | **11/36** |
+| 40 | 207 | 1.3241 | 78/78 | **97/104** | 26/38 | 6/36 |
+
+The gain is dominated by normal combats. Boss selection is unstable
+and worse at R40 than R35. Entropy fell from 0.755 (R5) to 0.643 (R40);
+approximate KL rose from 0.0028 to 0.0292.
+
+**Selection fixtures reuse training structural indices 0–255.** The
+different selection source names and fixed evaluation seeds are useful
+for policy selection, but do **not** provide structural zero-shot evidence.
+Further PPO rounds are deferred. Evaluate immutable R80, R35 and R40
+checkpoints on the *same* reserved indices 1024–1279.
+
+The existing `tools/benchmark_h8_h7_policy_pilot.py` now accepts
+`--source-split zero-shot --greedy-policy --episodes 256`; these flags
+leave its old defaults unchanged. Use all-terminal and full replay.
+Example (fish; run on the AI rich branch):
+
+```fish
+cd ~/projects/sts2-ai
+git pull --ff-only
+source .venv/bin/activate.fish
+set emu ~/projects/sts2-emulator
+set dll $emu/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll
+set rev (git -C $emu rev-parse HEAD)
+
+set checkpoints \
+  results/h9-structured-a10-r80/models/player-r0080.pt \
+  results/h9-overgrowth-rich-v2-r40/models/player-r0035.pt \
+  results/h9-overgrowth-rich-v2-r40/models/player-r0040.pt
+set names baseline-r80 rich-r35 rich-r40
+
+for i in (seq 1 3)
+    python -u tools/benchmark_h8_h7_policy_pilot.py \
+      --emulator-dll $dll --emulator-bindings $emu/bindings/python \
+      --emulator-revision $rev --curriculum h9-rich \
+      --source-split zero-shot --structured-curriculum-seed 20261028 \
+      --player-checkpoint $checkpoints[$i] --greedy-policy \
+      --order native --episodes 256 --workers 15 \
+      --actor-device cuda --actor-collation packed \
+      --local-reference-nature --inline-player-frame \
+      --require-all-terminal --replay-every 1 \
+      --output results/h9-zero-shot-$names[$i].json
+end
+```
+
+Only conclude that rich training improved generalization after a
+matched structural holdout comparison. Even favorable results would
+remain synthetic-combat evidence, not full native Act 1 victory evidence.
+
 ## Required acceptance on local checkout
 
 1. Run Python structural tests and focused C# research-fixture tests.
