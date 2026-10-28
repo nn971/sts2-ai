@@ -82,6 +82,7 @@ def _shard(
     warmup_per_worker: int = 0,
     measure_rpc: bool = False,
     local_reference_nature: bool = False,
+    inline_player_frame: bool = False,
 ) -> list[dict[str, Any]]:
     sys.path.insert(0, bindings)
     from sts2_emulator import Session
@@ -166,6 +167,7 @@ def _shard(
                 use_native_draw_transition=native,
                 use_native_player_end_turn=native,
                 use_trusted_intent=native,
+                include_player_frame=inline_player_frame,
                 **({"local_reference_seed": episode_reference_seed}
                    if local_reference_nature else {}),
             )["result"]
@@ -192,12 +194,24 @@ def _shard(
                         boundary_version=state["boundaryVersion"],
                     )
                     if kind in ("player", "player_choice"):
-                        frame = call(
-                            "h8_observe", **token,
-                            policy_id="prototype-fair-v0",
-                        )
-                        obs = json.loads(frame["payloadJson"])
-                        menu = frame["actions"]
+                        if inline_player_frame:
+                            # H8Status already captured the same public frame
+                            # to populate legal player actions. Avoid one
+                            # redundant emulator RPC and one nested JSON
+                            # serialization/parse per player decision.
+                            frame = state.get("playerFrame")
+                            if not isinstance(frame, dict):
+                                raise RuntimeError(
+                                    "Missing H8 inline public player frame")
+                            obs = frame["observation"]
+                            menu = frame["actions"]
+                        else:
+                            frame = call(
+                                "h8_observe", **token,
+                                policy_id="prototype-fair-v0",
+                            )
+                            obs = json.loads(frame["payloadJson"])
+                            menu = frame["actions"]
                         if not isinstance(obs, dict) or not isinstance(menu, list):
                             raise RuntimeError("Malformed H8 public policy frame")
                         if opening_hp is None:
@@ -219,6 +233,7 @@ def _shard(
                             raise RuntimeError("H7 actor selected outside source menu")
                         result = call(
                             "h8_step", **token, action_id=chosen,
+                            include_player_frame=inline_player_frame,
                             **({"local_reference_seed": episode_reference_seed}
                                if local_reference_nature else {}),
                         )
@@ -232,6 +247,7 @@ def _shard(
                             result = call(
                                 "h8_continue_reference", **token,
                                 local_reference_seed=episode_reference_seed,
+                                include_player_frame=inline_player_frame,
                             )
                             if result["resolvedNatureDecisions"] < 1:
                                 raise RuntimeError(
@@ -282,7 +298,9 @@ def _shard(
                         if kind == "enemy_intent":
                             result = call(
                                 "h8_resolve_intent", **token,
-                                intent_id=chosen, provider_id=(
+                                intent_id=chosen,
+                                include_player_frame=inline_player_frame,
+                                provider_id=(
                                     "h7-event-scoped-reference"
                                     if chance_sampling == "event-law" else
                                     "reference-weighted-h8-pilot"),
@@ -290,7 +308,9 @@ def _shard(
                         else:
                             result = call(
                                 "h8_resolve_draw_card", **token,
-                                card_instance_id=chosen, provider_id=(
+                                card_instance_id=chosen,
+                                include_player_frame=inline_player_frame,
+                                provider_id=(
                                     "h7-event-scoped-reference"
                                     if chance_sampling == "event-law" else
                                     "reference-weighted-h8-pilot"),
@@ -492,6 +512,7 @@ def _worker_main(
     warmup_per_worker: int = 0,
     measure_rpc: bool = False,
     local_reference_nature: bool = False,
+    inline_player_frame: bool = False,
 ) -> None:
     # Queue handles cross the process boundary *only at spawn*, never
     # inside a ProcessPoolExecutor task queue. Keep one emulator process
@@ -503,7 +524,7 @@ def _worker_main(
             replay_every, reference_seed, capture_player_training,
             chance_sampling, replay_indices, audit_mechanics,
             profile_emulator, steady_barrier, warmup_per_worker, measure_rpc,
-            local_reference_nature)
+            local_reference_nature, inline_player_frame)
         results.put(("ok", rows))
     except BaseException:
         results.put(("error", traceback.format_exc()))
@@ -523,7 +544,8 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
              measure_rpc: bool = False,
              actor_collation: str = "legacy",
              actor_batch_trace: bool = False,
-             local_reference_nature: bool = False) -> dict[str, Any]:
+             local_reference_nature: bool = False,
+             inline_player_frame: bool = False) -> dict[str, Any]:
     if (replay_indices is not None and
             (not replay_indices or
              any(type(i) is not int or i < 0 or i >= len(seeds)
@@ -556,7 +578,7 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
                       results, capture_player_training, chance_sampling,
                       replay_indices, audit_mechanics, profile_emulator,
                       steady_barrier, warmup_per_worker, measure_rpc,
-                      local_reference_nature),
+                      local_reference_nature, inline_player_frame),
             )
             for shard in shards
         ]
@@ -725,6 +747,10 @@ def main() -> None:
                         "retain original H8 sequential sampler for diagnosis")
     p.add_argument("--actor-device", default="cuda")
     p.add_argument("--actor-max-batch", type=int, default=16)
+    p.add_argument("--inline-player-frame", action="store_true",
+                   help="Embed source-public typed observation/actions in "
+                        "H8 transition status; skip separate h8_observe RPC "
+                        "and nested JSON decoding for every player choice")
     p.add_argument("--local-reference-nature", action="store_true",
                    help="Opt into H8 in-process event-keyed reference Nature; "
                         "eliminates per-draw and intent chance-law/resolution "
@@ -822,6 +848,7 @@ def main() -> None:
                 actor_collation=args.actor_collation,
                 actor_batch_trace=args.actor_batch_trace,
                 local_reference_nature=args.local_reference_nature,
+                inline_player_frame=args.inline_player_frame,
             )
             cohorts.append(x)
             print(
@@ -899,6 +926,7 @@ def main() -> None:
             sampled_mechanics_audit=args.sampled_mechanics_audit,
             actor_collation=args.actor_collation,
             local_reference_nature=args.local_reference_nature,
+            inline_player_frame=args.inline_player_frame,
             actor_max_batch=args.actor_max_batch,
             actor_batch_trace=args.actor_batch_trace,
             actor_delay_ms=args.actor_delay_ms,
