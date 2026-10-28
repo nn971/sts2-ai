@@ -175,8 +175,11 @@ def _serve(
                         raise ValueError("H7 inference received non-public token request")
                     prepared = time.perf_counter()
                     batch = (
-                        collate_h7_actor_packed(frames, device=device)
-                        if collation == "packed" else
+                        collate_h7_actor_packed(
+                            frames, device=device,
+                            contiguous_metadata=(collation == "packed-contiguous"),
+                        )
+                        if collation in ("packed", "packed-contiguous") else
                         collate_h7(frames).to(device)
                     )
                     stats["collate_seconds"] = float(stats["collate_seconds"]) + (
@@ -225,7 +228,7 @@ class SharedH7Service:
         device: str = "cpu", max_batch: int = 16, max_delay_ms: float = 3.0,
         collation: str = "legacy",
     ) -> None:
-        if (collation not in ("legacy", "packed") or
+        if (collation not in ("legacy", "packed", "packed-contiguous") or
                 workers < 1 or max_batch < 1 or max_delay_ms < 0
                 or not math.isfinite(max_delay_ms)
                 or not (device == "cpu" or device.startswith("cuda"))):
