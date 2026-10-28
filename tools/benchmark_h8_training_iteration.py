@@ -41,6 +41,7 @@ def validate_training_cohort(
     *, replay_every: int,
     replay_indices: frozenset[int] | None = None,
     require_capture: bool = True,
+    require_reference_event_digest: bool = True,
 ) -> tuple[tuple[Any, ...], tuple[tuple[dict[str, Any], ...], ...]]:
     """Reject censored, non-reference, unverified or incomplete on-policy data."""
     if cohort["episodes"] != len(seeds) or (
@@ -60,7 +61,8 @@ def validate_training_cohort(
                 row["outcome"] not in ("victory", "defeat") or
                 row["replay_verified"] != audited or
                 row["score"] is None or
-                row["reference_event_digest"] is None or
+                (require_reference_event_digest and
+                 row["reference_event_digest"] is None) or
                 (require_capture and (
                     row["captured_player_decisions"] != row["player_decisions"] or
                     row["captured_player_decisions"] != len(row["player_steps"]) or
@@ -190,6 +192,17 @@ def main() -> None:
     p.add_argument("--learner-device", default="cuda")
     p.add_argument("--actor-max-batch", type=int, default=16)
     p.add_argument("--actor-delay-ms", type=float, default=3.0)
+    p.add_argument("--actor-collation",
+                   choices=("legacy", "packed"), default="packed",
+                   help="Packed actor serving is faster for the frozen H7 "
+                        "Transformer without changing model semantics")
+    p.add_argument("--separate-player-observe", action="store_true",
+                   help="Compatibility path retaining the per-player "
+                        "h8_observe RPC; default uses typed inline H8 frame")
+    p.add_argument("--local-reference-nature", action="store_true",
+                   help="Use H8's in-emulator source-law reference provider. "
+                        "No per-draw/intent JSONL round trips; deterministic "
+                        "seeded outcomes are recorded in the H8 journal.")
     p.add_argument("--lr", type=float, default=0.0001)
     p.add_argument("--ppo-epochs", type=int, default=3)
     p.add_argument("--ppo-minibatch", type=int, default=64)
@@ -205,6 +218,10 @@ def main() -> None:
             args.replay_every < 1 or args.ppo_epochs < 1 or
             args.ppo_minibatch < 1 or args.ppo_sample_limit < 2):
         p.error("H8 PPO benchmark needs positive budgets and balanced 16-cell sources")
+    if args.local_reference_nature and args.compare_legacy:
+        p.error("Local reference Nature uses a new event-keyed ticket "
+                "algorithm; exact legacy MT19937 trajectory comparison "
+                "is invalid. Compare performance separately.")
     if (not args.emulator_dll.is_file() or
             not (args.emulator_bindings / "sts2_emulator" /
                  "__init__.py").is_file()):
@@ -233,7 +250,8 @@ def main() -> None:
             "train", args.episodes, study_seed=args.study_seed)
         print(
             f"[h8-ppo] actor={spec.model_sha256[:16]} params={params} "
-            f"workers={args.workers} episodes={len(seeds)} reference=event-law",
+            f"workers={args.workers} episodes={len(seeds)} "
+            f"reference={'h8-local' if args.local_reference_nature else 'h7-event-law'}",
             flush=True)
         h8 = _cohort(
             seeds, dll=str(args.emulator_dll.resolve()),
@@ -242,6 +260,9 @@ def main() -> None:
             actor_device=args.actor_device,
             actor_max_batch=args.actor_max_batch,
             actor_delay_ms=args.actor_delay_ms,
+            actor_collation=args.actor_collation,
+            local_reference_nature=args.local_reference_nature,
+            inline_player_frame=not args.separate_player_observe,
             max_boundaries=args.max_boundaries,
             replay_every=args.replay_every,
             reference_seed=args.reference_seed,
@@ -249,7 +270,8 @@ def main() -> None:
             profile_emulator=args.profile_emulator,
             audit_mechanics=not args.sampled_mechanics_audit)
         episodes, captures = validate_training_cohort(
-            h8, seeds, replay_every=args.replay_every)
+            h8, seeds, replay_every=args.replay_every,
+            require_reference_event_digest=not args.local_reference_nature)
         print(
             f"[h8-ppo] completed={len(episodes)} "
             f"rollout_s={h8['wall_seconds']:.2f} "
@@ -295,7 +317,13 @@ def main() -> None:
             "emulator_dll_sha256": hashlib.sha256(
                 args.emulator_dll.read_bytes()).hexdigest(),
             "source_digest": canonical_sha256(seeds),
-            "reference_law": "h7-event-scoped-declared-chance-law",
+            "reference_law": (
+                "h8-local-event-keyed-source-law-v1"
+                if args.local_reference_nature else
+                "h7-event-scoped-declared-chance-law"),
+            "local_reference_nature": args.local_reference_nature,
+            "actor_collation": args.actor_collation,
+            "inline_player_frame": not args.separate_player_observe,
             "source_count": len(seeds),
             "workers": args.workers,
             "max_boundaries": args.max_boundaries,

@@ -15,7 +15,6 @@ import torch
 from .shared_game_objects import NUMERIC_FIELDS, SHARED_OBJECT_SCHEMA, EncodedDecision
 from .shared_transformer import H7Batch
 
-
 # The only fields packed in an interleaved last dimension. Numeric fields,
 # presence masks, action masks and phases already have contiguous storage.
 H7_PACKED_METADATA_FIELDS = (
