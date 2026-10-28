@@ -382,7 +382,11 @@ def main() -> None:
     p.add_argument("--no-gpu-telemetry", action="store_true")
     p.add_argument("--report-only", action="store_true",
                    help="Verify/combine four existing A1,B1,B2,A2 JSON reports")
+    p.add_argument("--build-only", action="store_true",
+                   help="Compile and fingerprint A/B archive builds without GPU rollouts")
     args = p.parse_args()
+    if args.report_only and args.build_only:
+        p.error("--report-only and --build-only are mutually exclusive")
     if (args.workers < 1 or args.episodes < 16 or args.episodes % 16 or
             args.max_boundaries < 1 or args.replay_every < 1 or
             args.actor_max_batch < 1 or args.actor_delay_ms < 0):
@@ -429,6 +433,10 @@ def main() -> None:
             }
             (output / "environment.json").write_text(
                 json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+            if args.build_only:
+                print("[h8-abba] both pinned archive DLL builds passed; "
+                      f"manifest={output/'environment.json'}", flush=True)
+                return
             for name, arm in ORDER:
                 print(f"[h8-abba] RUN {name} / {arm} ({before if arm=='A' else after})",
                       flush=True)
