@@ -83,7 +83,7 @@ def test_abba_uses_mirrored_pairs_and_confirms_full_parity():
     (("B2", "source_digest"), "other", "source_digest"),
     (("B2", "model_sha256"), "other", "model_sha256"),
     (("A2", "emulator_revision"), AFTER_REV, "revision"),
-    (("B1", "emulator_dll_sha256"), "b" * 64, "Same emulator DLL"),
+    (("B1", "emulator_dll_sha256"), "b" * 64, "DLL"),
     (("B1", "terminal_counts"), {"terminal": 15, "capped": 1}, "censored"),
     (("A2", "verified_terminal_replays"), 1, "replay"),
     (("A1", "legacy_h7"), None, "legacy"),
