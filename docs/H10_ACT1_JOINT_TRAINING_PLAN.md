@@ -278,3 +278,45 @@ attempts do not create a trusted corpus. Never bypass an illegal card
 transition or omit the failing run. If a different missing card error
 persists, capture the selected legal action and the managed stack trace
 rather than assuming this specific lifecycle bug explains every case.
+
+### H10 next unblock: legacy generated event-gold request
+
+On the same seed after the Power-card fix, an unrelated stochastic
+interface mismatch raised:
+`ArgumentException: Legacy site 'event.generated_gold.index_draw' requires
+a bounded-integer request`.
+
+The legacy event-gold helper previously used an enumerated support
+`[minimum, ..., minimum + count - 1]` via `choose_index`. The
+`StochasticSiteRegistryV111` requires `bounded_integer` for this site.
+Emulator PR #221 now uses `minimum + ResolveLegacyBoundedInteger(count)`,
+preserving the resulting discrete gold range and legacy modulo RNG
+consumption/stream. It does not change native Chance Law ownership.
+
+The H10 collector now accepts `--start-index 2 --runs 1` to
+**replay the exact failing seed first**, and prints the last legal
+action on exceptions:
+
+```fish
+cd ~/projects/sts2-emulator
+git pull --ff-only
+dotnet build src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj -c Release
+
+cd ~/projects/sts2-ai
+git pull --ff-only
+source .venv/bin/activate.fish
+set emu ~/projects/sts2-emulator
+set rev (git -C $emu rev-parse HEAD)
+python -u tools/collect_h10_native_combat_entries.py \
+    --macro-model results/nature/h6c-macro-attention-r80.json \
+    --combat-checkpoint results/h9-structured-a10-r80/models/player-r0080.pt \
+    --emulator-root $emu --emulator-revision $rev \
+    --start-index 2 --runs 1 \
+    --seed-prefix h10-native-a10-collector-v1 \
+    --device cuda --output results/h10-snapshots/hybrid-entry-seed2.jsonl
+```
+
+Use a **different output** for the one-seed replay. Once it succeeds,
+run the entire 16-run collector on the same revisions and original
+seed prefix. Record any further real emulator exceptions and fix the
+underlying call site rather than omitting a difficult seed.
