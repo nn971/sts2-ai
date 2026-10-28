@@ -34,6 +34,7 @@ from sts2_ai.nature.ppo_draw import PpoDrawNature
 from sts2_ai.nature.protocol import canonical_sha256
 from sts2_ai.nature.research_combat_fixtures import (
     fixture_from_source,
+    rich_source_bank,
     source_bank as structured_source_bank,
 )
 from sts2_ai.training.h7_combat_ppo import H7_PPO_SCHEMA, H7CombatPPO
@@ -43,7 +44,7 @@ RUN_SCHEMA = "sts2-h7-reference-combat-run-v1"
 
 def _source_meta(seed: str, args: Any) -> tuple[str, str, str]:
     """Source-visible identity, structural deck label and audit stratum."""
-    if getattr(args, "curriculum", "h5") == "h8-structured":
+    if getattr(args, "curriculum", "h5") in ("h8-structured", "h9-rich"):
         scenario, _, index = fixture_from_source(
             seed, curriculum_seed=args.structured_curriculum_seed)
         return scenario.scenario_id, f"structured:{index}", scenario.scenario_id
@@ -55,6 +56,10 @@ def _source_meta(seed: str, args: Any) -> tuple[str, str, str]:
 
 def _source_bank(split: str, count: int, *, args: Any,
                  round_index: int = 0) -> tuple[str, ...]:
+    if getattr(args, "curriculum", "h5") == "h9-rich":
+        return rich_source_bank(
+            split, count, study_seed=args.study_seed, round_index=round_index,
+        )
     if getattr(args, "curriculum", "h5") == "h8-structured":
         return structured_source_bank(
             split, count, study_seed=args.study_seed, round_index=round_index)
@@ -76,7 +81,7 @@ def terminal_replay_audit_indices(
     seen: dict[str, int] = {}
     indices: list[int] = []
     for index, seed in enumerate(seeds):
-        if curriculum == "h8-structured":
+        if curriculum in ("h8-structured", "h9-rich"):
             scenario, _, _ = fixture_from_source(
                 seed, curriculum_seed=curriculum_seed)
             key = scenario.scenario_id
@@ -140,7 +145,7 @@ def summarize(
         }
     cells: dict[str, list[Any]] = {}
     for ep in episodes:
-        if curriculum == "h8-structured":
+        if curriculum in ("h8-structured", "h9-rich"):
             scenario, _, index = fixture_from_source(
                 ep.source_seed, curriculum_seed=curriculum_seed)
             key = f"structured:{index}:{scenario.scenario_id}"
@@ -212,7 +217,7 @@ def collect_h8(
         inline_player_frame=True,
         structured_curriculum_seed=(
             args.structured_curriculum_seed
-            if args.curriculum == "h8-structured" else None),
+            if args.curriculum in ("h8-structured", "h9-rich") else None),
     )
     episodes, captures = validate_training_cohort(
         h8, seeds, replay_every=audit_every,
@@ -328,7 +333,7 @@ def main() -> None:
     p.add_argument("--ppo-epochs", type=int, default=3)
     p.add_argument("--ppo-minibatch", type=int, default=64)
     p.add_argument("--ppo-sample-limit", type=int, default=4096)
-    p.add_argument("--curriculum", choices=("h5", "h8-structured"),
+    p.add_argument("--curriculum", choices=("h5", "h8-structured", "h9-rich"),
                    default="h5")
     p.add_argument("--structured-curriculum-seed", type=int,
                    default=20261027)
@@ -349,6 +354,8 @@ def main() -> None:
         help="Audit one terminal per N episodes in each source cell; 1 means all. "
              "Selection/held-out evaluations always replay every terminal.",
     )
+    p.add_argument("--initialize-from-model", type=Path,
+                   help="Start a new optimizer from frozen compatible H9 weights")
     p.add_argument("--resume", action="store_true")
     p.add_argument("--execute", action="store_true")
     args = p.parse_args()
@@ -357,8 +364,8 @@ def main() -> None:
             args.ppo_minibatch) < 1 or args.ppo_sample_limit < 2
             or (args.curriculum == "h5" and
                 args.episodes_per_round < len(TRAIN_CELLS))
-            or args.eval_episodes < (1 if args.curriculum ==
-                "h8-structured" else len(TRAIN_CELLS))
+            or args.eval_episodes < (1 if args.curriculum in
+                ("h8-structured", "h9-rich") else len(TRAIN_CELLS))
             or (args.curriculum == "h5" and
                 args.eval_episodes % len(TRAIN_CELLS))
             or args.study_seed < 0 or args.train_terminal_replay_every < 1
@@ -366,8 +373,12 @@ def main() -> None:
         p.error("Invalid H7 balanced-source or PPO configuration")
     if args.rollout_backend == "h8-native" and args.actor_backend != "shared":
         p.error("--rollout-backend h8-native requires --actor-backend shared")
-    if args.curriculum == "h8-structured" and args.rollout_backend != "h8-native":
+    if args.curriculum in ("h8-structured", "h9-rich") and args.rollout_backend != "h8-native":
         p.error("Structured curriculum requires the native H8 rollout backend")
+    if args.resume and args.initialize_from_model is not None:
+        p.error("Choose --resume or --initialize-from-model, never both")
+    if args.initialize_from_model is not None and not args.initialize_from_model.is_file():
+        p.error("Missing frozen initialization checkpoint")
     if args.local_reference_nature and args.rollout_backend != "h8-native":
         p.error("Local reference Nature requires the native H8 backend")
     config_model = H7Config(
@@ -390,11 +401,16 @@ def main() -> None:
             else None
         ),
         "chance_law": "reference", "combat_reward": H4_REWARD,
-        "curriculum": ("h8-structured-256+64-v1"
-                       if args.curriculum == "h8-structured"
-                       else "h5-16-train-cells"),
-        "training_cells": (256 if args.curriculum == "h8-structured"
-                           else len(TRAIN_CELLS)),
+        "curriculum": (
+            "h9-overgrowth-rich-1024+256-v2" if args.curriculum == "h9-rich"
+            else "h8-structured-256+64-v1" if args.curriculum == "h8-structured"
+            else "h5-16-train-cells"
+        ),
+        "training_cells": (
+            1024 if args.curriculum == "h9-rich"
+            else 256 if args.curriculum == "h8-structured"
+            else len(TRAIN_CELLS)
+        ),
         "rounds": args.rounds, "episodes_per_round": args.episodes_per_round,
         "workers": args.workers, "max_boundaries": args.max_boundaries,
         "eval_every": args.eval_every, "eval_episodes": args.eval_episodes,
@@ -410,7 +426,7 @@ def main() -> None:
     if args.rollout_backend != "legacy-h7":
         config["structured_curriculum_seed"] = (
             args.structured_curriculum_seed
-            if args.curriculum == "h8-structured" else None)
+            if args.curriculum in ("h8-structured", "h9-rich") else None)
         config["local_reference_nature"] = args.local_reference_nature
         config["actor_collation"] = args.actor_collation
         config["rollout_backend"] = {
@@ -433,6 +449,8 @@ def main() -> None:
             "train_every": args.train_terminal_replay_every,
             "evaluation_every": 1,
         }
+    if args.initialize_from_model is not None:
+        config["initialize_from_sha256"] = file_sha256(args.initialize_from_model)
     fingerprint = canonical_sha256(config)
     print(json.dumps({
         "fingerprint": fingerprint, "parameter_target": asdict(config_model),
@@ -449,6 +467,11 @@ def main() -> None:
     torch.set_num_threads(1)
     torch.manual_seed(args.study_seed)
     model = SharedObjectTransformer(config_model)
+    if args.initialize_from_model is not None:
+        previous = SharedObjectTransformer.load_checkpoint(args.initialize_from_model)
+        model.load_state_dict(previous.state_dict(), strict=True)
+        print(f"[h9-rich] initialized from frozen {args.initialize_from_model}",
+              flush=True)
     learner = H7CombatPPO(
         model, device=args.device, lr=args.lr, temperature=args.temperature,
         epochs=args.ppo_epochs, minibatch=args.ppo_minibatch,
