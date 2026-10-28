@@ -33,6 +33,7 @@ class H7Transport:
     replies: tuple[Any, ...]
     slot_counter: Any
     model_id: str
+    batch_trace: bool = False
 
     def allocate_slot(self) -> int:
         with self.slot_counter.get_lock():
@@ -96,7 +97,10 @@ class RemoteH7Policy:
         seq = self.sequence
         start = time.perf_counter()
         try:
-            self.transport.requests.put((self.slot, seq, encoded), timeout=self.timeout)
+            request = ((self.slot, seq, encoded, time.perf_counter())
+                       if self.transport.batch_trace else
+                       (self.slot, seq, encoded))
+            self.transport.requests.put(request, timeout=self.timeout)
             answer = self.transport.replies[self.slot].get(timeout=self.timeout)
         except queue.Full as exc:
             raise RuntimeError("H7 shared inference request queue stalled") from exc
@@ -182,6 +186,11 @@ def _serve(
                     if not all(isinstance(item, EncodedDecision) for item in frames):
                         raise ValueError("H7 inference received non-public token request")
                     prepared = time.perf_counter()
+                    if probe is not None:
+                        queue_delays = [
+                            1000 * max(0.0, prepared - entry[3])
+                            for entry in work
+                        ]
                     batch = (
                         collate_h7_actor_packed(
                             frames, device=device,
@@ -209,7 +218,8 @@ def _serve(
                     )
                     reply_started = (
                         time.perf_counter() if probe is not None else 0.0)
-                    for row, (slot, seq, frame) in enumerate(work):
+                    for row, entry in enumerate(work):
+                        slot, seq, frame = entry[:3]
                         count = len(frame.actions)
                         replies[slot].put((
                             seq, "ok",
@@ -224,13 +234,17 @@ def _serve(
                             valid_objects=sum(len(x.objects) for x in frames),
                             valid_actions=sum(len(x.actions) for x in frames),
                             fill_ms=1000 * fill_seconds,
+                            queue_to_batch_mean_ms=(
+                                sum(queue_delays) / len(queue_delays)),
+                            queue_to_batch_max_ms=max(queue_delays),
                             collate_ms=1000 * collate_seconds,
                             forward_ms=1000 * forward_seconds,
                             reply_ms=1000 * (time.perf_counter()-reply_started),
                         )
                 except Exception:
                     error = traceback.format_exc()
-                    for slot, seq, _ in work:
+                    for entry in work:
+                        slot, seq = entry[:2]
                         replies[slot].put((seq, "error", error))
         if probe is not None:
             report = probe.report()
@@ -271,6 +285,7 @@ class SharedH7Service:
         self.transport = H7Transport(
             self.requests, self.replies, self.ctx.Value("i", 0),
             model_id=f"h7-{digest[:16]}",
+            batch_trace=batch_trace,
         )
         self.process = self.ctx.Process(
             target=_serve,
