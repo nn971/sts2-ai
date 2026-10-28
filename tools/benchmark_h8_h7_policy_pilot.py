@@ -15,15 +15,14 @@ import argparse
 import hashlib
 import json
 import multiprocessing
+import queue
 import random
 import sys
 import tempfile
 import time
-from collections import Counter
-import queue
 import traceback
+from collections import Counter
 from contextlib import ExitStack
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -35,13 +34,14 @@ from sts2_ai.models.h7_public_policy import H7PlayerSpec
 from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
 from sts2_ai.nature.combat_scenarios import SCENARIOS
 from sts2_ai.nature.draw_only_episode import fair_player_choice_actions
-from sts2_ai.nature.draw_only_p0 import DeclaredLaw, SeededLawSampler 
-from sts2_ai.nature.h5_curriculum import cell_for_source, source_bank
-from sts2_ai.nature.research_combat_fixtures import (
-    fixture_from_source, structural_key,
-)
+from sts2_ai.nature.draw_only_p0 import DeclaredLaw, SeededLawSampler
 from sts2_ai.nature.h4_reward import boss_progress_score, opening_enemy_health
+from sts2_ai.nature.h5_curriculum import cell_for_source, source_bank
 from sts2_ai.nature.protocol import canonical_sha256
+from sts2_ai.nature.research_combat_fixtures import (
+    fixture_from_source,
+    structural_key,
+)
 
 
 def _choose_weighted(rng: random.Random, options: list[Any],
@@ -51,7 +51,7 @@ def _choose_weighted(rng: random.Random, options: list[Any],
         raise ValueError("Malformed source weighted intent support")
     # Integer tickets retain the source raw-weight ratios without float bias.
     ticket = rng.randrange(sum(raw_weights))
-    for item, weight in zip(options, raw_weights):
+    for item, weight in zip(options, raw_weights, strict=True):
         if ticket < weight:
             return item
         ticket -= weight
