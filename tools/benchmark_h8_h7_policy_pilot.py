@@ -245,7 +245,8 @@ def _shard(
                             raise RuntimeError("Malformed H8 public policy frame")
                         if opening_hp is None:
                             opening_hp, opening_max_hp = obs.get("hp"), obs.get("max_hp")
-                            initial_enemies_hp = opening_enemy_health(obs)
+                            if not source_scenario.startswith("rich-"):
+                                initial_enemies_hp = opening_enemy_health(obs)
                             if (type(opening_hp) is not int or
                                     type(opening_max_hp) is not int or
                                     opening_max_hp < 1):
@@ -449,7 +450,8 @@ def _shard(
                 score = None
                 if status == "terminal":
                     if (opening_hp is None or opening_max_hp is None or
-                            initial_enemies_hp is None):
+                            (not source_scenario.startswith("rich-")
+                             and initial_enemies_hp is None)):
                         raise RuntimeError("Terminal H8 episode lacks a public opening")
                     if source_scenario.startswith("rich-"):
                         score = encounter_total_hp_score(
