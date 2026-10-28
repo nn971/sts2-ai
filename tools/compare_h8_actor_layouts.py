@@ -25,7 +25,8 @@ TOP_KEYS = (
     "model_sha256", "parameters", "emulator_revision",
     "emulator_dll_sha256", "chance_sampling", "source_digest",
     "warmup_per_worker", "sampled_mechanics_audit",
-    "capture_player_training",
+    "capture_player_training", "actor_max_batch",
+    "actor_delay_ms", "actor_device",
 )
 COHORT_KEYS = (
     "mode", "workers", "episodes", "source_digest", "statuses",
