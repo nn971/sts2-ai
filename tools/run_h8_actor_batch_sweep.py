@@ -105,7 +105,20 @@ def main() -> None:
                             f"see {log}")
             if not target.is_file():
                 raise RuntimeError("H8 benchmark did not write " + str(target))
-        labeled.append((label, json.loads(target.read_text())))
+        report = json.loads(target.read_text())
+        if (int(report.get("actor_max_batch", -1)) != max_batch or
+                float(report.get("actor_delay_ms", -1.0)) != delay_ms or
+                report.get("actor_device") != args.actor_device or
+                report.get("actor_collation") != args.actor_collation or
+                report.get("emulator_revision") != args.emulator_revision or
+                len(report.get("cohorts", [])) != 1 or
+                report["cohorts"][0].get("episodes") != args.episodes or
+                report["cohorts"][0].get("workers") !=
+                min(args.workers, args.episodes)):
+            raise ValueError(
+                "Saved H8 batch-window run has different configuration: "
+                + str(target))
+        labeled.append((label, report))
     summary = compare(labeled, allow_censored=args.allow_censored)
     summary["plan"] = args.plan
     summary["report_paths"] = {
