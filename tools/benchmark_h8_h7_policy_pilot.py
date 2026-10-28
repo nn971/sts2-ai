@@ -818,6 +818,9 @@ def main() -> None:
             profile_emulator=args.profile_emulator,
             sampled_mechanics_audit=args.sampled_mechanics_audit,
             actor_collation=args.actor_collation,
+            actor_max_batch=args.actor_max_batch,
+            actor_delay_ms=args.actor_delay_ms,
+            actor_device=args.actor_device,
             cohorts=cohorts,
         )
         args.output.parent.mkdir(parents=True, exist_ok=True)
