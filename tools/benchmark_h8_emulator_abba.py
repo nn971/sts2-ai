@@ -276,6 +276,42 @@ def _stop_gpu_probe(process: subprocess.Popen[bytes] | None, handle: Any) -> Non
         handle.close()
 
 
+def _cpu_snapshot() -> dict[str, Any]:
+    """Low-cost Linux host CPU counter snapshot; no external dependency."""
+    stat = Path("/proc/stat")
+    if not stat.is_file():
+        return {}
+    fields = stat.read_text().splitlines()[0].split()
+    if fields[0] != "cpu" or len(fields) < 9:
+        return {}
+    values = list(map(int, fields[1:9]))
+    result: dict[str, Any] = {
+        "total_jiffies": sum(values),
+        "idle_jiffies": values[3] + values[4],
+        "logical_cpu_count": os.cpu_count(),
+    }
+    if hasattr(os, "getloadavg"):
+        result["load_averages"] = list(os.getloadavg())
+    return result
+
+
+def _cpu_interval(begin: dict[str, Any], end: dict[str, Any]) -> dict[str, Any]:
+    if not begin or not end:
+        return {"available": False}
+    total = end["total_jiffies"] - begin["total_jiffies"]
+    idle = end["idle_jiffies"] - begin["idle_jiffies"]
+    if total <= 0 or idle < 0 or idle > total:
+        return {"available": False}
+    return {
+        "available": True,
+        "average_host_busy_percent": 100.0 * (1.0 - idle / total),
+        "logical_cpu_count": end["logical_cpu_count"],
+        "start_load_averages": begin.get("load_averages"),
+        "end_load_averages": end.get("load_averages"),
+        "scope": "whole-host CPU activity, including unrelated processes",
+    }
+
+
 def _run_benchmark(
     name: str, revision: str, dll: Path, args: argparse.Namespace,
     output_root: Path, bindings: Path,
@@ -307,12 +343,20 @@ def _run_benchmark(
     probe, handle = ((None, None) if args.no_gpu_telemetry or
                      not args.actor_device.startswith("cuda")
                      else _start_gpu_probe(output_root / f"{name}-gpu.csv"))
+    start_cpu = _cpu_snapshot()
     start = time.perf_counter()
     try:
         _command_with_log(cmd, AI_ROOT, output_root / f"{name}.log")
     finally:
         _stop_gpu_probe(probe, handle)
-    print(f"[h8-abba] completed {name} in {time.perf_counter()-start:.2f}s",
+        elapsed = time.perf_counter() - start
+        (output_root / f"{name}-system.json").write_text(
+            json.dumps({
+                "elapsed_seconds_including_startup": elapsed,
+                "host_cpu": _cpu_interval(start_cpu, _cpu_snapshot()),
+                "gpu_probe_csv": (f"{name}-gpu.csv" if probe is not None else None),
+            }, indent=2) + "\n", encoding="utf-8")
+    print(f"[h8-abba] completed {name} in {elapsed:.2f}s",
           flush=True)
 
 
