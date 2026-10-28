@@ -79,6 +79,32 @@ The source corpus is versioned v2 and the R80 benchmark is unaffected.
 Python tests and full native-combat acceptance should still be run locally
 before initiating PPO.
 
+## Full-combat acceptance blockers (October 28)
+
+The first 64-source native H8 pilot completed four episodes before workers
+reported three distinct execution gaps:
+
+1. Newly offered legal research potions (Swift, Weak, Dexterity, Energy,
+   Strength, Explosive) were outside the original three-potion research
+   semantic allowlist.
+2. The richer card corpus includes Calculated Gamble (controlled draws) and
+   Bouncing Flask (random target), absent from the player action gate.
+3. Multi-enemy next-turn intents committed into the continuation frame
+   without synchronizing the surrounding combat snapshot, violating the
+   intentionally strict stochastic continuation invariant.
+
+Emulator PR #222 now admits the explicitly supported source potion effects,
+reuses the existing controlled draw and target paths, and synchronizes
+committed intent mechanics with the pipeline state. Unsupported-action errors
+now include the actual card/potion identifier. The source Chance Law, hidden
+deck owner, automatic combat transitions, and journal replay checks remain
+enabled. These fixes are committed but **not yet verified by the 64-source
+acceptance run**.
+
+Do not discard unsupported actions, count failures as defeats, or begin the
+40-round PPO run until the source-complete pilot succeeds. If another legal
+card/potion fails, use the reported model ID to address its engine semantics.
+
 ## Required acceptance on local checkout
 
 1. Run Python structural tests and focused C# research-fixture tests.
