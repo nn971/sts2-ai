@@ -74,7 +74,7 @@ def validate_training_cohort(
             source_seed=seed, outcome=row["outcome"], score=row["score"],
             exit_hp=row["exit_hp"],
             terminal_enemy_hp=row["terminal_enemy_hp"],
-            reward_version=H4_REWARD,
+            reward_version=row.get("reward_version", H4_REWARD),
             draw_mode="reference", terminal_replay_verified=audited,
             decisions=tuple(SimpleNamespace(**x) for x in row["decision_sequence"]),
         ))
