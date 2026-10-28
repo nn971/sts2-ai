@@ -24,3 +24,38 @@ jobs:
         run: python -m py_compile tools/benchmark_h8_emulator_abba.py
       - name: Verify ABBA parity, drift and report-only rejection gates
         run: python -m pytest -q tests/test_h8_emulator_abba.py
+
+  pinned-archive-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout existing emulator repository for immutable A/B archives
+        uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: research/h8-trusted-player-hotpath-20261028
+          fetch-depth: 0
+          path: emulator
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Build both pinned revisions from git archive without branch changes
+        run: |
+          python tools/benchmark_h8_emulator_abba.py \
+            --emulator-repo emulator \
+            --output-root "$RUNNER_TEMP/h8-abba-build" \
+            --build-only
+      - name: Upload A/B build logs and executable fingerprints
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: h8-abba-pinned-archive-build
+          path: |
+            ${{ runner.temp }}/h8-abba-build/build-A.log
+            ${{ runner.temp }}/h8-abba-build/build-B.log
+            ${{ runner.temp }}/h8-abba-build/environment.json
+          if-no-files-found: ignore
