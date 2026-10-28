@@ -30,11 +30,12 @@ from sts2_ai.nature.h5_curriculum import (
     cell_for_source,
     source_bank,
 )
-from sts2_ai.nature.research_combat_fixtures import (
-    fixture_from_source, source_bank as structured_source_bank,
-)
 from sts2_ai.nature.ppo_draw import PpoDrawNature
 from sts2_ai.nature.protocol import canonical_sha256
+from sts2_ai.nature.research_combat_fixtures import (
+    fixture_from_source,
+    source_bank as structured_source_bank,
+)
 from sts2_ai.training.h7_combat_ppo import H7_PPO_SCHEMA, H7CombatPPO
 
 RUN_SCHEMA = "sts2-h7-reference-combat-run-v1"
