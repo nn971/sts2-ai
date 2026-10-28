@@ -93,8 +93,8 @@ def compare(
         if len(entries) != actor["batches"]:
             raise ValueError("Truncated batch records in " + label)
         n = actor["batches"]
-        def total_ms(key: str) -> float:
-            return sum(float(x[key]) for x in entries)
+        def total_ms(key: str, records: list = entries) -> float:
+            return sum(float(x[key]) for x in records)
         rows.append({
             "label": label,
             "actor_max_batch": report["actor_max_batch"],

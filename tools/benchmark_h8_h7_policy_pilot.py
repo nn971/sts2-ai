@@ -929,6 +929,7 @@ def main() -> None:
             inline_player_frame=args.inline_player_frame,
             actor_max_batch=args.actor_max_batch,
             actor_batch_trace=args.actor_batch_trace,
+            actor_overlap=False,
             actor_delay_ms=args.actor_delay_ms,
             actor_device=args.actor_device,
             cohorts=cohorts,

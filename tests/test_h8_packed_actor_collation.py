@@ -8,6 +8,7 @@ from sts2_ai.models.packed_actor_collation import (
     H7_PACKED_METADATA_FIELDS,
     collate_h7_actor_packed,
     contiguous_actor_metadata,
+    prepare_h7_actor_packed,
 )
 from sts2_ai.models.shared_game_objects import (
     NUMERIC_FIELDS,
@@ -125,6 +126,29 @@ def test_packed_actor_transformer_logits_values_match_reference() -> None:
         torch.testing.assert_close(legacy_logits, actual, atol=0, rtol=0)
     for actual in (packed_values, contiguous_values):
         torch.testing.assert_close(legacy_values, actual, atol=0, rtol=0)
+
+
+def test_packed_host_pipeline_and_homogeneous_heads_preserve_output() -> None:
+    decisions = sample_decisions()
+    torch.manual_seed(37)
+    model = SharedObjectTransformer(H7Config(
+        width=32, heads=4, layers=1, feedforward=64)).eval()
+    with torch.inference_mode():
+        for phase_name, phase_id in (("combat", 0), ("macro", 1)):
+            homogeneous = [d for d in decisions if d.phase == phase_name]
+            host = prepare_h7_actor_packed(homogeneous)
+            batch = host.to("cpu")
+            original = collate_h7_actor_packed(homogeneous)
+            for name in vars_as_dict(original):
+                assert torch.equal(
+                    getattr(batch, name), getattr(original, name)), name
+            checked_logits, checked_values = model(batch)
+            trusted_logits, trusted_values = model(
+                batch, known_phase=phase_id)
+            torch.testing.assert_close(
+                checked_logits, trusted_logits, atol=0, rtol=0)
+            torch.testing.assert_close(
+                checked_values, trusted_values, atol=0, rtol=0)
 
 
 @pytest.mark.parametrize("kind", ("owner", "source", "target", "phase", "empty"))

@@ -22,7 +22,7 @@ from sts2_ai.emulator.protocol import LegalAction, Observation
 from sts2_ai.models.protocol import PolicyValueEstimate
 
 from .actor_batch_trace import ActorBatchTrace
-from .packed_actor_collation import collate_h7_actor_packed
+from .packed_actor_collation import prepare_h7_actor_packed
 from .shared_game_objects import EncodedDecision, encode_public_decision
 from .shared_transformer import SharedObjectTransformer, collate_h7
 
@@ -130,6 +130,7 @@ def _serve(
     stats: dict[str, float | int | str] = {
         "batches": 0, "requests": 0, "forward_seconds": 0.0,
         "collate_seconds": 0.0,
+        "host_collate_seconds": 0.0, "transfer_seconds": 0.0,
         "model_load_seconds": 0.0, "max_batch_observed": 0,
         "device": device,
         "collation": collation,
@@ -158,7 +159,8 @@ def _serve(
                     slot, marker, _ = request
                     for key in ("batches", "requests", "max_batch_observed"):
                         stats[key] = 0
-                    for key in ("forward_seconds", "collate_seconds"):
+                    for key in ("forward_seconds", "collate_seconds",
+                                "host_collate_seconds", "transfer_seconds"):
                         stats[key] = 0.0
                     if probe is not None:
                         probe.reset()
@@ -191,21 +193,36 @@ def _serve(
                             1000 * max(0.0, prepared - entry[3])
                             for entry in work
                         ]
-                    batch = (
-                        collate_h7_actor_packed(
-                            frames, device=device,
-                            contiguous_metadata=(collation == "packed-contiguous"),
-                        )
+                    if any(not x.objects or not x.actions or
+                           x.objects[0].kind != 0 for x in frames):
+                        raise ValueError("H7 requires global token and legal actions")
+                    host_start = time.perf_counter()
+                    host = (
+                        prepare_h7_actor_packed(frames)
                         if collation in ("packed", "packed-contiguous") else
-                        collate_h7(frames).to(device)
+                        collate_h7(frames)
                     )
-                    collate_seconds = time.perf_counter() - prepared
+                    host_seconds = time.perf_counter() - host_start
+                    transfer_start = time.perf_counter()
+                    batch = (host.to(
+                        device,
+                        contiguous_metadata=(collation == "packed-contiguous"),
+                    ) if collation in ("packed", "packed-contiguous")
+                       else host.to(device))
+                    transfer_seconds = time.perf_counter() - transfer_start
+                    stats["host_collate_seconds"] = (
+                        float(stats["host_collate_seconds"]) + host_seconds)
+                    stats["transfer_seconds"] = (
+                        float(stats["transfer_seconds"]) + transfer_seconds)
+                    collate_seconds = host_seconds + transfer_seconds
                     stats["collate_seconds"] = (
                         float(stats["collate_seconds"]) + collate_seconds)
                     begun = time.perf_counter()
-                    logits, values = model(batch)
-                    if device.startswith("cuda"):
-                        torch.cuda.synchronize(device)
+                    phase = (0 if all(x.phase == "combat" for x in frames)
+                             else 1 if all(x.phase == "macro" for x in frames)
+                             else None)
+                    logits, values = model(batch, known_phase=phase)
+                    # GPU-to-CPU result transfers already synchronize CUDA.
                     cpu_logits = logits.detach().float().cpu()
                     cpu_values = values.detach().float().cpu()
                     forward_seconds = time.perf_counter() - begun

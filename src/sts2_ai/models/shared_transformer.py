@@ -162,9 +162,21 @@ class SharedObjectTransformer(nn.Module):
         )
         return gathered * (indices >= 0).unsqueeze(-1)
 
-    def forward(self, batch: H7Batch) -> tuple[Tensor, Tensor]:
-        if not batch.object_mask[:, 0].all() or not batch.action_mask.any(dim=1).all():
-            raise ValueError("H7 requires global token and at least one valid action")
+    def forward(
+        self, batch: H7Batch, *, known_phase: int | None = None,
+    ) -> tuple[Tensor, Tensor]:
+        """Evaluate shared objects/actions, optionally with a trusted uniform phase.
+
+        known_phase is only for the actor service after CPU-side validation of
+        every encoded frame. It avoids synchronizing CUDA to inspect mask
+        scalars and avoids computing the unused phase's policy/value heads.
+        The regular public forward path keeps its checked mixed-phase behavior.
+        """
+        if known_phase is None:
+            if not batch.object_mask[:, 0].all() or not batch.action_mask.any(dim=1).all():
+                raise ValueError("H7 requires global token and at least one valid action")
+        elif known_phase not in (0, 1):
+            raise ValueError("Invalid H7 homogeneous inference phase")
         embedding = (
             self.kinds(batch.kinds) + self.identities(batch.identities)
             + self.zones(batch.zones)
@@ -187,13 +199,18 @@ class SharedObjectTransformer(nn.Module):
             need_weights=False,
         )
         attended = self.action_norm(queries + attended)
-        combat_logits = self.policy_heads[0](attended).squeeze(-1)
-        macro_logits = self.policy_heads[1](attended).squeeze(-1)
-        phase = (batch.phases == 0).unsqueeze(1)
-        logits = torch.where(phase, combat_logits, macro_logits)
-        value0 = torch.tanh(self.value_heads[0](context[:, 0]).squeeze(-1))
-        value1 = torch.tanh(self.value_heads[1](context[:, 0]).squeeze(-1))
-        values = torch.where(batch.phases == 0, value0, value1)
+        if known_phase is None:
+            combat_logits = self.policy_heads[0](attended).squeeze(-1)
+            macro_logits = self.policy_heads[1](attended).squeeze(-1)
+            phase = (batch.phases == 0).unsqueeze(1)
+            logits = torch.where(phase, combat_logits, macro_logits)
+            value0 = torch.tanh(self.value_heads[0](context[:, 0]).squeeze(-1))
+            value1 = torch.tanh(self.value_heads[1](context[:, 0]).squeeze(-1))
+            values = torch.where(batch.phases == 0, value0, value1)
+        else:
+            logits = self.policy_heads[known_phase](attended).squeeze(-1)
+            values = torch.tanh(
+                self.value_heads[known_phase](context[:, 0]).squeeze(-1))
         logits = logits.masked_fill(~batch.action_mask, torch.finfo(logits.dtype).min)
         return logits, values
 
