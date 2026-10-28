@@ -144,6 +144,25 @@ test. The 64-combat complete native acceptance and replay are **still
 pending** on a locally rebuilt DLL. Do not silently drop winning
 elite combats or Slimed actions from the curriculum.
 
+## Rich native acceptance: 59/64 terminal
+
+The full 64-source pilot no longer crashes during action execution. It
+reported `terminal=59, unsupported=5` in about 19 seconds, then failed
+`--require-all-terminal` *before saving the cohort JSON*. This is an H8
+unclassified-boundary issue; the existing log does not identify which five
+sources or which pending mechanics the runtime could not classify.
+
+AI PR #135 now retains all source trajectories in the requested report
+file, prints the failed source/encounter/boundary and last six recorded
+actions, then raises the same strict acceptance exception. This diagnostic
+change does not alter player policy, chance sampling, emulator mechanics,
+or the all-terminal acceptance criterion.
+
+Rerun exactly the same pilot command on the updated AI branch and read
+`[h9-rich-incomplete]` lines, or inspect the saved cohort's
+`trajectories` entries with `status != "terminal"`. Do not assume all
+five share one cause or narrow the curriculum before identifying them.
+
 ## Required acceptance on local checkout
 
 1. Run Python structural tests and focused C# research-fixture tests.
