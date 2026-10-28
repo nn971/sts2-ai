@@ -810,6 +810,16 @@ def main() -> None:
     p.add_argument("--player-checkpoint", type=Path)
     p.add_argument("--workers", type=int, default=15)
     p.add_argument("--episodes", type=int, default=128)
+    p.add_argument(
+        "--source-split",
+        choices=("train", "selection", "confirmation", "zero-shot"),
+        default="train",
+        help="Rich-H9 source partition; zero-shot uses distinct fixture indices",
+    )
+    p.add_argument(
+        "--greedy-policy", action="store_true",
+        help="Use deterministic argmax player actions as in training selection",
+    )
     p.add_argument("--curriculum", choices=("h5", "h8-structured", "h9-rich"),
                    default="h5")
     p.add_argument("--structured-curriculum-seed", type=int,
@@ -868,6 +878,10 @@ def main() -> None:
             args.episodes <= args.workers * args.warmup_per_worker):
         p.error("Need balanced 16-cell source cohorts and at least one "
                 "measured episode per worker")
+    if args.source_split != "train" and args.curriculum != "h9-rich":
+        p.error("--source-split currently supports non-train only for h9-rich")
+    if args.source_split == "zero-shot" and args.episodes != 256:
+        p.error("Complete H9-rich structural zero-shot evaluation requires 256 episodes")
     if args.local_reference_nature and args.chance_sampling != "event-law":
         p.error("Local reference Nature is a separate event-scoped "
                 "reference provider; use the default --chance-sampling event-law")
@@ -894,11 +908,11 @@ def main() -> None:
         del model
         spec = H7PlayerSpec.from_file(
             checkpoint, seed=args.actor_seed,
-            temperature=0.85, greedy=False,
+            temperature=0.85, greedy=args.greedy_policy,
         )
         seeds = (
             rich_source_bank(
-                "train", args.episodes, study_seed=args.study_seed)
+                args.source_split, args.episodes, study_seed=args.study_seed)
             if args.curriculum == "h9-rich" else
             structured_source_bank(
                 "train", args.episodes, study_seed=args.study_seed)
@@ -1025,6 +1039,8 @@ def main() -> None:
                 "independent-reference-raw-weight-pilot-v1"
             ),
             capture_player_training=args.capture_player_training,
+            source_split=args.source_split,
+            greedy_policy=args.greedy_policy,
             source_digest=canonical_sha256(seeds),
             order=order, paired_equivalence=len(cohorts) > 1,
             warmup_per_worker=args.warmup_per_worker,
