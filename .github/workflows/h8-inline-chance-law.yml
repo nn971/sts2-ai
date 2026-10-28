@@ -1,0 +1,68 @@
+name: h8-inline-chance-law
+
+on:
+  pull_request:
+    paths:
+      - 'tools/benchmark_h8_h7_policy_pilot.py'
+      - 'tools/compare_h8_inline_law.py'
+      - '.github/workflows/h8-inline-chance-law.yml'
+  workflow_dispatch:
+
+jobs:
+  compare-real-a10-law-providers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: research/h8-inline-chance-law-20261028
+          path: external-h8-emulator
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install neural/test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[neural,dev]'
+      - name: Build native H8 emulator
+        run: |
+          dotnet restore external-h8-emulator/Sts2Emulator.sln
+          dotnet build external-h8-emulator/Sts2Emulator.sln -c Release --no-restore -m:1
+      - name: Standalone reference Chance Law and exact replay
+        run: |
+          python -u tools/benchmark_h8_h7_policy_pilot.py \
+            --emulator-dll external-h8-emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings external-h8-emulator/bindings/python \
+            --emulator-revision "$(git -C external-h8-emulator rev-parse HEAD)" \
+            --workers 2 --episodes 16 --max-boundaries 1200 \
+            --replay-every 8 --actor-device cpu --order native \
+            --actor-collation legacy --sampled-mechanics-audit \
+            --output /tmp/h8-standalone-law-ci.json
+      - name: Inline reference Chance Law and exact replay
+        run: |
+          python -u tools/benchmark_h8_h7_policy_pilot.py \
+            --emulator-dll external-h8-emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings external-h8-emulator/bindings/python \
+            --emulator-revision "$(git -C external-h8-emulator rev-parse HEAD)" \
+            --workers 2 --episodes 16 --max-boundaries 1200 \
+            --replay-every 8 --actor-device cpu --order native \
+            --actor-collation legacy --sampled-mechanics-audit \
+            --inline-reference-law \
+            --output /tmp/h8-inline-law-ci.json
+      - name: Reject changed player or Nature source decisions
+        run: |
+          python tools/compare_h8_inline_law.py \
+            /tmp/h8-standalone-law-ci.json /tmp/h8-inline-law-ci.json \
+            --output /tmp/h8-inline-law-comparison-ci.json
+      - name: Upload exact source parity and timing
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: h8-inline-law-cpu-source-parity
+          path: /tmp/h8-*-law-*.json
+          if-no-files-found: ignore

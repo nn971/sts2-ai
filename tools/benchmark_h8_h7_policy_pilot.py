@@ -81,6 +81,7 @@ def _shard(
     steady_barrier: Any = None,
     warmup_per_worker: int = 0,
     measure_rpc: bool = False,
+    inline_reference_law: bool = False,
 ) -> list[dict[str, Any]]:
     sys.path.insert(0, bindings)
     from sts2_emulator import Session
@@ -90,6 +91,8 @@ def _shard(
     policy = _worker_policy
     spec = _worker_spec
     native = mode == "native"
+    inline_law_opts = ({"include_reference_law": True}
+                       if inline_reference_law else {})
     rows = []
     worker_started = time.perf_counter()
     rpc_counts: Counter[str] = Counter()
@@ -164,6 +167,7 @@ def _shard(
                 use_native_draw_transition=native,
                 use_native_player_end_turn=native,
                 use_trusted_intent=native,
+                **inline_law_opts,
             )["result"]
             handle = state["h8Handle"]
             counts: Counter[str] = Counter()
@@ -213,14 +217,31 @@ def _shard(
                         chosen = actor.choose(obs, allowed)
                         if chosen not in [a["actionId"] for a in allowed]:
                             raise RuntimeError("H7 actor selected outside source menu")
-                        result = call("h8_step", **token, action_id=chosen)
+                        result = call(
+                            "h8_step", **token, action_id=chosen,
+                            **inline_law_opts)
                     elif kind in ("enemy_intent", "draw_card"):
                         if chance_sampling == "event-law":
                             # The original H7 event-keyed SeededLawSampler
                             # consumes exact emulator-authored Chance Law
                             # identities, conditioning and ordered weights.
-                            pending = call(
-                                "h8_reference_law", **token)["pending"]
+                            if inline_reference_law:
+                                pending = state.get("referenceLaw")
+                                if pending is None:
+                                    raise RuntimeError(
+                                        "H8 transition omitted requested Chance Law")
+                                # One sampled standalone query per audited
+                                # episode; no redundant query otherwise.
+                                if (index % replay_every == 0 and
+                                        not nature_law_trace):
+                                    checked = call(
+                                        "h8_reference_law", **token)["pending"]
+                                    if pending != checked:
+                                        raise RuntimeError(
+                                            "Inline and standalone Chance Law drift")
+                            else:
+                                pending = call(
+                                    "h8_reference_law", **token)["pending"]
                             law = DeclaredLaw.from_pending(pending)
                             if law.operation != kind:
                                 raise RuntimeError("H8 reference law site drift")
@@ -254,7 +275,7 @@ def _shard(
                             raise ValueError("Unsupported H8 chance sampling mode")
                         if kind == "enemy_intent":
                             result = call(
-                                "h8_resolve_intent", **token,
+                                "h8_resolve_intent", **token, **inline_law_opts,
                                 intent_id=chosen, provider_id=(
                                     "h7-event-scoped-reference"
                                     if chance_sampling == "event-law" else
@@ -262,7 +283,7 @@ def _shard(
                             )
                         else:
                             result = call(
-                                "h8_resolve_draw_card", **token,
+                                "h8_resolve_draw_card", **token, **inline_law_opts,
                                 card_instance_id=chosen, provider_id=(
                                     "h7-event-scoped-reference"
                                     if chance_sampling == "event-law" else
@@ -437,6 +458,7 @@ def _worker_main(
     steady_barrier: Any = None,
     warmup_per_worker: int = 0,
     measure_rpc: bool = False,
+    inline_reference_law: bool = False,
 ) -> None:
     # Queue handles cross the process boundary *only at spawn*, never
     # inside a ProcessPoolExecutor task queue. Keep one emulator process
@@ -447,7 +469,8 @@ def _worker_main(
             shard, dll, bindings, mode, max_boundaries,
             replay_every, reference_seed, capture_player_training,
             chance_sampling, replay_indices, audit_mechanics,
-            profile_emulator, steady_barrier, warmup_per_worker, measure_rpc)
+            profile_emulator, steady_barrier, warmup_per_worker, measure_rpc,
+            inline_reference_law)
         results.put(("ok", rows))
     except BaseException:
         results.put(("error", traceback.format_exc()))
@@ -465,7 +488,8 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
              profile_emulator: bool = False,
              warmup_per_worker: int = 0,
              measure_rpc: bool = False,
-             actor_collation: str = "legacy") -> dict[str, Any]:
+             actor_collation: str = "legacy",
+             inline_reference_law: bool = False) -> dict[str, Any]:
     if (replay_indices is not None and
             (not replay_indices or
              any(type(i) is not int or i < 0 or i >= len(seeds)
@@ -496,7 +520,8 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
                       mode, max_boundaries, replay_every, reference_seed,
                       results, capture_player_training, chance_sampling,
                       replay_indices, audit_mechanics, profile_emulator,
-                      steady_barrier, warmup_per_worker, measure_rpc),
+                      steady_barrier, warmup_per_worker, measure_rpc,
+                      inline_reference_law),
             )
             for shard in shards
         ]
@@ -666,6 +691,9 @@ def main() -> None:
     p.add_argument("--actor-device", default="cuda")
     p.add_argument("--actor-max-batch", type=int, default=16)
     p.add_argument("--actor-delay-ms", type=float, default=3.0)
+    p.add_argument("--inline-reference-law", action="store_true",
+                   help="Embed declared Chance Law in transition response "
+                        "and avoid a separate C# RPC for each Nature choice")
     p.add_argument("--actor-collation", choices=("legacy", "packed"),
                    default="legacy",
                    help="Select tensor-identical legacy or fused-transfer actor input")
@@ -695,6 +723,8 @@ def main() -> None:
     if args.warmup_per_worker and args.order != "native":
         p.error("Steady-state warmup epoch requires --order native; "
                 "run unprofiled ABBA separately for revision comparisons")
+    if args.inline_reference_law and args.chance_sampling != "event-law":
+        p.error("Inline Chance Law requires the event-scoped reference provider")
     if not args.emulator_dll.is_file():
         p.error("Missing H8 emulator DLL")
     if not (args.emulator_bindings / "sts2_emulator" / "__init__.py").is_file():
@@ -747,6 +777,7 @@ def main() -> None:
                 warmup_per_worker=args.warmup_per_worker,
                 measure_rpc=args.measure_rpc,
                 actor_collation=args.actor_collation,
+                inline_reference_law=args.inline_reference_law,
             )
             cohorts.append(x)
             print(
@@ -817,6 +848,7 @@ def main() -> None:
             profile_emulator=args.profile_emulator,
             sampled_mechanics_audit=args.sampled_mechanics_audit,
             actor_collation=args.actor_collation,
+            inline_reference_law=args.inline_reference_law,
             cohorts=cohorts,
         )
         args.output.parent.mkdir(parents=True, exist_ok=True)
