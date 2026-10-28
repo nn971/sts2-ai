@@ -11,6 +11,7 @@ from pathlib import Path
 from train_h7_reference_combat import collect, summarize
 
 from sts2_ai.models.h7_public_policy import H7PlayerSpec
+from sts2_ai.nature.corpus import file_sha256
 from sts2_ai.nature.h5_curriculum import source_bank
 from sts2_ai.nature.protocol import canonical_sha256
 from sts2_ai.nature.research_combat_fixtures import (
@@ -87,6 +88,18 @@ def main() -> None:
             if args.curriculum == "h8-structured" else None),
         "source_digest": canonical_sha256(seeds),
         "emulator_revision": args.emulator_revision,
+        "emulator_dll_sha256": (
+            file_sha256(args.emulator_dll)
+            if args.emulator_dll.is_file() else None
+        ),
+        "emulator_bindings_sha256": (
+            file_sha256(args.emulator_bindings / "sts2_emulator" / "__init__.py")
+            if (args.emulator_bindings / "sts2_emulator" / "__init__.py").is_file()
+            else None
+        ),
+        "local_reference_nature": args.local_reference_nature,
+        "actor_device": args.actor_device,
+        "actor_collation": args.actor_collation,
         "models": {name: H7PlayerSpec.from_file(
             path, seed=args.actor_seed, greedy=True,
         ).model_sha256 for name, path in entries.items()},
