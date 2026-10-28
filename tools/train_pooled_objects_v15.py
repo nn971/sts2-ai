@@ -21,6 +21,7 @@ from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH
 from sts2_ai.evaluation.combat_snapshots import load_recipes
 from sts2_ai.models.object_embeddings import ObjectVocabulary
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
+from sts2_ai.training.h10_tactical_priorities import load_priority_file
 from sts2_ai.training.pooled_ppo_v15 import (
     POOLED_PPO_VERSION,
     collect_public_vocabulary,
@@ -117,6 +118,10 @@ def main() -> None:
         help="Importance only: proposal mixture with priority distribution (<1)",
     )
     parser.add_argument(
+        "--snapshot-priorities", type=Path,
+        help="H10 opt-in: matched paired-policy tactical priority manifest",
+    )
+    parser.add_argument(
         "--snapshot-every", type=int, default=20,
         help="Export portable model milestones every N completed rounds; 0 disables",
     )
@@ -134,6 +139,18 @@ def main() -> None:
     snapshot_recipes = (
         tuple(load_recipes(args.snapshot_corpus))
         if args.snapshot_corpus is not None else None
+    )
+    if args.snapshot_priorities is not None and (
+        snapshot_recipes is None or args.snapshot_sampling != "importance"
+    ):
+        parser.error("--snapshot-priorities requires --snapshot-corpus and importance")
+    priority_scores = (
+        load_priority_file(
+            args.snapshot_priorities, snapshot_recipes, corpus_path=args.snapshot_corpus,
+        )
+        if args.snapshot_priorities is not None
+        and snapshot_recipes is not None and args.snapshot_corpus is not None
+        else None
     )
 
     base = PhaseSplitNeuralModel.load(args.base_model)
@@ -185,6 +202,8 @@ def main() -> None:
         if args.snapshot_sampling == "importance":
             training_settings["snapshot_target_balance"] = args.snapshot_target_balance
             training_settings["snapshot_priority_mix"] = args.snapshot_priority_mix
+            if args.snapshot_priorities is not None:
+                training_settings["snapshot_priorities"] = str(args.snapshot_priorities)
     with JsonlEmulatorBackend(build=args.build) as backend:
         if vocab_path.is_file():
             vocabulary = ObjectVocabulary.from_dict(json.loads(
@@ -272,6 +291,7 @@ def main() -> None:
             snapshot_sampling=args.snapshot_sampling,
             snapshot_target_balance=args.snapshot_target_balance,
             snapshot_priority_mix=args.snapshot_priority_mix,
+            snapshot_priority_scores=priority_scores,
             diagnose_ppo=args.diagnose_ppo,
             initialize_from=initial,
             on_round=publish_round,
