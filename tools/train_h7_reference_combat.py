@@ -353,8 +353,8 @@ def main() -> None:
     if (min(args.rounds, args.episodes_per_round, args.workers,
             args.max_boundaries, args.eval_every, args.ppo_epochs,
             args.ppo_minibatch) < 1 or args.ppo_sample_limit < 2
-            or args.episodes_per_round < (256 if args.curriculum ==
-                "h8-structured" else len(TRAIN_CELLS))
+            or (args.curriculum == "h5" and
+                args.episodes_per_round < len(TRAIN_CELLS))
             or args.eval_episodes < (1 if args.curriculum ==
                 "h8-structured" else len(TRAIN_CELLS))
             or (args.curriculum == "h5" and
