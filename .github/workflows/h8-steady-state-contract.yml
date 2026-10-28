@@ -1,0 +1,78 @@
+name: h8-steady-state-contract
+
+on:
+  pull_request:
+    paths:
+      - 'src/sts2_ai/models/h7_batch_actor.py'
+      - 'tools/benchmark_h8_h7_policy_pilot.py'
+      - 'tests/test_h8_h7_policy_pilot.py'
+      - '.github/workflows/h8-steady-state-contract.yml'
+  workflow_dispatch:
+
+jobs:
+  steady-state-warmup-and-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: research/h8-native-turn-owner-20261028
+          path: external-h8-emulator
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install neural/test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[neural,dev]'
+      - name: Validate H8 public actor and test contracts
+        run: |
+          python -m compileall -q tools/benchmark_h8_h7_policy_pilot.py src/sts2_ai/models/h7_batch_actor.py
+          python -m pytest -q tests/test_h8_h7_policy_pilot.py
+      - name: Build paired native H8 emulator
+        run: |
+          dotnet restore external-h8-emulator/Sts2Emulator.sln
+          dotnet build external-h8-emulator/Sts2Emulator.sln -c Release --no-restore -m:1
+      - name: Real 2-worker synchronized warmup, model reset, and replay (CPU)
+        run: |
+          python -u tools/benchmark_h8_h7_policy_pilot.py \
+            --emulator-dll external-h8-emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings external-h8-emulator/bindings/python \
+            --emulator-revision "$(git -C external-h8-emulator rev-parse HEAD)" \
+            --workers 2 --episodes 16 --max-boundaries 1200 \
+            --replay-every 8 --actor-device cpu --order native \
+            --warmup-per-worker 1 --measure-rpc --sampled-mechanics-audit \
+            --output /tmp/h8-steady-state-ci.json
+      - name: Verify measured worker/actor source integrity
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('/tmp/h8-steady-state-ci.json').read_text())
+          cohort = report['cohorts'][0]
+          steady = cohort['steady_state']
+          assert cohort['episodes'] == 16
+          assert steady['warmup_episodes'] == 2
+          assert steady['measured_episodes'] == 14
+          assert steady['terminal_episodes'] == 14
+          assert cohort['replay_verified'] == 2
+          assert steady['actor_requests'] == cohort['actor_metrics']['requests']
+          assert steady['wall_seconds'] > 0
+          assert steady['emulator_rpc_calls']['h8_begin_seeded'] == 14
+          assert steady['emulator_rpc_calls']['h8_observe'] > 0
+          assert steady['actor_encoding_seconds'] >= 0
+          assert steady['actor_wait_seconds'] >= 0
+          print("Steady-state synchronization, actor counters and replay verified.")
+          PY
+      - name: Upload steady-state report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: h8-steady-state-cpu-source
+          path: /tmp/h8-steady-state-ci.json
+          if-no-files-found: ignore
