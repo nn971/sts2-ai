@@ -10,8 +10,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import benchmark_h8_h7_policy_pilot as pilot  # noqa: E402
 from train_h7_reference_combat import collect_h8, summarize  # noqa: E402
+
 from sts2_ai.nature.h5_curriculum import (
-    TRAIN_CELLS, cell_for_source, source_bank,
+    TRAIN_CELLS,
+    cell_for_source,
+    source_bank,
 )
 
 

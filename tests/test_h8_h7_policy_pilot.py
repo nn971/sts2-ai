@@ -9,9 +9,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from benchmark_h8_h7_policy_pilot import (  # noqa: E402
-    _choose_weighted, _validate_pair,
+    _choose_weighted,
+    _validate_pair,
 )
-from sts2_ai.nature.h5_curriculum import source_bank, cell_for_source
+from sts2_ai.nature.h5_curriculum import cell_for_source, source_bank
 
 
 def test_h8_pilot_weighted_source_intent_rational_ticket():

@@ -195,6 +195,10 @@ def main() -> None:
     p.add_argument("--ppo-minibatch", type=int, default=64)
     p.add_argument("--ppo-sample-limit", type=int, default=4096)
     p.add_argument("--compare-legacy", action="store_true")
+    p.add_argument("--profile-emulator", action="store_true",
+                   help="Collect opt-in .NET H8 nested time/allocation counters")
+    p.add_argument("--sampled-mechanics-audit", action="store_true",
+                   help="Avoid full state SHA/journal materialization on non-audited sources")
     args = p.parse_args()
     if (args.workers < 1 or args.episodes < 16 or
             args.episodes % 16 or args.max_boundaries < 1 or
@@ -241,7 +245,9 @@ def main() -> None:
             max_boundaries=args.max_boundaries,
             replay_every=args.replay_every,
             reference_seed=args.reference_seed,
-            capture_player_training=True, chance_sampling="event-law")
+            capture_player_training=True, chance_sampling="event-law",
+            profile_emulator=args.profile_emulator,
+            audit_mechanics=not args.sampled_mechanics_audit)
         episodes, captures = validate_training_cohort(
             h8, seeds, replay_every=args.replay_every)
         print(
@@ -304,6 +310,9 @@ def main() -> None:
             "native_h8_player_decisions_per_second": (
                 h8["player_decisions"] / h8["wall_seconds"]),
             "native_h8_actor_metrics": h8["actor_metrics"],
+            "emulator_hotpath_profile": h8["emulator_hotpath_profile"],
+            "emulator_profile_instrumented": args.profile_emulator,
+            "full_mechanics_audit_every_episode": not args.sampled_mechanics_audit,
             "legacy_h7": legacy_report,
             "ppo_seconds": ppo_wall,
             "total_h8_iteration_seconds": h8["wall_seconds"] + ppo_wall,

@@ -9,7 +9,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from benchmark_h8_training_iteration import (  # noqa: E402
-    validate_legacy_parity, validate_training_cohort,
+    validate_legacy_parity,
+    validate_training_cohort,
 )
 
 
