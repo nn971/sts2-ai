@@ -4,7 +4,11 @@ from __future__ import annotations
 import pytest
 import torch
 
-from sts2_ai.models.packed_actor_collation import collate_h7_actor_packed
+from sts2_ai.models.packed_actor_collation import (
+    H7_PACKED_METADATA_FIELDS,
+    collate_h7_actor_packed,
+    contiguous_actor_metadata,
+)
 from sts2_ai.models.shared_game_objects import (
     NUMERIC_FIELDS,
     SHARED_OBJECT_SCHEMA,
@@ -72,6 +76,40 @@ def test_packed_actor_tensors_are_bit_exact_across_all_h7_fields() -> None:
     assert packed.action_mask[1].tolist() == [True, False, False]
 
 
+def test_packed_contiguous_materializes_only_metadata_and_preserves_values() -> None:
+    decisions = sample_decisions()
+    packed = collate_h7_actor_packed(decisions)
+    contiguous = collate_h7_actor_packed(
+        decisions, contiguous_metadata=True)
+    reference = collate_h7(decisions)
+    assert set(H7_PACKED_METADATA_FIELDS) == {
+        "kinds", "identities", "zones", "owners",
+        "action_kinds", "action_semantics", "sources", "targets",
+    }
+    for name in vars_as_dict(reference):
+        a, b, expected = (
+            getattr(packed, name), getattr(contiguous, name),
+            getattr(reference, name))
+        assert torch.equal(a, expected), name
+        assert torch.equal(b, expected), name
+        if name in H7_PACKED_METADATA_FIELDS:
+            assert b.is_contiguous(), name
+            # The packed interleaved columns each have stride 4; the
+            # contiguous candidate owns a new allocation for each column.
+            assert not a.is_contiguous(), name
+            assert b.data_ptr() != a.data_ptr(), name
+        else:
+            # Neither packed numeric features nor masks should be copied.
+            assert b.data_ptr() == a.data_ptr() or (
+                b.is_contiguous() and a.is_contiguous()), name
+
+    # The helper acts only on metadata, and preserves the original batch.
+    again = contiguous_actor_metadata(packed)
+    for name in H7_PACKED_METADATA_FIELDS:
+        assert torch.equal(getattr(again, name), getattr(contiguous, name))
+    assert not packed.kinds.is_contiguous()
+
+
 def test_packed_actor_transformer_logits_values_match_reference() -> None:
     decisions = sample_decisions()
     torch.manual_seed(27)
@@ -80,11 +118,13 @@ def test_packed_actor_transformer_logits_values_match_reference() -> None:
     with torch.inference_mode():
         legacy_logits, legacy_values = model(collate_h7(decisions))
         packed_logits, packed_values = model(collate_h7_actor_packed(decisions))
-    # A different CPU input tensor stride must not alter any model semantics.
-    assert torch.testing.assert_close(
-        legacy_logits, packed_logits, atol=0, rtol=0) is None
-    assert torch.testing.assert_close(
-        legacy_values, packed_values, atol=0, rtol=0) is None
+        contiguous_logits, contiguous_values = model(
+            collate_h7_actor_packed(decisions, contiguous_metadata=True))
+    # CPU results must be identical for the same valid tokens and mask.
+    for actual in (packed_logits, contiguous_logits):
+        torch.testing.assert_close(legacy_logits, actual, atol=0, rtol=0)
+    for actual in (packed_values, contiguous_values):
+        torch.testing.assert_close(legacy_values, actual, atol=0, rtol=0)
 
 
 @pytest.mark.parametrize("kind", ("owner", "source", "target", "phase", "empty"))
@@ -119,5 +159,24 @@ def test_packed_actor_matches_gpu_reference_tensor_fields() -> None:
     decisions = sample_decisions()
     old = collate_h7(decisions).to("cuda")
     packed = collate_h7_actor_packed(decisions, device="cuda")
+    contiguous = collate_h7_actor_packed(
+        decisions, device="cuda", contiguous_metadata=True)
     for name, expected in vars_as_dict(old).items():
         assert torch.equal(expected, getattr(packed, name)), name
+        assert torch.equal(expected, getattr(contiguous, name)), name
+        if name in H7_PACKED_METADATA_FIELDS:
+            assert not getattr(packed, name).is_contiguous()
+            assert getattr(contiguous, name).is_contiguous()
+
+    torch.manual_seed(27)
+    model = SharedObjectTransformer(H7Config(
+        width=32, heads=4, layers=1, feedforward=64)).eval().cuda()
+    with torch.inference_mode():
+        l_logit, l_value = model(old)
+        p_logit, p_value = model(packed)
+        c_logit, c_value = model(contiguous)
+    for output, reference in (
+        (p_logit, l_logit), (c_logit, l_logit),
+        (p_value, l_value), (c_value, l_value),
+    ):
+        torch.testing.assert_close(output, reference, rtol=1e-6, atol=1e-6)

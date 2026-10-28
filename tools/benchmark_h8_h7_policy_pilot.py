@@ -666,7 +666,8 @@ def main() -> None:
     p.add_argument("--actor-device", default="cuda")
     p.add_argument("--actor-max-batch", type=int, default=16)
     p.add_argument("--actor-delay-ms", type=float, default=3.0)
-    p.add_argument("--actor-collation", choices=("legacy", "packed"),
+    p.add_argument("--actor-collation",
+                   choices=("legacy", "packed", "packed-contiguous"),
                    default="legacy",
                    help="Select tensor-identical legacy or fused-transfer actor input")
     p.add_argument("--order", choices=("native", "checked", "ab", "abba"),
@@ -817,6 +818,9 @@ def main() -> None:
             profile_emulator=args.profile_emulator,
             sampled_mechanics_audit=args.sampled_mechanics_audit,
             actor_collation=args.actor_collation,
+            actor_max_batch=args.actor_max_batch,
+            actor_delay_ms=args.actor_delay_ms,
+            actor_device=args.actor_device,
             cohorts=cohorts,
         )
         args.output.parent.mkdir(parents=True, exist_ok=True)

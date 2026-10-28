@@ -1,0 +1,94 @@
+name: h8-actor-layout-ablation
+
+on:
+  pull_request:
+    paths:
+      - 'src/sts2_ai/models/packed_actor_collation.py'
+      - 'src/sts2_ai/models/h7_batch_actor.py'
+      - 'tools/benchmark_h8_h7_policy_pilot.py'
+      - 'tools/benchmark_h8_actor_tensor_layout.py'
+      - 'tools/compare_h8_actor_layouts.py'
+      - 'tests/test_h8_packed_actor_collation.py'
+      - '.github/workflows/h8-actor-layout-ablation.yml'
+  workflow_dispatch:
+
+jobs:
+  validate-three-actor-layouts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: research/h8-tagged-boundary-cursor-20261028
+          path: external-h8-emulator
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Install shared actor dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[neural,dev]'
+      - name: Exact field/stride/forward contract and CPU three-way bench
+        run: |
+          python -m compileall -q src/sts2_ai/models tools/benchmark_h8_actor_tensor_layout.py tools/compare_h8_actor_layouts.py
+          python -m pytest -q tests/test_h8_packed_actor_collation.py
+          python -u tools/benchmark_h8_actor_tensor_layout.py \
+            --device cpu --batch 3 --objects 12 --actions 3 \
+            --width 32 --heads 4 --layers 1 --feedforward 64 \
+            --iterations 8 --warmup 2 \
+            --output /tmp/h8-actor-layout-cpu-micro.json
+      - name: Build M3 source-valid H8 runtime
+        run: |
+          dotnet restore external-h8-emulator/Sts2Emulator.sln
+          dotnet build external-h8-emulator/Sts2Emulator.sln -c Release --no-restore -m:1
+      - name: CPU three-way 16-cell source and Nature replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          dll=external-h8-emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll
+          revision="$(git -C external-h8-emulator rev-parse HEAD)"
+          for layout in legacy packed packed-contiguous; do
+            python -u tools/benchmark_h8_h7_policy_pilot.py \
+              --emulator-dll "$dll" \
+              --emulator-bindings external-h8-emulator/bindings/python \
+              --emulator-revision "$revision" \
+              --workers 2 --episodes 16 --warmup-per-worker 1 \
+              --max-boundaries 1200 --replay-every 8 \
+              --actor-device cpu --actor-max-batch 16 --actor-delay-ms 3 \
+              --sampled-mechanics-audit --order native \
+              --actor-collation "$layout" \
+              --output "/tmp/h8-layout-$layout.json"
+          done
+      - name: Reject source, Chance Law and replay drift
+        run: |
+          python tools/compare_h8_actor_layouts.py \
+            /tmp/h8-layout-legacy.json \
+            /tmp/h8-layout-packed.json \
+            /tmp/h8-layout-packed-contiguous.json \
+            --allow-censored \
+            --output /tmp/h8-layout-compare.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('/tmp/h8-layout-compare.json').read_text())
+          assert r['exact_source_player_nature_replay_parity']
+          assert r['source_count'] == 16
+          for name, metrics in r['variants'].items():
+              assert metrics['actor_batches'] > 0, name
+              assert metrics['steady_completed_combats'] <= 14, name
+          print('H8 metadata layout, 16-source event-scoped decisions and replay agree')
+          PY
+      - name: Upload source parity and CPU timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: h8-three-layout-cpu-parity
+          path: |
+            /tmp/h8-actor-layout-cpu-micro.json
+            /tmp/h8-layout-*.json
+          if-no-files-found: ignore
