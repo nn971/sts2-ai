@@ -149,6 +149,38 @@ metrics. Human comparison needs independently recorded same-rule runs.
 Inspect representative decision histories for semantic failures rather
 than inventing repeated microbenchmarks after negative results.
 
+
+### M1 first integration hook — native H9/historical-macro hybrid collector
+
+The opt-in `agents/h10_hybrid.py` uses H9's frozen Torch
+`TorchH7PublicPolicy` only in live combat and the existing semantic
+`PhaseSplitGreedyAgent` outside combat. It checks fair policy frames,
+selects only supplied legal actions, and never exposes hidden RNG.
+`tools/collect_h10_native_combat_entries.py` drives actual Silent A10
+Act 1 Overgrowth runs, collecting native snapshot recipes containing
+the source run's legal-action prefix and exact-state hash.
+
+Example fish command (substitute an existing, compatible H6 macro
+checkpoint; H9's R80 path is from your completed local run):
+
+```fish
+cd ~/projects/sts2-ai
+source .venv/bin/activate.fish
+set emu ~/projects/sts2-emulator
+set rev (git -C $emu rev-parse HEAD)
+python -u tools/collect_h10_native_combat_entries.py \
+  --macro-model results/your-phase-split-macro.json \
+  --combat-checkpoint results/h9-structured-a10-r80/models/player-r0080.pt \
+  --emulator-root $emu --emulator-revision $rev \
+  --runs 16 --seed-prefix h10-a10-hybrid-train-v1 \
+  --device cuda --output results/h10-snapshots/hybrid-entries.jsonl
+```
+
+This is an integration gate, **not yet validated on your local emulator**.
+Verify an ordinary full-run combat is playable under the H9 codec; failure
+on a new native card/mechanic is a concrete feature-coverage task.
+Current collector is serial and runs greedy macro; add 15-worker parallel
+collection only after the basic native codec proves compatible.
 ## First opt-in use (existing older v15 snapshot backend)
 
 This stage requires **real native snapshot recipes** and paired reports
