@@ -755,11 +755,18 @@ def main() -> None:
             _validate_pair(cohorts[0], x)
         if args.order == "native" and args.warmup_per_worker:
             steady = cohorts[0]["steady_state"]
-            if steady is None or (
-                    steady["terminal_episodes"] !=
-                    steady["measured_episodes"]):
-                raise RuntimeError(
-                    "H8 steady-state source cohort did not complete all fights")
+            if steady is None:
+                raise RuntimeError("Missing H8 synchronized steady-state epoch")
+            # Unsupported/censored environments are themselves essential
+            # source coverage failures. Retain their decision journals and
+            # timing report instead of discarding all measurements. Never
+            # count them as completed combats in throughput.
+            steady["all_sources_terminal"] = (
+                cohorts[0]["statuses"].get("terminal", 0) == args.episodes)
+            steady["status_counts"] = dict(cohorts[0]["statuses"])
+            steady["accepted_for_complete_combat_target"] = (
+                steady["all_sources_terminal"] and
+                steady["terminal_episodes"] == steady["measured_episodes"])
             expected_replays = sum(
                 index % args.replay_every == 0
                 for index in range(args.episodes))
@@ -775,7 +782,9 @@ def main() -> None:
                 f"warmup={steady['warmup_episodes']} "
                 f"wall_s={steady['wall_seconds']:.3f} "
                 f"combat/s={steady['terminal_combats_per_second']:.3f} "
-                f"gpu_requests={steady['actor_requests']}",
+                f"gpu_requests={steady['actor_requests']} "
+                f"status={steady['status_counts']} "
+                f"accepted={steady['accepted_for_complete_combat_target']}",
                 flush=True,
             )
         result = dict(
