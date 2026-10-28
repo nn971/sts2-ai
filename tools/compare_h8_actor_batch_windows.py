@@ -93,7 +93,8 @@ def compare(
         if len(entries) != actor["batches"]:
             raise ValueError("Truncated batch records in " + label)
         n = actor["batches"]
-        ms = lambda key: sum(float(x[key]) for x in entries)
+        def total_ms(key: str) -> float:
+            return sum(float(x[key]) for x in entries)
         rows.append({
             "label": label,
             "actor_max_batch": report["actor_max_batch"],
@@ -123,12 +124,12 @@ def compare(
             "queue_to_batch_mean_ms": sum(
                 x["count"] * x["queue_to_batch_mean_ms"] for x in entries) /
                 actor["requests"],
-            "batch_fill_ms": ms("fill_ms"),
+            "batch_fill_ms": total_ms("fill_ms"),
             "collate_seconds": actor["collate_seconds"],
             "forward_seconds": actor["forward_seconds"],
-            "reply_ms": ms("reply_ms"),
+            "reply_ms": total_ms("reply_ms"),
             "forward_ms_per_batch": actor["forward_seconds"] * 1000 / n,
-            "batch_fill_ms_per_batch": ms("fill_ms") / n,
+            "batch_fill_ms_per_batch": total_ms("fill_ms") / n,
             "by_batch_size": batch_trace["by_batch_size"],
         })
     ranked = sorted(rows, key=lambda r: r["completed_combats_per_second"],
