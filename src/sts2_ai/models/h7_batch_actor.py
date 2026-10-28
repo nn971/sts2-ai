@@ -21,6 +21,7 @@ import torch
 from sts2_ai.emulator.protocol import LegalAction, Observation
 from sts2_ai.models.protocol import PolicyValueEstimate
 
+from .packed_actor_collation import collate_h7_actor_packed
 from .shared_game_objects import EncodedDecision, encode_public_decision
 from .shared_transformer import SharedObjectTransformer, collate_h7
 
@@ -118,13 +119,14 @@ class RemoteH7Policy:
 def _serve(
     checkpoint: str, digest: str, device: str, requests: Any,
     replies: tuple[Any, ...], startup: Any, statistics: Any,
-    max_batch: int, max_delay_ms: float,
+    max_batch: int, max_delay_ms: float, collation: str,
 ) -> None:
     stats: dict[str, float | int | str] = {
         "batches": 0, "requests": 0, "forward_seconds": 0.0,
         "collate_seconds": 0.0,
         "model_load_seconds": 0.0, "max_batch_observed": 0,
         "device": device,
+        "collation": collation,
     }
     try:
         torch.set_num_threads(1)
@@ -172,7 +174,11 @@ def _serve(
                     if not all(isinstance(item, EncodedDecision) for item in frames):
                         raise ValueError("H7 inference received non-public token request")
                     prepared = time.perf_counter()
-                    batch = collate_h7(frames).to(device)
+                    batch = (
+                        collate_h7_actor_packed(frames, device=device)
+                        if collation == "packed" else
+                        collate_h7(frames).to(device)
+                    )
                     stats["collate_seconds"] = float(stats["collate_seconds"]) + (
                         time.perf_counter() - prepared
                     )
@@ -217,8 +223,10 @@ class SharedH7Service:
     def __init__(
         self, *, checkpoint: Path, digest: str, workers: int,
         device: str = "cpu", max_batch: int = 16, max_delay_ms: float = 3.0,
+        collation: str = "legacy",
     ) -> None:
-        if (workers < 1 or max_batch < 1 or max_delay_ms < 0
+        if (collation not in ("legacy", "packed") or
+                workers < 1 or max_batch < 1 or max_delay_ms < 0
                 or not math.isfinite(max_delay_ms)
                 or not (device == "cpu" or device.startswith("cuda"))):
             raise ValueError("Invalid H7 shared inference configuration")
@@ -236,7 +244,7 @@ class SharedH7Service:
             args=(
                 str(checkpoint), digest, device,
                 self.requests, self.replies, self.startup, self.statistics,
-                max_batch, max_delay_ms,
+                max_batch, max_delay_ms, collation,
             ),
             daemon=True,
         )
