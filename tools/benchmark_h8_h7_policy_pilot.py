@@ -40,6 +40,7 @@ from sts2_ai.nature.h5_curriculum import cell_for_source, source_bank
 from sts2_ai.nature.protocol import canonical_sha256
 from sts2_ai.nature.research_combat_fixtures import (
     fixture_from_source,
+    source_bank as structured_source_bank,
     structural_key,
 )
 
@@ -772,6 +773,12 @@ def main() -> None:
     p.add_argument("--player-checkpoint", type=Path)
     p.add_argument("--workers", type=int, default=15)
     p.add_argument("--episodes", type=int, default=128)
+    p.add_argument("--curriculum", choices=("h5", "h8-structured"),
+                   default="h5")
+    p.add_argument("--structured-curriculum-seed", type=int,
+                   default=20261027)
+    p.add_argument("--require-all-terminal", action="store_true",
+                   help="Reject any incomplete/unsupported structured combat")
     p.add_argument("--max-boundaries", type=int, default=1200)
     p.add_argument("--replay-every", type=int, default=8)
     p.add_argument("--study-seed", type=int, default=73127)
@@ -852,7 +859,12 @@ def main() -> None:
             checkpoint, seed=args.actor_seed,
             temperature=0.85, greedy=False,
         )
-        seeds = source_bank("train", args.episodes, study_seed=args.study_seed)
+        seeds = (
+            structured_source_bank(
+                "train", args.episodes, study_seed=args.study_seed)
+            if args.curriculum == "h8-structured" else
+            source_bank("train", args.episodes, study_seed=args.study_seed)
+        )
         order = ["checked", "native"]
         if args.order == "abba":
             order = ["checked", "native", "native", "checked"]
@@ -885,8 +897,16 @@ def main() -> None:
                 actor_batch_trace=args.actor_batch_trace,
                 local_reference_nature=args.local_reference_nature,
                 inline_player_frame=args.inline_player_frame,
+                structured_curriculum_seed=(
+                    args.structured_curriculum_seed
+                    if args.curriculum == "h8-structured" else None),
             )
             cohorts.append(x)
+            if (args.require_all_terminal and
+                    x["statuses"].get("terminal", 0) != args.episodes):
+                raise RuntimeError(
+                    "H9 structured curriculum has incomplete combats: "
+                    + str(x["statuses"]))
             print(
                 f"[h8-h7-pilot] {mode} {x['wall_seconds']:.2f}s "
                 f"full_combat={x['statuses'].get('terminal', 0)} "
