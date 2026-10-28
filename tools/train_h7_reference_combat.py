@@ -27,7 +27,7 @@ from sts2_ai.models.shared_game_objects import SHARED_OBJECT_SCHEMA
 from sts2_ai.models.shared_transformer import H7_MODEL_FORMAT, H7Config, SharedObjectTransformer
 from sts2_ai.nature.corpus import file_sha256
 from sts2_ai.nature.draw_only_workers import draw_only_batch
-from sts2_ai.nature.h4_reward import H4_REWARD
+from sts2_ai.nature.h4_reward import H4_REWARD, H9_TOTAL_HP_REWARD
 from sts2_ai.nature.h5_curriculum import (
     DECK_POOL,
     SCENARIO_POOL,
@@ -246,8 +246,10 @@ def collect_h8(
             raise RuntimeError("H8 returned wrong structured source")
         ep.scenario_id = scenario_id
         ep.deck_preset_id = deck_label
-        if ep.reward_version != H4_REWARD:
-            raise RuntimeError("H8 reward differs from H7 PPO")
+        expected_reward = (H9_TOTAL_HP_REWARD if args.curriculum == "h9-rich"
+                           else H4_REWARD)
+        if ep.reward_version != expected_reward:
+            raise RuntimeError("H8 reward differs from selected H7 PPO reward")
     return {
         "episodes": episodes,
         "player_rollouts": captures,
@@ -424,7 +426,9 @@ def main() -> None:
             if (args.emulator_bindings / "sts2_emulator" / "__init__.py").is_file()
             else None
         ),
-        "chance_law": "reference", "combat_reward": H4_REWARD,
+        "chance_law": "reference",
+        "combat_reward": (H9_TOTAL_HP_REWARD
+                          if args.curriculum == "h9-rich" else H4_REWARD),
         "curriculum": (
             "h9-overgrowth-rich-1024+256-v2" if args.curriculum == "h9-rich"
             else "h8-structured-256+64-v1" if args.curriculum == "h8-structured"
