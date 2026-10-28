@@ -314,6 +314,13 @@ class SharedH7Service:
     def __exit__(self, *_: object) -> None:
         try:
             self.requests.put(None, timeout=5)
+            # Traced runs can contain thousands of batch records. Read the
+            # report *before* joining: multiprocessing.Queue's feeder must
+            # drain into the parent or the server may deadlock on process exit.
+            try:
+                status, report = self.statistics.get(timeout=60)
+            except queue.Empty as exc:
+                raise RuntimeError("H7 inference server produced no statistics") from exc
             self.process.join(timeout=15)
             if self.process.is_alive():
                 self.process.terminate()
@@ -321,10 +328,6 @@ class SharedH7Service:
                 raise RuntimeError("H7 shared inference server did not exit cleanly")
             if self.process.exitcode != 0:
                 raise RuntimeError(f"H7 shared inference exited with {self.process.exitcode}")
-            try:
-                status, report = self.statistics.get(timeout=5)
-            except queue.Empty as exc:
-                raise RuntimeError("H7 inference server produced no statistics") from exc
             if status != "ok":
                 raise RuntimeError(f"H7 inference server failed: {report}")
             self.metrics = dict(report)
