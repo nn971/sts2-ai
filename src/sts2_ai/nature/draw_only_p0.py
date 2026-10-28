@@ -89,7 +89,7 @@ class DeclaredLaw:
     @classmethod
     def from_pending(cls, pending: Mapping[str, Any]) -> DeclaredLaw:
         kind = pending.get("kind")
-        if kind not in ("enemy_intent", "draw_card"):
+        if kind not in ("enemy_intent", "draw_card", "random_target"):
             raise DrawOnlyContractError(f"Unsupported draw-only boundary: {kind!r}")
         law = pending.get("chanceLaw")
         if not isinstance(law, dict) or law.get("schemaId") != CHANCE_LAW_SCHEMA:
@@ -101,6 +101,9 @@ class DeclaredLaw:
             or (kind == "enemy_intent"
                 and status == SOURCE_VERIFIED_STATUS
                 and metadata_status in (REFERENCE_STATUS, SOURCE_VERIFIED_STATUS))
+            or (kind == "random_target"
+                and status == SOURCE_VERIFIED_STATUS
+                and metadata_status == "UNVERIFIED")
         ):
             raise DrawOnlyContractError(
                 "Unexpected native probability provenance: "
@@ -166,20 +169,35 @@ class DeclaredLaw:
         else:
             candidates = pending.get("candidates")
             if not isinstance(candidates, list) or not candidates:
-                raise DrawOnlyContractError("Missing physical card-instance support")
+                raise DrawOnlyContractError("Missing physical card/target support")
             try:
-                expected = [
-                    f"card_instance:{row['cardInstanceId']}"
-                    for row in candidates
-                    if type(row["cardInstanceId"]) is int and row["cardInstanceId"] >= 0
-                ]
+                if kind == "random_target":
+                    expected = [
+                        f"enemy_instance:{row['enemyInstanceId']}"
+                        for row in candidates
+                        if type(row["enemyInstanceId"]) is int and row["enemyInstanceId"] >= 0
+                    ]
+                else:
+                    expected = [
+                        f"card_instance:{row['cardInstanceId']}"
+                        for row in candidates
+                        if type(row["cardInstanceId"]) is int and row["cardInstanceId"] >= 0
+                    ]
             except (KeyError, TypeError) as exc:
                 raise DrawOnlyContractError("Malformed physical-instance candidates") from exc
             if (expected != ids or len(expected) != len(candidates)
                     or law.get("conditioningFingerprint") !=
                     pending.get("constraintFingerprint")
                     or law.get("operationKind") != pending.get("operationKind")):
-                raise DrawOnlyContractError("Law violates physical-deck constraints")
+                raise DrawOnlyContractError("Law violates physical support constraints")
+            if kind == "random_target" and (
+                law.get("operationKind") != "choose_enemy_instance"
+                or law.get("conditioningPolicyId") !=
+                    "native-random-target-eligible-enemies-v1"
+                or status != SOURCE_VERIFIED_STATUS
+            ):
+                raise DrawOnlyContractError(
+                    "Random-target law must use the verified native target policy")
         return cls(
             law_id=law["lawId"], event_id=event_id,
             site_id=law["siteId"], support_fingerprint=law["supportFingerprint"],
