@@ -10,6 +10,8 @@ frozen remote actor service and must pass field-by-field parity.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import torch
 
 from .shared_game_objects import NUMERIC_FIELDS, SHARED_OBJECT_SCHEMA, EncodedDecision
@@ -38,14 +40,55 @@ def contiguous_actor_metadata(batch: H7Batch) -> H7Batch:
     })
 
 
-def collate_h7_actor_packed(
-    decisions: list[EncodedDecision], device: str | torch.device = "cpu",
-    *, contiguous_metadata: bool = False,
-) -> H7Batch:
+@dataclass(frozen=True)
+class H7PackedHost:
+    """The seven CPU buffers stay interleaved until a batched device transfer."""
+
+    object_meta: torch.Tensor
+    action_meta: torch.Tensor
+    numeric: torch.Tensor
+    observed: torch.Tensor
+    object_mask: torch.Tensor
+    action_mask: torch.Tensor
+    phases: torch.Tensor
+
+    def to(
+        self, device: str | torch.device, *,
+        contiguous_metadata: bool = False,
+    ) -> H7Batch:
+        obj = self.object_meta.to(device)
+        act = self.action_meta.to(device)
+        numeric = self.numeric.to(device)
+        observed = self.observed.to(device)
+        object_mask = self.object_mask.to(device)
+        action_mask = self.action_mask.to(device)
+        phases = self.phases.to(device)
+        result = H7Batch(
+            kinds=obj[..., 0],
+            identities=obj[..., 1],
+            zones=obj[..., 2],
+            numeric=numeric,
+            observed=observed,
+            owners=obj[..., 3],
+            object_mask=object_mask,
+            action_kinds=act[..., 0],
+            action_semantics=act[..., 1],
+            sources=act[..., 2],
+            targets=act[..., 3],
+            action_mask=action_mask,
+            phases=phases,
+        )
+        return contiguous_actor_metadata(result) if contiguous_metadata else result
+
+
+def prepare_h7_actor_packed(decisions: list[EncodedDecision]) -> H7PackedHost:
+    """Build packed CPU tensors, independently of a GPU execution stream."""
     if not decisions or any(d.schema != SHARED_OBJECT_SCHEMA for d in decisions):
         raise ValueError("Need nonempty same-version H7 decisions")
     if any(not d.objects or not d.actions for d in decisions):
         raise ValueError("H7 decisions require objects and legal actions")
+    if any(d.objects[0].kind != 0 for d in decisions):
+        raise ValueError("H7 requires the global state token at position zero")
 
     nobjects = max(len(d.objects) for d in decisions)
     nactions = max(len(d.actions) for d in decisions)
@@ -102,26 +145,20 @@ def collate_h7_actor_packed(
 
     # One copy each for object/action metadata (rather than many small
     # independent .to(device) calls), plus two float arrays and masks.
-    obj = torch.tensor(object_meta, dtype=torch.long).to(device)
-    act = torch.tensor(action_meta, dtype=torch.long).to(device)
-    numeric = torch.tensor(object_numeric, dtype=torch.float32).to(device)
-    observed = torch.tensor(object_observed, dtype=torch.float32).to(device)
-    object_mask = torch.tensor(object_masks, dtype=torch.bool).to(device)
-    action_mask = torch.tensor(action_masks, dtype=torch.bool).to(device)
-    phase_tensor = torch.tensor(phases, dtype=torch.long).to(device)
-    result = H7Batch(
-        kinds=obj[..., 0],
-        identities=obj[..., 1],
-        zones=obj[..., 2],
-        numeric=numeric,
-        observed=observed,
-        owners=obj[..., 3],
-        object_mask=object_mask,
-        action_kinds=act[..., 0],
-        action_semantics=act[..., 1],
-        sources=act[..., 2],
-        targets=act[..., 3],
-        action_mask=action_mask,
-        phases=phase_tensor,
+    return H7PackedHost(
+        object_meta=torch.tensor(object_meta, dtype=torch.long),
+        action_meta=torch.tensor(action_meta, dtype=torch.long),
+        numeric=torch.tensor(object_numeric, dtype=torch.float32),
+        observed=torch.tensor(object_observed, dtype=torch.float32),
+        object_mask=torch.tensor(object_masks, dtype=torch.bool),
+        action_mask=torch.tensor(action_masks, dtype=torch.bool),
+        phases=torch.tensor(phases, dtype=torch.long),
     )
-    return contiguous_actor_metadata(result) if contiguous_metadata else result
+
+
+def collate_h7_actor_packed(
+    decisions: list[EncodedDecision], device: str | torch.device = "cpu",
+    *, contiguous_metadata: bool = False,
+) -> H7Batch:
+    return prepare_h7_actor_packed(decisions).to(
+        device, contiguous_metadata=contiguous_metadata)
