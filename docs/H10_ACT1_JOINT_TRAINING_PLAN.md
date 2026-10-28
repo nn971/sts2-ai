@@ -368,3 +368,65 @@ After this seed succeeds, run a fresh full 16-run corpus with the
 same updated emulator revision. The original partial corpus was
 discarded on the exception; prior provisional entries from older
 revisions must not be concatenated with this one.
+
+## First complete H10 corpus: 16 authentic A10 runs (2026-10-28)
+
+User-supplied `hybrid-entries.jsonl` has **74 exact-entry recipes from
+16 distinct native Overgrowth source seeds**, all Ascension 10, the same
+frozen hybrid policy, schema, and emulator revision
+`ea3fc2bf9019568369e46b6f1785c3e6f23a25b7`.
+74 unique exact-state and public-observation fingerprints; all prefixes
+are nested consistently within source runs. This is a **static structural
+audit**; a local emulator replay still verifies real fingerprints.
+
+Combat-entry tiers: weak 43, normal 21, elite 4, boss 6.
+All 16 source runs reach floor 1. Six distinct runs reach a floor-16
+boss: 2 Ceremonial Beast, 3 Vantom, 1 Kin. Those boss-entry decks contain
+19–24 cards. Many late entries have no potions: 4 of 6 boss entries
+have zero potions. Snapshot recipes **do not record combat outcomes or
+full-run outcome** and therefore do not establish H9 win rate or Act
+clear rate.
+
+### Actionable next measurement: paired H6 versus H9
+
+`tools/evaluate_h10_native_combat_entries.py` plugs the
+H10FrozenHybridAgent (H9 Torch in combat) into the existing exact-entry
+resumable `snapshot_eval_runtime`, comparing it with the H6-C JSON
+policy on precisely matched entry states. Each source run is replayed
+only once per worker, public/exact hashes checked, and independent
+policy combat forks initialized from identical exact starting state.
+The report is a standard `sts2-act1-paired-combat-benchmark-v1` with
+tier, enemy, potion and exit HP statistics. A per-source-run
+`<report>.partial.jsonl` journal supports restart after interruption.
+
+The H6 combat head is a historical baseline and may be **weaker**
+than H9. Therefore this comparison measures whether H9 improves on
+the old deployed tactical head. It must not be used as evidence of
+H9-regret or to label a weak deck until an independently strong
+reference policy is available. Also report boss tier separately,
+because 6 boss entries share only 6 source run seeds.
+
+Example on the exact uploaded corpus, with CPU workers to avoid 15 GPU
+model copies (use one worker with `--combat-device cuda` if desired):
+
+```fish
+cd ~/projects/sts2-ai
+git pull --ff-only
+source .venv/bin/activate.fish
+set emu ~/projects/sts2-emulator
+set rev (git -C $emu rev-parse HEAD)
+python -u tools/evaluate_h10_native_combat_entries.py \
+    --corpus results/h10-snapshots/hybrid-entries.jsonl \
+    --macro-model results/nature/h6c-macro-attention-r80.json \
+    --combat-checkpoint results/h9-structured-a10-r80/models/player-r0080.pt \
+    --emulator-root $emu --emulator-revision $rev \
+    --combat-device cpu --workers 15 \
+    --max-combat-decisions 512 \
+    --report results/h10-snapshots/h6c-vs-h9-native-paired.json
+```
+
+If the evaluator raises an exact-state hash mismatch, stop; do not
+reinterpret records from a different emulator revision. Follow with
+larger seed-disjoint cohorts for tactical comparison and full-run
+Act-clear evaluation before H10 model training. Reuse the existing
+snapshot group journal rather than writing new ad hoc test suites.
