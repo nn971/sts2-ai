@@ -40,6 +40,7 @@ from sts2_ai.nature.h5_curriculum import cell_for_source, source_bank
 from sts2_ai.nature.protocol import canonical_sha256
 from sts2_ai.nature.research_combat_fixtures import (
     fixture_from_source,
+    rich_source_bank,
     source_bank as structured_source_bank,
     structural_key,
 )
@@ -268,7 +269,7 @@ def _shard(
                                 f"H8 scenario={cell_key} source={seed} "
                                 f"boundary={state['boundaryVersion']} "
                                 f"action={chosen!r}: {exc}") from exc
-                    elif kind in ("enemy_intent", "draw_card"):
+                    elif kind in ("enemy_intent", "draw_card", "random_target"):
                         if local_reference_nature:
                             # The in-process reference provider consumes
                             # consecutive Nature sites before returning to
@@ -301,6 +302,9 @@ def _shard(
                             expected = (
                                 tuple(state["intentIds"])
                                 if kind == "enemy_intent" else
+                                tuple("enemy_instance:" + str(x)
+                                      for x in state["targetEnemyInstanceIds"])
+                                if kind == "random_target" else
                                 tuple("card_instance:" + str(x)
                                       for x in state["cardInstanceIds"])
                             )
@@ -312,7 +316,9 @@ def _shard(
                                 (law.event_id, law.law_id, chosen_id))
                             chosen = (
                                 chosen_id if kind == "enemy_intent" else
-                                int(chosen_id.removeprefix("card_instance:"))
+                                int(chosen_id.removeprefix(
+                                    "enemy_instance:" if kind == "random_target"
+                                    else "card_instance:"))
                             )
                         elif chance_sampling == "sequential-raw":
                             if kind == "enemy_intent":
@@ -320,9 +326,11 @@ def _shard(
                                     nature_rng, state["intentIds"],
                                     state["intentRawWeights"])
                             else:
-                                options = state["cardInstanceIds"]
+                                options = (state["targetEnemyInstanceIds"]
+                                           if kind == "random_target"
+                                           else state["cardInstanceIds"])
                                 if not options:
-                                    raise RuntimeError("Empty controlled draw support")
+                                    raise RuntimeError("Empty controlled chance support")
                                 chosen = options[nature_rng.randrange(len(options))]
                         else:
                             raise ValueError("Unsupported H8 chance sampling mode")
@@ -330,6 +338,17 @@ def _shard(
                             result = call(
                                 "h8_resolve_intent", **token,
                                 intent_id=chosen,
+                                include_player_frame=inline_player_frame,
+                                provider_id=(
+                                    "h7-event-scoped-reference"
+                                    if chance_sampling == "event-law" else
+                                    "reference-weighted-h8-pilot"),
+                            )
+                        elif kind == "random_target":
+                            result = call(
+                                "h8_resolve_random_target", **token,
+                                target_event_id=state["targetEventId"],
+                                enemy_instance_id=chosen,
                                 include_player_frame=inline_player_frame,
                                 provider_id=(
                                     "h7-event-scoped-reference"
@@ -398,6 +417,8 @@ def _shard(
                             selected_id = entry["intentId"]
                         elif event_kind == "draw_card":
                             selected_id = entry["cardInstanceId"]
+                        elif event_kind == "random_target":
+                            selected_id = entry["targetEnemyInstanceId"]
                         else:
                             raise RuntimeError(
                                 "Unsupported H8 local reference journal entry")
@@ -435,6 +456,11 @@ def _shard(
                         terminal_enemy_hp=state.get("terminalEnemyHp"))
                 rows.append(dict(
                     seed=seed, cell=cell_key,
+                    unsupported_detail=(state.get("unsupportedDetail")
+                                        if status == "unsupported" else None),
+                    unsupported_boundary_version=(
+                        state.get("boundaryVersion")
+                        if status == "unsupported" else None),
                     scenario_id=source_scenario,
                     deck_preset_id=source_deck, status=status,
                     is_steady=(steady_barrier is not None and
@@ -443,10 +469,12 @@ def _shard(
                     decision_sequence=[
                         {"phase": (
                             "nature:" + k if k in
-                            ("enemy_intent", "draw_card") else k),
+                            ("enemy_intent", "draw_card", "random_target") else k),
                          "selected_id": (
                              "card_instance:" + str(v)
-                             if k == "draw_card" else v)}
+                             if k == "draw_card" else
+                             "enemy_instance:" + str(v)
+                             if k == "random_target" else v)}
                         for k, v in transcript
                     ],
                     player_steps=[
@@ -458,9 +486,11 @@ def _shard(
                         {"phase": "nature:" + k,
                          "selected_id": (
                              v if k == "enemy_intent" else
+                             "enemy_instance:" + str(v)
+                             if k == "random_target" else
                              "card_instance:" + str(v))}
                         for k, v in transcript
-                        if k in ("enemy_intent", "draw_card")
+                        if k in ("enemy_intent", "draw_card", "random_target")
                     ],
                     training_actions=(
                         tuple(actor.training_actions)
@@ -477,6 +507,7 @@ def _shard(
                         if capture_player_training else None
                     ),
                     nature_draws=counts["draw_card"],
+                    nature_targets=counts["random_target"],
                     intents=counts["enemy_intent"],
                     trace_digest=canonical_sha256(transcript),
                     journal_digest=(canonical_sha256(history)
@@ -779,7 +810,17 @@ def main() -> None:
     p.add_argument("--player-checkpoint", type=Path)
     p.add_argument("--workers", type=int, default=15)
     p.add_argument("--episodes", type=int, default=128)
-    p.add_argument("--curriculum", choices=("h5", "h8-structured"),
+    p.add_argument(
+        "--source-split",
+        choices=("train", "selection", "confirmation", "zero-shot"),
+        default="train",
+        help="Rich-H9 source partition; zero-shot uses distinct fixture indices",
+    )
+    p.add_argument(
+        "--greedy-policy", action="store_true",
+        help="Use deterministic argmax player actions as in training selection",
+    )
+    p.add_argument("--curriculum", choices=("h5", "h8-structured", "h9-rich"),
                    default="h5")
     p.add_argument("--structured-curriculum-seed", type=int,
                    default=20261027)
@@ -837,6 +878,10 @@ def main() -> None:
             args.episodes <= args.workers * args.warmup_per_worker):
         p.error("Need balanced 16-cell source cohorts and at least one "
                 "measured episode per worker")
+    if args.source_split != "train" and args.curriculum != "h9-rich":
+        p.error("--source-split currently supports non-train only for h9-rich")
+    if args.source_split == "zero-shot" and args.episodes != 256:
+        p.error("Complete H9-rich structural zero-shot evaluation requires 256 episodes")
     if args.local_reference_nature and args.chance_sampling != "event-law":
         p.error("Local reference Nature is a separate event-scoped "
                 "reference provider; use the default --chance-sampling event-law")
@@ -863,9 +908,12 @@ def main() -> None:
         del model
         spec = H7PlayerSpec.from_file(
             checkpoint, seed=args.actor_seed,
-            temperature=0.85, greedy=False,
+            temperature=0.85, greedy=args.greedy_policy,
         )
         seeds = (
+            rich_source_bank(
+                args.source_split, args.episodes, study_seed=args.study_seed)
+            if args.curriculum == "h9-rich" else
             structured_source_bank(
                 "train", args.episodes, study_seed=args.study_seed)
             if args.curriculum == "h8-structured" else
@@ -877,6 +925,7 @@ def main() -> None:
         elif args.order in ("native", "checked"):
             order = [args.order]
         cohorts = []
+        incomplete: list[tuple[str, dict[str, Any]]] = []
         for ordinal, mode in enumerate(order, 1):
             print(
                 f"[h8-h7-pilot] cohort {ordinal}/{len(order)} mode={mode} "
@@ -905,14 +954,23 @@ def main() -> None:
                 inline_player_frame=args.inline_player_frame,
                 structured_curriculum_seed=(
                     args.structured_curriculum_seed
-                    if args.curriculum == "h8-structured" else None),
+                    if args.curriculum in ("h8-structured", "h9-rich") else None),
             )
             cohorts.append(x)
-            if (args.require_all_terminal and
-                    x["statuses"].get("terminal", 0) != args.episodes):
-                raise RuntimeError(
-                    "H9 structured curriculum has incomplete combats: "
-                    + str(x["statuses"]))
+            if args.require_all_terminal:
+                for seed, row in x["trajectories"].items():
+                    if row["status"] != "terminal":
+                        incomplete.append((mode, row))
+                        print(
+                            "[h9-rich-incomplete] "
+                            f"mode={mode} source={seed} "
+                            f"encounter={row['scenario_id']} "
+                            f"status={row['status']} "
+                            f"boundary={row['unsupported_boundary_version']} "
+                            f"reason={row['unsupported_detail']} "
+                            f"last_steps={row['decision_sequence'][-6:]}",
+                            flush=True,
+                        )
             print(
                 f"[h8-h7-pilot] {mode} {x['wall_seconds']:.2f}s "
                 f"full_combat={x['statuses'].get('terminal', 0)} "
@@ -981,6 +1039,8 @@ def main() -> None:
                 "independent-reference-raw-weight-pilot-v1"
             ),
             capture_player_training=args.capture_player_training,
+            source_split=args.source_split,
+            greedy_policy=args.greedy_policy,
             source_digest=canonical_sha256(seeds),
             order=order, paired_equivalence=len(cohorts) > 1,
             warmup_per_worker=args.warmup_per_worker,
@@ -999,6 +1059,12 @@ def main() -> None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(result, indent=2) + "\n")
         print("[h8-h7-pilot] report:", args.output, flush=True)
+        if incomplete:
+            raise RuntimeError(
+                "H9 structured curriculum has incomplete combats: "
+                + str(Counter(row["status"] for _, row in incomplete))
+                + f"; inspect preserved report {args.output}"
+            )
 
 
 if __name__ == "__main__":

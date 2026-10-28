@@ -15,6 +15,7 @@ from sts2_ai.nature.corpus import file_sha256
 from sts2_ai.nature.h5_curriculum import source_bank
 from sts2_ai.nature.protocol import canonical_sha256
 from sts2_ai.nature.research_combat_fixtures import (
+    rich_source_bank,
     source_bank as structured_source_bank,
 )
 
@@ -40,7 +41,7 @@ def main() -> None:
     p.add_argument("--emulator-bindings", type=Path, required=True)
     p.add_argument("--emulator-revision", required=True)
     p.add_argument("--workers", type=int, default=15)
-    p.add_argument("--curriculum", choices=("h5", "h8-structured"),
+    p.add_argument("--curriculum", choices=("h5", "h8-structured", "h9-rich"),
                    default="h5")
     p.add_argument("--structured-curriculum-seed", type=int,
                    default=20261027)
@@ -67,14 +68,17 @@ def main() -> None:
             p.error("--player must use unique label=path")
         entries[label] = Path(path)
     args.rollout_backend = (
-        "h8-native" if args.curriculum == "h8-structured" else "legacy-h7")
+        "h8-native" if args.curriculum in ("h8-structured", "h9-rich") else "legacy-h7")
     args.actor_backend = (
-        "shared" if args.curriculum == "h8-structured" else "local")
-    divisor = (1 if args.curriculum == "h8-structured" else
+        "shared" if args.curriculum in ("h8-structured", "h9-rich") else "local")
+    divisor = (1 if args.curriculum in ("h8-structured", "h9-rich") else
                3 if args.split == "zero-shot" else 16)
     if args.runs < divisor or args.runs % divisor or args.workers < 1:
         p.error("H7 evaluation must balance supported cells exactly")
     seeds = (
+        rich_source_bank(
+            args.split, args.runs, study_seed=args.study_seed,
+        ) if args.curriculum == "h9-rich" else
         structured_source_bank(
             args.split, args.runs, study_seed=args.study_seed)
         if args.curriculum == "h8-structured" else
@@ -85,7 +89,7 @@ def main() -> None:
         "curriculum": args.curriculum,
         "structured_curriculum_seed": (
             args.structured_curriculum_seed
-            if args.curriculum == "h8-structured" else None),
+            if args.curriculum in ("h8-structured", "h9-rich") else None),
         "source_digest": canonical_sha256(seeds),
         "emulator_revision": args.emulator_revision,
         "emulator_dll_sha256": (
