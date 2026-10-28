@@ -78,6 +78,9 @@ def _shard(
     replay_indices: frozenset[int] | None = None,
     audit_mechanics: bool = True,
     profile_emulator: bool = False,
+    steady_barrier: Any = None,
+    warmup_per_worker: int = 0,
+    measure_rpc: bool = False,
 ) -> list[dict[str, Any]]:
     sys.path.insert(0, bindings)
     from sts2_emulator import Session
@@ -88,10 +91,38 @@ def _shard(
     spec = _worker_spec
     native = mode == "native"
     rows = []
+    worker_started = time.perf_counter()
+    rpc_counts: Counter[str] = Counter()
+    rpc_seconds: dict[str, float] = {}
+    steady_started: float | None = None
+    steady_actor_start: dict[str, float | int] | None = None
     with Session(["dotnet", dll, "prototype-ai-jsonl"]) as session:
+        initial_session_seconds = time.perf_counter() - worker_started
+
+        def call(op: str, **kwargs: Any) -> Any:
+            start = time.perf_counter()
+            result = session.call(op, **kwargs)
+            if measure_rpc and steady_started is not None:
+                rpc_counts[op] += 1
+                rpc_seconds[op] = (
+                    rpc_seconds.get(op, 0.0) + time.perf_counter() - start)
+            return result
+
         if profile_emulator:
-            session.call("h8_perf_reset")
-        for index, seed in indexed_seeds:
+            call("h8_perf_reset")
+        for position, (index, seed) in enumerate(indexed_seeds):
+            if steady_barrier is not None and position == warmup_per_worker:
+                # The first barrier ensures absolutely no outstanding
+                # player inference requests before the server stats reset.
+                steady_barrier.wait(timeout=300)
+                if indexed_seeds[0][0] == 0:
+                    policy.reset_server_metrics()
+                # The second barrier prevents new requests racing the reset.
+                steady_barrier.wait(timeout=300)
+                if profile_emulator:
+                    call("h8_perf_reset")
+                steady_started = time.perf_counter()
+                steady_actor_start = policy.timings_snapshot()
             cell = cell_for_source(seed)
             if cell is None:
                 raise RuntimeError("H7 source bank produced uncurated source")
@@ -116,7 +147,7 @@ def _shard(
             initial_enemies_hp: int | None = None
             before_actor = policy.timings_snapshot()
             began = time.perf_counter()
-            state = session.call(
+            state = call(
                 "h8_begin_seeded",
                 seed=seed, act=scenario.act,
                 encounter_id=scenario.encounter_id,
@@ -156,7 +187,7 @@ def _shard(
                         boundary_version=state["boundaryVersion"],
                     )
                     if kind in ("player", "player_choice"):
-                        frame = session.call(
+                        frame = call(
                             "h8_observe", **token,
                             policy_id="prototype-fair-v0",
                         )
@@ -181,13 +212,13 @@ def _shard(
                         chosen = actor.choose(obs, allowed)
                         if chosen not in [a["actionId"] for a in allowed]:
                             raise RuntimeError("H7 actor selected outside source menu")
-                        result = session.call("h8_step", **token, action_id=chosen)
+                        result = call("h8_step", **token, action_id=chosen)
                     elif kind in ("enemy_intent", "draw_card"):
                         if chance_sampling == "event-law":
                             # The original H7 event-keyed SeededLawSampler
                             # consumes exact emulator-authored Chance Law
                             # identities, conditioning and ordered weights.
-                            pending = session.call(
+                            pending = call(
                                 "h8_reference_law", **token)["pending"]
                             law = DeclaredLaw.from_pending(pending)
                             if law.operation != kind:
@@ -221,7 +252,7 @@ def _shard(
                         else:
                             raise ValueError("Unsupported H8 chance sampling mode")
                         if kind == "enemy_intent":
-                            result = session.call(
+                            result = call(
                                 "h8_resolve_intent", **token,
                                 intent_id=chosen, provider_id=(
                                     "h7-event-scoped-reference"
@@ -229,7 +260,7 @@ def _shard(
                                     "reference-weighted-h8-pilot"),
                             )
                         else:
-                            result = session.call(
+                            result = call(
                                 "h8_resolve_draw_card", **token,
                                 card_instance_id=chosen, provider_id=(
                                     "h7-event-scoped-reference"
@@ -259,13 +290,13 @@ def _shard(
                            index in replay_indices)
                 full_audit = audit_mechanics or audited
                 final_sha = (
-                    session.call(
+                    call(
                         "h8_audit_state_fingerprint",
                         h8_handle=handle,
                     )["fingerprint"] if full_audit else None
                 )
                 history = (
-                    session.call(
+                    call(
                         "h8_decision_history",
                         h8_handle=handle,
                     )["decisions"] if full_audit else None
@@ -275,16 +306,16 @@ def _shard(
                     raise RuntimeError("H8 player/Nature history count mismatch")
                 if audited:
                     if profile_emulator:
-                        session.call("h8_perf_stop")
+                        call("h8_perf_stop")
                     try:
-                        if not session.call(
+                        if not call(
                             "h8_replay_audit", h8_handle=handle
                         )["replayVerified"]:
                             raise RuntimeError(
                                 "H8 journal failed deterministic replay")
                     finally:
                         if profile_emulator:
-                            session.call("h8_perf_resume")
+                            call("h8_perf_resume")
                 after_actor = policy.timings_snapshot()
                 score = None
                 if status == "terminal":
@@ -359,12 +390,34 @@ def _shard(
                     },
                 ))
             finally:
-                released = session.call("h8_release_many", h8_handles=[handle])
+                released = call("h8_release_many", h8_handles=[handle])
                 if released["released"] != 1:
                     raise RuntimeError("H8 session handle was not released")
         if profile_emulator and rows:
-            rows[0]["emulator_hotpath_profile"] = session.call(
+            rows[0]["emulator_hotpath_profile"] = call(
                 "h8_perf_stop")["profile"]
+        if steady_barrier is not None and rows:
+            if steady_started is None or steady_actor_start is None:
+                raise RuntimeError("H8 worker did not reach steady-state barrier")
+            steady_end = time.perf_counter()
+            actor_end = policy.timings_snapshot()
+            rows[0]["steady_worker_metrics"] = {
+                "start": steady_started,
+                "end": steady_end,
+                "session_startup_seconds": initial_session_seconds,
+                "warmup_episodes": warmup_per_worker,
+                "steady_episodes": len(rows) - warmup_per_worker,
+                "actor_encoding_seconds": (
+                    float(actor_end["encoding_seconds"]) -
+                    float(steady_actor_start["encoding_seconds"])),
+                "actor_wait_seconds": (
+                    float(actor_end["wait_seconds"]) -
+                    float(steady_actor_start["wait_seconds"])),
+                "actor_calls": int(actor_end["calls"]) -
+                    int(steady_actor_start["calls"]),
+                "rpc_calls": dict(rpc_counts),
+                "rpc_seconds": rpc_seconds,
+            }
     return rows
 
 
