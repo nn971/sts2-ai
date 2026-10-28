@@ -1,0 +1,93 @@
+name: h8-actor-batch-window
+
+on:
+  pull_request:
+    paths:
+      - 'src/sts2_ai/models/actor_batch_trace.py'
+      - 'src/sts2_ai/models/h7_batch_actor.py'
+      - 'tools/benchmark_h8_h7_policy_pilot.py'
+      - 'tools/compare_h8_actor_batch_windows.py'
+      - 'tools/run_h8_actor_batch_sweep.py'
+      - 'tests/test_h8_actor_batch_trace.py'
+      - 'tests/test_h8_h7_policy_pilot.py'
+      - '.github/workflows/h8-actor-batch-window.yml'
+  workflow_dispatch:
+
+jobs:
+  actual-shared-actor-two-window-source-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: research/h8-tagged-boundary-cursor-20261028
+          path: external-h8-emulator
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Install neural and developer dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[neural,dev]'
+      - name: Batch telemetry, imports, and source-protocol unit contracts
+        run: |
+          python -m compileall -q src/sts2_ai/models/h7_batch_actor.py src/sts2_ai/models/actor_batch_trace.py tools/run_h8_actor_batch_sweep.py tools/compare_h8_actor_batch_windows.py
+          python -m ruff check src/sts2_ai/models/h7_batch_actor.py src/sts2_ai/models/actor_batch_trace.py tests/test_h8_actor_batch_trace.py tools/run_h8_actor_batch_sweep.py tools/compare_h8_actor_batch_windows.py
+          python -m pytest -q tests/test_h8_actor_batch_trace.py tests/test_h8_h7_policy_pilot.py tests/test_h8_packed_actor_collation.py
+      - name: Build pinned parity-verified M3 emulator
+        run: |
+          dotnet restore external-h8-emulator/Sts2Emulator.sln
+          dotnet build external-h8-emulator/Sts2Emulator.sln -c Release --no-restore -m:1
+      - name: Real synchronized actor batching sweep (two workers, 16 A10 sources)
+        run: |
+          python -u tools/run_h8_actor_batch_sweep.py \
+            --emulator-dll external-h8-emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings external-h8-emulator/bindings/python \
+            --emulator-revision "$(git -C external-h8-emulator rev-parse HEAD)" \
+            --plan smoke --episodes 16 --workers 2 \
+            --warmup-per-worker 1 --replay-every 8 \
+            --actor-device cpu --allow-censored \
+            --output-dir /tmp/h8-batch-window-ci
+      - name: Verify warmup-excluded batch trace and event-scoped replay parity
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('/tmp/h8-batch-window-ci')
+          study = json.loads((root / 'sweep-summary.json').read_text())
+          assert study['exact_source_player_nature_replay_parity']
+          assert study['source_count'] == 16
+          assert len(study['runs']) == 2
+          for x in study['runs']:
+              assert x['batches'] > 0
+              assert x['requests'] > 0
+              assert x['mean_batch_size'] >= 1
+              assert x['queue_to_batch_mean_ms'] >= 0
+              assert x['padding_object_slots'] >= 0
+              assert x['padding_action_slots'] >= 0
+              assert x['max_batch_size_seen'] <= x['effective_batch_cap']
+          for path in root.glob('*.json'):
+              if path.name == 'sweep-summary.json':
+                  continue
+              report = json.loads(path.read_text())
+              assert report['actor_batch_trace']
+              cohort = report['cohorts'][0]
+              trace = cohort['actor_metrics']['batch_trace']
+              assert trace['batches'] == cohort['actor_metrics']['batches']
+              assert trace['requests'] == cohort['steady_state']['actor_requests']
+              assert len(trace['batch_records']) == trace['batches']
+              assert cohort['replay_verified'] == 2
+          print('Batch fill, IPC delay, exact source replay and provider parity passed')
+          PY
+      - name: Preserve diagnostic/source reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: h8-batch-window-cpu-contract
+          path: /tmp/h8-batch-window-ci
+          if-no-files-found: ignore
