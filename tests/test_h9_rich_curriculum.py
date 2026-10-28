@@ -25,6 +25,10 @@ def test_rich_population_has_distinct_decks_and_all_encounter_tiers() -> None:
     assert {x["encounter_id"] for x in specs} == {
         encounter[0] for encounter in RICH_ENCOUNTERS
     }
+    assert all(x["total_floor"] == 3 and x["map_row"] == 2
+               for x in specs if x["encounter_id"].endswith("_elite"))
+    assert all(x["total_floor"] == 6 and x["map_row"] == 5
+               for x in specs if x["encounter_id"].endswith("_boss"))
     assert {len(x["deck"]) for x in specs} >= {12, 13, 14, 17, 20}
     assert all(12 <= len(x["deck"]) <= 24 for x in specs)
     assert all(x["distribution_id"] == RICH_DISTRIBUTION for x in specs)
