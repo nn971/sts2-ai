@@ -75,7 +75,11 @@ python -u tools/benchmark_h8_h7_policy_pilot.py \
 
 Read `cohorts[0].steady_state` for the 994-combat measured epoch and
 `cohorts[0].actor_metrics` for GPU forward, collation and batching since
-the synchronized reset. `cohorts[0].trajectories` contains source-level
+the synchronized reset. The `status_counts` and
+`accepted_for_complete_combat_target` fields are mandatory: if a source
+ends as `unsupported` or `max_boundaries`, it is retained in the report,
+excluded from completed-fight throughput, and the cohort must **not** be
+used to claim progress toward 50 complete combats/s. `cohorts[0].trajectories` contains source-level
 deterministic decisions and outcomes. An actual GPU run must pass the
 64/64 sampled terminal replay gates before being accepted.
 
