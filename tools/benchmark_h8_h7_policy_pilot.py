@@ -35,7 +35,10 @@ from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
 from sts2_ai.nature.combat_scenarios import SCENARIOS
 from sts2_ai.nature.draw_only_episode import fair_player_choice_actions
 from sts2_ai.nature.draw_only_p0 import DeclaredLaw, SeededLawSampler
-from sts2_ai.nature.h4_reward import boss_progress_score, opening_enemy_health
+from sts2_ai.nature.h4_reward import (
+    H4_REWARD, H9_TOTAL_HP_REWARD, boss_progress_score,
+    encounter_total_hp_score, opening_enemy_health,
+)
 from sts2_ai.nature.h5_curriculum import cell_for_source, source_bank
 from sts2_ai.nature.protocol import canonical_sha256
 from sts2_ai.nature.research_combat_fixtures import (
@@ -448,12 +451,21 @@ def _shard(
                     if (opening_hp is None or opening_max_hp is None or
                             initial_enemies_hp is None):
                         raise RuntimeError("Terminal H8 episode lacks a public opening")
-                    score = boss_progress_score(
-                        state.get("outcome"),
-                        player_exit_hp=state.get("exitHp"),
-                        player_max_hp=opening_max_hp,
-                        opening_enemy_hp=initial_enemies_hp,
-                        terminal_enemy_hp=state.get("terminalEnemyHp"))
+                    if source_scenario.startswith("rich-"):
+                        score = encounter_total_hp_score(
+                            state.get("outcome"),
+                            player_exit_hp=state.get("exitHp"),
+                            player_max_hp=opening_max_hp,
+                            total_enemy_hp=state.get("defeatTotalNonMinionEnemyHp"),
+                            remaining_enemy_hp=state.get(
+                                "defeatRemainingNonMinionEnemyHp"))
+                    else:
+                        score = boss_progress_score(
+                            state.get("outcome"),
+                            player_exit_hp=state.get("exitHp"),
+                            player_max_hp=opening_max_hp,
+                            opening_enemy_hp=initial_enemies_hp,
+                            terminal_enemy_hp=state.get("terminalEnemyHp"))
                 rows.append(dict(
                     seed=seed, cell=cell_key,
                     unsupported_detail=(state.get("unsupportedDetail")
@@ -466,6 +478,13 @@ def _shard(
                     is_steady=(steady_barrier is not None and
                                position >= warmup_per_worker),
                     score=score,
+                    reward_version=(H9_TOTAL_HP_REWARD
+                                    if source_scenario.startswith("rich-")
+                                    else H4_REWARD),
+                    defeat_total_non_minion_enemy_hp=state.get(
+                        "defeatTotalNonMinionEnemyHp"),
+                    defeat_remaining_non_minion_enemy_hp=state.get(
+                        "defeatRemainingNonMinionEnemyHp"),
                     decision_sequence=[
                         {"phase": (
                             "nature:" + k if k in
@@ -789,7 +808,9 @@ def _validate_pair(a: dict[str, Any], b: dict[str, Any]) -> None:
         for key in (
             "cell", "status", "outcome", "exit_hp", "score",
             "player_steps", "chance_steps", "decision_sequence",
-            "terminal_enemy_hp", "boundaries", "player_decisions",
+            "terminal_enemy_hp", "defeat_total_non_minion_enemy_hp",
+            "defeat_remaining_non_minion_enemy_hp", "reward_version",
+            "boundaries", "player_decisions",
             "nature_draws", "intents", "trace_digest",
             "journal_digest", "mechanics_sha256",
             "captured_player_decisions", "behavior_digest",
