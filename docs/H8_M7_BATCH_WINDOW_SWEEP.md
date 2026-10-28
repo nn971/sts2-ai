@@ -1,5 +1,55 @@
 # H8 M7 — shared Transformer batching windows
 
+## Measured result — 2026-10-28 1,024-source CUDA sweep
+
+Submitted `sweep-summary.json`, schema
+`sts2-h8-actor-batch-window-sweep-v1`, comparing all six expected
+candidate legs on the same `64549357d24d...` 14.66M frozen
+Transformer and emulator M3 `33bf8cc...`.
+
+The comparator reports:
+- `exact_source_player_nature_replay_parity: true`;
+- `complete_combat_throughput_accepted: true`;
+- 1,024 source combats per leg, 994 measured after 30 warmups,
+  and 26,855 policy requests per measured epoch.
+
+| Leg | Max batch | Delay | Batches | Mean batch | Forward seconds | Fights/s | Measured wall seconds |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 1 reference | 16 | 3 ms | 4,687 | 5.73 | 24.94 | 16.7611 | 59.304 |
+| 2 immediate | 16 | 0 ms | 26,855 | 1.00 | 75.78 | 10.4800 | 94.848 |
+| **3 short** | **16** | **1 ms** | 5,743 | 4.68 | 30.35 | **17.0228** | **58.392** |
+| 4 longer | 16 | 6 ms | 3,488 | 7.70 | 18.49 | 16.7955 | 59.183 |
+| 5 capped | 8 | 3 ms | 4,818 | 5.57 | 25.18 | 16.8782 | 58.892 |
+| 6 reference repeat | 16 | 3 ms | 4,678 | 5.74 | 24.70 | 16.9166 | 58.759 |
+
+3 ms baseline mean wall time is 59.0315 s, or 16.8385
+combats/s; the two controls differ by 0.545 s (0.92% throughput).
+The best observed 1 ms setting takes 58.3923 s, only **0.6392s
+(1.095%)** faster than that average. It has **not** cleared the
+run-to-run uncertainty needed to promote a default. The 8-cap setting
+is only 0.24% faster than the mean control, also inconclusive.
+
+The robust conclusion is **never use 0 ms immediate dispatch**
+under this 15-worker shared actor configuration: every request incurs
+a separate model forward, which triples total forward service
+(~25s -> 75.78s) and drops throughput ~37.8%.
+The 6 ms setting enlarges mean batch from ~5.74 to ~7.70
+and saves ~6.3s of forward service, while batch assembly
+increases from ~16.5s to 23.27s. Net rollout speed is unchanged.
+Those stage sums are shared actor serialized accounting and should
+not be interpreted as additive worker wall times.
+
+**Decision: retain `packed`, 16 max batch, 3 ms delay as the
+verified baseline.** Next controlled experiment should interleave
+an *unprofiled*, source-matched 3ms/1ms/1ms/3ms sequence with the
+same model, 15 workers and 994 measured complete fights per leg,
+inspecting exact player and event-scoped Nature journals.
+Only then consider promoting 1 ms. For a larger structural speedup,
+evaluate independent inline Chance Law M5 (#218 emulator / #128 AI),
+which addresses thousands of separate C# RPCs.
+
+---
+
 ## Motivation
 
 The repeated source-identical M6 A–B–C–C–B–A experiment
