@@ -663,7 +663,17 @@ def main() -> None:
     p.add_argument("--actor-device", default="cuda")
     p.add_argument("--actor-max-batch", type=int, default=16)
     p.add_argument("--actor-delay-ms", type=float, default=3.0)
-    p.add_argument("--order", choices=("ab", "abba"), default="ab")
+    p.add_argument("--order", choices=("native", "checked", "ab", "abba"),
+                   default="ab")
+    p.add_argument("--warmup-per-worker", type=int, default=0,
+                   help="With 15 workers, 2 warms 30 of 1024 fights, then "
+                        "synchronizes workers and resets shared GPU metrics")
+    p.add_argument("--measure-rpc", action="store_true",
+                   help="Attribute steady-state Python-to-C# RPC time by op")
+    p.add_argument("--sampled-mechanics-audit", action="store_true",
+                   help="Serialize full mechanics only at sampled replay sites")
+    p.add_argument("--profile-emulator", action="store_true",
+                   help="Collect .NET nested stage counters for steady state")
     p.add_argument(
         "--capture-player-training", action="store_true",
         help="Also record exact H7 on-policy public behavior logprob/value "
@@ -671,8 +681,14 @@ def main() -> None:
     )
     args = p.parse_args()
     if (args.workers < 1 or args.episodes < 16 or
-            args.max_boundaries < 1 or args.replay_every < 1):
-        p.error("Positive workers, boundaries, audits and >=16 source cells needed")
+            args.episodes % 16 or args.max_boundaries < 1 or
+            args.replay_every < 1 or args.warmup_per_worker < 0 or
+            args.episodes <= args.workers * args.warmup_per_worker):
+        p.error("Need balanced 16-cell source cohorts and at least one "
+                "measured episode per worker")
+    if args.warmup_per_worker and args.order != "native":
+        p.error("Steady-state warmup epoch requires --order native; "
+                "run unprofiled ABBA separately for revision comparisons")
     if not args.emulator_dll.is_file():
         p.error("Missing H8 emulator DLL")
     if not (args.emulator_bindings / "sts2_emulator" / "__init__.py").is_file():
@@ -699,6 +715,8 @@ def main() -> None:
         order = ["checked", "native"]
         if args.order == "abba":
             order = ["checked", "native", "native", "checked"]
+        elif args.order in ("native", "checked"):
+            order = [args.order]
         cohorts = []
         for ordinal, mode in enumerate(order, 1):
             print(
@@ -718,6 +736,10 @@ def main() -> None:
                 reference_seed=args.reference_seed,
                 capture_player_training=args.capture_player_training,
                 chance_sampling=args.chance_sampling,
+                audit_mechanics=not args.sampled_mechanics_audit,
+                profile_emulator=args.profile_emulator,
+                warmup_per_worker=args.warmup_per_worker,
+                measure_rpc=args.measure_rpc,
             )
             cohorts.append(x)
             print(
@@ -730,6 +752,31 @@ def main() -> None:
             )
         for x in cohorts[1:]:
             _validate_pair(cohorts[0], x)
+        if args.order == "native" and args.warmup_per_worker:
+            steady = cohorts[0]["steady_state"]
+            if steady is None or (
+                    steady["terminal_episodes"] !=
+                    steady["measured_episodes"]):
+                raise RuntimeError(
+                    "H8 steady-state source cohort did not complete all fights")
+            expected_replays = sum(
+                index % args.replay_every == 0
+                for index in range(args.episodes))
+            if cohorts[0]["replay_verified"] != expected_replays:
+                raise RuntimeError(
+                    "H8 steady-state replay count differs from sampling plan")
+            if (cohorts[0]["actor_metrics"]["requests"] !=
+                    steady["actor_requests"]):
+                raise RuntimeError(
+                    "Steady-state GPU request count disagrees with worker actor")
+            print(
+                f"[h8-steady] measured={steady['measured_episodes']} "
+                f"warmup={steady['warmup_episodes']} "
+                f"wall_s={steady['wall_seconds']:.3f} "
+                f"combat/s={steady['terminal_combats_per_second']:.3f} "
+                f"gpu_requests={steady['actor_requests']}",
+                flush=True,
+            )
         result = dict(
             schema="sts2-h8-h7-public-policy-inference-pilot-v1",
             evidence=(
@@ -749,12 +796,15 @@ def main() -> None:
             ),
             capture_player_training=args.capture_player_training,
             source_digest=canonical_sha256(seeds),
-            order=order, paired_equivalence=True, cohorts=cohorts,
+            order=order, paired_equivalence=len(cohorts) > 1,
+            warmup_per_worker=args.warmup_per_worker,
+            profile_emulator=args.profile_emulator,
+            sampled_mechanics_audit=args.sampled_mechanics_audit,
+            cohorts=cohorts,
         )
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(result, indent=2) + "\n")
-        print("[h8-h7-pilot] paired mechanics and journals exact:", args.output,
-              flush=True)
+        print("[h8-h7-pilot] report:", args.output, flush=True)
 
 
 if __name__ == "__main__":
