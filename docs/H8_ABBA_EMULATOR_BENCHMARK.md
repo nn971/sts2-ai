@@ -58,6 +58,12 @@ checkout. `nvidia-smi` is optional. Clean up other GPU workloads before
 running. Do not switch emulator branches midway; the runner never needs
 to switch them and uses exact immutable commit SHAs.
 
+A separate CI job executes the same archive-building code for both
+pinned revisions without CUDA. To perform that preliminary build
+check locally, add `--build-only` to the command above; it will write
+`environment.json` and the two build logs, with no combat rollout.
+Use a fresh output directory for the subsequent full A–B–B–A run.
+
 Results:
 
 - `results/h8-emulator-abba-a10-128/A1.json`, `B1.json`,
