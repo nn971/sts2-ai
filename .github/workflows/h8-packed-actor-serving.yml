@@ -1,0 +1,77 @@
+name: h8-packed-actor-serving
+
+on:
+  pull_request:
+    paths:
+      - 'src/sts2_ai/models/h7_batch_actor.py'
+      - 'src/sts2_ai/models/packed_actor_collation.py'
+      - 'tools/benchmark_h8_actor_collation.py'
+      - 'tools/benchmark_h8_h7_policy_pilot.py'
+      - 'tests/test_h8_packed_actor_collation.py'
+      - '.github/workflows/h8-packed-actor-serving.yml'
+  workflow_dispatch:
+
+jobs:
+  packed-reference-parity-and-a10-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: research/h8-tagged-boundary-cursor-20261028
+          path: external-h8-emulator
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install neural and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[neural,dev]'
+      - name: Verify packed input tensors and full Transformer output
+        run: |
+          python -m pytest -q tests/test_h8_packed_actor_collation.py tests/test_h8_h7_policy_pilot.py
+          python -u tools/benchmark_h8_actor_collation.py \
+            --device cpu --batch 6 --objects 40 --actions 8 \
+            --iterations 20 --warmup 3 --output /tmp/h8-packed-collation-cpu.json
+      - name: Build parity-verified emulator
+        run: |
+          dotnet restore external-h8-emulator/Sts2Emulator.sln
+          dotnet build external-h8-emulator/Sts2Emulator.sln -c Release --no-restore -m:1
+      - name: Replay real 16-cell A10 bouts through packed frozen actor
+        run: |
+          python -u tools/benchmark_h8_h7_policy_pilot.py \
+            --emulator-dll external-h8-emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings external-h8-emulator/bindings/python \
+            --emulator-revision "$(git -C external-h8-emulator rev-parse HEAD)" \
+            --workers 2 --episodes 16 --max-boundaries 1200 \
+            --replay-every 8 --actor-device cpu --order ab \
+            --actor-collation packed --sampled-mechanics-audit \
+            --output /tmp/h8-packed-actor-a10-parity.json
+      - name: Verify output contract and paired replay
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r = json.loads(Path('/tmp/h8-packed-actor-a10-parity.json').read_text())
+          assert r['paired_equivalence']
+          assert r['actor_collation'] == 'packed'
+          assert len(r['cohorts']) == 2
+          assert all(c['actor_metrics']['collation'] == 'packed' for c in r['cohorts'])
+          assert all(c['episodes'] == 16 and c['replay_verified'] == 2 for c in r['cohorts'])
+          assert r['cohorts'][0]['source_digest'] == r['cohorts'][1]['source_digest']
+          print('Packed actor H7/H8 source replay and tensor equivalence passed')
+          PY
+      - name: Upload provenance and timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: h8-packed-actor-cpu-contract
+          path: |
+            /tmp/h8-packed-collation-cpu.json
+            /tmp/h8-packed-actor-a10-parity.json
+          if-no-files-found: ignore
