@@ -10,6 +10,7 @@ import hashlib
 import math
 import multiprocessing
 import queue
+import threading
 import time
 import traceback
 from dataclasses import dataclass
@@ -22,7 +23,7 @@ from sts2_ai.emulator.protocol import LegalAction, Observation
 from sts2_ai.models.protocol import PolicyValueEstimate
 
 from .actor_batch_trace import ActorBatchTrace
-from .packed_actor_collation import collate_h7_actor_packed
+from .packed_actor_collation import prepare_h7_actor_packed
 from .shared_game_objects import EncodedDecision, encode_public_decision
 from .shared_transformer import SharedObjectTransformer, collate_h7
 
@@ -125,14 +126,16 @@ def _serve(
     checkpoint: str, digest: str, device: str, requests: Any,
     replies: tuple[Any, ...], startup: Any, statistics: Any,
     max_batch: int, max_delay_ms: float, collation: str,
-    batch_trace: bool,
+    batch_trace: bool, overlap: bool,
 ) -> None:
+    """Serve trusted public frames; optionally overlap CPU collation with CUDA."""
     stats: dict[str, float | int | str] = {
         "batches": 0, "requests": 0, "forward_seconds": 0.0,
-        "collate_seconds": 0.0,
+        "collate_seconds": 0.0, "host_collate_seconds": 0.0,
+        "transfer_seconds": 0.0,
         "model_load_seconds": 0.0, "max_batch_observed": 0,
-        "device": device,
-        "collation": collation,
+        "device": device, "collation": collation,
+        "actor_overlap": overlap and device.startswith("cuda"),
     }
     probe = ActorBatchTrace() if batch_trace else None
     try:
@@ -144,68 +147,125 @@ def _serve(
         model = model.to(device).eval()
         stats["model_load_seconds"] = time.perf_counter() - loaded
         startup.put(("ready", None))
-        stopping = False
-        with torch.inference_mode():
-            while not stopping:
-                request = requests.get()
-                if request is None:
+
+        def prepare_one() -> tuple[Any, ...]:
+            """Only CPU work: collection, input validation, packed host tensors."""
+            first = requests.get()
+            if first is None:
+                return ("stop",)
+            if (isinstance(first, tuple) and len(first) == 3
+                    and first[1] == "__h8_reset_metrics__"):
+                return ("reset", first[0], first[1])
+            work = [first]
+            fill_started = time.perf_counter()
+            deadline = fill_started + max_delay_ms / 1000.0
+            stop_after = False
+            while len(work) < max_batch:
+                remaining = deadline - time.perf_counter()
+                if remaining <= 0:
                     break
-                if (isinstance(request, tuple) and len(request) == 3 and
-                        request[1] == "__h8_reset_metrics__"):
-                    # The entire cohort has reached its first barrier. One
-                    # worker resets counters before the second barrier releases
-                    # any new inference request into the steady-state epoch.
-                    slot, marker, _ = request
+                try:
+                    more = requests.get(timeout=remaining)
+                except queue.Empty:
+                    break
+                if more is None:
+                    stop_after = True
+                    break
+                work.append(more)
+            fill_seconds = time.perf_counter() - fill_started
+            started = time.perf_counter()
+            try:
+                frames = [entry[2] for entry in work]
+                if not all(isinstance(x, EncodedDecision) for x in frames):
+                    raise ValueError("H7 inference received non-public token request")
+                # A trusted forward bypasses GPU-to-host mask validation.
+                if any(not x.objects or not x.actions or
+                       x.objects[0].kind != 0 for x in frames):
+                    raise ValueError("H7 requires global token and legal actions")
+                host = (prepare_h7_actor_packed(frames)
+                        if collation in ("packed", "packed-contiguous")
+                        else collate_h7(frames))
+                error = None
+            except Exception:
+                frames = []
+                host = None
+                error = traceback.format_exc()
+            return ("batch", work, frames, host, fill_seconds,
+                    time.perf_counter() - started, error, stop_after)
+
+        # A bounded, daemonized producer permits one batch of CPU collation
+        # while CUDA works on the previous batch. It owns no model or RNG.
+        # CPU-only runs remain synchronous to avoid thread overhead.
+        use_overlap = overlap and device.startswith("cuda")
+        prepared: queue.Queue[tuple[Any, ...]] = queue.Queue(maxsize=1)
+        if use_overlap:
+            def producer() -> None:
+                try:
+                    while True:
+                        item = prepare_one()
+                        prepared.put(item)
+                        if item[0] == "stop" or (
+                                item[0] == "batch" and item[-1]):
+                            break
+                except BaseException:
+                    prepared.put(("fatal", traceback.format_exc()))
+            threading.Thread(
+                target=producer, daemon=True, name="h8-cpu-collation",
+            ).start()
+
+        with torch.inference_mode():
+            while True:
+                item = prepared.get() if use_overlap else prepare_one()
+                if item[0] == "fatal":
+                    raise RuntimeError("H8 actor producer failed: " + item[1])
+                if item[0] == "stop":
+                    break
+                if item[0] == "reset":
+                    slot, marker = item[1:]
                     for key in ("batches", "requests", "max_batch_observed"):
                         stats[key] = 0
-                    for key in ("forward_seconds", "collate_seconds"):
+                    for key in ("forward_seconds", "collate_seconds",
+                                "host_collate_seconds", "transfer_seconds"):
                         stats[key] = 0.0
                     if probe is not None:
                         probe.reset()
                     replies[slot].put((marker, "ok", None))
                     continue
-                work = [request]
-                fill_started = time.perf_counter()
-                deadline = fill_started + max_delay_ms / 1000.0
-                while len(work) < max_batch:
-                    remaining = deadline - time.perf_counter()
-                    if remaining <= 0:
-                        break
-                    try:
-                        more = requests.get(timeout=remaining)
-                    except queue.Empty:
-                        break
-                    if more is None:
-                        stopping = True
-                        break
-                    work.append(more)
-                fill_seconds = (time.perf_counter() - fill_started
-                                if probe is not None else 0.0)
+                _, work, frames, host, fill_seconds, host_seconds, error, stop_after = item
                 try:
-                    frames = [entry[2] for entry in work]
-                    if not all(isinstance(item, EncodedDecision) for item in frames):
-                        raise ValueError("H7 inference received non-public token request")
-                    prepared = time.perf_counter()
+                    if error is not None:
+                        raise ValueError(error)
+                    prepared_at = time.perf_counter()
                     if probe is not None:
                         queue_delays = [
-                            1000 * max(0.0, prepared - entry[3])
+                            1000 * max(0.0, prepared_at - entry[3])
                             for entry in work
                         ]
-                    batch = (
-                        collate_h7_actor_packed(
-                            frames, device=device,
+                    copying = time.perf_counter()
+                    if collation in ("packed", "packed-contiguous"):
+                        batch = host.to(
+                            device,
                             contiguous_metadata=(collation == "packed-contiguous"),
                         )
-                        if collation in ("packed", "packed-contiguous") else
-                        collate_h7(frames).to(device)
-                    )
-                    collate_seconds = time.perf_counter() - prepared
+                    else:
+                        batch = host.to(device)
+                    transfer_seconds = time.perf_counter() - copying
+                    collate_seconds = host_seconds + transfer_seconds
+                    stats["host_collate_seconds"] = (
+                        float(stats["host_collate_seconds"]) + host_seconds)
+                    stats["transfer_seconds"] = (
+                        float(stats["transfer_seconds"]) + transfer_seconds)
                     stats["collate_seconds"] = (
                         float(stats["collate_seconds"]) + collate_seconds)
                     begun = time.perf_counter()
-                    logits, values = model(batch)
-                    if device.startswith("cuda"):
-                        torch.cuda.synchronize(device)
+                    phase = (0 if all(x.phase == "combat" for x in frames)
+                             else 1 if all(x.phase == "macro" for x in frames)
+                             else None)
+                    # Uniform public phases allow exact single-head inference.
+                    # No CUDA boolean -> Python synchronization per batch.
+                    logits, values = model(batch, known_phase=phase)
+                    # The .cpu() transfers synchronize CUDA; an additional
+                    # explicit cuda.synchronize() here was redundant.
                     cpu_logits = logits.detach().float().cpu()
                     cpu_values = values.detach().float().cpu()
                     forward_seconds = time.perf_counter() - begun
@@ -214,8 +274,7 @@ def _serve(
                     stats["batches"] = int(stats["batches"]) + 1
                     stats["requests"] = int(stats["requests"]) + len(work)
                     stats["max_batch_observed"] = max(
-                        int(stats["max_batch_observed"]), len(work)
-                    )
+                        int(stats["max_batch_observed"]), len(work))
                     reply_started = (
                         time.perf_counter() if probe is not None else 0.0)
                     for row, entry in enumerate(work):
@@ -239,13 +298,17 @@ def _serve(
                             queue_to_batch_max_ms=max(queue_delays),
                             collate_ms=1000 * collate_seconds,
                             forward_ms=1000 * forward_seconds,
-                            reply_ms=1000 * (time.perf_counter()-reply_started),
+                            reply_ms=1000 * (
+                                time.perf_counter() - reply_started),
                         )
                 except Exception:
-                    error = traceback.format_exc()
+                    failure = traceback.format_exc()
                     for entry in work:
                         slot, seq = entry[:2]
-                        replies[slot].put((seq, "error", error))
+                        replies[slot].put((seq, "error", failure))
+                if stop_after:
+                    break
+
         if probe is not None:
             report = probe.report()
             if (report["batches"] != stats["batches"] or
@@ -271,6 +334,7 @@ class SharedH7Service:
         device: str = "cpu", max_batch: int = 16, max_delay_ms: float = 3.0,
         collation: str = "legacy",
         batch_trace: bool = False,
+        overlap: bool = True,
     ) -> None:
         if (collation not in ("legacy", "packed", "packed-contiguous") or
                 workers < 1 or max_batch < 1 or max_delay_ms < 0
@@ -292,7 +356,7 @@ class SharedH7Service:
             args=(
                 str(checkpoint), digest, device,
                 self.requests, self.replies, self.startup, self.statistics,
-                max_batch, max_delay_ms, collation, batch_trace,
+                max_batch, max_delay_ms, collation, batch_trace, overlap,
             ),
             daemon=True,
         )
