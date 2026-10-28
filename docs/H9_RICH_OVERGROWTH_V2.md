@@ -163,6 +163,30 @@ Rerun exactly the same pilot command on the updated AI branch and read
 `trajectories` entries with `status != "terminal"`. Do not assume all
 five share one cause or narrow the curriculum before identifying them.
 
+## Five unsupported boundaries diagnosed from preserved 64-source report
+
+Analysis of the preserved `h9-rich-v2-acceptance.json` reveals that all five
+incomplete sources stopped **immediately after playing Bouncing Flask**:
+configuration indices 7 (Inklets), 23 (Slimes), 38 (Vantom, upgraded Flask),
+44 (Shrinker Beetle), and 62 (Nibbits). The previous report preserved
+replay-verified journals and showed all five as `unsupported`, with no
+worker exception and no detected replay divergence.
+
+Bouncing Flask already has source-native controlled **random enemy target**
+mechanics in `SemanticTargetChoiceV111`. H8 formerly exposed only physical
+draws and enemy intents as Nature sites, so these target continuations
+fell through to `unsupported`. The paired emulator and AI branches now
+expose a versioned `random_target` Chance Law and explicit resolve action,
+and teach the local reference provider and external H8 pilot to consume this
+site. Every selected target is retained in the H8 decision journal and
+checked during deterministic replay; no scripted card-move label or combat
+solver was added.
+
+A focused C# regression plays Bouncing Flask against Vantom and Inklets
+and checks target choice and complete journal replay. The old H9 source
+distribution is unchanged. **Build and 64-source acceptance are still
+pending**; do not interpret the previous 59/64 as the result of this fix.
+
 ## Required acceptance on local checkout
 
 1. Run Python structural tests and focused C# research-fixture tests.
