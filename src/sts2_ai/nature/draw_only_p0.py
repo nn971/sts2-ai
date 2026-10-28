@@ -193,7 +193,7 @@ class DeclaredLaw:
             if kind == "random_target" and (
                 law.get("operationKind") != "choose_enemy_instance"
                 or law.get("conditioningPolicyId") !=
-                    "native-random-target-eligible-enemies-v1"
+                    "uniform-live-enemy-instance-support-v1"
                 or status != SOURCE_VERIFIED_STATUS
             ):
                 raise DrawOnlyContractError(
