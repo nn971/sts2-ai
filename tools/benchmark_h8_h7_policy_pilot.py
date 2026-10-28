@@ -818,10 +818,11 @@ def _validate_pair(a: dict[str, Any], b: dict[str, Any]) -> None:
             "captured_player_decisions", "behavior_digest",
             "reference_event_digest", "reference_law_steps",
         ):
-            if left[key] != right[key]:
+            if ((key in left) != (key in right) or
+                    (key in left and left[key] != right[key])):
                 raise RuntimeError(
                     f"checked/native H8 H7 policy drift {seed}: {key} "
-                    f"{left[key]!r} != {right[key]!r}")
+                    f"{left.get(key)!r} != {right.get(key)!r}")
 
 
 def main() -> None:
