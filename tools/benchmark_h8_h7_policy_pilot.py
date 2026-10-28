@@ -436,6 +436,11 @@ def _shard(
                         terminal_enemy_hp=state.get("terminalEnemyHp"))
                 rows.append(dict(
                     seed=seed, cell=cell_key,
+                    unsupported_detail=(state.get("unsupportedDetail")
+                                        if status == "unsupported" else None),
+                    unsupported_boundary_version=(
+                        state.get("boundaryVersion")
+                        if status == "unsupported" else None),
                     scenario_id=source_scenario,
                     deck_preset_id=source_deck, status=status,
                     is_steady=(steady_barrier is not None and
@@ -881,6 +886,7 @@ def main() -> None:
         elif args.order in ("native", "checked"):
             order = [args.order]
         cohorts = []
+        incomplete: list[tuple[str, dict[str, Any]]] = []
         for ordinal, mode in enumerate(order, 1):
             print(
                 f"[h8-h7-pilot] cohort {ordinal}/{len(order)} mode={mode} "
@@ -912,11 +918,19 @@ def main() -> None:
                     if args.curriculum in ("h8-structured", "h9-rich") else None),
             )
             cohorts.append(x)
-            if (args.require_all_terminal and
-                    x["statuses"].get("terminal", 0) != args.episodes):
-                raise RuntimeError(
-                    "H9 structured curriculum has incomplete combats: "
-                    + str(x["statuses"]))
+            if args.require_all_terminal:
+                for seed, row in x["trajectories"].items():
+                    if row["status"] != "terminal":
+                        incomplete.append((mode, row))
+                        print(
+                            "[h9-rich-incomplete] "
+                            f"mode={mode} source={seed} "
+                            f"encounter={row['scenario_id']} "
+                            f"status={row['status']} "
+                            f"boundary={row['unsupported_boundary_version']} "
+                            f"reason={row['unsupported_detail']}",
+                            flush=True,
+                        )
             print(
                 f"[h8-h7-pilot] {mode} {x['wall_seconds']:.2f}s "
                 f"full_combat={x['statuses'].get('terminal', 0)} "
@@ -1003,6 +1017,12 @@ def main() -> None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(result, indent=2) + "\n")
         print("[h8-h7-pilot] report:", args.output, flush=True)
+        if incomplete:
+            raise RuntimeError(
+                "H9 structured curriculum has incomplete combats: "
+                + str(Counter(row["status"] for _, row in incomplete))
+                + f"; inspect preserved report {args.output}"
+            )
 
 
 if __name__ == "__main__":
