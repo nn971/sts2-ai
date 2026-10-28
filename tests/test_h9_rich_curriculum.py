@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pytest
 
+from sts2_ai.nature.combat_scenarios import CombatScenario
 from sts2_ai.nature.research_combat_fixtures import (
     RICH_ADDITIONS,
     RICH_DISTRIBUTION,
@@ -72,3 +73,22 @@ def test_rich_sources_separate_worlds_and_v1_is_unchanged() -> None:
         fixture_from_source("h9-rich-zero-shot-v2-73127-0-25-0")
     with pytest.raises(ValueError):
         rich_source_bank("selection", 8, round_index=1)
+
+
+def test_rich_random_access_is_stable_and_h2_floor_contract_is_unchanged() -> None:
+    late = rich_fixture_for_index(1279, curriculum_seed=20261028)
+    earlier = rich_fixture_for_index(0, curriculum_seed=20261028)
+    assert late == rich_fixture_for_index(1279, curriculum_seed=20261028)
+    assert earlier == rich_fixture_for_index(0, curriculum_seed=20261028)
+    with pytest.raises(ValueError, match="Unsupported H2"):
+        CombatScenario(
+            "old-h2-elite", "proto.encounter.phrog_parasite_elite",
+            "PhrogParasiteElite", 10, total_floor=3, map_row=2,
+        )
+    scenario, spec, index = fixture_from_source(
+        rich_source_bank("zero-shot", 256)[0],
+        curriculum_seed=20261028,
+    )
+    assert index == 1024
+    assert scenario.total_floor == spec["total_floor"]
+    assert scenario.map_row == spec["map_row"]
