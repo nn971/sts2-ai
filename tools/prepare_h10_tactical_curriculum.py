@@ -15,7 +15,6 @@ from sts2_ai.training.h10_tactical_priorities import (
 )
 from sts2_ai.training.snapshot_importance import (
     build_importance_distribution,
-    snapshot_identity,
 )
 
 
