@@ -232,3 +232,49 @@ v15 training instead of integrating H9.
 - Only complete native Act 1 runs count for Act-clear performance;
   separate selection and final confirmation by source seed. Preserve
   negative results and avoid needless successive tests of disproven ideas.
+
+## H10 native run unblock: Power-card lifecycle (2026-10-28)
+
+The first hybrid collector reached two full runs and failed on
+`h10-native-a10-collector-v1-2` with
+`InvalidOperationException: Combat card instance 17 is missing`.
+The H9 emulator base revision `3420dde4b6eaeeb46f0925eda817acab3fe93eeb`
+lacked the Power-card post-play fix already implemented separately
+in emulator PR #189 / issue #188. That existing fix was ported
+without changing the chance law to **emulator PR #221**:
+`fix/h10-power-card-lifecycle-20261028`
+(`e921af145c6cd0c69b5cff43428ee89dfc3342a8`).
+The exact H10 crash seed has NOT yet been rerun, so this is a
+well-supported candidate fix, not a completed end-to-end validation.
+
+Switch the existing emulator checkout to the isolated fix branch only
+if it has no uncommitted changes; the H10 Python collector's
+`--emulator-revision` explicitly accepts this checkout. The bridge
+uses `dotnet run --no-build`, so **rebuild** after switching.
+
+```fish
+cd ~/projects/sts2-emulator
+git status --short
+git fetch origin
+git switch --track origin/fix/h10-power-card-lifecycle-20261028
+dotnet test tests/Sts2Emulator.Core.Tests/Sts2Emulator.Core.Tests.csproj \
+    -c Release --filter FullyQualifiedName~PrototypePowerCardCompletionLifecycleTests
+dotnet build src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj -c Release
+
+cd ~/projects/sts2-ai
+source .venv/bin/activate.fish
+set emu ~/projects/sts2-emulator
+set rev (git -C $emu rev-parse HEAD)
+python -u tools/collect_h10_native_combat_entries.py \
+    --macro-model results/nature/h6c-macro-attention-r80.json \
+    --combat-checkpoint results/h9-structured-a10-r80/models/player-r0080.pt \
+    --emulator-root $emu --emulator-revision $rev \
+    --runs 16 --seed-prefix h10-native-a10-collector-v1 \
+    --device cuda --output results/h10-snapshots/hybrid-entries.jsonl
+```
+
+`--output` is created atomically only after all runs finish; interrupted
+attempts do not create a trusted corpus. Never bypass an illegal card
+transition or omit the failing run. If a different missing card error
+persists, capture the selected legal action and the managed stack trace
+rather than assuming this specific lifecycle bug explains every case.
