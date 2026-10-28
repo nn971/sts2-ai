@@ -217,6 +217,7 @@ def collect_h8(
     episodes, captures = validate_training_cohort(
         h8, seeds, replay_every=audit_every,
         replay_indices=audit_set, require_capture=capture,
+        require_reference_event_digest=not args.local_reference_nature,
     )
     for seed, ep in zip(seeds, episodes, strict=True):
         scenario_id, deck_label, _ = _source_meta(seed, args)
