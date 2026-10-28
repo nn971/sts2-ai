@@ -289,6 +289,53 @@ Only conclude that rich training improved generalization after a
 matched structural holdout comparison. Even favorable results would
 remain synthetic-combat evidence, not full native Act 1 victory evidence.
 
+## Matched structural zero-shot comparison (2026-10-29)
+
+Three user-provided reports (`h9-zero-shot-baseline-r80.json`,
+`h9-zero-shot-rich-r35.json`, `h9-zero-shot-rich-r40.json`) evaluated
+*identical* 256 reserved fixture indices 1024–1279, same
+`source_digest=b95839e2...`, emulator revision `7a69ce40`, greedy
+player actions, local event-keyed reference Nature, 15 workers and
+packed GPU actor. **Each evaluation has 256/256 terminal combats,
+256/256 successful deterministic journal replays, and zero unsupported
+boundaries**.
+
+| Tier | Count | H9 R80 | Rich R35 | Rich R40 |
+| --- | ---: | ---: | ---: | ---: |
+| Weak | 74 | 71 | 74 | 74 |
+| Normal | 104 | 78 | **94** | 92 |
+| Elite | 39 | 25 | 25 | 24 |
+| Boss | 39 | 10 | 8 | 10 |
+| **Overall wins** | **256** | **184 (71.88%)** | **201 (78.52%)** | **200 (78.13%)** |
+| Mean score | — | 1.2407 | **1.3116** | 1.3110 |
+
+R35 versus baseline matched-source outcome pairs: 177 both win;
+24 R35-only wins; 7 baseline-only wins; 48 both lose.
+Net **+17/256 = +6.64 percentage points**, exact paired McNemar
+`p = 0.00333` (unadjusted, exploratory). Paired bootstrap 95%
+difference interval approximately `[+2.34, +10.94]` percentage points.
+
+R40 versus baseline: 178 both win, 22 R40-only wins, 6
+baseline-only wins, 50 both lose. Net **+16/256 = +6.25 points**;
+exact paired McNemar `p = 0.00372`.
+R35 versus R40: 196 both win, 5 R35-only wins, 4 R40-only wins,
+51 both lose; **no meaningful distinction** on these fixtures.
+
+The gain is overwhelmingly normal encounters (R35 94/104 versus
+baseline 78/104), with essentially flat elite/boss performance.
+The Kin boss is exceptionally hard (baseline 2/20; R35 1/20;
+R40 2/20). This is **positive structural generalization within
+synthetic research combats**, but it does **not** establish success
+on native in-run combat states or A10 full runs.
+
+**Next direction:** preserve R35 and R40 checkpoints, retain R35
+as provisional all-tier champion, stop uniform PPO extension.
+Prioritize real native-combat fixtures/representativeness and
+a deliberate hard-encounter curriculum that does not erase normal
+gains. The current structural holdout has now been inspected for
+checkpoint selection; do not repeatedly tune against the same
+256 fixtures as if they were a fresh test set.
+
 ## Required acceptance on local checkout
 
 1. Run Python structural tests and focused C# research-fixture tests.
