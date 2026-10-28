@@ -37,7 +37,9 @@ STEADY_KEYS = (
 )
 
 
-def compare(reports: list[dict[str, Any]]) -> dict[str, Any]:
+def compare(
+    reports: list[dict[str, Any]], *, allow_censored: bool = False,
+) -> dict[str, Any]:
     if len(reports) != 3:
         raise ValueError("Expected three actor variants")
     for report, mode in zip(reports, MODES, strict=True):
@@ -49,7 +51,9 @@ def compare(reports: list[dict[str, Any]]) -> dict[str, Any]:
     baseline = old["cohorts"][0]
     if baseline.get("mode") != "native":
         raise ValueError("Only native source-valid H8 cohorts are comparable")
-    if not baseline["steady_state"]["accepted_for_complete_combat_target"]:
+    complete = bool(
+        baseline["steady_state"]["accepted_for_complete_combat_target"])
+    if not complete and not allow_censored:
         raise ValueError("Legacy source coverage incomplete")
     bases = baseline["trajectories"]
     for mode, report in zip(MODES[1:], reports[1:], strict=True):
@@ -105,6 +109,7 @@ def compare(reports: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "schema": "sts2-h8-three-way-actor-layout-comparison-v1",
         "exact_source_player_nature_replay_parity": True,
+        "complete_combat_throughput_accepted": complete,
         "source_count": len(bases),
         "model_sha256": old["model_sha256"],
         "emulator_revision": old["emulator_revision"],
@@ -132,11 +137,14 @@ def main() -> None:
     ap.add_argument("legacy", type=Path)
     ap.add_argument("packed", type=Path)
     ap.add_argument("packed_contiguous", type=Path)
+    ap.add_argument("--allow-censored", action="store_true",
+                    help="CI-only: verify exact source parity even if some "
+                         "encounters are unsupported; no throughput claim")
     ap.add_argument("--output", type=Path)
     a = ap.parse_args()
     reports = [json.loads(path.read_text())
                for path in (a.legacy, a.packed, a.packed_contiguous)]
-    result = compare(reports)
+    result = compare(reports, allow_censored=a.allow_censored)
     if a.output:
         a.output.parent.mkdir(parents=True, exist_ok=True)
         a.output.write_text(json.dumps(result, indent=2) + "\n")
