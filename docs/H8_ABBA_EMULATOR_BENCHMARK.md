@@ -65,6 +65,9 @@ Results:
 - same-named `.log`: live per-run stdout/stderr
 - `build-A.log`, `build-B.log`: binary build output
 - `A1-gpu.csv` etc.: optional 1-second GPU telemetry
+- `A1-system.json` etc.: elapsed time and average whole-host CPU busy
+  percentage with load averages (Linux, when `/proc/stat` is available);
+  **includes unrelated processes**, so interpret as contention diagnostics
 - `environment.json`: pinned revisions and built binary hashes
 - `summary.json`: exact-parity checks, interleaved throughput comparison
 
