@@ -30,6 +30,9 @@ from sts2_ai.nature.h5_curriculum import (
     cell_for_source,
     source_bank,
 )
+from sts2_ai.nature.research_combat_fixtures import (
+    fixture_from_source, source_bank as structured_source_bank,
+)
 from sts2_ai.nature.ppo_draw import PpoDrawNature
 from sts2_ai.nature.protocol import canonical_sha256
 from sts2_ai.training.h7_combat_ppo import H7_PPO_SCHEMA, H7CombatPPO
@@ -37,7 +40,31 @@ from sts2_ai.training.h7_combat_ppo import H7_PPO_SCHEMA, H7CombatPPO
 RUN_SCHEMA = "sts2-h7-reference-combat-run-v1"
 
 
-def terminal_replay_audit_indices(seeds: tuple[str, ...], every: int) -> tuple[int, ...]:
+def _source_meta(seed: str, args: Any) -> tuple[str, str, str]:
+    """Source-visible identity, structural deck label and audit stratum."""
+    if getattr(args, "curriculum", "h5") == "h8-structured":
+        scenario, _, index = fixture_from_source(
+            seed, curriculum_seed=args.structured_curriculum_seed)
+        return scenario.scenario_id, f"structured:{index}", scenario.scenario_id
+    cell = cell_for_source(seed)
+    if cell is None:
+        raise ValueError("Uncurated combat source")
+    return cell.scenario, cell.deck, cell.key
+
+
+def _source_bank(split: str, count: int, *, args: Any,
+                 round_index: int = 0) -> tuple[str, ...]:
+    if getattr(args, "curriculum", "h5") == "h8-structured":
+        return structured_source_bank(
+            split, count, study_seed=args.study_seed, round_index=round_index)
+    return source_bank(
+        split, count, study_seed=args.study_seed, round_index=round_index)
+
+
+def terminal_replay_audit_indices(
+    seeds: tuple[str, ...], every: int, *,
+    curriculum: str = "h5", curriculum_seed: int = 20261027,
+) -> tuple[int, ...]:
     """Deterministic pre-outcome audit: at least one combat per source cell.
 
     Audits are selected before rollout by original seed ordering, independently
@@ -48,13 +75,19 @@ def terminal_replay_audit_indices(seeds: tuple[str, ...], every: int) -> tuple[i
     seen: dict[str, int] = {}
     indices: list[int] = []
     for index, seed in enumerate(seeds):
-        cell = cell_for_source(seed)
-        if cell is None:
-            raise ValueError("Terminal audit cannot sample uncurated sources")
-        ordinal = seen.get(cell.key, 0)
+        if curriculum == "h8-structured":
+            scenario, _, _ = fixture_from_source(
+                seed, curriculum_seed=curriculum_seed)
+            key = scenario.scenario_id
+        else:
+            cell = cell_for_source(seed)
+            if cell is None:
+                raise ValueError("Terminal audit cannot sample uncurated sources")
+            key = cell.key
+        ordinal = seen.get(key, 0)
         if ordinal % every == 0:
             indices.append(index)
-        seen[cell.key] = ordinal + 1
+        seen[key] = ordinal + 1
     return tuple(indices)
 
 
@@ -75,7 +108,10 @@ def atomic_torch(path: Path, payload: dict[str, Any]) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def summarize(episodes: tuple[Any, ...]) -> dict[str, Any]:
+def summarize(
+    episodes: tuple[Any, ...], *, curriculum: str = "h5",
+    curriculum_seed: int = 20261027,
+) -> dict[str, Any]:
     def summary(items: list[Any]) -> dict[str, float | int | None]:
         wins = [x for x in items if x.outcome == "victory"]
         defeats = [x for x in items if x.outcome == "defeat"]
@@ -103,10 +139,16 @@ def summarize(episodes: tuple[Any, ...]) -> dict[str, Any]:
         }
     cells: dict[str, list[Any]] = {}
     for ep in episodes:
-        cell = cell_for_source(ep.source_seed)
-        if cell is None:
-            raise ValueError("H7 uncurated combat source")
-        cells.setdefault(cell.key, []).append(ep)
+        if curriculum == "h8-structured":
+            scenario, _, index = fixture_from_source(
+                ep.source_seed, curriculum_seed=curriculum_seed)
+            key = f"structured:{index}:{scenario.scenario_id}"
+        else:
+            cell = cell_for_source(ep.source_seed)
+            if cell is None:
+                raise ValueError("H7 uncurated combat source")
+            key = cell.key
+        cells.setdefault(key, []).append(ep)
     return {
         **summary(list(episodes)),
         "by_cell": {name: summary(items) for name, items in sorted(cells.items())},
@@ -145,7 +187,9 @@ def collect_h8(
         getattr(args, "train_terminal_replay_every", 1)
         if capture else 1
     )
-    audit_indices = terminal_replay_audit_indices(seeds, audit_every)
+    audit_indices = terminal_replay_audit_indices(
+        seeds, audit_every, curriculum=args.curriculum,
+        curriculum_seed=args.structured_curriculum_seed)
     audit_set = frozenset(audit_indices)
     h8 = _cohort(
         seeds,
@@ -162,17 +206,25 @@ def collect_h8(
         capture_player_training=capture,
         chance_sampling="event-law",
         audit_mechanics=False,
+        actor_collation=args.actor_collation,
+        local_reference_nature=args.local_reference_nature,
+        inline_player_frame=True,
+        structured_curriculum_seed=(
+            args.structured_curriculum_seed
+            if args.curriculum == "h8-structured" else None),
     )
     episodes, captures = validate_training_cohort(
         h8, seeds, replay_every=audit_every,
         replay_indices=audit_set, require_capture=capture,
     )
     for seed, ep in zip(seeds, episodes, strict=True):
-        cell = cell_for_source(seed)
-        if cell is None:
-            raise RuntimeError("H8 collected an uncurated H7 source")
-        ep.scenario_id = cell.scenario
-        ep.deck_preset_id = cell.deck
+        scenario_id, deck_label, _ = _source_meta(seed, args)
+        row = h8["trajectories"][seed]
+        if (row["scenario_id"] != scenario_id or
+                row["deck_preset_id"] != deck_label):
+            raise RuntimeError("H8 returned wrong structured source")
+        ep.scenario_id = scenario_id
+        ep.deck_preset_id = deck_label
         if ep.reward_version != H4_REWARD:
             raise RuntimeError("H8 reward differs from H7 PPO")
     return {
@@ -274,6 +326,14 @@ def main() -> None:
     p.add_argument("--ppo-epochs", type=int, default=3)
     p.add_argument("--ppo-minibatch", type=int, default=64)
     p.add_argument("--ppo-sample-limit", type=int, default=4096)
+    p.add_argument("--curriculum", choices=("h5", "h8-structured"),
+                   default="h5")
+    p.add_argument("--structured-curriculum-seed", type=int,
+                   default=20261027)
+    p.add_argument("--actor-collation", choices=("legacy", "packed",
+                   "packed-contiguous"), default="packed")
+    p.add_argument("--local-reference-nature", action="store_true",
+                   help="In-emulator source-law Nature for fast H8 rollouts")
     p.add_argument("--rollout-backend", choices=("legacy-h7", "h8-native"),
                    default="legacy-h7",
                    help="Use existing checked semantic H7 or native H8 event-law combat")
@@ -293,13 +353,21 @@ def main() -> None:
     if (min(args.rounds, args.episodes_per_round, args.workers,
             args.max_boundaries, args.eval_every, args.ppo_epochs,
             args.ppo_minibatch) < 1 or args.ppo_sample_limit < 2
-            or args.episodes_per_round < len(TRAIN_CELLS)
-            or args.eval_episodes < len(TRAIN_CELLS)
-            or args.eval_episodes % len(TRAIN_CELLS)
-            or args.study_seed < 0 or args.train_terminal_replay_every < 1):
+            or args.episodes_per_round < (256 if args.curriculum ==
+                "h8-structured" else len(TRAIN_CELLS))
+            or args.eval_episodes < (1 if args.curriculum ==
+                "h8-structured" else len(TRAIN_CELLS))
+            or (args.curriculum == "h5" and
+                args.eval_episodes % len(TRAIN_CELLS))
+            or args.study_seed < 0 or args.train_terminal_replay_every < 1
+            or args.structured_curriculum_seed < 0):
         p.error("Invalid H7 balanced-source or PPO configuration")
     if args.rollout_backend == "h8-native" and args.actor_backend != "shared":
         p.error("--rollout-backend h8-native requires --actor-backend shared")
+    if args.curriculum == "h8-structured" and args.rollout_backend != "h8-native":
+        p.error("Structured curriculum requires the native H8 rollout backend")
+    if args.local_reference_nature and args.rollout_backend != "h8-native":
+        p.error("Local reference Nature requires the native H8 backend")
     config_model = H7Config(
         width=args.width, layers=args.layers, heads=args.heads,
         feedforward=args.feedforward,
@@ -320,7 +388,11 @@ def main() -> None:
             else None
         ),
         "chance_law": "reference", "combat_reward": H4_REWARD,
-        "curriculum": "h5-16-train-cells", "training_cells": len(TRAIN_CELLS),
+        "curriculum": ("h8-structured-256+64-v1"
+                       if args.curriculum == "h8-structured"
+                       else "h5-16-train-cells"),
+        "training_cells": (256 if args.curriculum == "h8-structured"
+                           else len(TRAIN_CELLS)),
         "rounds": args.rounds, "episodes_per_round": args.episodes_per_round,
         "workers": args.workers, "max_boundaries": args.max_boundaries,
         "eval_every": args.eval_every, "eval_episodes": args.eval_episodes,
@@ -334,6 +406,11 @@ def main() -> None:
     # Preserve legacy H7 local-run fingerprints and resume compatibility.
     # New backend-specific runs are explicitly fingerprinted.
     if args.rollout_backend != "legacy-h7":
+        config["structured_curriculum_seed"] = (
+            args.structured_curriculum_seed
+            if args.curriculum == "h8-structured" else None)
+        config["local_reference_nature"] = args.local_reference_nature
+        config["actor_collation"] = args.actor_collation
         config["rollout_backend"] = {
             "name": args.rollout_backend,
             "reference_law": "h7-declared-event-scoped-v1",
@@ -404,9 +481,8 @@ def main() -> None:
             snapshot, seed=args.actor_seed, temperature=args.temperature,
             greedy=False,
         )
-        seeds = source_bank(
-            "train", args.episodes_per_round,
-            study_seed=args.study_seed, round_index=index,
+        seeds = _source_bank(
+            "train", args.episodes_per_round, args=args, round_index=index,
         )
         batch = collect(
             seeds, spec=spec, args=args,
@@ -424,7 +500,9 @@ def main() -> None:
         row: dict[str, Any] = {
             "round": index + 1, "behavior_sha256": spec.model_sha256,
             "source_digest": canonical_sha256(seeds),
-            "train": summarize(batch["episodes"]),
+            "train": summarize(
+                batch["episodes"], curriculum=args.curriculum,
+                curriculum_seed=args.structured_curriculum_seed),
             "terminal_replay_audit": {
                 "policy": "stratified-per-cell-preoutcome-v1",
                 "every": args.train_terminal_replay_every,
@@ -447,14 +525,16 @@ def main() -> None:
                 selection_model, seed=args.actor_seed,
                 temperature=1.0, greedy=True,
             )
-            eval_seeds = source_bank(
-                "selection", args.eval_episodes, study_seed=args.study_seed,
+            eval_seeds = _source_bank(
+                "selection", args.eval_episodes, args=args,
             )
             heldout = collect(
                 eval_seeds, spec=selection, args=args,
                 reference_seed=args.reference_seed + 700000003, capture=False,
             )
-            row["selection"] = summarize(heldout["episodes"])
+            row["selection"] = summarize(
+                heldout["episodes"], curriculum=args.curriculum,
+                curriculum_seed=args.structured_curriculum_seed)
             row["selection_digest"] = canonical_sha256(eval_seeds)
         history.append(row)
         atomic_torch(checkpoint, {
