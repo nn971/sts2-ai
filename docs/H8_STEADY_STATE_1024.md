@@ -50,7 +50,9 @@ critical path **without repeatedly restarting Python, the GPU model, or the
 git -C ~/projects/sts2-emulator fetch origin
 git -C ~/projects/sts2-ai fetch origin
 
-git -C ~/projects/sts2-emulator switch research/h8-native-turn-owner-20261028
+# Use the last parity-verified M3 runtime as the steady-state baseline.
+# M4's native turn-owner branch remains experimental until extended parity passes.
+git -C ~/projects/sts2-emulator switch research/h8-tagged-boundary-cursor-20261028
 dotnet build ~/projects/sts2-emulator/Sts2Emulator.sln -c Release -m:1
 
 git -C ~/projects/sts2-ai switch research/h8-steady-state-1024-20261028
