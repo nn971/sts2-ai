@@ -117,6 +117,33 @@ noncombat run state. The stochastic continuation invariant is retained.
 
 Focused emulator tests and the 64-combat acceptance rerun remain pending.
 
+## Native acceptance second wave (October 28)
+
+The next H8 native pilot reached 34/64 completed source workers before
+failing on three gameplay events. These are source execution coverage,
+not bad curriculum indices:
+
+- **Elite victory:** `reward.elite_relic.model` was omitted from the
+  narrowly scoped engine-owned **postcombat** reward-site list. It now
+  uses the existing reward stream, with the complete combat result
+  preserved and no reward choice exposed to the combat policy.
+- **Slimes:** the source-generated `proto.status.slimed` is playable,
+  exhausts, and draws one card. It is admitted to the controlled
+  card-effect draw path; it remains a genuine player action.
+- **Phrog Parasite:** death summons roll HP for new Wrigglers. The
+  reference-law, Nature-owned-deck H8 fixture has no native combat
+  RNG owner; this site now consumes exactly one scoped and journaled
+  `combat.initial_unique_hp` selection from the existing prototype
+  combat stream per death summon. Unrelated guarded chance still
+  fails closed. The recorded provider mode is `legacy-prototype-v0`,
+  **not** native RNG parity. An eventual stochastic-provider migration
+  should give the newly spawned creatures a full typed RNG owner.
+
+Latest emulator feature branch also includes a focused scope-isolation
+test. The 64-combat complete native acceptance and replay are **still
+pending** on a locally rebuilt DLL. Do not silently drop winning
+elite combats or Slimed actions from the curriculum.
+
 ## Required acceptance on local checkout
 
 1. Run Python structural tests and focused C# research-fixture tests.
