@@ -77,6 +77,7 @@ def _shard(
     chance_sampling: str = "event-law",
     replay_indices: frozenset[int] | None = None,
     audit_mechanics: bool = True,
+    profile_emulator: bool = False,
 ) -> list[dict[str, Any]]:
     sys.path.insert(0, bindings)
     from sts2_emulator import Session
@@ -88,6 +89,8 @@ def _shard(
     native = mode == "native"
     rows = []
     with Session(["dotnet", dll, "prototype-ai-jsonl"]) as session:
+        if profile_emulator:
+            session.call("h8_perf_reset")
         for index, seed in indexed_seeds:
             cell = cell_for_source(seed)
             if cell is None:
@@ -270,10 +273,18 @@ def _shard(
                 if ((history is not None and len(history) != len(transcript))
                         or state["decisionCount"] != len(transcript)):
                     raise RuntimeError("H8 player/Nature history count mismatch")
-                if audited and not session.call(
-                    "h8_replay_audit", h8_handle=handle
-                )["replayVerified"]:
-                    raise RuntimeError("H8 journal failed deterministic replay")
+                if audited:
+                    if profile_emulator:
+                        session.call("h8_perf_stop")
+                    try:
+                        if not session.call(
+                            "h8_replay_audit", h8_handle=handle
+                        )["replayVerified"]:
+                            raise RuntimeError(
+                                "H8 journal failed deterministic replay")
+                    finally:
+                        if profile_emulator:
+                            session.call("h8_perf_resume")
                 after_actor = policy.timings_snapshot()
                 score = None
                 if status == "terminal":
@@ -351,6 +362,9 @@ def _shard(
                 released = session.call("h8_release_many", h8_handles=[handle])
                 if released["released"] != 1:
                     raise RuntimeError("H8 session handle was not released")
+        if profile_emulator and rows:
+            rows[0]["emulator_hotpath_profile"] = session.call(
+                "h8_perf_stop")["profile"]
     return rows
 
 
@@ -363,6 +377,7 @@ def _worker_main(
     chance_sampling: str = "event-law",
     replay_indices: frozenset[int] | None = None,
     audit_mechanics: bool = True,
+    profile_emulator: bool = False,
 ) -> None:
     # Queue handles cross the process boundary *only at spawn*, never
     # inside a ProcessPoolExecutor task queue. Keep one emulator process
@@ -372,7 +387,8 @@ def _worker_main(
         rows = _shard(
             shard, dll, bindings, mode, max_boundaries,
             replay_every, reference_seed, capture_player_training,
-            chance_sampling, replay_indices, audit_mechanics)
+            chance_sampling, replay_indices, audit_mechanics,
+            profile_emulator)
         results.put(("ok", rows))
     except BaseException:
         results.put(("error", traceback.format_exc()))
@@ -386,7 +402,8 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
             capture_player_training: bool = False,
             chance_sampling: str = "event-law",
             replay_indices: frozenset[int] | None = None,
-            audit_mechanics: bool = True) -> dict[str, Any]:
+            audit_mechanics: bool = True,
+             profile_emulator: bool = False) -> dict[str, Any]:
     if (replay_indices is not None and
             (not replay_indices or
              any(type(i) is not int or i < 0 or i >= len(seeds)
@@ -409,7 +426,7 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
                 args=(server.transport, spec, shard, dll, bindings,
                       mode, max_boundaries, replay_every, reference_seed,
                       results, capture_player_training, chance_sampling,
-                      replay_indices, audit_mechanics),
+                      replay_indices, audit_mechanics, profile_emulator),
             )
             for shard in shards
         ]
@@ -455,6 +472,23 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
     by_seed = {row["seed"]: row for row in rows}
     if len(rows) != len(seeds) or set(by_seed) != set(seeds):
         raise RuntimeError("Missing/duplicate H8 H7-policy fixture")
+    profiles = [row.pop("emulator_hotpath_profile") for row in rows
+                if "emulator_hotpath_profile" in row]
+    if profile_emulator and len(profiles) != len(shards):
+        raise RuntimeError("One or more H8 worker profiler snapshots missing")
+    merged: dict[str, dict[str, float | int]] = {}
+    for profile in profiles:
+        if profile.get("schemaId") != "sts2-h8-nested-hotpath-performance-v1":
+            raise RuntimeError("Wrong H8 C# profile schema")
+        for key, values in profile["operations"].items():
+            target = merged.setdefault(key, {
+                "count": 0, "totalSeconds": 0.0, "maxSeconds": 0.0,
+                "allocatedBytes": 0})
+            target["count"] += int(values["count"])
+            target["totalSeconds"] += float(values["totalSeconds"])
+            target["maxSeconds"] = max(
+                target["maxSeconds"], float(values["maxSeconds"]))
+            target["allocatedBytes"] += int(values["allocatedBytes"])
     counts = Counter(row["status"] for row in rows)
     players = sum(row["player_decisions"] for row in rows)
     boundaries = sum(row["boundaries"] for row in rows)
@@ -467,6 +501,14 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
         terminal_combats_per_second=counts["terminal"] / wall,
         replay_verified=sum(row["replay_verified"] for row in rows),
         actor_metrics=server_stats, source_digest=canonical_sha256(seeds),
+        emulator_hotpath_profile=(
+            {"schemaId": "sts2-h8-merged-worker-profile-v1",
+             "workerProcesses": len(profiles),
+             "inclusiveNestedOperations": True,
+             "operations": merged,
+             "interpretation": "Nested scopes overlap. Do not sum parent "
+             "and child totalSeconds or allocatedBytes."}
+            if profile_emulator else None),
         trajectories=by_seed,
     )
 
