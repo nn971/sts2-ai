@@ -24,13 +24,14 @@ from sts2_ai.evaluation.combat_snapshots import (
 )
 from sts2_ai.models.h7_public_policy import H7PlayerSpec, TorchH7PublicPolicy
 from sts2_ai.models.shared_game_objects import encode_public_decision
+from sts2_ai.nature.h4_reward import H9_TOTAL_HP_REWARD, encounter_total_hp_score
 from sts2_ai.nature.protocol import canonical_sha256
 from sts2_ai.training.h7_combat_ppo import PreparedH7
 from sts2_ai.training.snapshot_curriculum import (
     sample_snapshot_curriculum, source_key,
 )
 
-NATIVE_REWARD = "h10-native-win-and-exit-hp-v1"
+NATIVE_REWARD = H9_TOTAL_HP_REWARD
 _WORKER_BACKEND: JsonlEmulatorBackend | None = None
 _WORKER_POLICY: TorchH7PublicPolicy | None = None
 _WORKER_SPEC: H7PlayerSpec | None = None
@@ -48,21 +49,21 @@ class NativeRollout:
     samples: tuple[PreparedH7, ...]
 
 
-def native_reward(outcome: str, exit_hp: int, max_hp: int) -> float:
-    """No fabricated healing/summon progress: defeats score zero.
+def native_reward(
+    outcome: str, exit_hp: int, max_hp: int, *,
+    total_non_minion_hp: int | None = None,
+    remaining_non_minion_hp: int | None = None,
+) -> float:
+    """Same versioned total-non-minion encounter reward as synthetic H9.
 
-    This first native objective is deliberately distinct from synthetic H9
-    total-nonminion defeat-progress reward. Both lie in [0, 2].
+    Defeat totals must be supplied by the authoritative emulator terminal
+    state. Missing totals fail loudly; actor inference never sees these data.
     """
-    if type(exit_hp) is not int or type(max_hp) is not int or not (
-        max_hp > 0 and 0 <= exit_hp <= max_hp
-    ):
-        raise ValueError("Invalid public native exit HP")
-    if outcome == "victory":
-        return 1.0 + exit_hp / max_hp
-    if outcome == "defeat":
-        return 0.0
-    raise ValueError("Native PPO requires a resolved terminal combat")
+    return encounter_total_hp_score(
+        outcome, player_exit_hp=exit_hp, player_max_hp=max_hp,
+        total_enemy_hp=total_non_minion_hp,
+        remaining_enemy_hp=remaining_non_minion_hp,
+    )
 
 
 def choose_sampled(logits: Sequence[float], *, temperature: float,
@@ -125,7 +126,13 @@ def play_native_fork(
                 outcome = "defeat" if hp == 0 or (
                     state.get("terminal_outcome") == "defeat"
                 ) else "victory"
-                score = native_reward(outcome, hp, recipe.max_hp)
+                score = native_reward(
+                    outcome, hp, max(recipe.max_hp, int(state.get("max_hp", recipe.max_hp))),
+                    total_non_minion_hp=state.get(
+                        "defeat_total_non_minion_enemy_hp"),
+                    remaining_non_minion_hp=state.get(
+                        "defeat_remaining_non_minion_enemy_hp"),
+                )
                 if not entries:
                     raise ValueError("Native snapshot completed with zero player decisions")
                 return NativeRollout(
