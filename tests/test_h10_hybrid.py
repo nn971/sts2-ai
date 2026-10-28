@@ -5,6 +5,8 @@ import json
 
 import pytest
 
+pytest.importorskip("torch")
+
 from sts2_ai.agents.base import Decision
 from sts2_ai.agents.h10_hybrid import H10FrozenHybridAgent
 from sts2_ai.emulator import FAIR_POLICY_ID, LegalAction, Observation
