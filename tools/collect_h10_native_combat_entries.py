@@ -30,12 +30,15 @@ def main() -> None:
     p.add_argument("--emulator-revision", required=True)
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--runs", type=int, default=16)
+    p.add_argument("--start-index", type=int, default=0,
+                   help="Skip earlier source-run indices for exact-seed reproduction")
     p.add_argument("--seed-prefix", default="h10-native-a10-collector-v1")
     p.add_argument("--max-decisions", type=int, default=4096)
     p.add_argument("--device", default="cuda")
     p.add_argument("--build", action="store_true")
     args = p.parse_args()
-    if args.runs <= 0 or args.max_decisions <= 0 or not args.seed_prefix:
+    if (args.runs <= 0 or args.start_index < 0
+            or args.max_decisions <= 0 or not args.seed_prefix):
         p.error("Require positive run/decision counts and a nonempty seed prefix")
     if args.output.exists():
         p.error("Refusing to overwrite an existing research snapshot corpus")
@@ -57,27 +60,48 @@ def main() -> None:
                 suffix=".pending", delete=False,
             ) as stream:
                 temporary = Path(stream.name)
-                for i in range(args.runs):
+                for offset in range(args.runs):
+                    i = args.start_index + offset
                     seed = f"{args.seed_prefix}-{i}"
                     collector = SnapshotCollector(
                         backend, seed=seed, source_policy=hybrid.policy_id,
                         ascension=10,
                     )
-                    result = play_run(
-                        backend, hybrid, seed=seed,
-                        policy=InformationPolicy(FAIR_POLICY_ID),
-                        ascension=10, max_decisions=args.max_decisions,
-                        environment=NATIVE_OVERGROWTH,
-                        episode_goal_version=NATIVE_ACT1_BOSS_GOAL,
-                        decision_observer=collector.on_decision,
-                    )
+                    last_action: dict[str, object] = {}
+
+                    def observe_decision(handle, observation, legal, decision):
+                        collector.on_decision(handle, observation, legal, decision)
+                        last_action.clear()
+                        last_action.update({
+                            "decision_index": len(collector.action_ids) - 1,
+                            "action_id": decision.action.action_id,
+                            "kind": decision.action.kind,
+                            "payload_json": decision.action.payload_json,
+                        })
+
+                    try:
+                        result = play_run(
+                            backend, hybrid, seed=seed,
+                            policy=InformationPolicy(FAIR_POLICY_ID),
+                            ascension=10, max_decisions=args.max_decisions,
+                            environment=NATIVE_OVERGROWTH,
+                            episode_goal_version=NATIVE_ACT1_BOSS_GOAL,
+                            decision_observer=observe_decision,
+                        )
+                    except Exception:
+                        print("[h10-collect-error] " + json.dumps({
+                            "seed": seed,
+                            "emulator_revision": backend.emulator_revision,
+                            "selected_action": last_action or None,
+                        }, sort_keys=True), flush=True)
+                        raise
                     for recipe in collector.recipes:
                         stream.write(json.dumps(asdict(recipe), sort_keys=True) + "\n")
                         counts["entries"] += 1
                     counts[result.outcome] += 1
                     counts["censored"] += int(result.censored)
                     print(
-                        f"[h10-collect] run={i+1}/{args.runs} seed={seed} "
+                        f"[h10-collect] run={offset+1}/{args.runs} seed={seed} "
                         f"outcome={result.outcome} captures={len(collector.recipes)} "
                         f"censored={result.censored}",
                         flush=True,
