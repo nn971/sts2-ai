@@ -375,8 +375,6 @@ def main() -> None:
         p.error("--rollout-backend h8-native requires --actor-backend shared")
     if args.curriculum in ("h8-structured", "h9-rich") and args.rollout_backend != "h8-native":
         p.error("Structured curriculum requires the native H8 rollout backend")
-    if args.resume and args.initialize_from_model is not None:
-        p.error("Choose --resume or --initialize-from-model, never both")
     if args.initialize_from_model is not None and not args.initialize_from_model.is_file():
         p.error("Missing frozen initialization checkpoint")
     if args.local_reference_nature and args.rollout_backend != "h8-native":
@@ -467,7 +465,7 @@ def main() -> None:
     torch.set_num_threads(1)
     torch.manual_seed(args.study_seed)
     model = SharedObjectTransformer(config_model)
-    if args.initialize_from_model is not None:
+    if args.initialize_from_model is not None and not args.resume:
         previous = SharedObjectTransformer.load_checkpoint(args.initialize_from_model)
         model.load_state_dict(previous.state_dict(), strict=True)
         print(f"[h9-rich] initialized from frozen {args.initialize_from_model}",
