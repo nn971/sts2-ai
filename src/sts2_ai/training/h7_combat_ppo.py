@@ -166,10 +166,23 @@ class H7CombatPPO:
                 gae_lambda=self.gae_lambda,
                 allow_sampled_terminal_replay=allow_sampled_terminal_replay,
             ))
+        return self.update_prepared(
+            prepared, seed=seed, prepare_seconds=time.perf_counter() - started,
+        )
+
+    def update_prepared(
+        self, prepared: list[PreparedH7], *,
+        seed: int, prepare_seconds: float = 0.0,
+    ) -> dict[str, float | int]:
+        """Update from verified on-policy H7 decisions, including native forks.
+
+        Callers must capture their logits/value from a frozen model checkpoint.
+        Exact log-probability and critic parity are verified *before* mutation.
+        """
+        started = time.perf_counter()
         if len(prepared) < 2:
             raise ValueError("H7 PPO requires at least two source-public decisions")
         total_valid_decisions = len(prepared)
-        prepare_seconds = time.perf_counter() - started
         if len(prepared) > self.sample_limit:
             prepared = random.Random(seed).sample(prepared, self.sample_limit)
 
@@ -192,7 +205,7 @@ class H7CombatPPO:
                             or abs(p.old_value - value) > 5e-4):
                         raise ValueError("H7 behavior policy mismatch before PPO update")
 
-        ratio_verification_seconds = time.perf_counter() - started - prepare_seconds
+        ratio_verification_seconds = time.perf_counter() - started
         optimization_started = time.perf_counter()
         advantages = torch.tensor([p.advantage for p in prepared], dtype=torch.float32)
         normalized = (advantages - advantages.mean()) / advantages.std(
@@ -257,7 +270,7 @@ class H7CombatPPO:
             "prepare_seconds": prepare_seconds,
             "ratio_verification_seconds": ratio_verification_seconds,
             "optimizer_seconds": optimizer_seconds,
-            "total_update_seconds": time.perf_counter() - started,
+            "total_update_seconds": time.perf_counter() - started + prepare_seconds,
             "decisions": len(prepared),
             "source_decisions": total_valid_decisions,
             "updates": len(diagnostics),
