@@ -196,6 +196,9 @@ def main() -> None:
                    choices=("legacy", "packed"), default="packed",
                    help="Packed actor serving is faster for the frozen H7 "
                         "Transformer without changing model semantics")
+    p.add_argument("--separate-player-observe", action="store_true",
+                   help="Compatibility path retaining the per-player "
+                        "h8_observe RPC; default uses typed inline H8 frame")
     p.add_argument("--local-reference-nature", action="store_true",
                    help="Use H8's in-emulator source-law reference provider. "
                         "No per-draw/intent JSONL round trips; deterministic "
@@ -259,6 +262,7 @@ def main() -> None:
             actor_delay_ms=args.actor_delay_ms,
             actor_collation=args.actor_collation,
             local_reference_nature=args.local_reference_nature,
+            inline_player_frame=not args.separate_player_observe,
             max_boundaries=args.max_boundaries,
             replay_every=args.replay_every,
             reference_seed=args.reference_seed,
@@ -319,6 +323,7 @@ def main() -> None:
                 "h7-event-scoped-declared-chance-law"),
             "local_reference_nature": args.local_reference_nature,
             "actor_collation": args.actor_collation,
+            "inline_player_frame": not args.separate_player_observe,
             "source_count": len(seeds),
             "workers": args.workers,
             "max_boundaries": args.max_boundaries,
