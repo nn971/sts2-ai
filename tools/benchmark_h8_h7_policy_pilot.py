@@ -40,6 +40,7 @@ from sts2_ai.nature.h5_curriculum import cell_for_source, source_bank
 from sts2_ai.nature.protocol import canonical_sha256
 from sts2_ai.nature.research_combat_fixtures import (
     fixture_from_source,
+    rich_source_bank,
     source_bank as structured_source_bank,
     structural_key,
 )
@@ -779,7 +780,7 @@ def main() -> None:
     p.add_argument("--player-checkpoint", type=Path)
     p.add_argument("--workers", type=int, default=15)
     p.add_argument("--episodes", type=int, default=128)
-    p.add_argument("--curriculum", choices=("h5", "h8-structured"),
+    p.add_argument("--curriculum", choices=("h5", "h8-structured", "h9-rich"),
                    default="h5")
     p.add_argument("--structured-curriculum-seed", type=int,
                    default=20261027)
@@ -866,6 +867,9 @@ def main() -> None:
             temperature=0.85, greedy=False,
         )
         seeds = (
+            rich_source_bank(
+                "train", args.episodes, study_seed=args.study_seed)
+            if args.curriculum == "h9-rich" else
             structured_source_bank(
                 "train", args.episodes, study_seed=args.study_seed)
             if args.curriculum == "h8-structured" else
@@ -905,7 +909,7 @@ def main() -> None:
                 inline_player_frame=args.inline_player_frame,
                 structured_curriculum_seed=(
                     args.structured_curriculum_seed
-                    if args.curriculum == "h8-structured" else None),
+                    if args.curriculum in ("h8-structured", "h9-rich") else None),
             )
             cohorts.append(x)
             if (args.require_all_terminal and
