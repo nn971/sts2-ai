@@ -145,6 +145,11 @@ def fixture_from_source(
     source_seed: str, *, curriculum_seed: int = 20261027,
     train_specs: int = 256, heldout_specs: int = 64,
 ) -> tuple[CombatScenario, dict[str, Any], int]:
+    if _RICH_SOURCE.fullmatch(source_seed):
+        return rich_fixture_from_source(
+            source_seed, curriculum_seed=curriculum_seed,
+            train_specs=1024, heldout_specs=256,
+        )
     match = _SOURCE.fullmatch(source_seed)
     if match is None:
         raise ValueError("Unsupported H8 source-bank identifier")
@@ -160,4 +165,190 @@ def fixture_from_source(
     ), None)
     if scenario is None:
         raise ValueError("Unregistered source-supported research encounter")
+    return scenario, fixture, index
+
+# A second distribution for H9 continuation. The original v1 corpus, its
+# source namespaces, fixture hashes and sealed H9 evaluations are immutable.
+RICH_DISTRIBUTION = "silent-a10-overgrowth-rich-v2"
+_RICH_SOURCE = re.compile(
+    r"^h9-rich-(train|selection|confirmation|zero-shot)-v2-"
+    r"(\\d+)-(\\d+)-(\\d+)-(\\d+)$"
+)
+RICH_ENCOUNTERS = (
+    ("proto.encounter.shrinker_beetle_weak", "ShrinkerBeetleWeak", 2, 1),
+    ("proto.encounter.nibbits_weak", "NibbitsWeak", 2, 1),
+    ("proto.encounter.fuzzy_wurm_crawler_weak", "FuzzyWurmCrawlerWeak", 2, 1),
+    ("proto.encounter.slimes_weak", "SlimesWeak", 2, 1),
+    ("proto.encounter.mawler_normal", "MawlerNormal", 2, 1),
+    ("proto.encounter.cubex_construct_normal", "CubexConstructNormal", 2, 1),
+    ("proto.encounter.vine_shambler_normal", "VineShamblerNormal", 2, 1),
+    ("proto.encounter.flyconid_normal", "FlyconidNormal", 2, 1),
+    ("proto.encounter.fogmog_normal", "FogmogNormal", 2, 1),
+    ("proto.encounter.inklets_normal", "InkletsNormal", 2, 1),
+    ("proto.encounter.overgrowth_crawlers", "OvergrowthCrawlers", 2, 1),
+    ("proto.encounter.ruby_raiders_normal", "RubyRaidersNormal", 2, 1),
+    ("proto.encounter.slimes_normal", "SlimesNormal", 2, 1),
+    ("proto.encounter.slithering_strangler_normal", "SlitheringStranglerNormal", 2, 1),
+    ("proto.encounter.snapping_jaxfruit_normal", "SnappingJaxfruitNormal", 2, 1),
+    ("proto.encounter.bygone_effigy_elite", "BygoneEffigyElite", 2, 1),
+    ("proto.encounter.byrdonis_elite", "ByrdonisElite", 2, 1),
+    ("proto.encounter.phrog_parasite_elite", "PhrogParasiteElite", 2, 1),
+    ("proto.encounter.ceremonial_beast_boss", "CeremonialBeastBoss", 6, 5),
+    ("proto.encounter.vantom_boss", "VantomBoss", 6, 5),
+    ("proto.encounter.the_kin_boss", "TheKinBoss", 6, 5),
+)
+# Index ranges preserve deterministic 30/40/15/15% tier allocation.
+RICH_TIERS = (
+    RICH_ENCOUNTERS[:4], RICH_ENCOUNTERS[4:15],
+    RICH_ENCOUNTERS[15:18], RICH_ENCOUNTERS[18:],
+)
+RICH_ADDITIONS = ADDITIONS + (
+    "proto.silent.blade_dance", "proto.silent.dagger_spray",
+    "proto.silent.quick_slash", "proto.silent.dagger_throw",
+    "proto.silent.cloak_and_dagger", "proto.silent.deflect",
+    "proto.silent.sucker_punch", "proto.silent.dash",
+    "proto.silent.leg_sweep", "proto.silent.skewer",
+    "proto.silent.footwork", "proto.silent.noxious_fumes",
+    "proto.silent.prepared", "proto.silent.piercing_wail",
+    "proto.silent.backstab", "proto.silent.adrenaline",
+    "proto.silent.afterimage", "proto.silent.bouncing_flask",
+    "proto.silent.calculated_gamble", "proto.silent.predator",
+    "proto.silent.blur",
+)
+RICH_ARCHETYPES = (
+    ("proto.silent.blade_dance", "proto.silent.cloak_and_dagger",
+     "proto.silent.dagger_spray", "proto.silent.slice"),
+    ("proto.silent.poisoned_stab", "proto.silent.deadly_poison",
+     "proto.silent.catalyst", "proto.silent.noxious_fumes",
+     "proto.silent.bouncing_flask"),
+    ("proto.silent.backflip", "proto.silent.deflect", "proto.silent.footwork",
+     "proto.silent.blur", "proto.silent.leg_sweep"),
+    ("proto.silent.quick_slash", "proto.silent.dagger_throw",
+     "proto.silent.predator", "proto.silent.dash", "proto.silent.skewer"),
+    ("proto.silent.acrobatics", "proto.silent.prepared",
+     "proto.silent.calculated_gamble", "proto.silent.adrenaline"),
+    ("proto.silent.piercing_wail", "proto.silent.sucker_punch",
+     "proto.silent.afterimage", "proto.silent.backstab"),
+)
+RICH_RELICS = RELICS + (
+    "proto.relic.bag_of_preparation", "proto.relic.anchor",
+    "proto.relic.bag_of_marbles", "proto.relic.nunchaku",
+    "proto.relic.bronze_scales", "proto.relic.snecko_skull",
+    "proto.relic.kunai", "proto.relic.shuriken",
+)
+RICH_POTIONS = POTIONS + (
+    "proto.potion.swift", "proto.potion.weak", "proto.potion.dexterity",
+    "proto.potion.energy", "proto.potion.strength", "proto.potion.explosive",
+    "proto.potion.fairy_in_a_bottle",
+)
+
+
+def _rich_roll(curriculum_seed: int, index: int, domain: str, ordinal: int) -> int:
+    return int.from_bytes(hashlib.sha256(
+        f"{RICH_DISTRIBUTION}:{curriculum_seed}:{index}:{domain}:{ordinal}"
+        .encode()
+    ).digest()[:8], "big")
+
+
+def rich_fixture_for_index(
+    index: int, *, curriculum_seed: int = 20261028,
+) -> dict[str, Any]:
+    """Stratified, versioned Overgrowth research mixture; no native frequency claim."""
+    if type(index) is not int or index < 0 or type(curriculum_seed) is not int or curriculum_seed < 0:
+        raise ValueError("Invalid rich research fixture index/seed")
+    bucket = index % 20
+    tier = 0 if bucket < 6 else 1 if bucket < 14 else 2 if bucket < 17 else 3
+    pool = RICH_TIERS[tier]
+    encounter_id, native_entry, floor, row = pool[
+        _rich_roll(curriculum_seed, index, "encounter", 0) % len(pool)
+    ]
+    mode = _rich_roll(curriculum_seed, index, "deck-mode", 0) % 4
+    archetype = _rich_roll(curriculum_seed, index, "archetype", 0) % len(RICH_ARCHETYPES)
+    strikes = 5 - (0, 1, 2, 3)[mode]
+    defends = 5 - (0, 0, 1, 2)[mode]
+    cards = [("proto.silent.strike", 0)] * strikes + [
+        ("proto.silent.defend", 0)
+    ] * defends + [("proto.silent.neutralize", 0), ("proto.silent.survivor", 0)]
+    amount = (0, 5, 9, 13)[mode] + _rich_roll(curriculum_seed, index, "deck-size", 0) % 3
+    for ordinal in range(amount):
+        pool = (RICH_ARCHETYPES[archetype]
+                if _rich_roll(curriculum_seed, index, "archetype-choice", ordinal) % 4
+                else RICH_ADDITIONS)
+        card_id = pool[_rich_roll(curriculum_seed, index, "card", ordinal) % len(pool)]
+        level = int(_rich_roll(curriculum_seed, index, "upgrade", ordinal) % 4 == 0)
+        cards.append((card_id, level))
+    cards.sort()
+    extras = _rich_roll(curriculum_seed, index, "relic-count", 0) % 3
+    relics = ["proto.relic.silent_ring"]
+    if extras:
+        first = _rich_roll(curriculum_seed, index, "relic", 0) % len(RICH_RELICS)
+        relics.append(RICH_RELICS[first])
+    if extras == 2:
+        second = (first + 1 + _rich_roll(curriculum_seed, index, "relic", 1)
+                  % (len(RICH_RELICS) - 1)) % len(RICH_RELICS)
+        relics.append(RICH_RELICS[second])
+    potions: list[str | None] = [None, None]
+    for ordinal in range(_rich_roll(curriculum_seed, index, "potion-count", 0) % 3):
+        potions[ordinal] = RICH_POTIONS[
+            _rich_roll(curriculum_seed, index, "potion-kind", ordinal) % len(RICH_POTIONS)
+        ]
+    return {
+        "encounter_id": encounter_id, "native_encounter_entry": native_entry,
+        "total_floor": floor, "map_column": 3, "map_row": row,
+        "deck": [{"card_id": card, "upgrade_level": level} for card, level in cards],
+        "relic_ids": relics, "potion_ids": potions,
+        "hp": (20, 30, 40, 50, 60, 70)[
+            _rich_roll(curriculum_seed, index, "hp", 0) % 6
+        ],
+        "max_hp": 70, "act": 1, "ascension": 10,
+        "distribution_id": RICH_DISTRIBUTION,
+    }
+
+
+def rich_source_bank(
+    split: str, count: int, *, study_seed: int = 73127,
+    round_index: int = 0, train_specs: int = 1024,
+    heldout_specs: int = 256,
+) -> tuple[str, ...]:
+    """Isolated v2 source namespace with disjoint structural zero-shot indices."""
+    if (split not in {"train", "selection", "confirmation", "zero-shot"}
+            or type(count) is not int or count < 1
+            or type(study_seed) is not int or study_seed < 0
+            or type(round_index) is not int or round_index < 0
+            or type(train_specs) is not int or train_specs < 200
+            or type(heldout_specs) is not int or heldout_specs < 1):
+        raise ValueError("Invalid rich source bank")
+    if split != "train" and round_index:
+        raise ValueError("Holdout source seeds cannot depend on training rounds")
+    size = train_specs if split != "zero-shot" else heldout_specs
+    offset = 0 if split != "zero-shot" else train_specs
+    output = []
+    for ordinal in range(count):
+        shifted = ordinal + (round_index * count if split == "train" else 0)
+        index = offset + shifted % size
+        replica = shifted // size
+        output.append(
+            f"h9-rich-{split}-v2-{study_seed}-{round_index}-{index}-{replica}"
+        )
+    return tuple(output)
+
+
+def rich_fixture_from_source(
+    source_seed: str, *, curriculum_seed: int = 20261028,
+    train_specs: int = 1024, heldout_specs: int = 256,
+) -> tuple[CombatScenario, dict[str, Any], int]:
+    match = _RICH_SOURCE.fullmatch(source_seed)
+    if match is None:
+        raise ValueError("Unsupported rich research source identifier")
+    split, _, _, index_text, _ = match.groups()
+    index = int(index_text)
+    if (index < 0 or (index >= train_specs if split != "zero-shot"
+                      else not train_specs <= index < train_specs + heldout_specs)):
+        raise ValueError("Rich source accesses configuration outside its split")
+    fixture = rich_fixture_for_index(index, curriculum_seed=curriculum_seed)
+    scenario = CombatScenario(
+        "rich-" + fixture["encounter_id"], fixture["encounter_id"],
+        fixture["native_encounter_entry"], 10,
+        total_floor=fixture["total_floor"], map_row=fixture["map_row"],
+    )
     return scenario, fixture, index
