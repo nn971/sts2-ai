@@ -61,6 +61,25 @@ class RemoteH7Policy:
             "wait_seconds": self.wait_seconds,
         }
 
+    def reset_server_metrics(self) -> None:
+        """Synchronized steady-state epoch after all worker warmups.
+
+        Only valid when no worker has an outstanding inference request.
+        The double worker barrier in the H8 cohort enforces this. The model
+        and its weights remain unchanged; only service counters are reset.
+        """
+        marker = "__h8_reset_metrics__"
+        try:
+            self.transport.requests.put(
+                (self.slot, marker, None), timeout=self.timeout)
+            sequence, status, payload = self.transport.replies[self.slot].get(
+                timeout=self.timeout)
+        except (queue.Full, queue.Empty) as exc:
+            raise RuntimeError("H8 shared actor metric reset stalled") from exc
+        if sequence != marker or status != "ok":
+            raise RuntimeError(
+                "H8 shared actor metric reset failed: " + str(payload))
+
     def evaluate(
         self, observation: Observation, legal_actions: tuple[LegalAction, ...],
     ) -> PolicyValueEstimate:
@@ -122,6 +141,18 @@ def _serve(
                 request = requests.get()
                 if request is None:
                     break
+                if (isinstance(request, tuple) and len(request) == 3 and
+                        request[1] == "__h8_reset_metrics__"):
+                    # The entire cohort has reached its first barrier. One
+                    # worker resets counters before the second barrier releases
+                    # any new inference request into the steady-state epoch.
+                    slot, marker, _ = request
+                    for key in ("batches", "requests", "max_batch_observed"):
+                        stats[key] = 0
+                    for key in ("forward_seconds", "collate_seconds"):
+                        stats[key] = 0.0
+                    replies[slot].put((marker, "ok", None))
+                    continue
                 work = [request]
                 deadline = time.perf_counter() + max_delay_ms / 1000.0
                 while len(work) < max_batch:
