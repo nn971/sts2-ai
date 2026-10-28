@@ -100,12 +100,13 @@ def _shard(
         initial_session_seconds = time.perf_counter() - worker_started
 
         def call(op: str, **kwargs: Any) -> Any:
+            if not measure_rpc or steady_started is None:
+                return session.call(op, **kwargs)
             start = time.perf_counter()
             result = session.call(op, **kwargs)
-            if measure_rpc and steady_started is not None:
-                rpc_counts[op] += 1
-                rpc_seconds[op] = (
-                    rpc_seconds.get(op, 0.0) + time.perf_counter() - start)
+            rpc_counts[op] += 1
+            rpc_seconds[op] = (
+                rpc_seconds.get(op, 0.0) + time.perf_counter() - start)
             return result
 
         if profile_emulator:
