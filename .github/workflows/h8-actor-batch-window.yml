@@ -9,6 +9,7 @@ on:
       - 'tools/compare_h8_actor_batch_windows.py'
       - 'tools/run_h8_actor_batch_sweep.py'
       - 'tests/test_h8_actor_batch_trace.py'
+      - 'tests/test_h7_batch_actor.py'
       - 'tests/test_h8_h7_policy_pilot.py'
       - '.github/workflows/h8-actor-batch-window.yml'
   workflow_dispatch:
@@ -38,7 +39,7 @@ jobs:
         run: |
           python -m compileall -q src/sts2_ai/models/h7_batch_actor.py src/sts2_ai/models/actor_batch_trace.py tools/run_h8_actor_batch_sweep.py tools/compare_h8_actor_batch_windows.py
           python -m ruff check src/sts2_ai/models/h7_batch_actor.py src/sts2_ai/models/actor_batch_trace.py tests/test_h8_actor_batch_trace.py tools/run_h8_actor_batch_sweep.py tools/compare_h8_actor_batch_windows.py
-          python -m pytest -q tests/test_h8_actor_batch_trace.py tests/test_h8_h7_policy_pilot.py tests/test_h8_packed_actor_collation.py
+          python -m pytest -q tests/test_h8_actor_batch_trace.py tests/test_h7_batch_actor.py tests/test_h8_h7_policy_pilot.py tests/test_h8_packed_actor_collation.py
       - name: Build pinned parity-verified M3 emulator
         run: |
           dotnet restore external-h8-emulator/Sts2Emulator.sln
