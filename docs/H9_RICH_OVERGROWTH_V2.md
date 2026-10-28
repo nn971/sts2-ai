@@ -105,6 +105,18 @@ Do not discard unsupported actions, count failures as defeats, or begin the
 40-round PPO run until the source-complete pilot succeeds. If another legal
 card/potion fails, use the reported model ID to address its engine semantics.
 
+## Multi-enemy partial-intent validation follow-up
+
+The native `RichMultiEnemyTurnAndSwiftPotionAdvance(inklets_normal)`
+regression reached the second enemy intent, then failed the end-turn
+`Run == Origin` check. Partial intent commitment legitimately changes the
+active enemy mechanics before the next pending chance ticket. Emulator
+commit `955a07a` replaces that obsolete equality check with comparisons
+of the original pre-intent checkpoint, replayed intent combat and unchanged
+noncombat run state. The stochastic continuation invariant is retained.
+
+Focused emulator tests and the 64-combat acceptance rerun remain pending.
+
 ## Required acceptance on local checkout
 
 1. Run Python structural tests and focused C# research-fixture tests.
