@@ -383,6 +383,22 @@ def rich_source_bank(
     return tuple(output)
 
 
+class RichCombatScenario(CombatScenario):
+    """Research-only Act 1 context with explicit elite-floor admission.
+
+    The older H2 CombatScenario still permits only its original fixed
+    weak/normal and boss floors; no legacy source contract is widened.
+    """
+
+    def __post_init__(self) -> None:
+        if (self.act != 1 or self.ascension != 10
+                or self.first_monster_combat_id != 1
+                or self.map_column != 3
+                or (self.encounter_id, self.native_entry, self.total_floor,
+                    self.map_row) not in RICH_ENCOUNTERS):
+            raise ValueError("Unsupported rich Overgrowth research encounter")
+
+
 def rich_fixture_from_source(
     source_seed: str, *, curriculum_seed: int = 20261028,
     train_specs: int = 1024, heldout_specs: int = 256,
@@ -396,7 +412,7 @@ def rich_fixture_from_source(
                       else not train_specs <= index < train_specs + heldout_specs)):
         raise ValueError("Rich source accesses configuration outside its split")
     fixture = rich_fixture_for_index(index, curriculum_seed=curriculum_seed)
-    scenario = CombatScenario(
+    scenario = RichCombatScenario(
         "rich-" + fixture["encounter_id"], fixture["encounter_id"],
         fixture["native_encounter_entry"], 10,
         total_floor=fixture["total_floor"], map_row=fixture["map_row"],
