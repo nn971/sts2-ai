@@ -18,7 +18,7 @@ import os
 import random
 import tempfile
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import ExitStack
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -67,8 +67,10 @@ from sts2_ai.training.snapshot_curriculum import (
     sample_snapshot_curriculum,
 )
 from sts2_ai.training.snapshot_importance import (
+    SnapshotIdentity,
     build_importance_distribution,
     importance_diagnostics,
+    snapshot_identity,
 )
 
 POOLED_PPO_VERSION = "sts2-v15c-frozen-strategy-combat-ppo-v1"
@@ -680,6 +682,7 @@ def train_pooled_combat_ppo(
     snapshot_sampling: str = "balanced",
     snapshot_target_balance: float = 0.5,
     snapshot_priority_mix: float = 0.7,
+    snapshot_priority_scores: Mapping[SnapshotIdentity, float] | None = None,
     diagnose_ppo: bool = False,
     initialize_from: PhaseSplitNeuralModel | None = None,
     on_round: Callable[
@@ -714,10 +717,17 @@ def train_pooled_combat_ppo(
             recipe.validate()
             if recipe.emulator_revision != backend.emulator_revision:
                 raise ValueError("Snapshot corpus emulator revision mismatch")
+    if snapshot_priority_scores is not None:
+        if snapshot_recipes is None or snapshot_sampling != "importance":
+            raise ValueError("H10 priorities require snapshot importance sampling")
+        identities = {snapshot_identity(recipe) for recipe in snapshot_recipes}
+        if set(snapshot_priority_scores) != identities:
+            raise ValueError("H10 priority identities do not match snapshot corpus")
     importance_sampler = (
         build_importance_distribution(
             snapshot_recipes, target_balance=snapshot_target_balance,
             priority_mix=snapshot_priority_mix,
+            priority_scores=snapshot_priority_scores,
         )
         if snapshot_recipes is not None and snapshot_sampling == "importance"
         else None
@@ -785,7 +795,14 @@ def train_pooled_combat_ppo(
         if importance_sampler is not None:
             snapshot_config["target_balance"] = snapshot_target_balance
             snapshot_config["priority_mix"] = snapshot_priority_mix
-            snapshot_config["priority_version"] = "hp-tier-proxy-v1"
+            if snapshot_priority_scores is not None:
+                snapshot_config["priority_version"] = "h10-observed-opportunity-v1"
+                snapshot_config["priority_sha256"] = _hash_json([
+                    [*key, snapshot_priority_scores[key]]
+                    for key in sorted(snapshot_priority_scores)
+                ])
+            else:
+                snapshot_config["priority_version"] = "hp-tier-proxy-v1"
         config["snapshot_curriculum"] = snapshot_config
     fingerprint = _hash_json(config)
     rows: list[PooledTrainingRound] = []

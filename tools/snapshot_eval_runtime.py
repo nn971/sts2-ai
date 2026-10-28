@@ -15,6 +15,7 @@ from multiprocessing import get_context
 from pathlib import Path
 from typing import Any
 
+from sts2_ai.agents.base import Agent
 from sts2_ai.agents.phase_split_agent import PhaseSplitGreedyAgent
 from sts2_ai.emulator import JsonlEmulatorBackend
 from sts2_ai.evaluation.combat_snapshots import (
@@ -29,8 +30,8 @@ from sts2_ai.evaluation.combat_snapshots import (
 JOURNAL_SCHEMA = "sts2-snapshot-paired-progress-v1"
 SourceKey = tuple[str, int, str]
 _WORKER_BACKEND: JsonlEmulatorBackend | None = None
-_WORKER_BASELINE: PhaseSplitGreedyAgent | None = None
-_WORKER_CANDIDATE: PhaseSplitGreedyAgent | None = None
+_WORKER_BASELINE: Agent | None = None
+_WORKER_CANDIDATE: Agent | None = None
 
 
 def log(message: str) -> None:
@@ -159,7 +160,7 @@ def _atomic_report(path: Path, report: dict[str, Any]) -> None:
 
 def evaluate_source(
     backend: JsonlEmulatorBackend,
-    baseline: PhaseSplitGreedyAgent, candidate: PhaseSplitGreedyAgent,
+    baseline: Agent, candidate: Agent,
     recipes: Sequence[CombatSnapshotRecipe], *,
     max_combat_decisions: int, progress_every: int,
 ) -> list[PairedCombatResult]:
@@ -188,9 +189,29 @@ def evaluate_source(
     )
 
 
+def _load_candidate(
+    candidate_model: Path, *, candidate_kind: str,
+    macro_model: Path | None, combat_device: str,
+) -> Agent:
+    if candidate_kind == "phase_split":
+        return PhaseSplitGreedyAgent.load(candidate_model)
+    if candidate_kind == "h10_hybrid":
+        if macro_model is None:
+            raise ValueError("H10 candidate requires a frozen macro checkpoint")
+        # Import lazily so the legacy v14 evaluation never requires Torch.
+        from sts2_ai.agents.h10_hybrid import H10FrozenHybridAgent
+        return H10FrozenHybridAgent.load(
+            macro_model=macro_model,
+            combat_checkpoint=candidate_model,
+            combat_device=combat_device,
+        )
+    raise ValueError(f"Unknown snapshot candidate kind: {candidate_kind}")
+
+
 def _worker_init(
     repo_root: str, emulator_root: str, revision: str,
     baseline_path: str, candidate_path: str,
+    candidate_kind: str, macro_path: str | None, combat_device: str,
 ) -> None:
     global _WORKER_BACKEND, _WORKER_BASELINE, _WORKER_CANDIDATE
     _WORKER_BACKEND = JsonlEmulatorBackend(
@@ -199,7 +220,11 @@ def _worker_init(
     )
     atexit.register(_WORKER_BACKEND.close)
     _WORKER_BASELINE = PhaseSplitGreedyAgent.load(Path(baseline_path))
-    _WORKER_CANDIDATE = PhaseSplitGreedyAgent.load(Path(candidate_path))
+    _WORKER_CANDIDATE = _load_candidate(
+        Path(candidate_path), candidate_kind=candidate_kind,
+        macro_model=Path(macro_path) if macro_path is not None else None,
+        combat_device=combat_device,
+    )
 
 
 def _worker_run(
@@ -220,6 +245,11 @@ def evaluate_paired_snapshots(
     report_path: Path, workers: int = 1, max_combat_decisions: int = 256,
     progress_every: int = 32, limit_source_runs: int | None = None,
     build: bool = False,
+    candidate_kind: str = "phase_split",
+    candidate_macro_model: Path | None = None,
+    combat_device: str = "cpu",
+    emulator_root: Path | None = None,
+    expected_emulator_revision: str | None = None,
 ) -> dict[str, Any]:
     """Safe group-level checkpointing; different models can NEVER share journals."""
     if (min(workers, max_combat_decisions, progress_every) <= 0
@@ -229,6 +259,12 @@ def evaluate_paired_snapshots(
         raise FileExistsError(f"Completed report already exists: {report_path}")
     if not baseline_model.is_file() or not candidate_model.is_file():
         raise FileNotFoundError("Snapshot baseline/candidate model does not exist")
+    if candidate_kind not in ("phase_split", "h10_hybrid"):
+        raise ValueError("Unsupported snapshot candidate kind")
+    if candidate_kind == "h10_hybrid" and (
+        candidate_macro_model is None or not candidate_macro_model.is_file()
+    ):
+        raise FileNotFoundError("H10 evaluation needs a frozen macro checkpoint")
     recipes = load_recipes(corpus)
     if not recipes:
         raise ValueError("Empty snapshot corpus")
@@ -242,6 +278,8 @@ def evaluate_paired_snapshots(
     if len(revisions) != 1:
         raise ValueError("Mixed snapshot emulator revisions")
     revision = next(iter(revisions))
+    if expected_emulator_revision is not None and revision != expected_emulator_revision:
+        raise ValueError("Snapshot corpus does not match expected emulator revision")
     identity = {
         "corpus_sha256": _sha(corpus),
         "baseline_sha256": _sha(baseline_model),
@@ -250,6 +288,14 @@ def evaluate_paired_snapshots(
         "max_combat_decisions": max_combat_decisions,
         "sources": [list(key) for key in groups],
     }
+    if candidate_kind != "phase_split" or emulator_root is not None:
+        identity.update({
+            "candidate_kind": candidate_kind,
+            "candidate_macro_sha256": (
+                _sha(candidate_macro_model) if candidate_macro_model is not None else None
+            ),
+            "combat_device": combat_device,
+        })
     journal_path = Path(str(report_path) + ".partial.jsonl")
     done = read_journal(journal_path, identity, groups)
     if not journal_path.exists():
@@ -274,12 +320,19 @@ def evaluate_paired_snapshots(
             f"entries={completed_entries}/{total_entries} "
             f"elapsed_s={time.monotonic()-start:.1f} source={key[0]}")
 
-    with JsonlEmulatorBackend(build=build) as backend:
+    with JsonlEmulatorBackend(
+        emulator_root=emulator_root,
+        expected_emulator_revision=revision,
+        build=build,
+    ) as backend:
         if backend.emulator_revision != revision:
             raise ValueError("Snapshot corpus/emulator revision mismatch")
         if workers == 1:
             baseline = PhaseSplitGreedyAgent.load(baseline_model)
-            candidate = PhaseSplitGreedyAgent.load(candidate_model)
+            candidate = _load_candidate(
+                candidate_model, candidate_kind=candidate_kind,
+                macro_model=candidate_macro_model, combat_device=combat_device,
+            )
             for key, rows in remaining:
                 completed(key, evaluate_source(
                     backend, baseline, candidate, rows,
@@ -293,7 +346,10 @@ def evaluate_paired_snapshots(
                 initargs=(
                     str(backend._repo_root), str(backend._emulator_root),
                     revision, str(baseline_model.resolve()),
-                    str(candidate_model.resolve()),
+                    str(candidate_model.resolve()), candidate_kind,
+                    str(candidate_macro_model.resolve())
+                    if candidate_macro_model is not None else None,
+                    combat_device,
                 ),
             ) as pool:
                 tasks = [
@@ -316,6 +372,7 @@ def evaluate_paired_snapshots(
         "subset_only": limit_source_runs is not None,
         "source_run_limit": limit_source_runs,
         "journal": str(journal_path), "identity": identity,
+        "candidate_kind": candidate_kind,
     }
     _atomic_report(report_path, report)
     log(f"[snapshot] DONE pairs={len(ordered)} elapsed_s={time.monotonic()-start:.1f} "
