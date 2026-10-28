@@ -1,0 +1,202 @@
+# H10: jointly trained Silent A10 Act 1 Overgrowth agent
+
+Status: **implementation started** on `research/h10-joint-act1-overgrowth-20261028`,
+based on H9's 80-round structured-combat work (AI PR #133). The first
+commit series implements measured tactical-opportunity priorities on the
+existing native Act 1 snapshot + importance-PPO pipeline. It does **not**
+yet run the H9 Torch combat checkpoint inside complete native Overgrowth
+runs. No H9 or H6 checkpoint format is silently reinterpreted.
+
+## Goal and objective
+
+First measurable target: autonomous **Silent, Ascension 10, Act 1
+Overgrowth boss clear** from real native-shaped run resets, outperforming
+fixed baselines and eventually independently measured human runs on the
+same emulator/game rules. The eventual objective is full-game A10.
+
+A shared public-object encoder and distinct combat and macro policy/action
+heads should be optimized for **Act-clear probability**. Combat also
+optimizes short-horizon tactics; macro handles map, deck, relic, potion,
+shop, event and campfire choices. The later combat boundary critic should
+bootstrap from a frozen target macro continuation critic:
+
+    G_combat = V_macro(public post-combat run state)
+
+This avoids an unconditional HP-to-potion conversion rate. The outcome
+predictor should represent a joint distribution over combat survival,
+persistent HP, *named* potion inventory and other persistent effects.
+Calibrate it on macro-generated entries and freeze/pin the tactical-policy
+version generating each data cohort. The model does not reveal hidden
+draw order, native RNG stream state or private emulator handles.
+
+## Existing infrastructure to reuse
+
+- H9 shared object/action Transformer, frozen Torch combat checkpoints
+  and reference-law native complete-combat PPO
+  (`docs/H9_NATIVE_STRUCTURED_TRAINING.md`).
+- H6 phase-separated full-run learning, macro action semantics, fixed
+  combat adaptation and run-level histories
+  (`docs/H6_FROZEN_COMBAT_MACRO.md`).
+- Authentic Act 1 combat snapshots: `evaluation/combat_snapshots.py`
+  captures native reset seed + **public selected legal-action prefix**;
+  restores/validates observation and exact-state fingerprints inside
+  the emulator; forks combat entries. `snapshot_curriculum.py` already
+  replays grouped prefixes and supports native isolated tactical PPO.
+- `snapshot_importance.py` already supports full-support
+  importance-weighted priority proposals. Do not duplicate it.
+- Existing distributional outcome predictors are experimental and not
+  yet conditioned on a deployed tactical-policy identity or calibrated
+  for joint named-potion outcomes.
+
+## Implementation stages
+
+### M0 — tactical improvability for authentic macro histories (in progress)
+
+Capture reachable native Act 1 snapshots using the existing snapshot
+collector, on training-only macro seeds. Run the **same exact entry**
+under the current tactical agent and a stronger candidate/reference.
+Paired reports from `combat_snapshot_benchmark.py` are the evidence;
+one exact RNG world is **not** a statistically reliable expected-regret
+estimate. Priority labels are conservative:
+
+- Current policy loses, reference wins: **reference_survives** (priority 5).
+- Both win, reference has at least as much HP *and* retains a superset
+  of the same named potion identities: **reference_dominates**
+  (priority 1.5–2.5).
+- Both lose: **unresolved** (priority 1), not `weak_deck`.
+- Reference trades potions for HP: **resource_tradeoff_unresolved**
+  (priority 1), pending strategic continuation values.
+- Censored combat: priority 1; no fabricated defeat or win.
+- If no reference does better, keep positive probability of sampling;
+  periodically reconsider as the policy population improves.
+
+The first implementation is in `h10_tactical_priorities.py` and
+`tools/prepare_h10_tactical_curriculum.py`. A versioned JSON output is
+matched to the **exact** training snapshot corpus hash, source seeds,
+exact snapshot hashes and emulator revision. Ambiguous historical report
+joins fail. Distinct reference policies can contribute independently;
+the same current baseline must be used.
+
+The opt-in `--snapshot-priorities` parameter of
+`tools/train_pooled_objects_v15.py` passes those priorities into the
+existing `build_importance_distribution` and on-policy PPO.
+The target is preserved:
+
+    p = mixture(natural snapshot frequency, balanced strata)
+    q = (1-lambda)*p + lambda*normalized(p*priority)
+    importance weight = p/q
+
+There is a nonzero minimum sampling mass and the optimizer checkpoint
+pins the complete priorities SHA. Existing training defaults, sample
+weights and checkpoints remain unchanged without this option.
+
+**Important scope:** This is a working *older v15 model* training bridge,
+not yet the H9 Torch actor. H10's next integration should connect
+H9-native decision encoding, batched inference and PPO to this same
+verified source/priority machinery, without reverting to v15 capacity.
+One repeated snapshot shares hidden initial RNG; new macro runs/source
+seeds are required to obtain independent environment replicas.
+
+### M1 — H9 combat within true native Act 1 runs
+
+Integrate H9 policy inference with the full-run reset/step API. Preserve
+all legal action queries, target pointers, potion and card choices.
+Expose fair public observations and portable Torch checkpoints. Collect
+actual combat-entry snapshots from H9-driven (or H9-combat/older-macro)
+runs; all unsupported mechanics are coverage gaps, not fake victories.
+Identify any remaining H9/H6 semantic incompatibilities directly;
+do not modify training correctness to force acceptance.
+
+### M2 — macro head and continuation critic
+
+Attach a macro object/action-query adapter to the shared semantic
+encoder. Verify different shop/event/card/upgrade/remove choices have
+different input features and logits, map connectivity is explicit, and
+treasure relic skip actions exist. Train macro PPO against real Act-clear
+returns using a **frozen H9 combat pathway**. Keep independent optimizer
+state and policy signatures. Censored runs have no artificial defeat label.
+
+### M3 — joint survival/resource transition and macro lookahead
+
+Fit a policy-versioned distribution over defeat versus joint exit
+(HP, named potions, persistent deck/relic/gold changes). Preserve
+correlation and calibrate on *run-seed-disjoint* source runs. Avoid using
+on-policy outcome data as counterfactual evidence for a different tactic.
+Use macro continuation value at the search frontier and simulate exact
+known macro transitions wherever available. Compare macro PPO alone,
+PPO+continuation critic, PPO+outcome-model lookahead, each with the same
+frozen combat model.
+
+### M4 — alternating or stabilized joint training
+
+Iterate:
+1. Frozen combat / exploratory macro: complete Act 1 runs; archive
+   trajectories and authentic combat entries (including failed macro runs).
+2. Train macro and policy-conditioned outcome model; run separate
+   calibration/evaluation cohorts.
+3. Freeze macro target critic; train combat from prioritized **entry
+   states** with fresh on-policy actions, optionally using boundary
+   continuation value. Preserve a natural-distribution portion and
+   previous skills; remeasure reference gaps.
+4. Refresh macro/outcome predictors against the new frozen combat policy.
+   Never use a stale predictor as ground truth. Later unfreeze shared
+   representations only with explicit stability gates.
+
+Training/holdout partitions are by **originating full-run seed**, keeping
+all entries from a run together. Held-out full-run A10 Act-clear rate,
+boss-entry HP, potion inventory, deck quality and censoring are principal
+metrics. Human comparison needs independently recorded same-rule runs.
+Inspect representative decision histories for semantic failures rather
+than inventing repeated microbenchmarks after negative results.
+
+## First opt-in use (existing older v15 snapshot backend)
+
+This stage requires **real native snapshot recipes** and paired reports
+already generated by the existing benchmark tool. Neither an H9 Torch
+model nor a public-only observation JSON by itself can be passed as an
+exact emulator restart recipe.
+
+```fish
+cd ~/projects/sts2-ai
+git fetch origin
+git switch research/h10-joint-act1-overgrowth-20261028
+git pull --ff-only
+source .venv/bin/activate.fish
+
+# Use a TRAIN partition and compare current vs reference on those recipes.
+# All inputs must have the same native emulator revision.
+python -u tools/combat_snapshot_benchmark.py evaluate \
+  --corpus results/h10-snapshots/train.jsonl \
+  --baseline-model results/current-v15-model.json \
+  --candidate-model results/reference-v15-model.json \
+  --report results/h10-snapshots/current-vs-reference.json
+
+python -u tools/prepare_h10_tactical_curriculum.py \
+  --train-corpus results/h10-snapshots/train.jsonl \
+  --comparison results/h10-snapshots/current-vs-reference.json \
+  --output results/h10-snapshots/priorities.json
+```
+
+Then supply `--snapshot-corpus results/h10-snapshots/train.jsonl`,
+`--snapshot-sampling importance`, and
+`--snapshot-priorities results/h10-snapshots/priorities.json` to
+`tools/train_pooled_objects_v15.py` along with its normal pinned base
+model, vocabulary, optimizer, and checkpoint settings. This is a
+**staging-only legacy bridge**, not a recommendation to invest in further
+v15 training instead of integrating H9.
+
+## Release gates
+
+- Source runs/fingerprints reproducible; no evaluator handle or hidden
+  RNG supplied to either agent; all candidate actions legal.
+- Macro provenance and paired comparison must refer to the same
+  configurations/emulator revision; ambiguity and mismatched priorities
+  fail closed. Immutable result artifacts and new checkpoint fingerprints.
+- Reference strength evaluated on separate source runs, not asserted from
+  individual examples; one comparison world can suggest a tactical gap but
+  cannot certify deck hopelessness.
+- H9 full-run adapter tested for original game mechanics and action
+  semantics; no fabricated terminal outcomes.
+- Only complete native Act 1 runs count for Act-clear performance;
+  separate selection and final confirmation by source seed. Preserve
+  negative results and avoid needless successive tests of disproven ideas.
