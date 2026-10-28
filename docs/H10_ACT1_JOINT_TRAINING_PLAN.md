@@ -320,3 +320,51 @@ Use a **different output** for the one-seed replay. Once it succeeds,
 run the entire 16-run collector on the same revisions and original
 seed prefix. Record any further real emulator exceptions and fix the
 underlying call site rather than omitting a difficult seed.
+
+### H10 Neow/HeftyTablet: legacy reward-shuffle registration
+
+After the two earlier emulator fixes, the first three original H10
+runs complete (3, 4 and 6 combat entries, each ending in defeat).
+Seed `h10-native-a10-collector-v1-3` then failed at decision 0:
+
+```text
+event_choice: {"ChoiceId":"take_proto.native.neow.heftytablet"}
+NotSupportedException: Native Fisher-Yates does not support shuffle
+site 'run.random_pool_distinct.shuffle_swap_index'.
+```
+
+HeftyTablet generates a three-Rare-card choice. That follows
+`PickDistinct` → `LegacyFisherYatesV111` → shared
+`NativeFisherYatesV111.ShuffleInPlace`. The shuffle site was
+already registered for legacy `reward` stream bounded draws,
+but the shared algorithm checked the separate **native-only**
+shuffle site list. Emulator PR #221 adds an explicit
+`allowRegisteredLegacySite` pathway for the legacy adapter,
+requiring exactly the registered site, stream, and operation;
+the native provider's sites remain restricted.
+
+Retry only the new failing source seed on the newly built emulator:
+
+```fish
+cd ~/projects/sts2-emulator
+git pull --ff-only
+dotnet build src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj -c Release
+
+cd ~/projects/sts2-ai
+git pull --ff-only
+source .venv/bin/activate.fish
+set emu ~/projects/sts2-emulator
+set rev (git -C $emu rev-parse HEAD)
+python -u tools/collect_h10_native_combat_entries.py \
+    --macro-model results/nature/h6c-macro-attention-r80.json \
+    --combat-checkpoint results/h9-structured-a10-r80/models/player-r0080.pt \
+    --emulator-root $emu --emulator-revision $rev \
+    --start-index 3 --runs 1 \
+    --seed-prefix h10-native-a10-collector-v1 \
+    --device cuda --output results/h10-snapshots/hybrid-entry-seed3.jsonl
+```
+
+After this seed succeeds, run a fresh full 16-run corpus with the
+same updated emulator revision. The original partial corpus was
+discarded on the exception; prior provisional entries from older
+revisions must not be concatenated with this one.
