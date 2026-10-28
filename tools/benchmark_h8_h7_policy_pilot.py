@@ -928,7 +928,8 @@ def main() -> None:
                             f"encounter={row['scenario_id']} "
                             f"status={row['status']} "
                             f"boundary={row['unsupported_boundary_version']} "
-                            f"reason={row['unsupported_detail']}",
+                            f"reason={row['unsupported_detail']} "
+                            f"last_steps={row['decision_sequence'][-6:]}",
                             flush=True,
                         )
             print(
