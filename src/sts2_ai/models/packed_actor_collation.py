@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import torch
 
-from .shared_game_objects import NUMERIC_FIELDS, SHARED_OBJECT_SCHEMA, EncodedDecision
+from .shared_game_objects import EncodedDecision, NUMERIC_FIELDS, SHARED_OBJECT_SCHEMA
 from .shared_transformer import H7Batch
 
 
