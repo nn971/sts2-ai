@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 H4_REWARD = "boss_progress_v2"
+H9_TOTAL_HP_REWARD = "encounter_nonminion_total_hp_v1"
 
 
 def boss_progress_score(
@@ -62,3 +63,32 @@ def opening_enemy_health(observation: dict[str, Any]) -> int:
     if total <= 0:
         raise ValueError("Opening enemies already defeated")
     return total
+
+
+def encounter_total_hp_score(
+    outcome: str, *, player_exit_hp: int, player_max_hp: int,
+    total_enemy_hp: int | None, remaining_enemy_hp: int | None,
+) -> float:
+    """H9 total-encounter HP reward, excluding minions.
+
+    The emulator counts every non-minion enemy instance (including death
+    summons) and completed in-place forms in total_enemy_hp. Remaining HP
+    contains only currently living non-minions. A loss therefore earns credit
+    for defeated earlier stages, even when the boss summons replacements
+    or regains its HP for a later stage. Victory remains HP-preserving.
+    """
+    if (type(player_exit_hp) is not int or
+            type(player_max_hp) is not int or player_max_hp <= 0 or
+            not 0 <= player_exit_hp <= player_max_hp):
+        raise ValueError("Invalid player HP for total-encounter reward")
+    if outcome == "victory":
+        return 1.0 + player_exit_hp / player_max_hp
+    if outcome != "defeat":
+        raise ValueError("Unknown total-encounter outcome")
+    if (type(total_enemy_hp) is not int or total_enemy_hp <= 0 or
+            type(remaining_enemy_hp) is not int or
+            not 0 <= remaining_enemy_hp <= total_enemy_hp):
+        raise ValueError(
+            "Defeat requires authoritative total and remaining non-minion HP"
+        )
+    return 1.0 - remaining_enemy_hp / total_enemy_hp

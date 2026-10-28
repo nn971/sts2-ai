@@ -8,8 +8,8 @@ architecture stay unchanged.
 ## Algorithm
 
 Each of the 21 supported encounter IDs is one *family*. We use the existing
-H4 continuous combat reward; no hand-coded difficulty/HP/deck taxonomy is
-involved. A fixed set of six training-pool fixtures per family is evaluated
+versioned H9 total non-minion encounter HP reward; no hand-coded
+difficulty/HP/deck taxonomy is involved. A fixed set of six training-pool fixtures per family is evaluated
 with greedy player actions at initialization and every ten PPO rounds.
 Reference-Nature seeds and fixture IDs are identical between evaluations.
 
@@ -52,17 +52,18 @@ terminal replay auditing (1 per 16 episodes within each family).
 
 ```fish
 cd ~/projects/sts2-emulator
-git switch research/h9-rich-overgrowth-fixtures-20261028
+git fetch origin
+git switch fix/total-nonminion-encounter-hp-20261029
 git pull --ff-only
 dotnet build src/Sts2Emulator.Cli -c Release
 
 cd ~/projects/sts2-ai
 git fetch origin
-git switch research/h9-adaptive-progress-20261029
+git switch research/h9-total-hp-reward-20261029
 git pull --ff-only
 source .venv/bin/activate.fish
 
-pytest -q tests/test_h9_adaptive_curriculum.py tests/test_h9_rich_curriculum.py
+pytest -q tests/test_nature_h4_reward.py tests/test_h9_adaptive_curriculum.py tests/test_h9_rich_curriculum.py
 
 set emu ~/projects/sts2-emulator
 set dll $emu/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll
@@ -107,3 +108,15 @@ The existing `SharedObjectTransformer` already has shared object
 representations and distinct combat/macro heads; future macro training
 can reuse the feedback mechanism with appropriately scaled macro
 reward, once the map/action representation issues are resolved.
+
+
+## V3 terminal reward (2026-10-29)
+
+The follow-up HP fix is documented in
+`docs/H9_TOTAL_ENCOUNTER_HP_REWARD.md`. Non-minion death-summoned
+stages and all non-minion opponents contribute to the same encounter
+HP budget, including future stages before spawn. Minions are
+excluded; the remaining HP and total are snapshotted at defeat by
+the emulator. This is a *new reward version*: historical H9 rich
+R35/R40 models can initialize fresh training, but earlier reward
+scores are not numerically comparable.
