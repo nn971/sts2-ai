@@ -465,7 +465,8 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
              profile_emulator: bool = False,
              warmup_per_worker: int = 0,
              measure_rpc: bool = False,
-             actor_collation: str = "legacy") -> dict[str, Any]:
+             actor_collation: str = "legacy",
+             actor_batch_trace: bool = False) -> dict[str, Any]:
     if (replay_indices is not None and
             (not replay_indices or
              any(type(i) is not int or i < 0 or i >= len(seeds)
@@ -487,6 +488,7 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
             workers=len(shards), device=actor_device,
             max_batch=actor_max_batch, max_delay_ms=actor_delay_ms,
             collation=actor_collation,
+            batch_trace=actor_batch_trace,
         ))
         results = ctx.Queue(maxsize=len(shards) + 1)
         processes = [
@@ -665,6 +667,10 @@ def main() -> None:
                         "retain original H8 sequential sampler for diagnosis")
     p.add_argument("--actor-device", default="cuda")
     p.add_argument("--actor-max-batch", type=int, default=16)
+    p.add_argument("--actor-batch-trace", action="store_true",
+                   help="Collect per-batch occupancy, padded tensor shapes, "
+                        "fill-window, collation, forward and reply timings; "
+                        "reset together with actor counters after warmup")
     p.add_argument("--actor-delay-ms", type=float, default=3.0)
     p.add_argument("--actor-collation",
                    choices=("legacy", "packed", "packed-contiguous"),
@@ -748,6 +754,7 @@ def main() -> None:
                 warmup_per_worker=args.warmup_per_worker,
                 measure_rpc=args.measure_rpc,
                 actor_collation=args.actor_collation,
+                actor_batch_trace=args.actor_batch_trace,
             )
             cohorts.append(x)
             print(
@@ -819,6 +826,7 @@ def main() -> None:
             sampled_mechanics_audit=args.sampled_mechanics_audit,
             actor_collation=args.actor_collation,
             actor_max_batch=args.actor_max_batch,
+            actor_batch_trace=args.actor_batch_trace,
             actor_delay_ms=args.actor_delay_ms,
             actor_device=args.actor_device,
             cohorts=cohorts,

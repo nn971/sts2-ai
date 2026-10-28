@@ -21,6 +21,7 @@ import torch
 from sts2_ai.emulator.protocol import LegalAction, Observation
 from sts2_ai.models.protocol import PolicyValueEstimate
 
+from .actor_batch_trace import ActorBatchTrace
 from .packed_actor_collation import collate_h7_actor_packed
 from .shared_game_objects import EncodedDecision, encode_public_decision
 from .shared_transformer import SharedObjectTransformer, collate_h7
@@ -32,6 +33,7 @@ class H7Transport:
     replies: tuple[Any, ...]
     slot_counter: Any
     model_id: str
+    batch_trace: bool = False
 
     def allocate_slot(self) -> int:
         with self.slot_counter.get_lock():
@@ -95,7 +97,10 @@ class RemoteH7Policy:
         seq = self.sequence
         start = time.perf_counter()
         try:
-            self.transport.requests.put((self.slot, seq, encoded), timeout=self.timeout)
+            request = ((self.slot, seq, encoded, time.perf_counter())
+                       if self.transport.batch_trace else
+                       (self.slot, seq, encoded))
+            self.transport.requests.put(request, timeout=self.timeout)
             answer = self.transport.replies[self.slot].get(timeout=self.timeout)
         except queue.Full as exc:
             raise RuntimeError("H7 shared inference request queue stalled") from exc
@@ -120,6 +125,7 @@ def _serve(
     checkpoint: str, digest: str, device: str, requests: Any,
     replies: tuple[Any, ...], startup: Any, statistics: Any,
     max_batch: int, max_delay_ms: float, collation: str,
+    batch_trace: bool,
 ) -> None:
     stats: dict[str, float | int | str] = {
         "batches": 0, "requests": 0, "forward_seconds": 0.0,
@@ -128,6 +134,7 @@ def _serve(
         "device": device,
         "collation": collation,
     }
+    probe = ActorBatchTrace() if batch_trace else None
     try:
         torch.set_num_threads(1)
         loaded = time.perf_counter()
@@ -153,10 +160,13 @@ def _serve(
                         stats[key] = 0
                     for key in ("forward_seconds", "collate_seconds"):
                         stats[key] = 0.0
+                    if probe is not None:
+                        probe.reset()
                     replies[slot].put((marker, "ok", None))
                     continue
                 work = [request]
-                deadline = time.perf_counter() + max_delay_ms / 1000.0
+                fill_started = time.perf_counter()
+                deadline = fill_started + max_delay_ms / 1000.0
                 while len(work) < max_batch:
                     remaining = deadline - time.perf_counter()
                     if remaining <= 0:
@@ -169,11 +179,18 @@ def _serve(
                         stopping = True
                         break
                     work.append(more)
+                fill_seconds = (time.perf_counter() - fill_started
+                                if probe is not None else 0.0)
                 try:
                     frames = [entry[2] for entry in work]
                     if not all(isinstance(item, EncodedDecision) for item in frames):
                         raise ValueError("H7 inference received non-public token request")
                     prepared = time.perf_counter()
+                    if probe is not None:
+                        queue_delays = [
+                            1000 * max(0.0, prepared - entry[3])
+                            for entry in work
+                        ]
                     batch = (
                         collate_h7_actor_packed(
                             frames, device=device,
@@ -182,34 +199,60 @@ def _serve(
                         if collation in ("packed", "packed-contiguous") else
                         collate_h7(frames).to(device)
                     )
-                    stats["collate_seconds"] = float(stats["collate_seconds"]) + (
-                        time.perf_counter() - prepared
-                    )
+                    collate_seconds = time.perf_counter() - prepared
+                    stats["collate_seconds"] = (
+                        float(stats["collate_seconds"]) + collate_seconds)
                     begun = time.perf_counter()
                     logits, values = model(batch)
                     if device.startswith("cuda"):
                         torch.cuda.synchronize(device)
                     cpu_logits = logits.detach().float().cpu()
                     cpu_values = values.detach().float().cpu()
-                    stats["forward_seconds"] = float(stats["forward_seconds"]) + (
-                        time.perf_counter() - begun
-                    )
+                    forward_seconds = time.perf_counter() - begun
+                    stats["forward_seconds"] = (
+                        float(stats["forward_seconds"]) + forward_seconds)
                     stats["batches"] = int(stats["batches"]) + 1
                     stats["requests"] = int(stats["requests"]) + len(work)
                     stats["max_batch_observed"] = max(
                         int(stats["max_batch_observed"]), len(work)
                     )
-                    for row, (slot, seq, frame) in enumerate(work):
+                    reply_started = (
+                        time.perf_counter() if probe is not None else 0.0)
+                    for row, entry in enumerate(work):
+                        slot, seq, frame = entry[:3]
                         count = len(frame.actions)
                         replies[slot].put((
                             seq, "ok",
                             (tuple(cpu_logits[row, :count].tolist()),
                              float(cpu_values[row].item())),
                         ))
+                    if probe is not None:
+                        probe.record(
+                            count=len(work),
+                            padded_objects=batch.kinds.shape[1],
+                            padded_actions=batch.action_kinds.shape[1],
+                            valid_objects=sum(len(x.objects) for x in frames),
+                            valid_actions=sum(len(x.actions) for x in frames),
+                            fill_ms=1000 * fill_seconds,
+                            queue_to_batch_mean_ms=(
+                                sum(queue_delays) / len(queue_delays)),
+                            queue_to_batch_max_ms=max(queue_delays),
+                            collate_ms=1000 * collate_seconds,
+                            forward_ms=1000 * forward_seconds,
+                            reply_ms=1000 * (time.perf_counter()-reply_started),
+                        )
                 except Exception:
                     error = traceback.format_exc()
-                    for slot, seq, _ in work:
+                    for entry in work:
+                        slot, seq = entry[:2]
                         replies[slot].put((seq, "error", error))
+        if probe is not None:
+            report = probe.report()
+            if (report["batches"] != stats["batches"] or
+                    report["requests"] != stats["requests"]):
+                raise RuntimeError(
+                    "Shared actor trace count differs from inference counters")
+            stats["batch_trace"] = report
         statistics.put(("ok", stats))
     except BaseException:
         error = traceback.format_exc()
@@ -227,6 +270,7 @@ class SharedH7Service:
         self, *, checkpoint: Path, digest: str, workers: int,
         device: str = "cpu", max_batch: int = 16, max_delay_ms: float = 3.0,
         collation: str = "legacy",
+        batch_trace: bool = False,
     ) -> None:
         if (collation not in ("legacy", "packed", "packed-contiguous") or
                 workers < 1 or max_batch < 1 or max_delay_ms < 0
@@ -241,13 +285,14 @@ class SharedH7Service:
         self.transport = H7Transport(
             self.requests, self.replies, self.ctx.Value("i", 0),
             model_id=f"h7-{digest[:16]}",
+            batch_trace=batch_trace,
         )
         self.process = self.ctx.Process(
             target=_serve,
             args=(
                 str(checkpoint), digest, device,
                 self.requests, self.replies, self.startup, self.statistics,
-                max_batch, max_delay_ms, collation,
+                max_batch, max_delay_ms, collation, batch_trace,
             ),
             daemon=True,
         )
@@ -269,6 +314,13 @@ class SharedH7Service:
     def __exit__(self, *_: object) -> None:
         try:
             self.requests.put(None, timeout=5)
+            # Traced runs can contain thousands of batch records. Read the
+            # report *before* joining: multiprocessing.Queue's feeder must
+            # drain into the parent or the server may deadlock on process exit.
+            try:
+                status, report = self.statistics.get(timeout=60)
+            except queue.Empty as exc:
+                raise RuntimeError("H7 inference server produced no statistics") from exc
             self.process.join(timeout=15)
             if self.process.is_alive():
                 self.process.terminate()
@@ -276,10 +328,6 @@ class SharedH7Service:
                 raise RuntimeError("H7 shared inference server did not exit cleanly")
             if self.process.exitcode != 0:
                 raise RuntimeError(f"H7 shared inference exited with {self.process.exitcode}")
-            try:
-                status, report = self.statistics.get(timeout=5)
-            except queue.Empty as exc:
-                raise RuntimeError("H7 inference server produced no statistics") from exc
             if status != "ok":
                 raise RuntimeError(f"H7 inference server failed: {report}")
             self.metrics = dict(report)

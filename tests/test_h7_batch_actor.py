@@ -105,6 +105,52 @@ def test_shared_model_preserves_frozen_player_seed_and_ppo_source(tmp_path: Path
     assert remote.timings_snapshot()["calls"] == 1
 
 
+
+
+def test_traced_actor_produces_exact_results_and_resets_warmup(tmp_path: Path):
+    path, digest, network = _checkpoint(tmp_path)
+    _, _, public, legal_actions = _source()
+    expected = TorchH7PublicPolicy(
+        network, model_id=f"h7-{digest[:16]}").evaluate(
+            public, legal_actions)
+
+    with SharedH7Service(
+        checkpoint=path, digest=digest, workers=2,
+        max_batch=2, max_delay_ms=5.0,
+        collation="packed", batch_trace=True,
+    ) as service:
+        policies = [
+            RemoteH7Policy(service.transport, slot=service.transport.allocate_slot())
+            for _ in range(2)
+        ]
+        def both():
+            barrier = threading.Barrier(2)
+            def run(index):
+                barrier.wait(timeout=10)
+                return policies[index].evaluate(public, legal_actions)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                return list(pool.map(run, range(2)))
+
+        warmup = both()
+        policies[0].reset_server_metrics()
+        measured = both()
+    assert len(warmup) == len(measured) == 2
+    for output in measured:
+        assert output.action_logits == pytest.approx(
+            expected.action_logits, abs=2e-5)
+        assert output.value == pytest.approx(expected.value, abs=2e-5)
+    stats = service.metrics
+    assert stats["requests"] == 2
+    assert stats["batches"] >= 1
+    trace = stats["batch_trace"]
+    assert trace["requests"] == 2
+    assert trace["batches"] == stats["batches"]
+    assert len(trace["batch_records"]) == stats["batches"]
+    assert all(0 < record["count"] <= 2 for record in trace["batch_records"])
+    assert all(record["queue_to_batch_mean_ms"] >= 0 for record in trace["batch_records"])
+    assert all(record["padded_objects"] >= 1 for record in trace["batch_records"])
+    assert all(record["padded_actions"] >= 1 for record in trace["batch_records"])
+
 def test_unavailable_public_pointer_is_rejected_before_queue(tmp_path: Path):
     path, digest, _ = _checkpoint(tmp_path)
     _, _, public, _ = _source()
