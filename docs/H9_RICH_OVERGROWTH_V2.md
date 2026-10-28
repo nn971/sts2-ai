@@ -64,6 +64,21 @@ global order uniqueness.
 These fixes are pushed, but local rerun and complete-combat acceptance
 remain pending. Do not start PPO until the native test passes.
 
+## Python curriculum corrections (October 28)
+
+Initial `tests/test_h9_rich_curriculum.py` run exposed one duplicate
+structural specification (indices 564 and 722), and the existing H2
+`CombatScenario` rejected rich elite floor 3 / row 2. The rich generator
+now deterministically retries duplicate structural draws within their
+original encounter tier, preserving index-stable 1,024/256 structural
+splits. Rich scenarios use an isolated subclass with an explicit 21-encounter
+allowlist; legacy H2 source validation remains unchanged. Additional
+regression checks cover random-access stability and the old H2 floor gate.
+
+The source corpus is versioned v2 and the R80 benchmark is unaffected.
+Python tests and full native-combat acceptance should still be run locally
+before initiating PPO.
+
 ## Required acceptance on local checkout
 
 1. Run Python structural tests and focused C# research-fixture tests.
