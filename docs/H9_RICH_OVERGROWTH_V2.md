@@ -187,6 +187,39 @@ and checks target choice and complete journal replay. The old H9 source
 distribution is unchanged. **Build and 64-source acceptance are still
 pending**; do not interpret the previous 59/64 as the result of this fix.
 
+## Verified 64-combat native acceptance (2026-10-28)
+
+The user-supplied `h9-rich-v2-acceptance(1).json` confirms the
+Bouncing Flask random-target fix on emulator revision
+`7a69ce40cb6c34bf2082092d2cbe8bfe970a4378`, using the frozen
+14,659,972-parameter H9 R80 policy, 15 workers, packed CUDA actor,
+and H8 local reference Nature. This supersedes the earlier 59/64
+unsupported-boundary result.
+
+- **64/64 terminal combats, 64/64 replay verified, zero unsupported**.
+- **51 victories, 13 defeats**: 79.69% on this particular synthetic cohort.
+- **16 random-target Nature selections** across five encounters; all five
+  original previously unsupported source indices (7, 23, 38, 44, 62)
+  reached terminal outcomes and replayed successfully.
+- Weak: 22/22 victories; normal: 23/24; elite: 4/9; boss: 2/9.
+- Wall time 19.596 s, 2,086 player decisions (106.45/s),
+  3,490 total boundaries (178.09/s), 3.27 terminal fights/s.
+- Twenty of 21 allowed encounters are represented in these 64 samples;
+  `slithering_strangler_normal` is absent by chance.
+- This acceptance used `capture_player_training=false`; it validates
+  mechanics/replay/inference but does not independently validate the
+  PPO action-capture and optimizer step. The H8 training backend uses
+  the same cohort function with capture enabled.
+- Evaluation using the `selection` split changes seeds but shares
+  structural indices with the 1,024 training fixtures. True structural
+  zero-shot evaluation must use the separate 256 `zero-shot` fixtures.
+
+**Decision:** start a new H9 rich PPO run from the immutable H9 R80
+checkpoint without changing the curriculum or adding further pilot
+benchmarks. Keep the original structured-v1 distribution as a separate
+regression. Inspect training progress and independent native Act 1
+results after the run; no claim of improved generalization yet.
+
 ## Required acceptance on local checkout
 
 1. Run Python structural tests and focused C# research-fixture tests.
