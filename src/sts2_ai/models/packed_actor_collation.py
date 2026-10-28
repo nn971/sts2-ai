@@ -16,8 +16,32 @@ from .shared_game_objects import NUMERIC_FIELDS, SHARED_OBJECT_SCHEMA, EncodedDe
 from .shared_transformer import H7Batch
 
 
+# The only fields packed in an interleaved last dimension. Numeric fields,
+# presence masks, action masks and phases already have contiguous storage.
+H7_PACKED_METADATA_FIELDS = (
+    "kinds", "identities", "zones", "owners",
+    "action_kinds", "action_semantics", "sources", "targets",
+)
+
+
+def contiguous_actor_metadata(batch: H7Batch) -> H7Batch:
+    """Materialize only the eight strided metadata views.
+
+    Called *after* the seven packed buffers have been transferred to the
+    target device. This deliberately leaves host packing, source input, model
+    weights, batch scheduling, tensor values and other strides unchanged,
+    isolating the cost or benefit of contiguous metadata for inference.
+    """
+    return H7Batch(**{
+        name: (getattr(batch, name).contiguous()
+               if name in H7_PACKED_METADATA_FIELDS else getattr(batch, name))
+        for name in H7Batch.__dataclass_fields__
+    })
+
+
 def collate_h7_actor_packed(
     decisions: list[EncodedDecision], device: str | torch.device = "cpu",
+    *, contiguous_metadata: bool = False,
 ) -> H7Batch:
     if not decisions or any(d.schema != SHARED_OBJECT_SCHEMA for d in decisions):
         raise ValueError("Need nonempty same-version H7 decisions")
@@ -86,7 +110,7 @@ def collate_h7_actor_packed(
     object_mask = torch.tensor(object_masks, dtype=torch.bool).to(device)
     action_mask = torch.tensor(action_masks, dtype=torch.bool).to(device)
     phase_tensor = torch.tensor(phases, dtype=torch.long).to(device)
-    return H7Batch(
+    result = H7Batch(
         kinds=obj[..., 0],
         identities=obj[..., 1],
         zones=obj[..., 2],
@@ -101,3 +125,4 @@ def collate_h7_actor_packed(
         action_mask=action_mask,
         phases=phase_tensor,
     )
+    return contiguous_actor_metadata(result) if contiguous_metadata else result
