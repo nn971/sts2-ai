@@ -37,6 +37,22 @@ training; the optimizer is reset when the curriculum changes.
 - Emulator expands only opt-in v2 fixture validation. It preserves the
   original C# v1 generator and source RNG providers.
 
+## Native opening unblock (October 28)
+
+The first local C# run reported five `UNSUPPORTED_SEMANTIC_OPENING
+site=act1.fixed_single_formation` errors for SlimesWeak, InkletsNormal,
+RubyRaidersNormal, PhrogParasiteElite and TheKinBoss. This was an omitted
+routing integration: the original isolated research opening recognizes only
+the seven original H9 encounters.
+
+Emulator PR #222 now sends **only rich v2** into source-shaped native
+formation resolution already used by full-run fidelity: weak Slimes uses its
+three encounter-local RNG calls; normal formations use the native resolver;
+elite and boss fixtures reuse registered fixed source formations including
+named slots and leader references. Original v1 entry behavior remains
+separate. The patch is pushed, but local rerun and complete-combat
+acceptance remain pending. Do not start PPO until the native test passes.
+
 ## Required acceptance on local checkout
 
 1. Run Python structural tests and focused C# research-fixture tests.
