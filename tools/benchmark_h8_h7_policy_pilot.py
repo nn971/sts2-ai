@@ -256,12 +256,18 @@ def _shard(
                         chosen = actor.choose(obs, allowed)
                         if chosen not in [a["actionId"] for a in allowed]:
                             raise RuntimeError("H7 actor selected outside source menu")
-                        result = call(
-                            "h8_step", **token, action_id=chosen,
-                            include_player_frame=inline_player_frame,
-                            **({"local_reference_seed": episode_reference_seed}
-                               if local_reference_nature else {}),
-                        )
+                        try:
+                            result = call(
+                                "h8_step", **token, action_id=chosen,
+                                include_player_frame=inline_player_frame,
+                                **({"local_reference_seed": episode_reference_seed}
+                                   if local_reference_nature else {}),
+                            )
+                        except Exception as exc:
+                            raise RuntimeError(
+                                f"H8 scenario={cell_key} source={seed} "
+                                f"boundary={state['boundaryVersion']} "
+                                f"action={chosen!r}: {exc}") from exc
                     elif kind in ("enemy_intent", "draw_card"):
                         if local_reference_nature:
                             # The in-process reference provider consumes
