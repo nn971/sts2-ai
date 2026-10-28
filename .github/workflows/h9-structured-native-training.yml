@@ -1,0 +1,90 @@
+name: h9-structured-native-training
+on:
+  push:
+    branches:
+      - research/h9-structured-combat-training-20261028
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  structural-census:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - name: Schema, distinct structural configurations and holdout isolation
+        run: |
+          python -m compileall -q src/sts2_ai/nature/research_combat_fixtures.py tools/benchmark_h8_h7_policy_pilot.py tools/train_h7_reference_combat.py tools/evaluate_h7_reference_combat.py
+          python -m pytest -q tests/test_h8_structured_curriculum.py
+      - name: Focused lint
+        run: ruff check src/sts2_ai/nature/research_combat_fixtures.py tools/train_h7_reference_combat.py tools/evaluate_h7_reference_combat.py tools/benchmark_h8_h7_policy_pilot.py tests/test_h8_structured_curriculum.py
+
+  native-real-ppo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ai
+          submodules: false
+      - uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: research/h9-structured-combat-training-20261028
+          path: emulator
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Install PyTorch and training dependencies
+        working-directory: ai
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e '.[neural,dev]'
+      - name: Build and verify structured engine
+        working-directory: emulator
+        run: |
+          dotnet restore Sts2Emulator.sln
+          dotnet build src/Sts2Emulator.Cli -c Release
+          dotnet test tests/Sts2Emulator.Core.Tests -c Release --filter FullyQualifiedName~ResearchCombatFixtureV111Tests
+      - name: Execute 8 independent native research combats and one real PPO update
+        working-directory: ai
+        run: |
+          set -eu
+          REV="$(git -C ../emulator rev-parse HEAD)"
+          python -u tools/train_h7_reference_combat.py \
+            --curriculum h8-structured --structured-curriculum-seed 20261027 \
+            --rollout-backend h8-native --actor-backend shared \
+            --actor-device cpu --actor-collation packed --local-reference-nature \
+            --emulator-dll ../emulator/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --emulator-bindings ../emulator/bindings/python \
+            --emulator-revision "$REV" \
+            --output-root ci-h9-structured --device cpu \
+            --width 32 --layers 1 --heads 4 --feedforward 64 \
+            --rounds 1 --episodes-per-round 8 --workers 2 \
+            --eval-every 1 --eval-episodes 8 \
+            --ppo-epochs 1 --ppo-minibatch 8 --ppo-sample-limit 64 \
+            --max-boundaries 1200 --execute
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path('ci-h9-structured/progress.json').read_text())
+          row=report['history'][0]
+          assert row['train']['combats'] == 8
+          assert len(row['train']['by_cell']) == 8
+          assert row['selection']['combats'] == 8
+          assert row['updates'] > 0
+          assert Path('ci-h9-structured/final-player.pt').is_file()
+          print('H9: 8 real native terminal combats, replay, on-policy PPO completed')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: h9-structured-native-ppo-report
+          path: ai/ci-h9-structured/progress.json
+          if-no-files-found: ignore
