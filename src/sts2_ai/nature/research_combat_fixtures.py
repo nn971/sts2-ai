@@ -269,7 +269,10 @@ def rich_fixture_for_index(
     cards = [("proto.silent.strike", 0)] * strikes + [
         ("proto.silent.defend", 0)
     ] * defends + [("proto.silent.neutralize", 0), ("proto.silent.survivor", 0)]
-    amount = (0, 5, 9, 13)[mode] + _rich_roll(curriculum_seed, index, "deck-size", 0) % 3
+    amount = (0, 5, 9, 13)[mode] + (
+        _rich_roll(curriculum_seed, index, "deck-size", 0)
+        % (3, 3, 4, 5)[mode]
+    )
     for ordinal in range(amount):
         pool = (RICH_ARCHETYPES[archetype]
                 if _rich_roll(curriculum_seed, index, "archetype-choice", ordinal) % 4
