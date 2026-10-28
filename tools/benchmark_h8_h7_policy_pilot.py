@@ -15,15 +15,14 @@ import argparse
 import hashlib
 import json
 import multiprocessing
+import queue
 import random
 import sys
 import tempfile
 import time
-from collections import Counter
-import queue
 import traceback
+from collections import Counter
 from contextlib import ExitStack
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -35,10 +34,15 @@ from sts2_ai.models.h7_public_policy import H7PlayerSpec
 from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
 from sts2_ai.nature.combat_scenarios import SCENARIOS
 from sts2_ai.nature.draw_only_episode import fair_player_choice_actions
-from sts2_ai.nature.draw_only_p0 import DeclaredLaw, SeededLawSampler 
-from sts2_ai.nature.h5_curriculum import cell_for_source, source_bank
+from sts2_ai.nature.draw_only_p0 import DeclaredLaw, SeededLawSampler
 from sts2_ai.nature.h4_reward import boss_progress_score, opening_enemy_health
+from sts2_ai.nature.h5_curriculum import cell_for_source, source_bank
 from sts2_ai.nature.protocol import canonical_sha256
+from sts2_ai.nature.research_combat_fixtures import (
+    fixture_from_source,
+    source_bank as structured_source_bank,
+    structural_key,
+)
 
 
 def _choose_weighted(rng: random.Random, options: list[Any],
@@ -48,7 +52,7 @@ def _choose_weighted(rng: random.Random, options: list[Any],
         raise ValueError("Malformed source weighted intent support")
     # Integer tickets retain the source raw-weight ratios without float bias.
     ticket = rng.randrange(sum(raw_weights))
-    for item, weight in zip(options, raw_weights):
+    for item, weight in zip(options, raw_weights, strict=True):
         if ticket < weight:
             return item
         ticket -= weight
@@ -83,6 +87,9 @@ def _shard(
     measure_rpc: bool = False,
     local_reference_nature: bool = False,
     inline_player_frame: bool = False,
+    structured_curriculum_seed: int | None = None,
+    structured_train_specs: int = 256,
+    structured_heldout_specs: int = 64,
 ) -> list[dict[str, Any]]:
     sys.path.insert(0, bindings)
     from sts2_emulator import Session
@@ -126,18 +133,36 @@ def _shard(
                     call("h8_perf_reset")
                 steady_started = time.perf_counter()
                 steady_actor_start = policy.timings_snapshot()
-            cell = cell_for_source(seed)
-            if cell is None:
-                raise RuntimeError("H7 source bank produced uncurated source")
-            scenario = SCENARIOS[cell.scenario]
+            if structured_curriculum_seed is None:
+                cell = cell_for_source(seed)
+                if cell is None:
+                    raise RuntimeError("H7 source bank produced uncurated source")
+                scenario = SCENARIOS[cell.scenario]
+                cell_key = cell.key
+                fixture_identity = ("draw-only:seeded-fixed-shrinker:"
+                                    + cell.scenario + ":" + cell.deck)
+                fixture_kwargs: dict[str, Any] = {
+                    "fixture_deck_preset_id": cell.deck}
+                source_deck = cell.deck
+                source_scenario = cell.scenario
+            else:
+                scenario, fixture, fixture_index = fixture_from_source(
+                    seed, curriculum_seed=structured_curriculum_seed,
+                    train_specs=structured_train_specs,
+                    heldout_specs=structured_heldout_specs,
+                )
+                cell_key = f"structured:{fixture_index}:{scenario.scenario_id}"
+                fixture_identity = "research:" + structural_key(fixture)
+                fixture_kwargs = {"fixture_spec": fixture}
+                source_deck = f"structured:{fixture_index}"
+                source_scenario = scenario.scenario_id
             actor = FrozenP0Player(
                 policy, greedy=spec.greedy, temperature=spec.temperature,
                 action_scope=spec.action_scope,
                 capture_training=capture_player_training,
                 actor_seed=spec.episode_seed(
                     fixture_seed=seed,
-                    fixture_id=("draw-only:seeded-fixed-shrinker:"
-                                + cell.scenario + ":" + cell.deck),
+                    fixture_id=fixture_identity,
                 ),
             )
             # Original H7 per-source reference-seed derivation, with
@@ -161,7 +186,7 @@ def _shard(
                 first_monster_combat_id=scenario.first_monster_combat_id,
                 map_column=scenario.map_column,
                 map_row=scenario.map_row,
-                fixture_deck_preset_id=cell.deck,
+                **fixture_kwargs,
                 replay_opening_draw_hooks=True,
                 use_m2_automatic_draw=native,
                 use_native_draw_transition=native,
@@ -231,12 +256,18 @@ def _shard(
                         chosen = actor.choose(obs, allowed)
                         if chosen not in [a["actionId"] for a in allowed]:
                             raise RuntimeError("H7 actor selected outside source menu")
-                        result = call(
-                            "h8_step", **token, action_id=chosen,
-                            include_player_frame=inline_player_frame,
-                            **({"local_reference_seed": episode_reference_seed}
-                               if local_reference_nature else {}),
-                        )
+                        try:
+                            result = call(
+                                "h8_step", **token, action_id=chosen,
+                                include_player_frame=inline_player_frame,
+                                **({"local_reference_seed": episode_reference_seed}
+                                   if local_reference_nature else {}),
+                            )
+                        except Exception as exc:
+                            raise RuntimeError(
+                                f"H8 scenario={cell_key} source={seed} "
+                                f"boundary={state['boundaryVersion']} "
+                                f"action={chosen!r}: {exc}") from exc
                     elif kind in ("enemy_intent", "draw_card"):
                         if local_reference_nature:
                             # The in-process reference provider consumes
@@ -403,7 +434,9 @@ def _shard(
                         opening_enemy_hp=initial_enemies_hp,
                         terminal_enemy_hp=state.get("terminalEnemyHp"))
                 rows.append(dict(
-                    seed=seed, cell=cell.key, status=status,
+                    seed=seed, cell=cell_key,
+                    scenario_id=source_scenario,
+                    deck_preset_id=source_deck, status=status,
                     is_steady=(steady_barrier is not None and
                                position >= warmup_per_worker),
                     score=score,
@@ -513,6 +546,9 @@ def _worker_main(
     measure_rpc: bool = False,
     local_reference_nature: bool = False,
     inline_player_frame: bool = False,
+    structured_curriculum_seed: int | None = None,
+    structured_train_specs: int = 256,
+    structured_heldout_specs: int = 64,
 ) -> None:
     # Queue handles cross the process boundary *only at spawn*, never
     # inside a ProcessPoolExecutor task queue. Keep one emulator process
@@ -524,7 +560,9 @@ def _worker_main(
             replay_every, reference_seed, capture_player_training,
             chance_sampling, replay_indices, audit_mechanics,
             profile_emulator, steady_barrier, warmup_per_worker, measure_rpc,
-            local_reference_nature, inline_player_frame)
+            local_reference_nature, inline_player_frame,
+            structured_curriculum_seed, structured_train_specs,
+            structured_heldout_specs)
         results.put(("ok", rows))
     except BaseException:
         results.put(("error", traceback.format_exc()))
@@ -545,7 +583,10 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
              actor_collation: str = "legacy",
              actor_batch_trace: bool = False,
              local_reference_nature: bool = False,
-             inline_player_frame: bool = False) -> dict[str, Any]:
+             inline_player_frame: bool = False,
+             structured_curriculum_seed: int | None = None,
+             structured_train_specs: int = 256,
+             structured_heldout_specs: int = 64) -> dict[str, Any]:
     if (replay_indices is not None and
             (not replay_indices or
              any(type(i) is not int or i < 0 or i >= len(seeds)
@@ -578,7 +619,9 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
                       results, capture_player_training, chance_sampling,
                       replay_indices, audit_mechanics, profile_emulator,
                       steady_barrier, warmup_per_worker, measure_rpc,
-                      local_reference_nature, inline_player_frame),
+                      local_reference_nature, inline_player_frame,
+                      structured_curriculum_seed, structured_train_specs,
+                      structured_heldout_specs),
             )
             for shard in shards
         ]
@@ -736,6 +779,12 @@ def main() -> None:
     p.add_argument("--player-checkpoint", type=Path)
     p.add_argument("--workers", type=int, default=15)
     p.add_argument("--episodes", type=int, default=128)
+    p.add_argument("--curriculum", choices=("h5", "h8-structured"),
+                   default="h5")
+    p.add_argument("--structured-curriculum-seed", type=int,
+                   default=20261027)
+    p.add_argument("--require-all-terminal", action="store_true",
+                   help="Reject any incomplete/unsupported structured combat")
     p.add_argument("--max-boundaries", type=int, default=1200)
     p.add_argument("--replay-every", type=int, default=8)
     p.add_argument("--study-seed", type=int, default=73127)
@@ -816,7 +865,12 @@ def main() -> None:
             checkpoint, seed=args.actor_seed,
             temperature=0.85, greedy=False,
         )
-        seeds = source_bank("train", args.episodes, study_seed=args.study_seed)
+        seeds = (
+            structured_source_bank(
+                "train", args.episodes, study_seed=args.study_seed)
+            if args.curriculum == "h8-structured" else
+            source_bank("train", args.episodes, study_seed=args.study_seed)
+        )
         order = ["checked", "native"]
         if args.order == "abba":
             order = ["checked", "native", "native", "checked"]
@@ -849,8 +903,16 @@ def main() -> None:
                 actor_batch_trace=args.actor_batch_trace,
                 local_reference_nature=args.local_reference_nature,
                 inline_player_frame=args.inline_player_frame,
+                structured_curriculum_seed=(
+                    args.structured_curriculum_seed
+                    if args.curriculum == "h8-structured" else None),
             )
             cohorts.append(x)
+            if (args.require_all_terminal and
+                    x["statuses"].get("terminal", 0) != args.episodes):
+                raise RuntimeError(
+                    "H9 structured curriculum has incomplete combats: "
+                    + str(x["statuses"]))
             print(
                 f"[h8-h7-pilot] {mode} {x['wall_seconds']:.2f}s "
                 f"full_combat={x['statuses'].get('terminal', 0)} "

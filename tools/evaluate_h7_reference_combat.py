@@ -11,8 +11,12 @@ from pathlib import Path
 from train_h7_reference_combat import collect, summarize
 
 from sts2_ai.models.h7_public_policy import H7PlayerSpec
+from sts2_ai.nature.corpus import file_sha256
 from sts2_ai.nature.h5_curriculum import source_bank
 from sts2_ai.nature.protocol import canonical_sha256
+from sts2_ai.nature.research_combat_fixtures import (
+    source_bank as structured_source_bank,
+)
 
 SCHEMA = "sts2-h7-independent-reference-combat-evaluation-v1"
 
@@ -36,6 +40,17 @@ def main() -> None:
     p.add_argument("--emulator-bindings", type=Path, required=True)
     p.add_argument("--emulator-revision", required=True)
     p.add_argument("--workers", type=int, default=15)
+    p.add_argument("--curriculum", choices=("h5", "h8-structured"),
+                   default="h5")
+    p.add_argument("--structured-curriculum-seed", type=int,
+                   default=20261027)
+    p.add_argument("--actor-device", default="cuda")
+    p.add_argument("--actor-max-batch", type=int, default=16)
+    p.add_argument("--actor-delay-ms", type=float, default=3.0)
+    p.add_argument("--actor-collation", choices=("legacy", "packed",
+                   "packed-contiguous"), default="packed")
+    p.add_argument("--local-reference-nature", action="store_true")
+    p.add_argument("--train-terminal-replay-every", type=int, default=1)
     p.add_argument("--max-boundaries", type=int, default=1200)
     p.add_argument("--split", choices=("confirmation", "zero-shot"), default="confirmation")
     p.add_argument("--runs", type=int, default=160)
@@ -51,14 +66,40 @@ def main() -> None:
         if not separator or not label or label in entries:
             p.error("--player must use unique label=path")
         entries[label] = Path(path)
-    divisor = 3 if args.split == "zero-shot" else 16
+    args.rollout_backend = (
+        "h8-native" if args.curriculum == "h8-structured" else "legacy-h7")
+    args.actor_backend = (
+        "shared" if args.curriculum == "h8-structured" else "local")
+    divisor = (1 if args.curriculum == "h8-structured" else
+               3 if args.split == "zero-shot" else 16)
     if args.runs < divisor or args.runs % divisor or args.workers < 1:
         p.error("H7 evaluation must balance supported cells exactly")
-    seeds = source_bank(args.split, args.runs, study_seed=args.study_seed)
+    seeds = (
+        structured_source_bank(
+            args.split, args.runs, study_seed=args.study_seed)
+        if args.curriculum == "h8-structured" else
+        source_bank(args.split, args.runs, study_seed=args.study_seed)
+    )
     config = {
         "schema": SCHEMA, "split": args.split,
+        "curriculum": args.curriculum,
+        "structured_curriculum_seed": (
+            args.structured_curriculum_seed
+            if args.curriculum == "h8-structured" else None),
         "source_digest": canonical_sha256(seeds),
         "emulator_revision": args.emulator_revision,
+        "emulator_dll_sha256": (
+            file_sha256(args.emulator_dll)
+            if args.emulator_dll.is_file() else None
+        ),
+        "emulator_bindings_sha256": (
+            file_sha256(args.emulator_bindings / "sts2_emulator" / "__init__.py")
+            if (args.emulator_bindings / "sts2_emulator" / "__init__.py").is_file()
+            else None
+        ),
+        "local_reference_nature": args.local_reference_nature,
+        "actor_device": args.actor_device,
+        "actor_collation": args.actor_collation,
         "models": {name: H7PlayerSpec.from_file(
             path, seed=args.actor_seed, greedy=True,
         ).model_sha256 for name, path in entries.items()},
@@ -76,7 +117,9 @@ def main() -> None:
             reference_seed=args.reference_seed + 900000007,
             capture=False,
         )
-        arms[label] = summarize(result["episodes"])
+        arms[label] = summarize(
+            result["episodes"], curriculum=args.curriculum,
+            curriculum_seed=args.structured_curriculum_seed)
         scores[label] = [ep.score for ep in result["episodes"]]
         print(
             f"[h7-eval] {label}: wins={arms[label]['wins']}/{args.runs} "
