@@ -124,7 +124,7 @@ def validate_and_compare(
         if not isinstance(legacy, dict) or (
             legacy.get("matching_source_trajectories") != expected_count or
             legacy.get("player_decisions") != decisions):
-            raise ValueError(f"{name}: missing exact source H7/H8 parity")
+            raise ValueError(f"{name}: missing exact legacy H7/H8 source parity")
         _positive(legacy.get("wall_seconds"), f"{name}.legacy_wall")
         _positive(report.get("native_h8_rollout_seconds"), f"{name}.rollout")
         _positive(report.get("ppo_seconds"), f"{name}.ppo")
