@@ -666,7 +666,8 @@ def main() -> None:
     p.add_argument("--actor-device", default="cuda")
     p.add_argument("--actor-max-batch", type=int, default=16)
     p.add_argument("--actor-delay-ms", type=float, default=3.0)
-    p.add_argument("--actor-collation", choices=("legacy", "packed"),
+    p.add_argument("--actor-collation",
+                   choices=("legacy", "packed", "packed-contiguous"),
                    default="legacy",
                    help="Select tensor-identical legacy or fused-transfer actor input")
     p.add_argument("--order", choices=("native", "checked", "ab", "abba"),
