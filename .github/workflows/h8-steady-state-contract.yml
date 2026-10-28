@@ -18,7 +18,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: nn971/sts2-emulator
-          ref: research/h8-native-turn-owner-20261028
+          # Steady-state orchestration is tested against the last H8 path
+          # with a passing 128-combat exact parity suite. Native M4 is tested
+          # separately and must pass its own extended replay gate.
+          ref: research/h8-tagged-boundary-cursor-20261028
           path: external-h8-emulator
       - uses: actions/setup-dotnet@v4
         with:
