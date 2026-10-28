@@ -330,6 +330,8 @@ def _shard(
                         terminal_enemy_hp=state.get("terminalEnemyHp"))
                 rows.append(dict(
                     seed=seed, cell=cell.key, status=status,
+                    is_steady=(steady_barrier is not None and
+                               position >= warmup_per_worker),
                     score=score,
                     decision_sequence=[
                         {"phase": (
@@ -431,6 +433,9 @@ def _worker_main(
     replay_indices: frozenset[int] | None = None,
     audit_mechanics: bool = True,
     profile_emulator: bool = False,
+    steady_barrier: Any = None,
+    warmup_per_worker: int = 0,
+    measure_rpc: bool = False,
 ) -> None:
     # Queue handles cross the process boundary *only at spawn*, never
     # inside a ProcessPoolExecutor task queue. Keep one emulator process
@@ -441,7 +446,7 @@ def _worker_main(
             shard, dll, bindings, mode, max_boundaries,
             replay_every, reference_seed, capture_player_training,
             chance_sampling, replay_indices, audit_mechanics,
-            profile_emulator)
+            profile_emulator, steady_barrier, warmup_per_worker, measure_rpc)
         results.put(("ok", rows))
     except BaseException:
         results.put(("error", traceback.format_exc()))
@@ -456,7 +461,9 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
             chance_sampling: str = "event-law",
             replay_indices: frozenset[int] | None = None,
             audit_mechanics: bool = True,
-             profile_emulator: bool = False) -> dict[str, Any]:
+             profile_emulator: bool = False,
+             warmup_per_worker: int = 0,
+             measure_rpc: bool = False) -> dict[str, Any]:
     if (replay_indices is not None and
             (not replay_indices or
              any(type(i) is not int or i < 0 or i >= len(seeds)
@@ -464,8 +471,14 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
         raise ValueError("Invalid H8 preselected terminal replay indices")
     indexed = list(enumerate(seeds))
     shards = [indexed[i::workers] for i in range(min(workers, len(seeds)))]
+    if warmup_per_worker < 0 or (
+            warmup_per_worker and
+            any(len(shard) <= warmup_per_worker for shard in shards)):
+        raise ValueError("Each H8 worker needs at least one steady-state episode")
     began = time.perf_counter()
     ctx = multiprocessing.get_context("spawn")
+    steady_barrier = (ctx.Barrier(len(shards))
+                      if warmup_per_worker else None)
     with ExitStack() as stack:
         server = stack.enter_context(SharedH7Service(
             checkpoint=Path(spec.model_path), digest=spec.model_sha256,
@@ -479,7 +492,8 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
                 args=(server.transport, spec, shard, dll, bindings,
                       mode, max_boundaries, replay_every, reference_seed,
                       results, capture_player_training, chance_sampling,
-                      replay_indices, audit_mechanics, profile_emulator),
+                      replay_indices, audit_mechanics, profile_emulator,
+                      steady_barrier, warmup_per_worker, measure_rpc),
             )
             for shard in shards
         ]
@@ -527,6 +541,10 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
         raise RuntimeError("Missing/duplicate H8 H7-policy fixture")
     profiles = [row.pop("emulator_hotpath_profile") for row in rows
                 if "emulator_hotpath_profile" in row]
+    worker_stages = [row.pop("steady_worker_metrics") for row in rows
+                     if "steady_worker_metrics" in row]
+    if warmup_per_worker and len(worker_stages) != len(shards):
+        raise RuntimeError("H8 steady-state worker timing snapshots missing")
     if profile_emulator and len(profiles) != len(shards):
         raise RuntimeError("One or more H8 worker profiler snapshots missing")
     merged: dict[str, dict[str, float | int]] = {}
@@ -542,6 +560,43 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
             target["maxSeconds"] = max(
                 target["maxSeconds"], float(values["maxSeconds"]))
             target["allocatedBytes"] += int(values["allocatedBytes"])
+    steady_metrics = None
+    if warmup_per_worker:
+        rpc_calls: Counter[str] = Counter()
+        rpc_seconds: dict[str, float] = {}
+        for worker in worker_stages:
+            rpc_calls.update(worker["rpc_calls"])
+            for name, value in worker["rpc_seconds"].items():
+                rpc_seconds[name] = rpc_seconds.get(name, 0.0) + value
+        steady_span = max(x["end"] for x in worker_stages) - min(
+            x["start"] for x in worker_stages)
+        measured = [row for row in rows if row["is_steady"]]
+        terminal = sum(row["status"] == "terminal" for row in measured)
+        steady_metrics = {
+            "schema": "sts2-h8-steady-state-epoch-v1",
+            "warmup_per_worker": warmup_per_worker,
+            "warmup_episodes": len(rows) - len(measured),
+            "measured_episodes": len(measured),
+            "terminal_episodes": terminal,
+            "wall_seconds": steady_span,
+            "terminal_combats_per_second": terminal / steady_span,
+            "actor_encoding_seconds": sum(
+                x["actor_encoding_seconds"] for x in worker_stages),
+            "actor_wait_seconds": sum(
+                x["actor_wait_seconds"] for x in worker_stages),
+            "actor_requests": sum(x["actor_calls"] for x in worker_stages),
+            "emulator_session_startup_seconds_per_worker": [
+                x["session_startup_seconds"] for x in worker_stages],
+            "emulator_rpc_calls": dict(rpc_calls),
+            "emulator_rpc_seconds": rpc_seconds,
+            "worker_elapsed_seconds": [
+                x["end"] - x["start"] for x in worker_stages],
+            "actor_service_counters_exclude_warmup": True,
+            "interpretation": (
+                "RPC and actor times overlap across processes; GPU forward "
+                "and collation are serialized service time, not additive "
+                "with worker wait or rollout wall-clock."),
+        }
     counts = Counter(row["status"] for row in rows)
     players = sum(row["player_decisions"] for row in rows)
     boundaries = sum(row["boundaries"] for row in rows)
@@ -554,6 +609,7 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
         terminal_combats_per_second=counts["terminal"] / wall,
         replay_verified=sum(row["replay_verified"] for row in rows),
         actor_metrics=server_stats, source_digest=canonical_sha256(seeds),
+        steady_state=steady_metrics,
         emulator_hotpath_profile=(
             {"schemaId": "sts2-h8-merged-worker-profile-v1",
              "workerProcesses": len(profiles),
