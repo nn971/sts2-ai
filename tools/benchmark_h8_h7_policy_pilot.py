@@ -269,7 +269,7 @@ def _shard(
                                 f"H8 scenario={cell_key} source={seed} "
                                 f"boundary={state['boundaryVersion']} "
                                 f"action={chosen!r}: {exc}") from exc
-                    elif kind in ("enemy_intent", "draw_card"):
+                    elif kind in ("enemy_intent", "draw_card", "random_target"):
                         if local_reference_nature:
                             # The in-process reference provider consumes
                             # consecutive Nature sites before returning to
@@ -302,6 +302,9 @@ def _shard(
                             expected = (
                                 tuple(state["intentIds"])
                                 if kind == "enemy_intent" else
+                                tuple("enemy_instance:" + str(x)
+                                      for x in state["targetEnemyInstanceIds"])
+                                if kind == "random_target" else
                                 tuple("card_instance:" + str(x)
                                       for x in state["cardInstanceIds"])
                             )
@@ -313,7 +316,9 @@ def _shard(
                                 (law.event_id, law.law_id, chosen_id))
                             chosen = (
                                 chosen_id if kind == "enemy_intent" else
-                                int(chosen_id.removeprefix("card_instance:"))
+                                int(chosen_id.removeprefix(
+                                    "enemy_instance:" if kind == "random_target"
+                                    else "card_instance:"))
                             )
                         elif chance_sampling == "sequential-raw":
                             if kind == "enemy_intent":
@@ -321,9 +326,11 @@ def _shard(
                                     nature_rng, state["intentIds"],
                                     state["intentRawWeights"])
                             else:
-                                options = state["cardInstanceIds"]
+                                options = (state["targetEnemyInstanceIds"]
+                                           if kind == "random_target"
+                                           else state["cardInstanceIds"])
                                 if not options:
-                                    raise RuntimeError("Empty controlled draw support")
+                                    raise RuntimeError("Empty controlled chance support")
                                 chosen = options[nature_rng.randrange(len(options))]
                         else:
                             raise ValueError("Unsupported H8 chance sampling mode")
@@ -331,6 +338,17 @@ def _shard(
                             result = call(
                                 "h8_resolve_intent", **token,
                                 intent_id=chosen,
+                                include_player_frame=inline_player_frame,
+                                provider_id=(
+                                    "h7-event-scoped-reference"
+                                    if chance_sampling == "event-law" else
+                                    "reference-weighted-h8-pilot"),
+                            )
+                        elif kind == "random_target":
+                            result = call(
+                                "h8_resolve_random_target", **token,
+                                target_event_id=state["targetEventId"],
+                                enemy_instance_id=chosen,
                                 include_player_frame=inline_player_frame,
                                 provider_id=(
                                     "h7-event-scoped-reference"
@@ -399,6 +417,8 @@ def _shard(
                             selected_id = entry["intentId"]
                         elif event_kind == "draw_card":
                             selected_id = entry["cardInstanceId"]
+                        elif event_kind == "random_target":
+                            selected_id = entry["targetEnemyInstanceId"]
                         else:
                             raise RuntimeError(
                                 "Unsupported H8 local reference journal entry")
@@ -449,10 +469,12 @@ def _shard(
                     decision_sequence=[
                         {"phase": (
                             "nature:" + k if k in
-                            ("enemy_intent", "draw_card") else k),
+                            ("enemy_intent", "draw_card", "random_target") else k),
                          "selected_id": (
                              "card_instance:" + str(v)
-                             if k == "draw_card" else v)}
+                             if k == "draw_card" else
+                             "enemy_instance:" + str(v)
+                             if k == "random_target" else v)}
                         for k, v in transcript
                     ],
                     player_steps=[
@@ -464,9 +486,11 @@ def _shard(
                         {"phase": "nature:" + k,
                          "selected_id": (
                              v if k == "enemy_intent" else
+                             "enemy_instance:" + str(v)
+                             if k == "random_target" else
                              "card_instance:" + str(v))}
                         for k, v in transcript
-                        if k in ("enemy_intent", "draw_card")
+                        if k in ("enemy_intent", "draw_card", "random_target")
                     ],
                     training_actions=(
                         tuple(actor.training_actions)
@@ -483,6 +507,7 @@ def _shard(
                         if capture_player_training else None
                     ),
                     nature_draws=counts["draw_card"],
+                    nature_targets=counts["random_target"],
                     intents=counts["enemy_intent"],
                     trace_digest=canonical_sha256(transcript),
                     journal_digest=(canonical_sha256(history)
