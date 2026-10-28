@@ -464,7 +464,8 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
             audit_mechanics: bool = True,
              profile_emulator: bool = False,
              warmup_per_worker: int = 0,
-             measure_rpc: bool = False) -> dict[str, Any]:
+             measure_rpc: bool = False,
+             actor_collation: str = "legacy") -> dict[str, Any]:
     if (replay_indices is not None and
             (not replay_indices or
              any(type(i) is not int or i < 0 or i >= len(seeds)
@@ -485,6 +486,7 @@ def _cohort(seeds: tuple[str, ...], *, dll: str, bindings: str,
             checkpoint=Path(spec.model_path), digest=spec.model_sha256,
             workers=len(shards), device=actor_device,
             max_batch=actor_max_batch, max_delay_ms=actor_delay_ms,
+            collation=actor_collation,
         ))
         results = ctx.Queue(maxsize=len(shards) + 1)
         processes = [
@@ -664,6 +666,9 @@ def main() -> None:
     p.add_argument("--actor-device", default="cuda")
     p.add_argument("--actor-max-batch", type=int, default=16)
     p.add_argument("--actor-delay-ms", type=float, default=3.0)
+    p.add_argument("--actor-collation", choices=("legacy", "packed"),
+                   default="legacy",
+                   help="Select tensor-identical legacy or fused-transfer actor input")
     p.add_argument("--order", choices=("native", "checked", "ab", "abba"),
                    default="ab")
     p.add_argument("--warmup-per-worker", type=int, default=0,
@@ -741,6 +746,7 @@ def main() -> None:
                 profile_emulator=args.profile_emulator,
                 warmup_per_worker=args.warmup_per_worker,
                 measure_rpc=args.measure_rpc,
+                actor_collation=args.actor_collation,
             )
             cohorts.append(x)
             print(
@@ -810,6 +816,7 @@ def main() -> None:
             warmup_per_worker=args.warmup_per_worker,
             profile_emulator=args.profile_emulator,
             sampled_mechanics_audit=args.sampled_mechanics_audit,
+            actor_collation=args.actor_collation,
             cohorts=cohorts,
         )
         args.output.parent.mkdir(parents=True, exist_ok=True)
