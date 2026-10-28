@@ -762,6 +762,9 @@ def main() -> None:
             args.episodes <= args.workers * args.warmup_per_worker):
         p.error("Need balanced 16-cell source cohorts and at least one "
                 "measured episode per worker")
+    if args.local_reference_nature and args.chance_sampling != "event-law":
+        p.error("Local reference Nature is a separate event-scoped "
+                "reference provider; use the default --chance-sampling event-law")
     if args.warmup_per_worker and args.order != "native":
         p.error("Steady-state warmup epoch requires --order native; "
                 "run unprofiled ABBA separately for revision comparisons")
@@ -868,6 +871,10 @@ def main() -> None:
         result = dict(
             schema="sts2-h8-h7-public-policy-inference-pilot-v1",
             evidence=(
+                "real-H7-shared-Transformer-on-H8-with-in-process-"
+                "H8-local-reference-Nature;source-distribution-"
+                "same-provider-replay-only"
+                if args.local_reference_nature else
                 "real-H7-shared-Transformer-on-H8-with-H7-event-scoped-law;"
                 "cross-emulator-source-parity-pending"
                 if args.chance_sampling == "event-law" else
@@ -878,6 +885,8 @@ def main() -> None:
             emulator_dll_sha256=hashlib.sha256(
                 args.emulator_dll.read_bytes()).hexdigest(),
             chance_sampling=(
+                "h8-local-event-keyed-source-law-v1"
+                if args.local_reference_nature else
                 "h7-declared-event-scoped-reference-v1"
                 if args.chance_sampling == "event-law" else
                 "independent-reference-raw-weight-pilot-v1"
