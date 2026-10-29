@@ -70,6 +70,9 @@ def _run(task: tuple[int, str, int]) -> tuple[int, dict[str, Any]]:
         environment=NATIVE_OVERGROWTH,
         episode_goal_version=NATIVE_ACT1_BOSS_GOAL,
         public_frame_observer=trace.observe,
+        decision_observer=lambda handle, obs, legal, decision: trace.record_decision(
+            obs, legal, decision,
+        ),
     )
     return index, trace.finish(
         outcome=result.outcome, censored=result.censored,
