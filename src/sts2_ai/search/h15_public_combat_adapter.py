@@ -108,7 +108,6 @@ class H15PublicCombatAdapter:
         handle = self._active_handle
         if handle is None or self._active_key != frame.information_key:
             raise RuntimeError("Transition requested outside the active sampled path")
-        transcript = self._histories[frame.information_key]
         policy = InformationPolicy(frame.observation.policy_id)
         actual = self._backend.observe(handle, policy)
         if actual.payload_json != frame.observation.payload_json:
@@ -128,17 +127,21 @@ class H15PublicCombatAdapter:
             () if score is not None
             else tuple(self._backend.legal_actions(transition.child))
         )
-        expanded = transcript[:-1] + (
-            PublicHistoryStep(
-                transcript[-1].observation, action, transcript[-1].legal_actions,
-            ),
-            PublicHistoryStep(observed, None, child_legal),
-        )
-        key = self._key(expanded)
-        existing = self._histories.get(key)
-        if existing is not None and existing != expanded:
-            raise ValueError("Public history hash collision")
-        self._histories[key] = expanded
+        # The complete public transcript is required only to condition the
+        # independently sampled ROOT. During a rollout the active hidden
+        # continuation persists; a hash of the preceding information-set key,
+        # selected public action, and newly visible frame uniquely identifies
+        # the child history without copying the entire run prefix.
+        transition_public = [
+            frame.information_key,
+            [action.action_id, action.kind, action.payload_json],
+            observed.policy_id,
+            observed.payload_json,
+            [[a.action_id, a.kind, a.payload_json] for a in child_legal],
+        ]
+        key = "h15-child-history:" + hashlib.sha256(
+            json.dumps(transition_public, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
         self._active_key = key
         return CombatFrame(key, observed, child_legal, score)
 
