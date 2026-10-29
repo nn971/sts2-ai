@@ -70,15 +70,17 @@ class FrozenCombatSampledMacro:
     """One public-only shared checkpoint, greedy combat and sampled macro."""
 
     def __init__(self, policy: TorchH7PublicPolicy, *,
-                 seed: str, temperature: float) -> None:
+                 seed: str, temperature: float, greedy_macro: bool = False) -> None:
         if temperature <= 0:
             raise ValueError("Invalid H11 macro temperature")
         self.policy = policy
         self.temperature = temperature
+        self.greedy_macro = greedy_macro
         self.rng = random.Random(int(canonical_sha256([
             "h11-macro", policy.model_id, seed, temperature,
         ])[:16], 16))
-        self.policy_id = "h11-frozen-combat-macro-" + policy.model_id
+        self.policy_id = ("h11-frozen-combat-" + ("greedy" if greedy_macro else "sampled")
+                          + "-macro-" + policy.model_id)
         self.entries: list[tuple[Any, int, float, float]] = []
 
     def choose(self, observation, legal_actions) -> Decision:
@@ -99,9 +101,11 @@ class FrozenCombatSampledMacro:
             # Match the CPU singleton policy's fp32 behavior distribution.
             logits = torch.tensor(scores.action_logits, dtype=torch.float32)
             logp = torch.log_softmax(logits / self.temperature, dim=0)
-            index = self.rng.choices(
-                range(len(legal_actions)), weights=logp.exp().tolist(), k=1,
-            )[0]
+            index = (max(range(len(legal_actions)),
+                         key=lambda i: (float(logp[i]), legal_actions[i].action_id))
+                     if self.greedy_macro else self.rng.choices(
+                         range(len(legal_actions)), weights=logp.exp().tolist(), k=1,
+                     )[0])
             self.entries.append((
                 encoded, index, float(logp[index]), float(scores.value),
             ))
