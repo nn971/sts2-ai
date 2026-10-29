@@ -341,7 +341,7 @@ def encode_macro_public_decision(
             choice = _reward_choice(state, kind, payload)
             if choice is None:
                 raise ValueError(
-                    f"Legal {kind} has no matching public reward option: "
+                    f"Legal {kind} has no matching visible public reward option: "
                     f"payload={payload!r}; reward_fields="
                     f"{sorted(state.get('reward', {}))!r}"
                 )
@@ -349,7 +349,21 @@ def encode_macro_public_decision(
             token_kind = ("card" if "card" in kind or "bundle" in kind
                           else "potion" if "potion" in kind
                           else "event_choice" if "gold" in kind else "relic")
-            target = add(token_kind, identity, "reward", record)
+            # Replacements of different potion slots point at the same
+            # incoming reward and different outgoing inventory objects.
+            reward_ref = None
+            if kind in ("take_reward_potion", "skip_reward_potion",
+                        "replace_reward_potion"):
+                reward_ref = ("reward_potion", "primary")
+            elif kind in ("take_reward_extra_potion", "skip_reward_extra_potion",
+                          "replace_reward_extra_potion"):
+                reward_ref = ("reward_extra_potion",
+                              _field(payload, "GroupIndex", "group_index"))
+            if reward_ref is not None and reward_ref in lookup:
+                target = lookup[reward_ref]
+            else:
+                target = add(token_kind, identity, "reward", record,
+                             ref=reward_ref)
             semantic = identity
             if kind in ("replace_reward_potion", "replace_reward_extra_potion"):
                 slot = _field(payload, "Slot", "slot")
