@@ -221,15 +221,14 @@ class H8ReferenceCombatBackend:
             pending = self._session.call("h8_reference_law", **token)["pending"]
             law = pending.get("chanceLaw")
             if (pending.get("kind") != kind or not isinstance(law, dict)
-                    or law.get("EventId") != pending.get("eventId")
-                    and kind != "random_target"):
+                    or law.get("eventId") != pending.get("eventId")):
                 raise ValueError("Declared Chance Law does not match pending event")
-            candidates = law.get("Outcomes")
-            total = law.get("TotalWeight")
+            candidates = law.get("outcomes")
+            total = law.get("totalWeight")
             if (not isinstance(candidates, list) or not candidates
                     or type(total) is not int or total <= 0):
                 raise ValueError("Invalid H8 Chance Law support")
-            weights = [candidate.get("Weight") for candidate in candidates]
+            weights = [candidate.get("weight") for candidate in candidates]
             if (any(type(w) is not int or w <= 0 for w in weights)
                     or sum(weights) != total):
                 raise ValueError("Inconsistent declared Chance Law weights")
@@ -238,7 +237,7 @@ class H8ReferenceCombatBackend:
             for candidate, weight in zip(candidates, weights, strict=True):
                 ticket -= weight
                 if ticket < 0:
-                    selected = candidate.get("OutcomeId")
+                    selected = candidate.get("outcomeId")
                     break
             if not isinstance(selected, str) or not selected:
                 raise ValueError("Malformed H8 Chance Law outcome")
