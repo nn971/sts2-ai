@@ -14,11 +14,16 @@ from typing import Any
 
 from sts2_ai.emulator.protocol import LegalAction
 from sts2_ai.models.h15_combat_codec import (
-    H15_COMBAT_SCHEMA, collate_h15, encode_h15_combat,
+    H15_COMBAT_SCHEMA,
+    collate_h15,
+    encode_h15_combat,
 )
 from sts2_ai.models.shared_game_objects import EncodedDecision
 from sts2_ai.search.combat_puct import (
-    FAIR_COMBAT_CAPABILITY, H15_SEARCH_VERSION, CombatFrame, CombatSearchResult,
+    FAIR_COMBAT_CAPABILITY,
+    H15_SEARCH_VERSION,
+    CombatFrame,
+    CombatSearchResult,
 )
 
 SAMPLE_SCHEMA = "sts2-h15-combat-search-target-v1"
@@ -143,7 +148,8 @@ def search_policy_value_loss(
             sample.visits, dtype=logits.dtype, device=logits.device,
         )
     targets = counts / counts.sum(dim=1, keepdim=True)
-    policy_loss = -(targets * F.log_softmax(logits, dim=1).masked_fill(~mask, 0.0)).sum(dim=1).mean()
+    logp = F.log_softmax(logits, dim=1).masked_fill(~mask, 0.0)
+    policy_loss = -(targets * logp).sum(dim=1).mean()
     real_returns = torch.tensor(
         [sample.realized_reward / 2.0 for sample in samples],
         device=values.device, dtype=values.dtype,

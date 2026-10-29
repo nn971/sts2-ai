@@ -122,7 +122,10 @@ class H15PublicCombatAdapter:
         if not isinstance(public, dict):
             raise ValueError("Malformed poststep public observation")
         score = self._combat_result(public)
-        child_legal = () if score is not None else tuple(self._backend.legal_actions(transition.child))
+        child_legal = (
+            () if score is not None
+            else tuple(self._backend.legal_actions(transition.child))
+        )
         expanded = transcript[:-1] + (
             PublicHistoryStep(
                 transcript[-1].observation, action, transcript[-1].legal_actions,

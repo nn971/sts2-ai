@@ -7,14 +7,20 @@ import pytest
 
 from sts2_ai.emulator.protocol import LegalAction, Observation
 from sts2_ai.models.h15_combat_codec import (
-    H15_COMBAT_SCHEMA, collate_h15, encode_h15_combat,
+    H15_COMBAT_SCHEMA,
+    collate_h15,
+    encode_h15_combat,
 )
 from sts2_ai.models.shared_game_objects import SHARED_OBJECT_SCHEMA, encode_public_decision
 from sts2_ai.search.combat_puct import (
-    FAIR_COMBAT_CAPABILITY, CombatFrame, CombatPuct,
+    FAIR_COMBAT_CAPABILITY,
+    CombatFrame,
+    CombatPuct,
 )
 from sts2_ai.training.h15_search_supervision import (
-    decode_target, search_policy_value_loss, target_record,
+    decode_target,
+    search_policy_value_loss,
+    target_record,
 )
 
 

@@ -6,12 +6,20 @@ The new token has its enemy as owner and carries only a public move identity.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import replace
-from typing import Any, Sequence
+from typing import Any
 
 from sts2_ai.models.shared_game_objects import (
-    IDENTITY_BUCKETS, KINDS, MAX_OBJECTS, NUMERIC_FIELDS, ZONES,
-    EncodedDecision, ObjectToken, SHARED_OBJECT_SCHEMA, _bucket,
+    IDENTITY_BUCKETS,
+    KINDS,
+    MAX_OBJECTS,
+    NUMERIC_FIELDS,
+    SHARED_OBJECT_SCHEMA,
+    ZONES,
+    EncodedDecision,
+    ObjectToken,
+    _bucket,
     encode_public_decision,
 )
 from sts2_ai.models.shared_transformer import H7Batch, collate_h7
