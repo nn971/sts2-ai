@@ -98,8 +98,17 @@ python -u tools/train_h14_macro.py \
   --device cuda --ppo-minibatch 8 --execute
 ```
 
-For interrupted execution, rerun the same command with `--resume`.
-Use disjoint heldout source seeds for actual policy evaluation.
+Preflight now launches the pinned emulator bridge, verifies an actual
+Ascension 10 native reset, and encodes the first legal Neow macro menu. The
+emulator's A5+ initial curse is **Ascender's Bane**; A0 uses Restlessness.
+The pinned native RNG map profile is
+`native-overgrowth-map-native-rng-v0.111.0-v1`.
+
+If the previous attempt failed before producing `latest.json`, rerun the
+same `--execute` command without deleting the result directory: the trainer
+safely restarts the uncommitted first round, with deterministic initialization
+derived from the run identity. After at least one completed round, use
+`--resume`. Use disjoint heldout source seeds for actual policy evaluation.
 
 ## Validation and next promotion gate
 
