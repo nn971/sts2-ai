@@ -267,6 +267,20 @@ def main() -> None:
         "epochs": args.epochs, "device": args.device,
     }, sort_keys=True), flush=True)
     if not args.execute:
+        # Audit the existing corpus without training or writing artifacts.
+        # This exposes whether reward-settlement actually contributes
+        # nondegenerate resource labels before any new optimizer run.
+        _, _, train_coverage = _dataset(
+            train_runs, resource_boundary=args.resource_boundary,
+        )
+        _, _, held_coverage = _dataset(
+            heldout_runs, resource_boundary=args.resource_boundary,
+        )
+        print("[h12-audit] " + json.dumps({
+            "resource_boundary": args.resource_boundary,
+            "train_coverage": train_coverage,
+            "heldout_coverage": held_coverage,
+        }, sort_keys=True), flush=True)
         return
     if args.checkpoint.exists() or args.report.exists():
         p.error("Refusing to overwrite pinned H12 result artifacts")
