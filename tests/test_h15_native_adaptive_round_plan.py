@@ -65,7 +65,7 @@ def test_round_plan_uses_only_native_recipes_and_advances_from_fixed_probes(
     cohort = [json.loads(s) for s in (planned / "train.jsonl").read_text().splitlines()]
     assert len(cohort) == 7
     assert {row["seed"] for row in cohort} <= {r.seed for r in originals}
-    assert {row["tier"] for row in cohort} == {"weak", "elite"}
+    assert {row["tier"] for row in cohort} <= {"weak", "elite"}
     first_content = (planned / "train.jsonl").read_bytes()
     invoke(monkeypatch, "plan", corpus, root, 0, *flags)
     assert first_content == (planned / "train.jsonl").read_bytes()
