@@ -134,3 +134,97 @@ def test_unmodified_h7_combat_checkpoint_architecture_accepts_macro_batch():
     assert logits.shape == (1, 2)
     assert values.shape == (1,)
     assert not torch.equal(logits[0, 0], logits[0, 1])
+
+
+def test_native_independent_reward_extra_relic_alias_uses_pending_relic():
+    # PrototypeRooms.GetRewardActionsCore: when RelicResolved is true,
+    # take_reward_relic(Index=0) aliases the earliest pending extra relic.
+    state = {"reward": {
+        "relic_resolved": True,
+        "relic_option": "old-primary-relic",
+        "relic_options": ["old-primary-relic"],
+        "independent_selection": True,
+        "pending_extra_relic_rewards": [
+            {"group_index": 2, "relic_id": "extra-new-relic", "is_wax": False},
+            {"group_index": 4, "relic_id": "another-relic", "is_wax": True},
+        ],
+    }}
+    decision = encode_public_decision(state, legal(
+        ("take_reward_relic", {"Index": 0}),
+        ("take_reward_extra_relic", {"Index": 4}),
+        ("skip_reward_extra_relic", {"Index": 4}),
+    ))
+    from sts2_ai.models.shared_game_objects import _bucket, IDENTITY_BUCKETS
+    assert decision.actions[0].semantic == _bucket("extra-new-relic", IDENTITY_BUCKETS)
+    assert decision.actions[0].semantic != _bucket("old-primary-relic", IDENTITY_BUCKETS)
+    assert decision.actions[1].semantic == _bucket("another-relic", IDENTITY_BUCKETS)
+    assert decision.actions[1].target != decision.actions[0].target
+    assert decision.actions[1] != decision.actions[2]
+
+
+def test_native_grouped_rewards_use_actual_wire_payloads():
+    state = {"reward": {
+        "card_options": ["strike"],
+        "pending_card_groups": [
+            {"group_index": 2, "card_options": ["dagger", "dash"],
+             "option_upgrade_flags": [False, True]},
+        ],
+        "pending_extra_gold_rewards": [
+            {"group_index": 1, "amount": 25},
+            {"group_index": 2, "amount": 40},
+        ],
+        "pending_extra_potion_rewards": [
+            {"group_index": 3, "potion_id": "poison-potion"},
+            {"group_index": 4, "potion_id": "weak-potion"},
+        ],
+    }}
+    menu = legal(
+        ("take_reward_card_group", {"GroupIndex": 2, "Index": 1}),
+        ("skip_reward_card_group", {"GroupIndex": 2, "Index": -1}),
+        ("take_reward_extra_gold", {"GroupIndex": 1}),
+        ("take_reward_extra_gold", {"GroupIndex": 2}),
+        ("take_reward_extra_potion", {"GroupIndex": 3, "Slot": -1}),
+        ("skip_reward_extra_potion", {"GroupIndex": 4, "Slot": -1}),
+    )
+    decision = encode_public_decision(state, menu)
+    assert len(set(decision.actions)) == len(menu)
+    assert decision.actions[2].target != decision.actions[3].target
+    assert decision.actions[4].target != decision.actions[5].target
+
+
+def test_reward_potion_replacement_distinguishes_outgoing_named_potions():
+    state = {
+        "potions": [
+            {"slot": 0, "potion_id": "fire"},
+            {"slot": 1, "potion_id": "weak"},
+        ],
+        "reward": {
+            "potion_option": "poison",
+            "pending_extra_potion_rewards": [
+                {"group_index": 0, "potion_id": "block"},
+            ],
+        },
+    }
+    decision = encode_public_decision(state, legal(
+        ("replace_reward_extra_potion", {"GroupIndex": 0, "Slot": 0}),
+        ("replace_reward_extra_potion", {"GroupIndex": 0, "Slot": 1}),
+        ("replace_reward_potion", {"Slot": 0}),
+        ("replace_reward_potion", {"Slot": 1}),
+    ))
+    assert len(set(decision.actions)) == 4
+    assert decision.actions[0].source != decision.actions[1].source
+    assert decision.actions[0].target == decision.actions[1].target
+
+
+def test_ordered_extra_relic_preserves_unpublished_information_boundary():
+    state = {"reward": {
+        "independent_selection": False,
+        "relic_resolved": True,
+        "relic_option": "already-resolved",
+        "relic_options": ["already-resolved"],
+    }}
+    action = encode_public_decision(state, legal(("take_reward_relic", {"Index": 0})))
+    from sts2_ai.models.shared_game_objects import _bucket, IDENTITY_BUCKETS
+    assert action.actions[0].semantic == _bucket(
+        "unpublished-extra-relic", IDENTITY_BUCKETS,
+    )
