@@ -38,16 +38,25 @@ single-player Silent, Ascension 10 full-run macro policy optimization.
   per-round H14 behavior checkpoint.
 - Macro actor samples legal moves; H9 combat uses deterministic greedy
   inference. Fifteen ordinary emulator workers are the default.
-- For observed Act-1 clearance, terminal training return is +1; for a
-  certified Act-1 defeat it is -1. Runs censored before a certified clear
-  contribute no samples. Each macro decision shares the corresponding
-  measured run label. This is a **sparse whole-run objective**; no H12
-  gold/reward predictor or desirability-weighted chance likelihood.
-- Clipped on-policy proximal policy optimization (PPO) uses stored behavior
-  log-probability, measured run-return advantage against the behavior
-  macro value, and the *same sampling temperature* used by the actor.
-  The critic learns the measured run outcome using MSE. The network has
-  an optional legal search-policy distillation interface for later search.
+- The revised Act-1-only objective stops each episode at the first *observed*
+  transition into Act 2, or certified defeat. The actor never collects
+  post-Act-1 macro decisions; censored runs are excluded.
+- Each macro transition, including an entire combat, earns a small
+  `0.02 * newly_reached_floors` progress reward. The last transition
+  also earns +1 for certified Act-1 clearance or -1 for defeat. Floor
+  changes are computed between successive *public macro decisions*, with
+  the terminal observed floor as the last boundary; no hidden combat
+  outcomes or card/resource prices are shaped.
+- A generalized advantage estimator (GAE; gamma=0.99, lambda=0.95) uses
+  behavior-checkpoint value estimates of successor macro states, with
+  zero bootstrap after terminal outcomes. Within each per-round on-policy
+  cohort, GAE policy advantages are standardized once before PPO; the
+  critic learns unnormalized TD(lambda) returns. Its output is linear,
+  permitting targets above +1 from progress plus victory.
+- The frozen H9 combat network retains its historical tanh value outputs.
+  The network has an optional legal search-policy distillation interface
+  for later search. H12 reward predictors and desirability-weighted
+  chance likelihoods remain excluded.
 - Immutable per-round behavior checkpoint, final macro/optimizer checkpoints,
   run seeds, returned outcomes, and digest-protected `latest.json`.
   Each round also saves `round-NNNN-history.jsonl` with per-run macro
@@ -55,11 +64,13 @@ single-player Silent, Ascension 10 full-run macro policy optimization.
   event choice and reward action), plus a recorded SHA256. Resumption enforces
   training-identity and checkpoint matching.
 
-This is the first training path. Macro advantage estimation is initially
-a whole-episode Monte Carlo return; refined temporal-difference and
-combat-exit bootstrapping should be introduced only after the macro critic
-is calibrated on independent heldout native runs. Model validation must
-measure Act-1 clears, ranking, and reliability against H6-C/H9.
+This is the first shaped-return/GAE training path. A macro transition
+may span an entire H9 combat, so the critic bootstraps at the next
+macro decision. The bonus is deliberately small (at most 0.32 over 16
+floors) relative to the two-point terminal win/loss gap. Treat shaping
+as a temporary exploration aid; later reduce it if actual Act-1
+performance improves. Value calibration and macro action ranking remain
+independent heldout promotion gates.
 
 ## Local invocation (fish)
 
@@ -81,13 +92,13 @@ set dll $emu/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll
 set h9 results/h9-adaptive-totalhp-r40-r250/models/player-r0250.pt
 set h9sha (sha256sum $h9 | cut -d' ' -f1)
 
-python -m pytest -q tests/test_h14_macro_codec.py tests/test_h14_macro_actor_critic.py tests/test_h14_hierarchical_agent.py
+python -m pytest -q tests/test_h14_macro_gae.py tests/test_h14_macro_codec.py tests/test_h14_macro_actor_critic.py tests/test_h14_hierarchical_agent.py
 
 # Strict pin/preflight, no training:
 python -u tools/train_h14_macro.py \
   --h9-checkpoint $h9 --h9-sha256 $h9sha \
   --emulator-root $emu --emulator-revision $rev --emulator-dll $dll \
-  --output-root results/h14-macro-a10-r80
+  --output-root results/h14-macro-a10-gae-r80
 
 # Substantial experimental budget (15 ordinary workers):
 python -u tools/train_h14_macro.py \
@@ -95,6 +106,7 @@ python -u tools/train_h14_macro.py \
   --emulator-root $emu --emulator-revision $rev --emulator-dll $dll \
   --output-root results/h14-macro-a10-r80 \
   --rounds 80 --runs-per-round 64 --workers 15 \
+  --gamma 0.99 --gae-lambda 0.95 --floor-reward 0.02 \
   --device cuda --ppo-minibatch 8 --execute
 ```
 
@@ -106,11 +118,14 @@ The strict native-start guard accepts two audited generation profiles:
 and `native-overgrowth-map-native-rng-v0.111.0-v1` (your pinned
 `2c46c703` revision). All other map profiles are rejected.
 
-If the previous attempt failed before producing `latest.json`, rerun the
-same `--execute` command without deleting the result directory: the trainer
-safely restarts the uncommitted first round, with deterministic initialization
-derived from the run identity. After at least one completed round, use
-`--resume`. Use disjoint heldout source seeds for actual policy evaluation.
+**Preserve the old 23-round +/-1 cohort as a negative experiment.**
+The revised trainer uses schema `sts2-h14-native-macro-ppo-gae-v2` and
+checkpoint format `sts2-h14-macro-policy-value-v2`. Start it in a *new*
+results directory as above. Do not `--resume` an earlier 23-round
+checkpoint or reuse the old output directory: the reward semantics,
+critic activation and training identity have changed. Once a new run
+has completed a round, use `--resume` for that run only.
+Use disjoint heldout source seeds for actual policy evaluation.
 
 ## Validation and next promotion gate
 
