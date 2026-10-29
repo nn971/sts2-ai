@@ -167,3 +167,74 @@ def test_early_search_cutoffs_are_not_fabricated_terminal_returns():
     assert result.neural_cutoffs > 0
     assert result.terminal_evaluations == 0
     assert sum(result.visits) == 20
+
+
+def test_terminal_rollout_uses_actual_fight_reward_without_critic_cutoffs():
+    """A two-action future must be played out, even at a new search leaf."""
+    class TwoActionCombat(FairToyCombat):
+        def step(self, frame, action, rng):
+            if frame.information_key.startswith("root:"):
+                return CombatFrame(
+                    "middle:" + action.action_id, frame.observation, ACTIONS,
+                )
+            winner = frame.information_key.endswith("safe")
+            reward = 1.8 if winner else 0.2
+            return CombatFrame(
+                "done:" + frame.information_key + ":" + action.action_id,
+                frame.observation, (), reward,
+            )
+
+    puct = CombatPuct(
+        TwoActionCombat(), lambda *_: ((0.0, 0.0), 0.01),
+        leaf_mode="terminal", max_depth=1, rollout_depth=3, seed=19,
+    )
+    result = puct.search(frame(), simulations=100)
+    assert result.rollout_mode == "terminal"
+    assert result.terminal_evaluations == 100
+    assert result.neural_cutoffs == 0
+    assert result.transitions == 200
+    assert result.visits[0] > result.visits[1]
+    assert result.root_mean_value > 0.5
+
+
+def test_terminal_rollout_refuses_censored_combat():
+    from sts2_ai.search.combat_puct import IncompleteCombatRollout
+
+    class Endless(FairToyCombat):
+        def step(self, frame, action, rng):
+            return CombatFrame(
+                frame.information_key + "/" + action.action_id,
+                frame.observation, ACTIONS,
+            )
+
+    search = CombatPuct(
+        Endless(), lambda *_: ((0.0, 0.0), .8),
+        leaf_mode="terminal", max_depth=1, rollout_depth=2,
+    )
+    with pytest.raises(IncompleteCombatRollout):
+        search.search(frame(), simulations=1)
+
+
+def test_h9_teacher_uses_original_codec_and_identical_logits():
+    torch = pytest.importorskip("torch")
+    from sts2_ai.emulator.jsonl_backend import FAIR_POLICY_ID
+    from sts2_ai.models.h15_policy_value import H15CombatEvaluator
+    from sts2_ai.models.shared_transformer import (
+        H7Config, SharedObjectTransformer, collate_h7,
+    )
+
+    model = SharedObjectTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64),
+    ).eval()
+    teacher = H15CombatEvaluator(model, checkpoint_sha256="a" * 64)
+    observation = Observation(FAIR_POLICY_ID, json.dumps(state("inhale")), "s")
+    old = encode_public_decision(state("inhale"), ACTIONS)
+    with torch.no_grad():
+        logits, values = model(collate_h7([old]), known_phase=0)
+    predicted = teacher.predict(observation, ACTIONS)
+    assert predicted.logits == pytest.approx(logits[0].tolist(), abs=1e-6)
+    assert predicted.unclipped_value == pytest.approx(values[0].item(), abs=1e-6)
+    # Previously H9 used the H15 augmented token sequence before training.
+    teacher.codec_schema = H15_COMBAT_SCHEMA
+    changed = teacher.predict(observation, ACTIONS)
+    assert changed.logits != pytest.approx(predicted.logits, abs=1e-8)
