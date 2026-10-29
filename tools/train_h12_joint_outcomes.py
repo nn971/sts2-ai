@@ -21,8 +21,11 @@ from torch import Tensor
 from torch.nn import functional as F
 
 from sts2_ai.models.h12_joint_outcome import (
-    H12JointOutcomeMixture, H12MacroContinuation,
-    MODEL_SCHEMA, public_features, training_example,
+    MODEL_SCHEMA,
+    H12JointOutcomeMixture,
+    H12MacroContinuation,
+    public_features,
+    training_example,
 )
 from sts2_ai.nature.corpus import file_sha256
 from sts2_ai.nature.protocol import canonical_sha256
@@ -66,8 +69,12 @@ def _dataset(runs: list[dict[str, Any]]
             combats.append(training_example(encounter))
             gaps["fights"] += 1
             gaps["new_named_potion"] += bool(encounter["potion_transition"]["gained"])
-            gaps["changed_deck"] += encounter["deck_delta"]["before"] != encounter["deck_delta"]["after"]
-            gaps["changed_relics"] += encounter["relic_delta"]["before"] != encounter["relic_delta"]["after"]
+            gaps["changed_deck"] += (
+                encounter["deck_delta"]["before"] != encounter["deck_delta"]["after"]
+            )
+            gaps["changed_relics"] += (
+                encounter["relic_delta"]["before"] != encounter["relic_delta"]["after"]
+            )
         if not run["censored"]:
             for state in run["macro_states"]:
                 macro.append((
