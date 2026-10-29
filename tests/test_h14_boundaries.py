@@ -227,7 +227,9 @@ def test_hunt_receipts_distinguish_causal_bonus_from_other_offers():
 
     bad = deepcopy(exit_state)
     bad["reward"]["extra_card_reward_groups_remaining"] = 0
+    bad_trace = H14CombatBoundaryTrace(
+        source_run_seed="bad-receipt", combat_policy_id="h9-fixed",
+    )
+    bad_trace.observe(state(combat=True))
     with pytest.raises(ValueError, match="exceed visible"):
-        public = public_persistent_state(bad)
-        from sts2_ai.training.h14_boundaries import _bonus_receipts
-        _bonus_receipts(public)
+        bad_trace.observe(bad)
