@@ -237,7 +237,7 @@ def main() -> None:
     p.add_argument("--runs-per-round", type=int, default=64)
     p.add_argument("--workers", type=int, default=15)
     p.add_argument("--max-decisions", type=int, default=4096)
-    p.add_argument("--seed-prefix", default="h14-a10-macro-train-v1")
+    p.add_argument("--seed-prefix", default="h14-a10-macro-gae-train-v1")
     p.add_argument("--temperature", type=float, default=0.85)
     p.add_argument("--lr", type=float, default=0.00003)
     p.add_argument("--device", default="cuda")
