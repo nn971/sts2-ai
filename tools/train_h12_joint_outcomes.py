@@ -30,8 +30,8 @@ from sts2_ai.models.h12_joint_outcome import (
 from sts2_ai.nature.corpus import file_sha256
 from sts2_ai.nature.protocol import canonical_sha256
 from sts2_ai.training.h12_reward_settlement import settled_public_resources
+from sts2_ai.training.h12_transition_data import SCHEMA as TRACE_SCHEMA
 from sts2_ai.training.h12_transition_data import (
-    SCHEMA as TRACE_SCHEMA,
     _named_potion_transition,
 )
 
