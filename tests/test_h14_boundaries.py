@@ -6,9 +6,9 @@ from copy import deepcopy
 import pytest
 
 from sts2_ai.training.h14_boundaries import (
-    H14CombatBoundaryTrace,
     STATE_SCHEMA,
     TRANSITION_SCHEMA,
+    H14CombatBoundaryTrace,
     public_persistent_state,
 )
 
