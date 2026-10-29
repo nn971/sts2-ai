@@ -27,6 +27,9 @@ class FakeRunBackend:
         self.legacy_calls = 0
         self.released: list[str] = []
         self.valid = valid
+        self.ascension = 0
+        self.force_a0_starter = False
+        self.force_old_map_profile = False
 
     def reset(self, seed: str, ascension: int = 0) -> str:
         self.legacy_calls += 1
@@ -34,11 +37,16 @@ class FakeRunBackend:
 
     def reset_native_overgrowth(self, seed: str, ascension: int = 0) -> str:
         self.native_calls += 1
+        self.ascension = ascension
         return "native-state"
 
     def observe(self, state: str, policy: object) -> Observation:
         payload = {
-            "map_generation_profile_id": NATIVE_MAP_PROFILE if self.valid else "legacy",
+            "map_generation_profile_id": (
+                "native-overgrowth-map-structure-v0.111.0-v1"
+                if self.force_old_map_profile
+                else NATIVE_MAP_PROFILE if self.valid else "legacy"
+            ),
             "act": 1,
             "floor": 0,
             "event_id": "proto.native.event.neow",
@@ -47,7 +55,11 @@ class FakeRunBackend:
                 {"node_id": "1:16:3", "floor": 16},
             ],
             "deck": [{"card_id": "proto.silent.strike"}] * 12
-            + [{"card_id": "proto.common.restlessness"}],
+            + [{"card_id": (
+                "proto.curse.ascenders_bane"
+                if self.ascension >= 5 and not self.force_a0_starter
+                else "proto.common.restlessness"
+            )}],
         }
         return Observation(
             "prototype-fair-v0", json.dumps(payload), "mock-public-hash"
@@ -71,6 +83,32 @@ def test_declared_native_capability_validates_visible_map_starter_and_neow() -> 
     assert reset_training_run(backend, "seed-1", NATIVE_OVERGROWTH) == "native-state"
     assert backend.native_calls == 1
     assert backend.legacy_calls == 0
+
+
+def test_pinned_a10_native_opening_has_ascenders_bane_not_restlessness() -> None:
+    backend = FakeRunBackend()
+    backend.native_overgrowth_reset_schema = NATIVE_RESET_SCHEMA
+    assert reset_training_run(backend, "a10-seed", NATIVE_OVERGROWTH, 10) == "native-state"
+    assert backend.native_calls == 1
+    assert backend.legacy_calls == 0
+
+
+def test_native_a10_refuses_a0_starter_with_specific_mismatch() -> None:
+    backend = FakeRunBackend()
+    backend.native_overgrowth_reset_schema = NATIVE_RESET_SCHEMA
+    backend.force_a0_starter = True
+    with pytest.raises(JsonlBridgeError, match="ascension_starter"):
+        reset_training_run(backend, "a10-seed", NATIVE_OVERGROWTH, 10)
+    assert backend.released == ["native-state"]
+
+
+def test_native_reset_refuses_obsolete_map_profile() -> None:
+    backend = FakeRunBackend()
+    backend.native_overgrowth_reset_schema = NATIVE_RESET_SCHEMA
+    backend.force_old_map_profile = True
+    with pytest.raises(JsonlBridgeError, match="map_generation_profile_id"):
+        reset_training_run(backend, "native-seed", NATIVE_OVERGROWTH, 0)
+    assert backend.released == ["native-state"]
 
 
 def test_mislabeled_native_reset_fails_and_releases_state() -> None:
