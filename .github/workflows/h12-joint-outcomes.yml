@@ -7,6 +7,7 @@ on:
   pull_request:
     paths:
       - src/sts2_ai/training/h12_transition_data.py
+      - src/sts2_ai/training/h12_reward_settlement.py
       - src/sts2_ai/models/h12_joint_outcome.py
       - src/sts2_ai/evaluation/run.py
       - tools/collect_h12_joint_outcomes.py
@@ -29,6 +30,7 @@ jobs:
         run: |
           python -m compileall -q \
             src/sts2_ai/training/h12_transition_data.py \
+            src/sts2_ai/training/h12_reward_settlement.py \
             src/sts2_ai/models/h12_joint_outcome.py \
             src/sts2_ai/evaluation/run.py \
             tools/collect_h12_joint_outcomes.py \
@@ -36,6 +38,7 @@ jobs:
             tests/test_h12_joint_outcome.py
           python -m ruff check \
             src/sts2_ai/training/h12_transition_data.py \
+            src/sts2_ai/training/h12_reward_settlement.py \
             src/sts2_ai/models/h12_joint_outcome.py \
             tools/collect_h12_joint_outcomes.py \
             tools/train_h12_joint_outcomes.py \
