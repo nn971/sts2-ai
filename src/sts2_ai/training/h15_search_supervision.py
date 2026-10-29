@@ -79,6 +79,7 @@ def target_record(
         "visits": list(result.visits),
         "realized_reward": terminal_reward,
         "search_simulations": result.simulations,
+        "search_rollout_mode": result.rollout_mode,
         "search_terminal_evaluations": result.terminal_evaluations,
         "search_neural_cutoffs": result.neural_cutoffs,
     }
@@ -120,6 +121,14 @@ def decode_target(row: dict[str, Any]) -> SearchTrainingSample:
         search_model_sha256=row.get("search_model_sha256"),
         source_seed=row.get("source_seed"),
     )
+    if (row.get("search_rollout_mode") not in ("value", "terminal")
+            or type(row.get("search_terminal_evaluations")) is not int
+            or type(row.get("search_neural_cutoffs")) is not int):
+        raise ValueError("Missing H15 search evaluation provenance")
+    if (row["search_rollout_mode"] == "terminal" and
+            (row["search_neural_cutoffs"] != 0 or
+             row["search_terminal_evaluations"] != row["search_simulations"])):
+        raise ValueError("Terminal-rollout search cannot contain critic cutoffs")
     if (type(row.get("search_simulations")) is not int
             or row["search_simulations"] <= 0
             or sum(sample.visits) != row["search_simulations"]):
