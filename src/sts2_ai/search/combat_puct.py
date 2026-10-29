@@ -101,6 +101,7 @@ class CombatSearchResult:
     neural_cutoffs: int
     transitions: int
     rollout_mode: str = "value"
+    expanded_information_sets: int = 0
 
     @property
     def policy(self) -> tuple[float, ...]:
@@ -206,6 +207,11 @@ class CombatPuct:
                         break
                     node = table.get(frame.information_key)
                     if node is None:
+                        # Expand the newly encountered information set even
+                        # when terminal rollouts supervise the leaf. Subsequent
+                        # simulations can then descend and improve its policy.
+                        node = self._expand(frame)
+                        table[frame.information_key] = node
                         if self._leaf_mode == "terminal":
                             result, extra = self._terminal_rollout(
                                 frame, seen, root_policy_id=root.observation.policy_id,
@@ -213,8 +219,6 @@ class CombatPuct:
                             transitions += extra
                             terminals += 1
                         else:
-                            node = self._expand(frame)
-                            table[frame.information_key] = node
                             result = node.prior_value
                             cutoffs += 1
                         break
@@ -258,5 +262,5 @@ class CombatPuct:
             tuple(e.visits for e in edges),
             tuple(e.q if e.visits else None for e in edges),
             root_value_sum / simulations, simulations, terminals, cutoffs,
-            transitions, self._leaf_mode,
+            transitions, self._leaf_mode, len(table),
         )
