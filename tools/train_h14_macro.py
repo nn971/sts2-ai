@@ -250,6 +250,27 @@ def main() -> None:
     }
     print(json.dumps({"mode": "execute" if args.execute else "preflight",
                       "identity": config}, sort_keys=True), flush=True)
+    with JsonlEmulatorBackend(
+        emulator_root=args.emulator_root,
+        expected_emulator_revision=revision,
+        build=False,
+    ) as backend:
+        probe = reset_training_run(
+            backend, f"{args.seed_prefix}-r0001-run00000", NATIVE_OVERGROWTH, 10,
+        )
+        try:
+            observed = backend.observe(probe, InformationPolicy(FAIR_POLICY_ID))
+            public = json.loads(observed.payload_json)
+            menu = tuple(backend.legal_actions(probe))
+            encoded = encode_public_decision(public, menu)
+            print("[h14-native-preflight] " + json.dumps({
+                "map_profile": public.get("map_generation_profile_id"),
+                "starter": [card.get("card_id") for card in public["deck"]
+                            if card.get("card_id") == "proto.curse.ascenders_bane"],
+                "macro_actions": len(encoded.actions),
+            }, sort_keys=True), flush=True)
+        finally:
+            backend.release_many([probe])
     if not args.execute:
         return
     if args.device.startswith("cuda") and not torch.cuda.is_available():
