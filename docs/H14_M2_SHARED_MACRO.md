@@ -50,7 +50,10 @@ single-player Silent, Ascension 10 full-run macro policy optimization.
   an optional legal search-policy distillation interface for later search.
 - Immutable per-round behavior checkpoint, final macro/optimizer checkpoints,
   run seeds, returned outcomes, and digest-protected `latest.json`.
-  Resumption enforces training-identity and checkpoint matching.
+  Each round also saves `round-NNNN-history.jsonl` with per-run macro
+  decision history (act, floor, public boss identity, action, map room type,
+  event choice and reward action), plus a recorded SHA256. Resumption enforces
+  training-identity and checkpoint matching.
 
 This is the first training path. Macro advantage estimation is initially
 a whole-episode Monte Carlo return; refined temporal-difference and
