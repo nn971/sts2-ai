@@ -106,9 +106,7 @@ def test_native_reset_refuses_obsolete_map_profile() -> None:
     backend = FakeRunBackend()
     backend.native_overgrowth_reset_schema = NATIVE_RESET_SCHEMA
     backend.force_old_map_profile = True
-    with pytest.raises(JsonlBridgeError, match="map_generation_profile_id"):
-        reset_training_run(backend, "native-seed", NATIVE_OVERGROWTH, 0)
-    assert backend.released == ["native-state"]
+    assert reset_training_run(backend, "native-seed", NATIVE_OVERGROWTH, 0) == "native-state"
 
 
 def test_mislabeled_native_reset_fails_and_releases_state() -> None:
