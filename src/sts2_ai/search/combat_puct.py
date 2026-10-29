@@ -20,7 +20,7 @@ from typing import Protocol, runtime_checkable
 from sts2_ai.emulator.protocol import LegalAction, Observation
 
 FAIR_COMBAT_CAPABILITY = "h15-public-history-combat-chance-v1"
-H15_SEARCH_VERSION = "h15-combat-puct-v1"
+H15_SEARCH_VERSION = "h15-combat-puct-v2"
 
 
 @dataclass(frozen=True)
@@ -41,6 +41,10 @@ class CombatFrame:
             if (self.legal_actions or not math.isfinite(self.terminal_reward)
                     or not 0 <= self.terminal_reward <= 2):
                 raise ValueError("Terminal must have no legal moves and a valid H9 reward")
+
+
+class IncompleteCombatRollout(RuntimeError):
+    """The independent combat simulation ended before a real terminal reward."""
 
 
 @runtime_checkable
@@ -96,6 +100,7 @@ class CombatSearchResult:
     terminal_evaluations: int
     neural_cutoffs: int
     transitions: int
+    rollout_mode: str = "value"
 
     @property
     def policy(self) -> tuple[float, ...]:
@@ -109,16 +114,20 @@ class CombatPuct:
     """A search-policy teacher, never a source of fictitious terminal labels."""
 
     def __init__(self, sampler: FairCombatSampler, evaluator: CombatEvaluator, *,
-                 c_puct: float = 1.5, max_depth: int = 256, seed: int = 0):
+                 c_puct: float = 1.5, max_depth: int = 256, seed: int = 0,
+                 leaf_mode: str = "value", rollout_depth: int = 512):
         if (not isinstance(sampler, FairCombatSampler) or
                 sampler.fair_combat_capability_id != FAIR_COMBAT_CAPABILITY):
             raise ValueError("H15 requires a certified fair-combat sampler")
-        if not math.isfinite(c_puct) or c_puct <= 0 or max_depth <= 0:
+        if (not math.isfinite(c_puct) or c_puct <= 0 or max_depth <= 0
+                or leaf_mode not in ("value", "terminal") or rollout_depth <= 0):
             raise ValueError("Invalid combat search configuration")
         self._sampler = sampler
         self._evaluator = evaluator
         self._c = c_puct
         self._depth = max_depth
+        self._leaf_mode = leaf_mode
+        self._rollout_depth = rollout_depth
         self._rng = random.Random(seed)
 
     def _expand(self, frame: CombatFrame) -> _Node:
@@ -143,6 +152,40 @@ class CombatPuct:
             node.frame.legal_actions[i].action_id,
         ))
 
+    def _terminal_rollout(self, frame: CombatFrame, seen: set[str], *,
+                          root_policy_id: str) -> tuple[float, int]:
+        """Complete an independent fight using the frozen policy priors.
+
+        The search's current fair sampled continuation owns all future chance
+        outcomes. The search actor samples only legal *player* actions. A
+        censored or unsupported fight fails explicitly: it is never scored as
+        defeat or replaced by the critic's prediction.
+        """
+        steps = 0
+        for _ in range(self._rollout_depth):
+            if frame.terminal_reward is not None:
+                return frame.terminal_reward / 2.0, steps
+            node = self._expand(frame)
+            indices = range(len(frame.legal_actions))
+            index = self._rng.choices(
+                tuple(indices), weights=tuple(e.prior for e in node.edges), k=1,
+            )[0]
+            following = self._sampler.step(
+                frame, frame.legal_actions[index], self._rng,
+            )
+            if (not isinstance(following, CombatFrame)
+                    or following.information_key in seen
+                    or following.observation.policy_id != root_policy_id):
+                raise ValueError("Terminal rollout violated public-history integrity")
+            seen.add(following.information_key)
+            steps += 1
+            frame = following
+        if frame.terminal_reward is not None:
+            return frame.terminal_reward / 2.0, steps
+        raise IncompleteCombatRollout(
+            "Combat did not end within rollout_depth; no terminal reward exists"
+        )
+
     def search(self, root: CombatFrame, *, simulations: int) -> CombatSearchResult:
         if root.terminal_reward is not None or simulations <= 0:
             raise ValueError("H15 requires nonterminal root and positive budget")
@@ -163,16 +206,30 @@ class CombatPuct:
                         break
                     node = table.get(frame.information_key)
                     if node is None:
-                        node = self._expand(frame)
-                        table[frame.information_key] = node
-                        result = node.prior_value
-                        cutoffs += 1
+                        if self._leaf_mode == "terminal":
+                            result, extra = self._terminal_rollout(
+                                frame, seen, root_policy_id=root.observation.policy_id,
+                            )
+                            transitions += extra
+                            terminals += 1
+                        else:
+                            node = self._expand(frame)
+                            table[frame.information_key] = node
+                            result = node.prior_value
+                            cutoffs += 1
                         break
                     if node.frame != frame:
                         raise ValueError("Same public-history key has contradictory observations")
                     if depth == self._depth:
-                        result = node.prior_value
-                        cutoffs += 1
+                        if self._leaf_mode == "terminal":
+                            result, extra = self._terminal_rollout(
+                                frame, seen, root_policy_id=root.observation.policy_id,
+                            )
+                            transitions += extra
+                            terminals += 1
+                        else:
+                            result = node.prior_value
+                            cutoffs += 1
                         break
                     action_index = self._choose(node)
                     path.append(node.edges[action_index])
@@ -201,5 +258,5 @@ class CombatPuct:
             tuple(e.visits for e in edges),
             tuple(e.q if e.visits else None for e in edges),
             root_value_sum / simulations, simulations, terminals, cutoffs,
-            transitions,
+            transitions, self._leaf_mode,
         )
