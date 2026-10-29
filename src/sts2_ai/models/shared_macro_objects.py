@@ -25,8 +25,8 @@ from .shared_game_objects import (
     _bucket,
     _entry_id,
     _numbers,
-    _records,
     _persistent_relic_tokens,
+    _records,
 )
 
 
