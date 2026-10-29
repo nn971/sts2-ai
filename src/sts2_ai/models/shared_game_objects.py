@@ -105,7 +105,10 @@ def encode_public_decision(
     if not isinstance(state, dict) or not legal_actions:
         raise ValueError("Need a public state and a nonempty legal action menu")
     combat = state.get("combat")
-    phase = "combat" if isinstance(combat, dict) else "macro"
+    if not isinstance(combat, dict):
+        from .shared_macro_objects import encode_macro_public_decision
+        return encode_macro_public_decision(state, legal_actions)
+    phase = "combat"
     objects: list[ObjectToken] = []
     lookup: dict[tuple[str, object], int] = {}
 
