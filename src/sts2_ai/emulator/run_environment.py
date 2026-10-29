@@ -18,7 +18,11 @@ ENVIRONMENTS = (NATIVE_OVERGROWTH, LEGACY)
 
 # Versioned native Overgrowth public bridge contract.
 NATIVE_RESET_SCHEMA = "prototype-native-overgrowth-reset-v1"
-NATIVE_MAP_PROFILE = "native-overgrowth-map-structure-v0.111.0-v1"
+NATIVE_MAP_PROFILE = "native-overgrowth-map-native-rng-v0.111.0-v1"
+NATIVE_COMPATIBLE_MAP_PROFILES = frozenset((
+    NATIVE_MAP_PROFILE,
+    "native-overgrowth-map-structure-v0.111.0-v1",
+))
 
 
 def require_environment(backend: EmulatorBackend, environment: str) -> None:
@@ -39,35 +43,71 @@ def require_environment(backend: EmulatorBackend, environment: str) -> None:
         )
 
 
-def validate_native_start(observation: Observation) -> None:
-    """Verify visible evidence of real native-shaped initialization."""
+def validate_native_start(observation: Observation, *, ascension: int = 0) -> None:
+    """Validate a native public opening against its explicit Ascension contract.
+
+    The authoritative native factory replaces Restlessness with Ascender's
+    Bane at A5+. Accept only the two audited native Overgrowth map profiles.
+    Never substitute a legacy prototype, even if it happens to have 13 cards.
+    """
     from .jsonl_backend import JsonlBridgeError
 
     raw = json.loads(observation.payload_json)
     if not isinstance(raw, dict):
         raise JsonlBridgeError("Native Overgrowth reset gave malformed public observation")
+    expected_starter = (
+        "proto.curse.ascenders_bane" if ascension >= 5
+        else "proto.common.restlessness"
+    )
+    excluded_starter = (
+        "proto.common.restlessness" if ascension >= 5
+        else "proto.curse.ascenders_bane"
+    )
     map_nodes = raw.get("map")
     deck = raw.get("deck")
-    if (
-        raw.get("map_generation_profile_id") != NATIVE_MAP_PROFILE
-        or raw.get("act") != 1
-        or raw.get("floor") != 0
-        or raw.get("event_id") != "proto.native.event.neow"
-        or not isinstance(map_nodes, list)
-        or 16 not in [node.get("floor") for node in map_nodes if isinstance(node, dict)]
-        or not isinstance(deck, list)
-        or sum(
-            card.get("card_id") == "proto.common.restlessness"
-            for card in deck if isinstance(card, dict)
-        ) != 1
-        or len(deck) != 13
+    map_floors = (
+        [node.get("floor") for node in map_nodes if isinstance(node, dict)]
+        if isinstance(map_nodes, list) else []
+    )
+    card_ids = (
+        [card.get("card_id") for card in deck if isinstance(card, dict)]
+        if isinstance(deck, list) else []
+    )
+    mismatches: dict[str, object] = {}
+    profile = raw.get("map_generation_profile_id")
+    if profile not in NATIVE_COMPATIBLE_MAP_PROFILES:
+        mismatches["map_generation_profile_id"] = {
+            "expected_one_of": sorted(NATIVE_COMPATIBLE_MAP_PROFILES),
+            "observed": profile,
+        }
+    for key, expected in (
+        ("act", 1), ("floor", 0),
+        ("event_id", "proto.native.event.neow"),
     ):
+        if raw.get(key) != expected:
+            mismatches[key] = {"expected": expected, "observed": raw.get(key)}
+    if 16 not in map_floors:
+        mismatches["map_last_floor"] = {"expected": 16, "observed": max(
+            (x for x in map_floors if type(x) is int), default=None,
+        )}
+    if not isinstance(deck, list) or len(deck) != 13:
+        mismatches["deck_size"] = {"expected": 13, "observed": (
+            len(deck) if isinstance(deck, list) else None
+        )}
+    if card_ids.count(expected_starter) != 1 or excluded_starter in card_ids:
+        mismatches["ascension_starter"] = {
+            "ascension": ascension, "expected": expected_starter,
+            "expected_count": 1, "observed_starter_ids": sorted(
+                card_id for card_id in card_ids
+                if card_id in (expected_starter, excluded_starter)
+            ),
+        }
+    if mismatches:
         raise JsonlBridgeError(
-            "Native Overgrowth reset failed public checks: expected Act 1 "
-            "16-floor map, Neow opening event and 13-card Silent deck with "
-            "Restlessness. Refusing to train on a substituted prototype."
+            "Native Overgrowth reset failed public checks: "
+            + json.dumps(mismatches, sort_keys=True)
+            + ". Refusing to train on a substituted prototype."
         )
-
 
 def reset_training_run(
     backend: EmulatorBackend,
@@ -84,7 +124,8 @@ def reset_training_run(
     state = native_reset(seed, ascension)
     try:
         validate_native_start(
-            backend.observe(state, InformationPolicy("prototype-fair-v0"))
+            backend.observe(state, InformationPolicy("prototype-fair-v0")),
+            ascension=ascension,
         )
     except BaseException:
         backend.release_many([state])

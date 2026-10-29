@@ -86,6 +86,7 @@ def play_run(
         | None
     ) = None,
     combat_boundary_observer: PublicCombatObserver | None = None,
+    stop_after_act1_clear: bool = False,
 ) -> RunSummary:
     """Drive one complete emulator run while keeping only the live state handle."""
 
@@ -113,6 +114,11 @@ def play_run(
                 hp_trajectory.append(hp)
 
             if backend.is_terminal(state):
+                break
+            # Native A10 macro optimization stops at the *actual* Act-1
+            # completion boundary. Act-2 actions cannot be assigned an Act-1
+            # reward or consume the per-run training budget.
+            if stop_after_act1_clear and type(current.get("act")) is int and current["act"] >= 2:
                 break
             if max_decisions is not None and decisions >= max_decisions:
                 break
@@ -147,10 +153,14 @@ def play_run(
             decisions += 1
 
         terminal = backend.is_terminal(state)
+        act1_clear = (
+            stop_after_act1_clear and type(final_state.get("act")) is int
+            and final_state["act"] >= 2
+        )
         outcome_raw = final_state.get("terminal_outcome")
         outcome = (
-            "truncated"
-            if not terminal
+            "act1_clear" if act1_clear
+            else "truncated" if not terminal
             else (str(outcome_raw) if isinstance(outcome_raw, str) else "unknown")
         )
         act = final_state.get("act")
@@ -184,7 +194,11 @@ def play_run(
                 else False if outcome == "defeat"
                 else None
             ),
-            censored=outcome not in ("victory", "defeat"),
+            censored=outcome not in ("victory", "defeat", "act1_clear"),
+            episode_goal_version=(
+                "native-act1-boss-clear-v1" if stop_after_act1_clear
+                else "prototype-three-act-v0"
+            ),
             environment=environment,
             boss_progress=boss_tracker.result(
                 act1_cleared=(

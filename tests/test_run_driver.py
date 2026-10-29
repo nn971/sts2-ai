@@ -57,3 +57,35 @@ def test_passive_same_state_shadow_search_does_not_change_run() -> None:
     assert instrumented.hp_trajectory == original.hp_trajectory
     assert instrumented.frontier_progress == original.frontier_progress
     assert instrumented.emulator_transitions == original.emulator_transitions
+
+
+def test_opt_in_act_one_cutoff_records_victory_before_act_two_choices() -> None:
+    import hashlib
+    import json
+
+    from sts2_ai.emulator import Observation
+
+    class ActOneBoundaryBackend(MockLinearBackend):
+        def observe(self, state, policy):
+            payload = json.dumps({
+                "act": 2 if int(state) >= 2 else 1,
+                "floor": 0 if int(state) >= 2 else int(state),
+                "hp": 40,
+            }, sort_keys=True)
+            return Observation(
+                policy_id=policy.policy_id,
+                payload_json=payload,
+                observation_hash=hashlib.sha256(payload.encode()).hexdigest(),
+            )
+
+    result = play_run(
+        ActOneBoundaryBackend(terminal_at=20), RandomAgent(seed=9),
+        seed="act-one-cutoff", policy=InformationPolicy("fair-test"),
+        stop_after_act1_clear=True,
+    )
+    assert result.outcome == "act1_clear"
+    assert result.act1_cleared is True
+    assert result.full_game_victory is None
+    assert not result.censored
+    assert result.decisions <= 2
+    assert result.episode_goal_version == "native-act1-boss-clear-v1"
