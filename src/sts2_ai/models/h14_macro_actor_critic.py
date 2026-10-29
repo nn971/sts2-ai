@@ -6,6 +6,7 @@ combat outcome predictor, H12 reward target, or heuristic mode is imported.
 
 PyTorch is the explicit optional `neural` dependency.
 """
+# mypy: disable-error-code="import-not-found,misc,no-any-return"
 from __future__ import annotations
 
 from collections.abc import Sequence
