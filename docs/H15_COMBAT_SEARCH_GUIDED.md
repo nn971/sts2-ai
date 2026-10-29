@@ -266,3 +266,30 @@ HP/deck/relic/enemy state and a public-history-conditioned joint
 stochastic provider before asserting a genuinely native full-run
 continuation distribution. Search under the limited Reference Nature
 fixture model is preparatory learning, not the final deployed agent.
+
+
+### M3 nested H8 player-choice continuation
+
+The initial Mawler search reached a real H8 `player_choice` boundary.
+H8 publishes `player_card_selection` and `draw_hook_action_choice`
+as player decisions; they are **not** random Nature choices. The H15
+fixed-fixture adapter now uses the existing
+`fair_player_choice_actions` validator to intersect the source pending
+action IDs with the fair public action menu and forwards **only** the
+public observation/menu. A public kind tag distinguishes these nodes
+without forwarding the source's pending-choice internals.
+
+H9 R250 did not learn the full non-hand card-selection action encoding.
+At such nodes, the H15 teacher therefore uses explicitly counted,
+uniform legal priors during its complete-combat rollouts. PUCT still
+branches and evaluates these choices through realized final combat
+rewards. The training collector omits nested-choice positions as
+direct policy/value targets; ordinary combat positions remain trainable.
+The output `report.json` includes
+`nested_choice_uniform_fallbacks` so this approximation can be
+quantified. A later versioned action codec must represent the full
+selection menu and train those decisions directly.
+
+Nested choices must be processed by player action, never by a Nature
+draw/intent resolver, and must never be silently skipped. Unsupported
+choice kinds continue to fail closed.
