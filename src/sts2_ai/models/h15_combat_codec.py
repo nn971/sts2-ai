@@ -22,6 +22,7 @@ from sts2_ai.models.shared_game_objects import (
     _bucket,
     encode_public_decision,
 )
+
 if TYPE_CHECKING:
     from sts2_ai.models.shared_transformer import H7Batch
 

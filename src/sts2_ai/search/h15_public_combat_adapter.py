@@ -14,7 +14,9 @@ from collections.abc import Sequence
 from typing import Any
 
 from sts2_ai.emulator.chance import (
-    FairContinuationSampler, PublicHistoryStep, require_fair_sampler,
+    FairContinuationSampler,
+    PublicHistoryStep,
+    require_fair_sampler,
 )
 from sts2_ai.emulator.protocol import EmulatorBackend, InformationPolicy, LegalAction
 from sts2_ai.nature.h4_reward import encounter_total_hp_score
