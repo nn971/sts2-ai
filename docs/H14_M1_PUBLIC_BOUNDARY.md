@@ -52,9 +52,10 @@ residues:
 These are the supported generic persistent-count definitions in
 `PrototypeNativeSharedRelics` at the audited emulator main revision.
 When the field is absent, the emulator initializes the trigger count to zero.
-A direct emulator cross-combat structural test is still needed to establish
-persistence through the complete step and reward pipeline. New, independently
-modeled relic states need explicit, source-fair schema extensions.
+Emulator PR #225 includes a direct two-room step/reward/next-entry
+regression, with focused CI passing for the persistent counter and The Hunt
+mechanics. Additional relics with independently modeled persistent state
+still require explicit, source-fair schema extensions.
 
 The projection intentionally excludes unknown nested persistent-state fields
 until they have been audited as public. It also excludes private RNG streams,
@@ -81,12 +82,11 @@ learned policies.
 
 ## Next coherent implementation step
 
-1. Execute an emulator-native cross-combat persistence test for Pendulum and
-   Pen Nib (including repeated copies, reward transition, and absent initial
-   counter fields), updating the emulator only if that test finds an actual
-   defect.
-2. Verify emulator PR #225 on its focused CI regression, including
-   The Hunt's source-attributed receipt and postcombat public projection.
-3. Migrate the public counter tokens and action representations into the
-   H11 shared macro encoder without bringing forward historical H12 models.
-   Pin the H9 policy and run the H14 collector on complete engine trajectories.
+1. Migrate the audited public counter tokens and action representations
+   into the H11 shared macro encoder, selectively recovering code from PR #139
+   without adopting its weak checkpoint or historical H12 model interfaces.
+2. Run H14's observer on full emulator trajectories with a pinned H9 combat
+   policy, verifying that optional causal receipts are populated when the
+   emulator version includes PR #225 and that older versions fall back to
+   unattributed visible groups.
+3. Keep independent native full-run evaluation as the gate before M2 training.
