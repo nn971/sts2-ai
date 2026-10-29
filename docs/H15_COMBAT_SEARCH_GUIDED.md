@@ -382,3 +382,76 @@ sample: fair search still requires a conditional chance provider for the
 actual public history. The fixed-fixture Reference Nature sampler remains
 limited to synthetic fixtures. Do not mix its targets into native-search
 training without an explicit chance-model distinction.
+
+
+## M5 — declared Chance Law bridge and native adaptive cohort planning
+
+Research emulator branch:
+`nn971/sts2-emulator:research/h15-native-chance-law-20261030`
+(based on pinned `2c46c703a30875d6ef84fcbe0a0511fec9c74dcd`).
+It exposes `H8CombatRuntimeV1.ChooseChanceLawOutcome` and JSONL
+`h8_resolve_chance_law_outcome`. The caller obtains the current
+`h8_reference_law`, selects an advertised `outcomeId`, and sends the
+entire advertised law back. The mechanics owner validates the boundary
+version, event/law identity, probabilities and selected support before
+applying it. The local fast Reference Nature path is unchanged.
+
+The existing H15 fixed-fixture adapter now accepts
+`use_declared_chance_laws=True`. This changes the fixed-fixture prior
+identity to `h15-h8-fixed-fixture-declared-chance-law-v1` and sends
+individual decisions through the emulator-owned law bridge. The caller
+uses independent seeded random numbers to draw exact integer-weighted
+law outcomes; every resulting player-visible prefix is still checked by
+the independent reference conditioning sampler.
+
+**Scope:** This is an executable *fixed-fixture* interface test, not a
+certification that full native H10/H14 entry states can be reconstructed
+with a fair hidden-state posterior. The emulator still needs a native
+combat-root constructor that retains authentic public deck/HP/relic/
+potions/enemies without retaining unexplained hidden RNG futures. This
+is the remaining blocker to native H15 PUCT target generation.
+
+The executable native adaptive round planner
+`tools/plan_h15_native_adaptive.py` is now available. It consumes the
+actual `results/h15-native-source-long/train.jsonl` recipes, uses the
+existing learning-progress weights and deterministic fixed probes, and
+writes a stable `round-NNNN/train.jsonl` cohort, `probes.jsonl`,
+and `manifest.json`. After each completed round's probe fights, pass
+one JSONL result per probe with `source_seed`, `entry_hash`,
+`outcome`, and realized H9 `reward`. `advance` validates every probe,
+updates the curriculum and atomically saves `state.json`. This planner
+does not launch PUCT or claim those combat recipes are fair search roots.
+
+Example fish commands:
+
+```fish
+set emu ~/projects/sts2-emulator
+set ai ~/projects/sts2-ai
+git -C $emu fetch origin
+git -C $emu switch research/h15-native-chance-law-20261030
+dotnet build $emu/src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj -c Release
+dotnet test $emu/tests/Sts2Emulator.Core.Tests/Sts2Emulator.Core.Tests.csproj -c Release --filter FullyQualifiedName~H15ChanceLawBoundaryTests
+git -C $ai switch research/h15-combat-search-guided-20261029
+cd $ai
+source .venv/bin/activate.fish
+python -m pytest -q tests/test_h15_h8_reference.py tests/test_h15_native_adaptive_round_plan.py
+python -u tools/collect_h15_h8_reference.py \
+    --emulator-root $emu \
+    --emulator-revision (git -C $emu rev-parse HEAD) \
+    --emulator-dll $emu/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+    --h9-checkpoint results/h9-adaptive-totalhp-r40-r250/models/player-r0250.pt \
+    --output-root results/h15-declared-law-smoke \
+    --scenario mawler-a10 --deck silent-starter-v1 \
+    --use-declared-chance-laws --simulations 4 --max-searches 1 \
+    --max-candidates 16384 --device cuda --execute
+python -u tools/plan_h15_native_adaptive.py plan \
+    --train-corpus results/h15-native-source-long/train.jsonl \
+    --study-root results/h15-native-adaptive \
+    --round 0 --combats 256 --probes-per-family 3 \
+    --teacher-checkpoint results/h9-adaptive-totalhp-r40-r250/models/player-r0250.pt
+```
+
+Next engineering gates: native combat-root reconstruction; stochastic-site
+coverage and public-history conditioning; batched GPU evaluation; and
+a resumable multi-worker PUCT collector/optimizer that consumes the
+planned cohort without dropping most supervision samples.
