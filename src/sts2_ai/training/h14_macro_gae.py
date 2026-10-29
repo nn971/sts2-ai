@@ -40,7 +40,7 @@ def macro_gae(
     if not floors or len(floors) != len(behavior_values):
         raise ValueError("Macro GAE requires aligned nonempty states/values")
     if (not all(type(x) is int and 0 <= x <= MAX_ACT1_FLOOR for x in (*floors, final_floor))
-            or any(b < a for a, b in zip(floors, (*floors[1:], final_floor)))):
+            or any(b < a for a, b in zip(floors, (*floors[1:], final_floor), strict=True))):
         raise ValueError("Public Act-1 floor progress must be monotone and valid")
     if not all(math.isfinite(v) for v in behavior_values):
         raise ValueError("Macro values must be finite")
@@ -52,7 +52,7 @@ def macro_gae(
     n = len(floors)
     increments = [
         floor_reward * (next_floor - floor)
-        for floor, next_floor in zip(floors, (*floors[1:], final_floor))
+        for floor, next_floor in zip(floors, (*floors[1:], final_floor), strict=True)
     ]
     increments[-1] += 1.0 if act1_cleared else -1.0
     advantages = [0.0] * n
