@@ -228,3 +228,26 @@ def test_ordered_extra_relic_preserves_unpublished_information_boundary():
     assert action.actions[0].semantic == _bucket(
         "unpublished-extra-relic", IDENTITY_BUCKETS,
     )
+
+
+def test_large_macro_menu_keeps_all_public_choices():
+    state = {
+        "event_id": "wide-choice-event",
+        "event": {
+            "event_id": "wide-choice-event",
+            "visible_choice_values": [
+                {"choice_id": f"public-choice-{i}", "gold_delta": i}
+                for i in range(160)
+            ],
+        },
+    }
+    menu = legal(*[
+        ("event_choice", {"ChoiceId": f"public-choice-{i}"})
+        for i in range(160)
+    ])
+    encoded = encode_public_decision(state, menu)
+    assert len(encoded.actions) == 160
+    assert len(set(encoded.actions)) == 160
+    batch = collate_h7([encoded])
+    assert batch.action_mask.shape == (1, 160)
+    assert batch.action_mask.sum().item() == 160
