@@ -11,13 +11,13 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from sts2_ai.emulator import FAIR_POLICY_ID, LegalAction, Observation  # noqa: E402
+from sts2_ai.models.h9_frozen_codec import SHARED_OBJECT_SCHEMA as H9_SCHEMA  # noqa: E402
 from sts2_ai.models.h14_hierarchical_agent import (  # noqa: E402
     H9_CHECKPOINT_FORMAT,
     FrozenH9CombatActor,
     H14HierarchicalAgent,
 )
 from sts2_ai.models.h14_macro_actor_critic import H14MacroActorCritic  # noqa: E402
-from sts2_ai.models.h9_frozen_codec import SHARED_OBJECT_SCHEMA as H9_SCHEMA  # noqa: E402
 from sts2_ai.models.shared_transformer import (  # noqa: E402
     H7Config,
     SharedObjectTransformer,
