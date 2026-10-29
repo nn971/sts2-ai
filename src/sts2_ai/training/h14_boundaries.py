@@ -194,7 +194,7 @@ def public_persistent_state(observation: Mapping[str, Any]) -> dict[str, Any]:
             "slot": _integer(item.get("slot"), "potion slot"),
             "potion_id": _identity(item, "potion_id"),
         })
-    slots = [p["slot"] for p in potions]
+    slots = [_integer(p["slot"], "potion slot") for p in potions]
     if len(slots) != len(set(slots)) or any(x < 0 for x in slots):
         raise ValueError("Invalid public potion slots")
     result["potions"] = sorted(potions, key=lambda p: p["slot"])
