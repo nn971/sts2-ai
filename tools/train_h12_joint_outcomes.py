@@ -29,7 +29,9 @@ from sts2_ai.models.h12_joint_outcome import (
 )
 from sts2_ai.nature.corpus import file_sha256
 from sts2_ai.nature.protocol import canonical_sha256
+from sts2_ai.training.h12_reward_settlement import settled_public_resources
 from sts2_ai.training.h12_transition_data import SCHEMA as TRACE_SCHEMA
+from sts2_ai.training.h12_transition_data import _named_potion_transition
 
 TRAIN_SCHEMA = "sts2-h12-joint-outcome-training-v1"
 
@@ -57,23 +59,35 @@ def _read(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     return manifest, runs
 
 
-def _dataset(runs: list[dict[str, Any]]
+def _dataset(runs: list[dict[str, Any]], *, resource_boundary: str = "immediate"
              ) -> tuple[tuple[Tensor, ...], tuple[Tensor, ...], dict[str, int]]:
+    if resource_boundary not in ("immediate", "postreward"):
+        raise ValueError("Unknown H12 resource boundary")
     combats = []
     macro = []
     gaps: Counter[str] = Counter()
     for run in runs:
         if run["censored"]:
             gaps["censored_full_runs"] += 1
-        for encounter in run["combats"]:
-            combats.append(training_example(encounter))
+        for index, encounter in enumerate(run["combats"]):
+            if resource_boundary == "postreward":
+                resource_exit, status = settled_public_resources(run, index)
+                gaps["settlement_" + status] += 1
+            else:
+                resource_exit = encounter["exit"]
+            combats.append(training_example(
+                encounter, resource_exit=resource_exit,
+            ))
             gaps["fights"] += 1
-            gaps["new_named_potion"] += bool(encounter["potion_transition"]["gained"])
+            potion_delta = _named_potion_transition(
+                encounter["entry"]["potions"], resource_exit["potions"],
+            )
+            gaps["new_named_potion"] += bool(potion_delta["gained"])
             gaps["changed_deck"] += (
-                encounter["deck_delta"]["before"] != encounter["deck_delta"]["after"]
+                encounter["entry"]["deck"] != resource_exit["deck"]
             )
             gaps["changed_relics"] += (
-                encounter["relic_delta"]["before"] != encounter["relic_delta"]["after"]
+                encounter["entry"]["relics"] != resource_exit["relics"]
             )
         if not run["censored"]:
             for state in run["macro_states"]:
@@ -214,6 +228,9 @@ def main() -> None:
     p.add_argument("--heldout", type=Path, required=True)
     p.add_argument("--checkpoint", type=Path, required=True)
     p.add_argument("--report", type=Path, required=True)
+    p.add_argument("--resource-boundary", choices=("immediate", "postreward"),
+                   default="immediate",
+                   help="Use immediate combat exit or reconstructed settled room resources")
     p.add_argument("--epochs", type=int, default=30)
     p.add_argument("--batch-size", type=int, default=256)
     p.add_argument("--lr", type=float, default=3e-4)
@@ -236,6 +253,7 @@ def main() -> None:
         p.error("H12 requires separate train and heldout seed namespaces")
     identity = {
         "schema": TRAIN_SCHEMA, "model_schema": MODEL_SCHEMA,
+        "resource_boundary": args.resource_boundary,
         "train_sha256": file_sha256(args.train),
         "heldout_sha256": file_sha256(args.heldout),
         "policy_identity": train_manifest["identity"],
@@ -256,8 +274,12 @@ def main() -> None:
         p.error("CUDA unavailable")
     torch.set_num_threads(1)
     torch.manual_seed(20261029)
-    train_fight, train_macro, train_gaps = _dataset(train_runs)
-    held_fight, held_macro, held_gaps = _dataset(heldout_runs)
+    train_fight, train_macro, train_gaps = _dataset(
+        train_runs, resource_boundary=args.resource_boundary,
+    )
+    held_fight, held_macro, held_gaps = _dataset(
+        heldout_runs, resource_boundary=args.resource_boundary,
+    )
     outcome = H12JointOutcomeMixture().to(args.device)
     continuation = H12MacroContinuation().to(args.device)
     opt = torch.optim.AdamW(
@@ -328,6 +350,9 @@ def main() -> None:
             continuation, held_macro, args.device, args.batch_size,
         ),
         "known_limitations": [
+            "Postreward resource labels are reconstructed from the last visible "
+            "same-floor state and include H6-C reward choices; survival and "
+            "exit HP always use the immediate combat boundary.",
             "The joint latent mixture predicts retention of named held potions, "
             "but newly generated potion/card/relic identities remain empirical-only.",
             "Continuation labels use the frozen H6-C+H9 rollout policy; "
