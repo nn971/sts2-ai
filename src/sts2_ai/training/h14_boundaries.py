@@ -81,6 +81,60 @@ def _visible_rewards(reward: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _public_combat(combat: Mapping[str, Any]) -> dict[str, Any]:
+    """Only fields published on the combat HUD; no hidden draw-pile order."""
+    result: dict[str, Any] = {}
+    for name in ("turn", "energy", "player_block", "draw_pile_count"):
+        result[name] = _integer(combat.get(name), name)
+
+    for name in ("hand", "discard_pile", "exhaust_pile", "play_pile"):
+        cards = []
+        for item in _objects(combat.get(name), name):
+            cards.append({
+                "card_id": _identity(item, "card_id"),
+                "upgrade_level": _integer(item.get("upgrade_level"), "upgrade_level"),
+            })
+        result[name] = cards
+
+    enemies = []
+    for item in _objects(combat.get("enemies"), "enemies"):
+        enemy: dict[str, Any] = {
+            "enemy_id": _identity(item, "enemy_id"),
+            "hp": _integer(item.get("hp"), "enemy hp"),
+            "block": _integer(item.get("block"), "enemy block"),
+        }
+        for name in ("move_id",):
+            if isinstance(item.get(name), str):
+                enemy[name] = item[name]
+        for name in ("intent_damage", "intent_hits", "intent_base_damage"):
+            if type(item.get(name)) is int:
+                enemy[name] = item[name]
+        statuses = item.get("statuses")
+        if isinstance(statuses, dict):
+            enemy["statuses"] = {
+                k: v for k, v in sorted(statuses.items())
+                if isinstance(k, str) and type(v) is int
+            }
+        powers = item.get("powers")
+        if isinstance(powers, list):
+            enemy["powers"] = [
+                {"power_id": _identity(p, "power_id"),
+                 "stacks": _integer(p.get("stacks"), "power stacks")}
+                for p in _objects(powers, "enemy powers")
+            ]
+        enemies.append(enemy)
+    result["enemies"] = enemies
+
+    powers = combat.get("player_powers")
+    if isinstance(powers, list):
+        result["player_powers"] = [
+            {"power_id": _identity(p, "power_id"),
+             "stacks": _integer(p.get("stacks"), "power stacks")}
+            for p in _objects(powers, "player powers")
+        ]
+    return result
+
+
 def public_persistent_state(observation: Mapping[str, Any]) -> dict[str, Any]:
     """Versioned feature projection from an emulator fair-player observation.
 
@@ -158,6 +212,9 @@ def public_persistent_state(observation: Mapping[str, Any]) -> dict[str, Any]:
             {"floor": floor, "room_type": room, "count": n}
             for (floor, room), n in sorted(counts.items())
         ]
+    combat = observation.get("combat")
+    if isinstance(combat, dict):
+        result["combat"] = _public_combat(combat)
     reward = observation.get("reward")
     if isinstance(reward, dict):
         result["reward_offers"] = _visible_rewards(reward)
