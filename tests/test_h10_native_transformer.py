@@ -62,6 +62,7 @@ def test_native_returns_single_terminal_reward_and_gae():
     assert result[0].advantage == pytest.approx(0.75 - 0.15)
     assert result[0].target == pytest.approx(0.75)
     assert result[1].target == pytest.approx(0.75)
+    assert all(row.actor_origin == "native-cpu" for row in result)
 
 
 def test_native_holdout_has_independent_run_seeds_and_revision():
