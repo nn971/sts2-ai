@@ -152,9 +152,20 @@ def play_native_fork(
             encoded = encode_public_decision(state, legal)
             if encoded.phase != "combat":
                 raise ValueError("Native PPO received noncombat legal menu")
-            chosen, logp = choose_sampled(
-                estimate.action_logits, temperature=spec.temperature, rng=rng,
-            )
+            if spec.greedy:
+                # Fixed native reward probes must use deterministic player
+                # choices. Otherwise episode_seed depends on the changing
+                # checkpoint SHA and noise contaminates learning progress.
+                chosen = max(
+                    range(len(legal)),
+                    key=lambda i: (estimate.action_logits[i], legal[i].action_id),
+                )
+                logp = 0.0  # probe only; never used as PPO behavior logprob
+            else:
+                chosen, logp = choose_sampled(
+                    estimate.action_logits, temperature=spec.temperature,
+                    rng=rng,
+                )
             entries.append((encoded, chosen, logp, float(estimate.value)))
             child = backend.step(current, legal[chosen]).child
             backend.release_many([current])
