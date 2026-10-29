@@ -1,5 +1,37 @@
 # Roadmap
 
+
+## Accepted research direction (2026-10-29)
+
+**Canonical design:** [Hierarchical MuZero-inspired architecture](HIERARCHICAL_MUZERO_ARCHITECTURE.md).
+This section supersedes the *ordering* of the legacy milestones below;
+those remain useful historical infrastructure notes.
+
+1. Preserve H6-C macro + H9 combat as the native A10 regression baseline.
+   Stop advancing the H12 reward-contaminated joint predictor and the H13
+   predictor-first map-override path as candidate agents.
+2. Record fair public macro/combat boundary states, relic-counter residues,
+   potion-use actions and combat-triggered effect receipts. Validate emulator
+   counter persistence and chance ownership.
+3. Train a **shared macro policy + value** network on full native runs,
+   treating combats as temporally extended macro transitions. Validate
+   continuation estimates and action rankings before using them to guide
+   another policy.
+4. Train a **combat policy + tactical value** network whose combat-exit
+   bootstrap comes from a validated, frozen macro continuation value.
+   Improve selected tactical decisions using legal emulator search; distill
+   search action distributions into the combat policy.
+5. Optionally fit a **joint probabilistic combat-dynamics head** with
+   explicit, correctly labeled combat consequences. Retain Chance Laws and
+   game mechanics for ordinary reward generation; do not let the macro actor
+   choose chance outcomes or backpropagate desirability into their likelihood.
+6. Alternate policy updates with calibrated evaluator/dynamics refreshes;
+   promote only on independent, paired native full-run evaluation.
+
+Do not resurrect the old H12 standalone predictor/continuation critic:
+the target and state-representation contracts must be redesigned first.
+
+
 ## Near term: emulator first
 
 1. Publish both repositories and wire the submodule.

@@ -2,6 +2,24 @@
 
 Research infrastructure for building an AI that can make strong **whole-run strategic decisions** in *Slay the Spire 2*.
 
+
+## Intended architecture (29 October 2026)
+
+The canonical target is the [hierarchical MuZero-inspired actor-critic](docs/HIERARCHICAL_MUZERO_ARCHITECTURE.md):
+a **shared macro policy/value Transformer** evaluates full persistent run
+states and chooses map/reward/shop actions; a **combat policy/value
+Transformer** optimizes tactical actions using the macro value at the
+combat-terminal boundary. Combat is a temporally extended macro transition.
+An optional shared-encoder **distributional combat-dynamics head** may
+accelerate planning after strict calibration.
+
+The H12 standalone outcome/continuation predictor and H13's predictor-first
+map-override plan are **superseded**. The old reward-change targets mixed
+combat effects, RNG rewards and macro policy choices. Preserve experimental
+artifacts for reproducibility; do not treat them as deployment candidates.
+The incumbent evaluated reference remains H6-C macro + H9 combat. This is a
+design decision, not evidence of a trained replacement.
+
 The long-term objective is an agent that reasons jointly about:
 
 - map/path choices;
