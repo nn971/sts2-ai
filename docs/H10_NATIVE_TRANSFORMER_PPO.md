@@ -180,6 +180,42 @@ resumable. Decisions are compared on matched **native entry states**,
 but 32 source runs may still yield relatively few boss fights; regard
 the resulting boss rate as preliminary.
 
+## Native CPU actor / CUDA optimizer parity (2026-10-29)
+
+The native fork workers select actions using 15 independent **CPU singleton**
+forwards of the SHA-pinned H9 actor. The PPO optimizer runs in CUDA batches.
+CUDA and CPU/padded-batch kernels can produce different fp32 logits even
+with identical model weights; a measured log-probability difference of
+`0.020514131` exceeded the old hard-coded `0.01` cross-device limit
+before the first parameter update.
+
+The verifier now:
+
+1. Preserves the native CPU **recorded** action log probability as the exact
+   behavior-policy PPO denominator. No replacement by CUDA logits occurs.
+2. Verifies every synthetic CUDA training sample with the original strict
+   `5e-4` policy/value guard.
+3. Checks every native CUDA-batch sample against a safety bound of
+   `0.1` log probability and `0.05` value (0.1 log probability is half
+   the usual PPO clip coefficient 0.2). The actual importance ratio
+   `exp(CUDA_logp - recorded_CPU_logp)` remains in the PPO objective.
+4. Recomputes the highest 16 native discrepancies plus periodic entries
+   with a separate CPU **singleton** copy of the frozen policy; these must
+   reproduce the recorded log probability and critic value within
+   `5e-4`, or the update fails before modifying parameters.
+5. Records the maximum CUDA drift, the maximum audited CPU drift, and
+   the number of CPU audits in each training progress row.
+
+This is a provenance test, not an unconditional relaxation of the native
+behavior check. A mismatch on the actual CPU actor backend or a large
+GPU/CPU policy discrepancy remains a hard error.
+
+After fetching this fix, run `pytest -q tests/test_h7_combat_ppo.py
+tests/test_h10_native_transformer.py`. If a previous attempt failed on
+round 1 before writing `optimizer-checkpoint.pt`, rerun the original
+command **without** `--resume`. Existing completed PPO rounds require
+`--resume` instead.
+
 ## Scope limitations
 
 - The previous 74-entry H10 corpus is development data, useful for
