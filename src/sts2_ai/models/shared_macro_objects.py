@@ -56,47 +56,111 @@ def _shop_offer(state: dict[str, Any], kind: str, offer_id: object) -> dict[str,
     return single if isinstance(single, dict) and single.get("offer_id") == offer_id else None
 
 
-def _reward_choice(state: dict[str, Any], kind: str, payload: dict[str, Any]
-                   ) -> tuple[str, dict[str, Any]] | None:
+def _reward_choice(
+    state: dict[str, Any], kind: str, payload: dict[str, Any],
+) -> tuple[str, dict[str, Any]] | None:
+    """Decode the reward *published* by PrototypeAiReward.
+
+    The legacy ordered reward and native independent-selection reward have
+    different naming and group rules. ChooseRelicPayload uses Index, whereas
+    ChooseExtraPotionRewardPayload/ChooseGoldRewardPayload use GroupIndex.
+    """
     reward = state.get("reward")
     if not isinstance(reward, dict):
         return None
     index = _field(payload, "Index", "index")
     group = _field(payload, "GroupIndex", "group_index")
+
+    def pending(key: str, group_index: object) -> dict[str, Any] | None:
+        if type(group_index) is not int:
+            return None
+        return next((
+            row for row in _records(reward.get(key))
+            if row.get("group_index") == group_index
+        ), None)
+
     if kind in ("take_reward_card", "take_reward_card_group"):
         cards = reward.get("card_options")
         flags = reward.get("card_option_upgrade_flags")
-        if type(group) is int:
-            entries = _records(reward.get("pending_card_groups"))
-            match = next((x for x in entries if x.get("group_index") == group), None)
-            cards = match.get("card_options") if match else None
-            flags = match.get("option_upgrade_flags") if match else None
-        if not isinstance(cards, list) or type(index) is not int or not 0 <= index < len(cards):
+        previews = reward.get("card_option_previews")
+        if kind == "take_reward_card_group":
+            match = pending("pending_card_groups", group)
+            if match is None:
+                return None
+            cards = match.get("card_options")
+            flags = match.get("option_upgrade_flags")
+            previews = match.get("card_previews")
+        if (not isinstance(cards, list) or type(index) is not int
+                or not 0 <= index < len(cards)):
             return None
         card = cards[index]
         if not isinstance(card, str):
             return None
         upgraded = isinstance(flags, list) and index < len(flags) and flags[index] is True
-        return card, {"upgrade_level": 1 if upgraded else 0}
+        preview = (previews[index] if isinstance(previews, list)
+                   and index < len(previews) else None)
+        level = preview.get("upgrade_level") if isinstance(preview, dict) else None
+        return card, {"upgrade_level": level if type(level) is int
+                      else int(upgraded)}
+
     if kind == "take_reward_relic":
+        # With independent selection, take_reward_relic(Index=0) is also
+        # the alias for the *first pending extra relic* once the original
+        # relic is resolved. A stale relic_option must not be re-encoded.
+        if reward.get("relic_resolved") is True:
+            extras = _records(reward.get("pending_extra_relic_rewards"))
+            if extras:
+                item = extras[0]
+                name = item.get("relic_id")
+                return (name, {"count": int(item.get("is_wax") is True)}
+                        ) if isinstance(name, str) else None
+            if reward.get("independent_selection") is not True and index == 0:
+                # Ordered reward can publish only the action, omitting the
+                # future extra relic identity. Preserve this information
+                # boundary instead of mislabelling it with the primary relic.
+                return "unpublished-extra-relic", {}
+            return None
         options = reward.get("relic_options")
         name = (options[index] if isinstance(options, list)
                 and type(index) is int and 0 <= index < len(options)
-                else reward.get("relic_option"))
+                else reward.get("relic_option") if index == 0 else None)
         return (name, {}) if isinstance(name, str) else None
+
     if kind in ("take_reward_extra_relic", "skip_reward_extra_relic"):
-        entries = _records(reward.get("pending_extra_relic_rewards"))
-        match = next((x for x in entries if x.get("group_index") == index), None)
+        match = pending("pending_extra_relic_rewards", index)
         name = match.get("relic_id") if match else None
-        return (name, {}) if isinstance(name, str) else None
+        return (name, {"count": int(match.get("is_wax") is True)}
+                ) if isinstance(name, str) else None
+
     if kind in ("take_reward_extra_potion", "replace_reward_extra_potion",
                 "skip_reward_extra_potion"):
-        entries = _records(reward.get("pending_extra_potion_rewards"))
-        match = next((x for x in entries if x.get("group_index") == group), None)
+        match = pending("pending_extra_potion_rewards", group)
         name = match.get("potion_id") if match else None
         return (name, {}) if isinstance(name, str) else None
-    return None
 
+    if kind in ("take_reward_potion", "replace_reward_potion", "skip_reward_potion"):
+        name = reward.get("potion_option")
+        return (name, {}) if isinstance(name, str) else None
+
+    if kind == "take_reward_extra_gold":
+        match = pending("pending_extra_gold_rewards", group)
+        amount = match.get("amount") if match else None
+        return ("gold", {"gold": amount}) if type(amount) is int else None
+
+    if kind == "take_reward_bundle":
+        # Public observation intentionally omits bundle contents. An Index
+        # selects an opaque, numbered, *visible* offered bundle.
+        return (f"visible-bundle:{index}", {}) if type(index) is int and index >= 0 else None
+
+    if kind in ("skip_reward_card_group", "sacrifice_reward_card_group"):
+        match = pending("pending_card_groups", group)
+        cards = match.get("card_options") if match else None
+        if not isinstance(cards, list) or not all(isinstance(c, str) for c in cards):
+            return None
+        # Unlike hidden node IDs, GroupIndex is a public menu selector.
+        return f"card-group:{group}:{'|'.join(sorted(cards))}", {"count": len(cards)}
+
+    return None
 
 def _pending_card_operation(state: dict[str, Any], kind: str) -> str:
     source = {
@@ -269,15 +333,29 @@ def encode_macro_public_decision(
         elif kind in ("take_reward_card", "take_reward_card_group",
                       "take_reward_relic", "take_reward_extra_relic",
                       "take_reward_extra_potion", "replace_reward_extra_potion",
-                      "skip_reward_extra_relic", "skip_reward_extra_potion"):
+                      "skip_reward_extra_relic", "skip_reward_extra_potion",
+                      "take_reward_potion", "replace_reward_potion",
+                      "skip_reward_potion", "take_reward_extra_gold",
+                      "take_reward_bundle", "skip_reward_card_group",
+                      "sacrifice_reward_card_group"):
             choice = _reward_choice(state, kind, payload)
             if choice is None:
-                raise ValueError("Legal reward choice has no visible reward option")
+                raise ValueError(
+                    f"Legal {kind} has no matching public reward option: "
+                    f"payload={payload!r}; reward_fields="
+                    f"{sorted(state.get('reward', {}))!r}"
+                )
             identity, record = choice
-            token_kind = ("card" if "card" in kind else "potion" if "potion" in kind
-                          else "relic")
+            token_kind = ("card" if "card" in kind or "bundle" in kind
+                          else "potion" if "potion" in kind
+                          else "event_choice" if "gold" in kind else "relic")
             target = add(token_kind, identity, "reward", record)
             semantic = identity
+            if kind in ("replace_reward_potion", "replace_reward_extra_potion"):
+                slot = _field(payload, "Slot", "slot")
+                source = lookup.get(("potion_slot", slot), -1)
+                if source < 0:
+                    raise ValueError("Reward potion replacement has no visible held potion")
         else:
             # Other single actions remain represented by their kind. If a
             # future legal menu has indistinguishable same-kind alternatives,
