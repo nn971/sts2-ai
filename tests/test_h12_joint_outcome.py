@@ -11,6 +11,7 @@ from sts2_ai.models.h12_joint_outcome import (
     public_features,
     training_example,
 )
+from sts2_ai.training.h12_reward_settlement import settled_public_resources
 from sts2_ai.training.h12_transition_data import (
     PublicJointRunTrace,
     public_resources,
@@ -159,3 +160,69 @@ def test_macro_continuation_uses_same_public_features():
     assert torch.isfinite(v).all() and ((v >= 0) & (v <= 1)).all()
     v.sum().backward()
     assert model.network[0].weight.grad.abs().sum().item() > 0
+
+
+def test_postreward_targets_recover_public_resources_without_future_room():
+    trace = PublicJointRunTrace("reward-seed")
+    trace.observe(_state(combat=True))
+    trace.observe(_state(hp=41))
+    settled = _state(hp=41, potions=[
+        {"slot": 0, "potion_id": "poison"},
+        {"slot": 1, "potion_id": "block"},
+        {"slot": 2, "potion_id": "strength"},
+    ])
+    settled["gold"] = 145
+    settled["deck"].append({"card_id": "reward-card", "upgrade_level": 0})
+    settled["relics"].append({"relic_id": "new-relic"})
+    trace.observe(settled)
+    next_room = _state(hp=72, potions=[
+        {"slot": 0, "potion_id": "poison"},
+    ])
+    next_room["floor"] = 4
+    next_room["gold"] = 999
+    trace.observe(next_room)
+    run = trace.finish(
+        outcome="defeat", censored=False, act1_clear=False,
+        frontier_progress=5., decisions=20, policy_identity={},
+    )
+    fight = run["combats"][0]
+    assert fight["exit"]["gold"] == 100
+    after, status = settled_public_resources(run, 0)
+    assert status == "settled"
+    assert after["gold"] == 145
+    assert after["floor"] == 3
+    assert "new-relic" in after["relics"]
+    _, _, _, _, old_target = training_example(fight)
+    _, _, _, _, new_target = training_example(
+        fight, resource_exit=after,
+    )
+    assert old_target[5].item() == 0
+    assert new_target[5].item() == 1
+    assert new_target[3].item() == 1
+    assert new_target[4].item() == 1
+    assert old_target[0].item() == new_target[0].item()
+    assert old_target[1].item() == new_target[1].item()
+    assert new_target[2].item() < 1.0  # gold is bounded by tanh
+
+
+def test_second_combat_excludes_later_same_floor_reward_states():
+    run = {
+        "combats": [
+            {"survived": True, "exit_observation_index": 2,
+             "exit": {"floor": 3, "act": 1}},
+            {"entry_observation_index": 4, "survived": True,
+             "exit_observation_index": 6,
+             "exit": {"floor": 3, "act": 1}},
+        ],
+        "macro_states": [
+            {"observation_index": 2,
+             "state": {"floor": 3, "act": 1, "gold": 10}},
+            {"observation_index": 3,
+             "state": {"floor": 3, "act": 1, "gold": 20}},
+            {"observation_index": 6,
+             "state": {"floor": 3, "act": 1, "gold": 30}},
+        ],
+    }
+    first, status = settled_public_resources(run, 0)
+    assert status == "settled"
+    assert first["gold"] == 20
