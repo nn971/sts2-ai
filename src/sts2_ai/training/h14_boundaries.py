@@ -78,6 +78,24 @@ def _visible_rewards(reward: Mapping[str, Any]) -> dict[str, Any]:
     extra = reward.get("extra_card_reward_groups_remaining")
     if type(extra) is int and extra >= 0:
         result["extra_card_reward_groups_remaining"] = extra
+    receipts = reward.get("combat_effect_receipts")
+    if isinstance(receipts, list):
+        public_receipts = []
+        for entry in receipts:
+            if not isinstance(entry, dict):
+                raise ValueError("Invalid public combat-effect receipt")
+            kind, source, count = (
+                entry.get("kind"), entry.get("source_card_id"),
+                entry.get("count"),
+            )
+            if (kind != "extra_card_reward_earned"
+                    or (source is not None and not isinstance(source, str))
+                    or type(count) is not int or count <= 0):
+                raise ValueError("Unsupported public combat-effect receipt")
+            public_receipts.append({
+                "kind": kind, "source_card_id": source, "count": count,
+            })
+        result["combat_effect_receipts"] = public_receipts
     return result
 
 
@@ -241,13 +259,27 @@ def _bonus_receipts(exit_state: Mapping[str, Any]) -> list[dict[str, Any]]:
     reward = exit_state.get("reward_offers")
     if not isinstance(reward, dict):
         return []
+    attributed = reward.get("combat_effect_receipts", [])
+    if not isinstance(attributed, list):
+        raise ValueError("Invalid public combat-effect receipts")
+    receipts = [
+        {**receipt, "source": "emulator_combat_effect"}
+        for receipt in attributed
+    ]
+    total_attributed = sum(receipt["count"] for receipt in attributed)
     extra = reward.get("extra_card_reward_groups_remaining")
-    if type(extra) is int and extra > 0:
-        # A published bonus is observable; its causal trigger may not be.
-        # Do not attribute this to The Hunt without a public event receipt.
-        return [{"kind": "extra_card_reward_groups_visible",
-                 "count": extra, "source": "unattributed_public_reward"}]
-    return []
+    if type(extra) is int:
+        if total_attributed > extra:
+            raise ValueError("Combat effect receipts exceed visible reward groups")
+        if extra > total_attributed:
+            # Relics can generate additional reward groups without a combat
+            # action trigger; retain their provenance as unattributed.
+            receipts.append({
+                "kind": "extra_card_reward_groups_visible",
+                "count": extra - total_attributed,
+                "source": "unattributed_public_reward",
+            })
+    return receipts
 
 
 class H14CombatBoundaryTrace:
