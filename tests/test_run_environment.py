@@ -102,11 +102,12 @@ def test_native_a10_refuses_a0_starter_with_specific_mismatch() -> None:
     assert backend.released == ["native-state"]
 
 
-def test_native_reset_refuses_obsolete_map_profile() -> None:
+def test_native_reset_accepts_both_audited_profiles() -> None:
     backend = FakeRunBackend()
     backend.native_overgrowth_reset_schema = NATIVE_RESET_SCHEMA
     backend.force_old_map_profile = True
     assert reset_training_run(backend, "native-seed", NATIVE_OVERGROWTH, 0) == "native-state"
+    assert reset_training_run(backend, "native-a10", NATIVE_OVERGROWTH, 10) == "native-state"
 
 
 def test_mislabeled_native_reset_fails_and_releases_state() -> None:
