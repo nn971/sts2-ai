@@ -10,8 +10,8 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from sts2_ai.models.h14_macro_actor_critic import (  # noqa: E402
-    H14MacroActorCritic,
     H14_MACRO_MODEL_FORMAT,
+    H14MacroActorCritic,
 )
 from sts2_ai.models.shared_game_objects import encode_public_decision  # noqa: E402
 from sts2_ai.models.shared_transformer import H7Config  # noqa: E402
