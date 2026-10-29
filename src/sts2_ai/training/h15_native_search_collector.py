@@ -112,6 +112,30 @@ def collect_native_combat_search(
     # state, so a missing capability cannot leak the source combat handle.
     require_fair_sampler(fair_sampler)
     current, initial_history = replay_native_public_history(backend, recipe)
+    return collect_live_combat_search(
+        backend, current, initial_history,
+        fair_sampler=fair_sampler, teacher=teacher, source_seed=recipe.seed,
+        entry_hash=recipe.exact_hash, encounter_tier=recipe.tier,
+        simulations=simulations, max_decisions=max_decisions,
+        max_searches=max_searches, seed=seed, tree_depth=tree_depth,
+        rollout_depth=rollout_depth,
+    )
+
+
+def collect_live_combat_search(
+    backend: EmulatorBackend, current: StateHandle,
+    initial_history: tuple[PublicHistoryStep, ...], *,
+    fair_sampler: FairContinuationSampler, teacher: H15CombatEvaluator,
+    source_seed: str, entry_hash: str, encounter_tier: str,
+    simulations: int = 32, max_decisions: int = 512, max_searches: int = 8,
+    seed: int = 20261029, tree_depth: int = 16,
+    rollout_depth: int = 512,
+) -> NativeSearchCollection:
+    """Consume a verified public combat entry and own/release its handle.
+
+    Native A10 source recipes and independently initialized H8 reference
+    fixtures both use this loop; the fair sampler is supplied explicitly.
+    """
     history = list(initial_history)
     adapter = H15PublicCombatAdapter(backend, sampler=fair_sampler)
     search = CombatPuct(
@@ -134,9 +158,9 @@ def collect_native_combat_search(
                     public.get("hp") == 0
                 ) else "victory"
                 return NativeSearchCollection(
-                    source_seed=recipe.seed,
-                    entry_hash=recipe.exact_hash,
-                    encounter_tier=recipe.tier,
+                    source_seed=source_seed,
+                    entry_hash=entry_hash,
+                    encounter_tier=encounter_tier,
                     outcome=outcome,
                     reward=score,
                     exit_hp=public["hp"],
@@ -145,7 +169,7 @@ def collect_native_combat_search(
                     targets=tuple(target_record(
                         root, stats, terminal_reward=score,
                         search_model_sha256=teacher.checkpoint_sha256,
-                        source_seed=recipe.seed,
+                        source_seed=source_seed,
                         emulator_revision=backend.emulator_revision,
                     ) for root, stats in saved),
                 )
@@ -175,7 +199,11 @@ def collect_native_combat_search(
             chosen: LegalAction = menu[index]
             history[-1] = PublicHistoryStep(observation, chosen, menu)
             child = backend.step(current, chosen).child
-            backend.release_many([current])
+            if child != current:
+                backend.release_many([current])
+            elif getattr(backend, "mutable_transition_capability_id", None) != (
+                    "h15-h8-inplace-player-step-v1"):
+                raise ValueError("Uncertified in-place native combat transition")
             current = child
             next_observation = backend.observe(current, POLICY)
             next_public = json.loads(next_observation.payload_json)
