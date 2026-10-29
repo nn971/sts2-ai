@@ -101,6 +101,7 @@ class H14HierarchicalAgent:
         self.greedy_macro = greedy_macro
         self.temperature = temperature
         self.samples: list[H14MacroActionSample] = []
+        self.macro_history: list[dict[str, Any]] = []
         seed_material = json.dumps(
             [episode_seed, combat.model_sha256, macro_checkpoint_sha256, temperature],
             separators=(",", ":"),
@@ -133,4 +134,22 @@ class H14HierarchicalAgent:
         self.samples.append(H14MacroActionSample(
             decision, index, math.log(probs[index]), score.continuation_value,
         ))
-        return Decision(legal_actions[index], policy_name=self.policy_id)
+        chosen = legal_actions[index]
+        details: dict[str, Any] = {
+            "decision_index": public.get("decision_index"),
+            "act": public.get("act"), "floor": public.get("floor"),
+            "phase": public.get("phase"), "kind": chosen.kind,
+            "action_payload": json.loads(chosen.payload_json),
+            "boss_encounter_id": public.get("act_one_boss_encounter_id"),
+        }
+        if chosen.kind == "choose_map_node":
+            node_id = details["action_payload"].get("NodeId")
+            for node in public.get("map", []):
+                if isinstance(node, dict) and node.get("node_id") == node_id:
+                    details["chosen_room_type"] = node.get("room_type")
+                    details["chosen_room_floor"] = node.get("floor")
+                    break
+        if chosen.kind == "event_choice":
+            details["event_id"] = public.get("event_id")
+        self.macro_history.append(details)
+        return Decision(chosen, policy_name=self.policy_id)
