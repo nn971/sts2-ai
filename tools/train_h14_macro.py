@@ -277,11 +277,12 @@ def main() -> None:
         p.error("CUDA device requested but not available")
     args.output_root.mkdir(parents=True, exist_ok=True)
     identity = args.output_root / "identity.json"
+    latest = args.output_root / "latest.json"
     if identity.exists():
         if json.loads(identity.read_text()) != config:
             p.error("Output root contains a different training identity")
-        if not args.resume:
-            p.error("Existing run requires --resume")
+        if latest.exists() and not args.resume:
+            p.error("Existing committed run requires --resume")
     else:
         if args.resume:
             p.error("No training identity to resume")
@@ -292,9 +293,8 @@ def main() -> None:
     ).hexdigest()[:16], 16) % (2**63 - 1))
     network = H14MacroActorCritic(cfg).to(args.device)
     optimizer = torch.optim.AdamW(network.parameters(), lr=args.lr)
-    latest = args.output_root / "latest.json"
     first_round = 1
-    if args.resume:
+    if args.resume and latest.exists():
         info = json.loads(latest.read_text())
         first_round = int(info["round"]) + 1
         checkpoint = args.output_root / info["checkpoint"]
