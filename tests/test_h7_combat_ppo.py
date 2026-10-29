@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -132,3 +133,58 @@ def test_h7_sampled_terminal_replay_requires_explicit_optimizer_opt_in(tmp_path:
             tuple(tampered), captures, behavior_model_id=policy_id,
             seed=9, allow_sampled_terminal_replay=True,
         )
+
+
+def test_native_cpu_actor_uses_bounded_measured_drift_without_changing_h8_guard(
+    tmp_path: Path,
+):
+    torch.set_num_threads(1)
+    net, spec, episodes, captures = make_cohort(tmp_path)
+    learner = H7CombatPPO(net, temperature=0.85, epochs=1, minibatch=2)
+    prepared = [
+        learner._prepare_episode(
+            episode, capture,
+            behavior_model_id=f"h7-{spec.model_sha256[:16]}",
+            temperature=0.85, gamma=1.0, gae_lambda=0.98,
+        )[0]
+        for episode, capture in zip(episodes, captures, strict=True)
+    ]
+    native = replace(
+        prepared[0], old_logp=prepared[0].old_logp + 0.002,
+        old_value=prepared[0].old_value + 0.003,
+        actor_origin="native-cpu",
+    )
+    original = [native, prepared[1]]
+    with pytest.raises(ValueError, match="explicit cross-device"):
+        learner.update_prepared(original, seed=9)
+
+    # Synthetic/reference-law decisions retain strict 5e-4 verification.
+    wrong_synthetic = replace(
+        prepared[1], old_logp=prepared[1].old_logp + 0.002,
+    )
+    with pytest.raises(ValueError, match="origin=h8-synthetic"):
+        learner.update_prepared(
+            [native, wrong_synthetic], seed=9,
+            allow_native_cpu_actor=True,
+        )
+
+    # Even native opt-in rejects materially different policies.
+    wrong_native = replace(
+        native, old_logp=prepared[0].old_logp + 0.04,
+    )
+    with pytest.raises(ValueError, match="origin=native-cpu"):
+        learner.update_prepared(
+            [wrong_native, prepared[1]], seed=9,
+            allow_native_cpu_actor=True,
+        )
+
+    stats = learner.update_prepared(
+        original, seed=9, allow_native_cpu_actor=True,
+    )
+    assert stats["native_actor_decisions"] == 1
+    assert 0.0019 < stats["max_native_logp_drift"] < 0.0021
+    assert 0.0029 < stats["max_native_value_drift"] < 0.0031
+    assert stats["source_decisions"] == 2
+    # Crucially, CUDA/CPU drift does not overwrite the actual sampled
+    # old log-probability used in PPO's importance ratio.
+    assert original[0].old_logp == native.old_logp
