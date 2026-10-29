@@ -29,9 +29,13 @@ label. Any generated reward offers live only in `exit.reward_offers`;
 inventory delta is separately tracked because a potion can be consumed and
 replaced during the same combat. The observed gold delta is retained for
 diagnostics; it is not an H12-style ordinary gold RNG prediction target.
-`effect_receipts` may include a publicly visible *unattributed* bonus card
-reward group count. There is no claim that a visible bonus proves a
-The Hunt trigger; a source-attributed public event stream is a later M1 step.
+`effect_receipts` records combat-caused extra reward groups by their
+public source card identity **when the emulator publishes a causally recorded
+combat receipt**. The Hunt's fatal effect is the first supported example, in
+emulator PR #225. Generated card identities remain exclusively in the reward
+screen. Any remaining visible bonus groups (including relic-generated groups)
+retain an `unattributed_public_reward` receipt. Older emulators that omit the
+new optional field continue to produce only unattributed visible groups.
 
 ## Counter audit
 
@@ -81,9 +85,8 @@ learned policies.
    Pen Nib (including repeated copies, reward transition, and absent initial
    counter fields), updating the emulator only if that test finds an actual
    defect.
-2. Add a publicly observed, typed combat-effect event/receipt source
-   (including The Hunt), which records cause counts independently of RNG
-   generated reward identities.
+2. Verify emulator PR #225 on its focused CI regression, including
+   The Hunt's source-attributed receipt and postcombat public projection.
 3. Migrate the public counter tokens and action representations into the
    H11 shared macro encoder without bringing forward historical H12 models.
    Pin the H9 policy and run the H14 collector on complete engine trajectories.
