@@ -287,6 +287,9 @@ def main() -> None:
             p.error("No training identity to resume")
         atomic_json(identity, config)
     torch.set_num_threads(1)
+    torch.manual_seed(int(hashlib.sha256(
+        json.dumps(config, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:16], 16) % (2**63 - 1))
     network = H14MacroActorCritic(cfg).to(args.device)
     optimizer = torch.optim.AdamW(network.parameters(), lr=args.lr)
     latest = args.output_root / "latest.json"
