@@ -118,6 +118,53 @@ class H14MacroActorCritic(nn.Module):
             "value": float(value_loss.detach().cpu()),
         }
 
+    def ppo_loss(
+        self, decisions: list[EncodedDecision], *,
+        selected_actions: Tensor, behavior_log_probabilities: Tensor,
+        behavior_values: Tensor, returns: Tensor, clip_epsilon: float = 0.2,
+        value_weight: float = 0.5, entropy_weight: float = 0.01,
+    ) -> tuple[Tensor, dict[str, float]]:
+        """On-policy macro PPO using certified run outcomes as value targets.
+
+        Behavior logits/values come from a frozen round checkpoint. A run
+        contributes only after its Act-1 clear/defeat label is established.
+        """
+        if (not 0 < clip_epsilon < 1 or value_weight < 0
+                or entropy_weight < 0):
+            raise ValueError("Invalid H14 PPO coefficients")
+        logits, values = self.forward(decisions)
+        device, dtype = values.device, values.dtype
+        chosen = selected_actions.to(device=device, dtype=torch.long)
+        old_logp = behavior_log_probabilities.to(device=device, dtype=dtype)
+        old_v = behavior_values.to(device=device, dtype=dtype)
+        targets = returns.to(device=device, dtype=dtype)
+        if any(x.shape != values.shape for x in (chosen, old_logp, old_v, targets)):
+            raise ValueError("H14 PPO batch shapes disagree")
+        if (not torch.isfinite(old_logp).all() or not torch.isfinite(old_v).all()
+                or not torch.isfinite(targets).all() or (targets.abs() > 1).any()):
+            raise ValueError("H14 PPO requires finite certified returns")
+        masks = collate_h7(decisions).action_mask.to(device)
+        if ((chosen < 0).any() or (chosen >= masks.shape[1]).any()
+                or not masks.gather(1, chosen[:, None]).all()):
+            raise ValueError("Invalid selected macro action")
+        logp = F.log_softmax(logits, dim=-1)
+        selected_logp = logp.gather(1, chosen[:, None]).squeeze(1)
+        advantage = (targets - old_v).detach()
+        ratio = torch.exp(selected_logp - old_logp)
+        policy_loss = -torch.minimum(
+            ratio * advantage,
+            torch.clamp(ratio, 1 - clip_epsilon, 1 + clip_epsilon) * advantage,
+        ).mean()
+        value_loss = F.mse_loss(values, targets)
+        probabilities = logp.exp()
+        entropy = -(probabilities * torch.where(masks, logp, 0.0)).sum(dim=-1).mean()
+        loss = policy_loss + value_weight * value_loss - entropy_weight * entropy
+        return loss, {
+            "policy": float(policy_loss.detach().cpu()),
+            "value": float(value_loss.detach().cpu()),
+            "entropy": float(entropy.detach().cpu()),
+        }
+
     def save_checkpoint(self, path: Path, *, provenance: dict[str, str]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save({
