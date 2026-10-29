@@ -67,6 +67,20 @@ def public_resources(state: dict[str, Any], *, include_combat: bool = False
     result["deck"] = _deck(state)
     result["relics"] = _id_list(state, "relics", "relic_id")
     result["potions"] = _potions(state)
+    # Four future public map layers. Aggregate types, not ephemeral node IDs;
+    # hidden room outcomes remain hidden.
+    nodes = state.get("map")
+    if isinstance(nodes, list) and type(state.get("floor")) is int:
+        floor = state["floor"]
+        projected: dict[str, int] = {}
+        for node in nodes:
+            if not isinstance(node, dict) or type(node.get("floor")) is not int:
+                continue
+            depth = node["floor"] - floor
+            if 1 <= depth <= 4:
+                key = f"d{depth}:{node.get('room_type', 'unknown')}"
+                projected[key] = projected.get(key, 0) + 1
+        result["public_map_future_room_counts"] = projected
     if include_combat and isinstance(state.get("combat"), dict):
         combat = state["combat"]
         enemies = []
@@ -181,6 +195,20 @@ class PublicJointRunTrace:
                 "state": public_resources(state),
             })
         self._frame += 1
+
+    def record_decision(self, observation, legal_actions, decision) -> None:
+        """Record public macro choices for subsequent trajectory diagnostics."""
+        if not self.macro_states:
+            return
+        index = self._frame - 1
+        last = self.macro_states[-1]
+        if last["observation_index"] == index:
+            import json
+            last["selected_action"] = {
+                "kind": decision.action.kind,
+                "payload": json.loads(decision.action.payload_json),
+                "legal_action_kinds": sorted(set(a.kind for a in legal_actions)),
+            }
 
     def finish(self, *, outcome: str, censored: bool,
                act1_clear: bool, frontier_progress: float,
