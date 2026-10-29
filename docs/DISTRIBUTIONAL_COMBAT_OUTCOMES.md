@@ -1,5 +1,15 @@
 # Distributional combat outcomes (experimental, October 2026)
 
+
+> **Historical experimental predictor, not a deployment contract.**
+> The accepted 2026-10-29 [hierarchical MuZero-inspired architecture](HIERARCHICAL_MUZERO_ARCHITECTURE.md)
+> uses an optional policy-conditioned **joint distribution** of combat-caused
+> consequences, including potion use, persistent counters and typed special
+> effects. Do not train on ordinary RNG reward identities or the macro
+> policy's reward collection choices. Preserve this earlier experiment for
+> reproducibility.
+
+
 This extends the combat-outcome instrumentation and phase-separated trainer
 without changing the emulator or the deployable tactical policy.
 
