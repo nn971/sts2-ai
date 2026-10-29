@@ -4,6 +4,7 @@ Torch-only research module, deliberately separate from legacy portable JSON
 combat and H6 macro checkpoints. Output is per-legal-action logits and a
 phase-specific value. No teacher/pretrained weights are loaded implicitly.
 """
+# mypy: disable-error-code="import-not-found,misc,no-any-return"
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
