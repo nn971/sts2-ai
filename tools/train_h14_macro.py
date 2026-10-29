@@ -248,13 +248,19 @@ def main() -> None:
     p.add_argument("--ppo-epochs", type=int, default=3)
     p.add_argument("--ppo-minibatch", type=int, default=8)
     p.add_argument("--ppo-sample-limit", type=int, default=2048)
+    p.add_argument("--gamma", type=float, default=0.99)
+    p.add_argument("--gae-lambda", type=float, default=0.95)
+    p.add_argument("--floor-reward", type=float, default=0.02)
     p.add_argument("--resume", action="store_true")
     p.add_argument("--execute", action="store_true")
     args = p.parse_args()
     if (min(args.rounds, args.runs_per_round, args.workers, args.max_decisions,
             args.width, args.layers, args.heads, args.feedforward,
             args.ppo_epochs, args.ppo_minibatch, args.ppo_sample_limit) < 1
-            or args.temperature <= 0 or args.lr <= 0 or not args.seed_prefix):
+            or args.temperature <= 0 or args.lr <= 0 or not args.seed_prefix
+            or not 0 < args.gamma <= 1 or not 0 <= args.gae_lambda <= 1
+            or not math.isfinite(args.floor_reward) or args.floor_reward < 0):
+
         p.error("Invalid H14 training parameters")
     if not args.h9_checkpoint.is_file() or not args.emulator_dll.is_file():
         p.error("Missing pinned H9 checkpoint or emulator DLL")
@@ -283,6 +289,8 @@ def main() -> None:
     config = {
         "schema": SCHEMA, "model": asdict(cfg), "provenance": provenance,
         "seed_prefix": args.seed_prefix, "temperature": args.temperature,
+        "gamma": args.gamma, "gae_lambda": args.gae_lambda,
+        "floor_reward": args.floor_reward, "episode_goal": "act1-clear-v1",
         "lr": args.lr, "max_decisions": args.max_decisions,
         "runs_per_round": args.runs_per_round,
         "workers": args.workers, "ppo_epochs": args.ppo_epochs,
@@ -380,6 +388,7 @@ def main() -> None:
                     "seed": episode.seed, "outcome": episode.outcome,
                     "act1_cleared": episode.act1_cleared,
                     "censored": episode.censored,
+                    "terminal_floor": episode.terminal_floor,
                     "macro_samples": len(episode.samples),
                     "macro_actions": len(episode.macro_history),
                 }, sort_keys=True), flush=True)
@@ -394,6 +403,7 @@ def main() -> None:
                     "outcome": episode.outcome,
                     "censored": episode.censored,
                     "act1_cleared": episode.act1_cleared,
+                    "terminal_floor": episode.terminal_floor,
                     "macro_decisions": episode.macro_history,
                 }, sort_keys=True) + "\n")
         stats = train_round(
@@ -401,6 +411,8 @@ def main() -> None:
             ppo_epochs=args.ppo_epochs, minibatch=args.ppo_minibatch,
             sample_limit=args.ppo_sample_limit, round_index=round_index,
             temperature=args.temperature,
+            gamma=args.gamma, gae_lambda=args.gae_lambda,
+            floor_reward=args.floor_reward,
         )
         checkpoint = models / f"macro-r{round_index:04d}.pt"
         network.save_checkpoint(checkpoint, provenance=provenance)
@@ -419,6 +431,10 @@ def main() -> None:
                 "act1_cleared": sum(e.act1_cleared is True for e in episodes),
                 "certified_defeats": sum(e.act1_cleared is False for e in episodes),
                 "unlabeled": sum(e.act1_cleared is None for e in episodes),
+                "average_terminal_floor": (
+                    sum(e.terminal_floor for e in episodes) / len(episodes)
+                ),
+                "max_terminal_floor": max(e.terminal_floor for e in episodes),
             },
             "training": stats,
             "source_seeds": [e.seed for e in episodes],
