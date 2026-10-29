@@ -125,14 +125,14 @@ def decode_target(row: dict[str, Any]) -> SearchTrainingSample:
             or type(row.get("search_terminal_evaluations")) is not int
             or type(row.get("search_neural_cutoffs")) is not int):
         raise ValueError("Missing H15 search evaluation provenance")
-    if (row["search_rollout_mode"] == "terminal" and
-            (row["search_neural_cutoffs"] != 0 or
-             row["search_terminal_evaluations"] != row["search_simulations"])):
-        raise ValueError("Terminal-rollout search cannot contain critic cutoffs")
     if (type(row.get("search_simulations")) is not int
             or row["search_simulations"] <= 0
             or sum(sample.visits) != row["search_simulations"]):
         raise ValueError("Root search visit count is inconsistent")
+    if (row["search_rollout_mode"] == "terminal" and
+            (row["search_neural_cutoffs"] != 0 or
+             row["search_terminal_evaluations"] != row["search_simulations"])):
+        raise ValueError("Terminal-rollout search cannot contain critic cutoffs")
     return sample
 
 
