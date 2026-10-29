@@ -13,9 +13,20 @@ from collections.abc import Sequence
 from typing import Any
 
 from .shared_game_objects import (
-    ACTION_BUCKETS, IDENTITY_BUCKETS, KINDS, MAX_ACTIONS, MAX_OBJECTS,
-    SHARED_OBJECT_SCHEMA, ZONES, ActionToken, EncodedDecision, ObjectToken,
-    _bucket, _entry_id, _numbers, _records,
+    ACTION_BUCKETS,
+    IDENTITY_BUCKETS,
+    KINDS,
+    MAX_ACTIONS,
+    MAX_OBJECTS,
+    SHARED_OBJECT_SCHEMA,
+    ZONES,
+    ActionToken,
+    EncodedDecision,
+    ObjectToken,
+    _bucket,
+    _entry_id,
+    _numbers,
+    _records,
 )
 
 
