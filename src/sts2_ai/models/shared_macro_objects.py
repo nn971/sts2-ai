@@ -16,7 +16,6 @@ from .shared_game_objects import (
     ACTION_BUCKETS,
     IDENTITY_BUCKETS,
     KINDS,
-    MAX_ACTIONS,
     MAX_OBJECTS,
     SHARED_OBJECT_SCHEMA,
     ZONES,
@@ -191,7 +190,7 @@ def encode_macro_public_decision(
     same logits for different offers/choices silently corrupted H6 macro PPO.
     """
     if (not isinstance(state, dict) or isinstance(state.get("combat"), dict)
-            or not legal_actions or len(legal_actions) > MAX_ACTIONS):
+            or not legal_actions):
         raise ValueError("Expected a nonempty public macro decision")
     objects: list[ObjectToken] = []
     lookup: dict[tuple[str, object], int] = {}
