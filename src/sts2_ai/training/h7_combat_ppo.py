@@ -246,7 +246,11 @@ class H7CombatPPO:
         max_native_cpu_value_drift = 0.0
         native_actor_decisions = 0
         native_cpu_audits = 0
-        cpu_reference: SharedObjectTransformer | None = None
+        # The source actor is already pinned by SHA per worker. Audit the
+        # worst device/batching discrepancies, plus periodic samples, using
+        # the exact CPU singleton inference path. Never re-run every sampled
+        # native action in the training process (a 14.66M model is costly).
+        cpu_candidates: list[tuple[float, int, PreparedH7]] = []
         with torch.no_grad():
             for begin in range(0, len(prepared), self.minibatch):
                 chunk = prepared[begin:begin + self.minibatch]
@@ -285,18 +289,10 @@ class H7CombatPPO:
                                 f"value_drift={value_drift:.8g}"
                             )
                         if logp_drift > 5e-4 or value_drift > 5e-4:
-                            if cpu_reference is None:
-                                cpu_reference = deepcopy(self.model).to("cpu").eval()
-                            cpu_logp, cpu_value = verify_native_singleton(
-                                cpu_reference, p, temperature=self.temperature,
-                            )
-                            native_cpu_audits += 1
-                            max_native_cpu_logp_drift = max(
-                                max_native_cpu_logp_drift, cpu_logp,
-                            )
-                            max_native_cpu_value_drift = max(
-                                max_native_cpu_value_drift, cpu_value,
-                            )
+                            cpu_candidates.append((
+                                max(logp_drift, value_drift),
+                                begin + offset, p,
+                            ))
                     elif p.actor_origin == "h8-synthetic":
                         if logp_drift > 5e-4 or value_drift > 5e-4:
                             raise ValueError(
@@ -307,6 +303,24 @@ class H7CombatPPO:
                             )
                     else:
                         raise ValueError("Unknown H7 actor origin")
+
+        # Highest-drift samples are the most informative diagnostic for the
+        # CPU/CUDA mismatch; one periodic sample guards against selection
+        # bias. Every entry still passes the full GPU safety bound above.
+        worst = sorted(cpu_candidates, key=lambda item: (-item[0], item[1]))[:16]
+        periodic = [item for item in cpu_candidates if item[1] % 128 == 0]
+        audited = {item[1]: item[2] for item in (*worst, *periodic)}
+        if audited:
+            cpu_reference = deepcopy(self.model).to("cpu").eval()
+            for index, sample in sorted(audited.items()):
+                cpu_logp, cpu_value = verify_native_singleton(
+                    cpu_reference, sample, temperature=self.temperature,
+                )
+                native_cpu_audits += 1
+                max_native_cpu_logp_drift = max(
+                    max_native_cpu_logp_drift, cpu_logp)
+                max_native_cpu_value_drift = max(
+                    max_native_cpu_value_drift, cpu_value)
 
         ratio_verification_seconds = time.perf_counter() - started
         optimization_started = time.perf_counter()
@@ -380,6 +394,7 @@ class H7CombatPPO:
             "max_native_logp_drift": max_native_logp_drift,
             "max_native_value_drift": max_native_value_drift,
             "native_cpu_audits": native_cpu_audits,
+            "native_cpu_audit_candidates": len(cpu_candidates),
             "max_native_cpu_logp_drift": max_native_cpu_logp_drift,
             "max_native_cpu_value_drift": max_native_cpu_value_drift,
             "updates": len(diagnostics),
