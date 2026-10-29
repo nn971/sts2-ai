@@ -8,8 +8,14 @@ given survival/death labels.
 from __future__ import annotations
 
 from collections import Counter
+import json
 from dataclasses import dataclass, field
 from typing import Any
+
+from sts2_ai.training.h13_public_transitions import (
+    CONTEXT_VERSION,
+    public_choice_context,
+)
 
 SCHEMA = "sts2-h12-public-joint-transition-v1"
 
@@ -203,12 +209,17 @@ class PublicJointRunTrace:
         index = self._frame - 1
         last = self.macro_states[-1]
         if last["observation_index"] == index:
-            import json
-            last["selected_action"] = {
-                "kind": decision.action.kind,
-                "payload": json.loads(decision.action.payload_json),
+            kind = decision.action.kind
+            payload = json.loads(decision.action.payload_json)
+            selected = {
+                "kind": kind,
+                "payload": payload,
                 "legal_action_kinds": sorted(set(a.kind for a in legal_actions)),
             }
+            if kind == "choose_map_node" or "reward" in kind:
+                raw = json.loads(observation.payload_json)
+                selected.update(public_choice_context(raw, kind, payload))
+            last["selected_action"] = selected
 
     def finish(self, *, outcome: str, censored: bool,
                act1_clear: bool, frontier_progress: float,
@@ -229,6 +240,7 @@ class PublicJointRunTrace:
                   0.1 * max(0.0, min(1.0, frontier_progress / 16.0)))
         return {
             "schema": SCHEMA,
+            "public_choice_context_version": CONTEXT_VERSION,
             "source_run_seed": self.source_seed,
             "policy_identity": policy_identity,
             "outcome": outcome,
