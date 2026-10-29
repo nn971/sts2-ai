@@ -89,3 +89,23 @@ menus. Every search example's visit counts must sum to its simulation budget.
 - An H15 checkpoint cannot be deployed by the old H9 actor, because that
   actor omits move tokens. Serving needs an H15 inference adapter.
 - Search improvement is **not claimed** without independent native replay.
+
+## Public-state fair replay integration (M1 continuation)
+
+`search/h15_public_combat_adapter.py` now adapts **an explicitly supplied,
+certified** `FairContinuationSampler` to H15 search. A full public
+observation/action/menu transcript determines the information-set root.
+Each simulation draws a distinct conditioned continuation; the adapter
+retains the same hidden continuation through all subsequent decisions and
+releases it after the simulation. The resulting combat ends at the first
+postcombat public observation, before reward picking.
+
+The H9 score uses public `defeat_total_non_minion_enemy_hp` and
+`defeat_remaining_non_minion_enemy_hp` at defeat; missing HP fields fail
+loudly. Victory uses public exit HP/max HP. This bridge cannot itself
+certify the *native* posterior: supplying an oracle-fork sampler is invalid.
+Its toy tests validate the observer, score and ownership lifecycle; the
+source-conditioned native sampler and distribution test remain next work.
+
+`models/h15_policy_value.py` supplies frozen H9/H15 checkpoint inference
+for search, with move-aware encoding and a counted [0,1] critic clamp.
