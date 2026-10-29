@@ -117,7 +117,11 @@ class H15PublicCombatAdapter:
             raise ValueError("Conditioned continuation disagrees with legal public menu")
         transition = self._backend.step(handle, action)
         self._active_handle = transition.child
-        self._backend.release_many([handle])
+        if transition.child != handle:
+            self._backend.release_many([handle])
+        elif getattr(self._backend, "mutable_transition_capability_id", None) != (
+                "h15-h8-inplace-player-step-v1"):
+            raise ValueError("Backend returned same handle without H8 mutable-step capability")
         observed = self._backend.observe(transition.child, policy)
         public = json.loads(observed.payload_json)
         if not isinstance(public, dict):
