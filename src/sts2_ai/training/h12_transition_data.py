@@ -7,8 +7,8 @@ given survival/death labels.
 """
 from __future__ import annotations
 
-from collections import Counter
 import json
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
