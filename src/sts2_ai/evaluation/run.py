@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from sts2_ai.agents import Agent, Decision, ExactStateAgent
 from sts2_ai.emulator import (
@@ -20,6 +20,17 @@ from sts2_ai.emulator.run_environment import (
     reset_training_run,
 )
 from sts2_ai.evaluation.boss_progress import BossProgress, BossProgressTracker
+
+
+class PublicCombatObserver(Protocol):
+    """Optional passive public-only run observer (H14 or another schema)."""
+
+    def observe(self, observation: Mapping[str, Any]) -> None: ...
+
+    def record_committed_action(
+        self, observation: Mapping[str, Any], *, kind: str,
+        payload: Mapping[str, Any],
+    ) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +85,7 @@ def play_run(
         Callable[[StateHandle, Observation, tuple[LegalAction, ...], Decision], None]
         | None
     ) = None,
+    combat_boundary_observer: PublicCombatObserver | None = None,
 ) -> RunSummary:
     """Drive one complete emulator run while keeping only the live state handle."""
 
@@ -93,6 +105,8 @@ def play_run(
             raw = json.loads(observation.payload_json)
             current = cast(dict[str, Any], raw if isinstance(raw, dict) else {})
             final_state = current
+            if combat_boundary_observer is not None:
+                combat_boundary_observer.observe(current)
             boss_tracker.observe(current)
             hp = current.get("hp")
             if isinstance(hp, int):
@@ -117,6 +131,15 @@ def play_run(
                 decision_observer(state, observation, legal_actions, decision)
 
             transition = backend.step(state, decision.action)
+            # The action is committed only after a successful engine step.
+            # Reward selections are ignored by the combat boundary observer.
+            if combat_boundary_observer is not None:
+                action_payload = json.loads(decision.action.payload_json)
+                if not isinstance(action_payload, dict):
+                    raise ValueError("Committed action payload is not an object")
+                combat_boundary_observer.record_committed_action(
+                    current, kind=decision.action.kind, payload=action_payload,
+                )
             emulator_transitions += 1 + _search_transitions(decision.metadata_json)
             old_state = state
             state = transition.child
