@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from dataclasses import replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sts2_ai.models.shared_game_objects import (
     IDENTITY_BUCKETS,
@@ -22,7 +22,8 @@ from sts2_ai.models.shared_game_objects import (
     _bucket,
     encode_public_decision,
 )
-from sts2_ai.models.shared_transformer import H7Batch, collate_h7
+if TYPE_CHECKING:
+    from sts2_ai.models.shared_transformer import H7Batch
 
 H15_COMBAT_SCHEMA = "sts2-h15-combat-moves-v1"
 
@@ -67,6 +68,8 @@ def collate_h15(decisions: Sequence[EncodedDecision]) -> H7Batch:
     if not decisions or any(d.schema != H15_COMBAT_SCHEMA or d.phase != "combat"
                             for d in decisions):
         raise ValueError("H15 batch requires versioned combat observations")
+    from sts2_ai.models.shared_transformer import collate_h7
+
     return collate_h7([replace(d, schema=SHARED_OBJECT_SCHEMA) for d in decisions])
 
 

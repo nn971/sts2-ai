@@ -87,6 +87,7 @@ def test_move_aware_schema_is_additive_and_owned():
     assert len(first.objects) == len(old.objects) + 2
     assert first.objects[-2].owner == 2
     assert first.objects[-2].identity != second.objects[-2].identity
+    pytest.importorskip("torch")
     assert collate_h15([first]).action_mask.sum().item() == len(ACTIONS)
     with pytest.raises(ValueError):
         collate_h15([old])
