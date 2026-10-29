@@ -329,7 +329,7 @@ def main() -> None:
                     "censored": episode.censored,
                     "act1_cleared": episode.act1_cleared,
                     "macro_decisions": episode.macro_history,
-                }, sort_keys=True) + "\\n")
+                }, sort_keys=True) + "\n")
         stats = train_round(
             network, optimizer, episodes, device=args.device,
             ppo_epochs=args.ppo_epochs, minibatch=args.ppo_minibatch,
