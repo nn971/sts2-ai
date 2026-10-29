@@ -13,6 +13,7 @@ import argparse
 import atexit
 import hashlib
 import json
+import math
 import os
 import random
 import tempfile
@@ -35,8 +36,9 @@ from sts2_ai.models.h14_hierarchical_agent import (
 from sts2_ai.models.h14_macro_actor_critic import H14MacroActorCritic
 from sts2_ai.models.shared_game_objects import encode_public_decision
 from sts2_ai.models.shared_transformer import H7Config
+from sts2_ai.training.h14_macro_gae import macro_gae
 
-SCHEMA = "sts2-h14-native-macro-ppo-v1"
+SCHEMA = "sts2-h14-native-macro-ppo-gae-v2"
 _WORKER_BACKEND: JsonlEmulatorBackend | None = None
 _WORKER_H9: FrozenH9CombatActor | None = None
 _WORKER_MACRO: H14MacroActorCritic | None = None
@@ -50,6 +52,7 @@ class Episode:
     censored: bool
     act1_cleared: bool | None
     decisions: int
+    terminal_floor: int
     samples: tuple[H14MacroActionSample, ...]
     macro_history: tuple[dict[str, Any], ...]
 
@@ -121,14 +124,19 @@ def run_episode(request: tuple[int, str, float, int]) -> tuple[int, Episode]:
         policy=InformationPolicy(FAIR_POLICY_ID),
         ascension=10, max_decisions=max_decisions,
         environment=NATIVE_OVERGROWTH,
+        stop_after_act1_clear=True,
     )
     certified = (
-        True if result.act1_cleared is True
+        True if result.outcome == "act1_clear"
         else False if result.outcome == "defeat" else None
     )
     return index, Episode(
         seed, result.outcome, result.censored, certified,
-        result.decisions, tuple(agent.samples) if certified is not None else (),
+        result.decisions,
+        (16 if certified is True else (
+            result.terminal_floor if type(result.terminal_floor) is int else 0
+        )),
+        tuple(agent.samples) if certified is not None else (),
         tuple(agent.macro_history),
     )
 
@@ -137,18 +145,42 @@ def train_round(
     network: H14MacroActorCritic, optimizer: torch.optim.Optimizer,
     episodes: list[Episode], *, device: str, ppo_epochs: int,
     minibatch: int, sample_limit: int, round_index: int,
-    temperature: float,
+    temperature: float, gamma: float, gae_lambda: float,
+    floor_reward: float,
 ) -> dict[str, Any]:
-    dataset = [
-        (sample, (1.0 if episode.act1_cleared else -1.0))
-        for episode in episodes if episode.act1_cleared is not None
-        for sample in episode.samples
-    ]
+    dataset: list[tuple[H14MacroActionSample, float, float, float]] = []
+    for episode in episodes:
+        if episode.act1_cleared is None or not episode.samples:
+            continue
+        targets = macro_gae(
+            [sample.progress_floor for sample in episode.samples],
+            [sample.behavior_value for sample in episode.samples],
+            final_floor=episode.terminal_floor,
+            act1_cleared=episode.act1_cleared,
+            gamma=gamma, gae_lambda=gae_lambda, floor_reward=floor_reward,
+        )
+        dataset.extend(
+            (sample, target.value_target, target.advantage, target.reward)
+            for sample, target in zip(episode.samples, targets)
+        )
     if len(dataset) > sample_limit:
         rng = random.Random(f"h14-macro-sample-{round_index}")
         dataset = rng.sample(dataset, sample_limit)
     if not dataset:
         return {"samples": 0, "updates": 0}
+    # One frozen-behavior cohort supplies advantage normalization for all
+    # epochs; never normalize per tiny PPO minibatch.
+    advantage_mean = sum(item[2] for item in dataset) / len(dataset)
+    advantage_variance = sum(
+        (item[2] - advantage_mean) ** 2 for item in dataset
+    ) / len(dataset)
+    advantage_std = math.sqrt(advantage_variance)
+    if advantage_std < 1e-6:
+        normalized = [0.0 for _ in dataset]
+    else:
+        normalized = [
+            (item[2] - advantage_mean) / advantage_std for item in dataset
+        ]
     rng = random.Random(f"h14-macro-minibatches-{round_index}")
     network.train()
     stats: list[dict[str, float]] = []
@@ -158,16 +190,21 @@ def train_round(
         for start in range(0, len(order), minibatch):
             indices = order[start:start + minibatch]
             batch = [dataset[index] for index in indices]
-            encoded = [item.decision for item, _ in batch]
-            selected = torch.tensor([item.selected for item, _ in batch])
-            logp = torch.tensor([item.behavior_log_probability for item, _ in batch])
-            old_values = torch.tensor([item.behavior_value for item, _ in batch])
-            returns = torch.tensor([label for _, label in batch])
+            encoded = [item.decision for item, _, _, _ in batch]
+            selected = torch.tensor([item.selected for item, _, _, _ in batch])
+            logp = torch.tensor([
+                item.behavior_log_probability for item, _, _, _ in batch
+            ])
+            old_values = torch.tensor([
+                item.behavior_value for item, _, _, _ in batch
+            ])
+            returns = torch.tensor([target for _, target, _, _ in batch])
+            adv = torch.tensor([normalized[index] for index in indices])
             optimizer.zero_grad(set_to_none=True)
             loss, metrics = network.ppo_loss(
                 encoded, selected_actions=selected,
                 behavior_log_probabilities=logp,
-                behavior_values=old_values, returns=returns,
+                behavior_values=old_values, returns=returns, advantages=adv,
                 behavior_temperature=temperature,
             )
             if not torch.isfinite(loss):
@@ -179,6 +216,10 @@ def train_round(
     network.eval()
     return {
         "samples": len(dataset), "updates": len(stats),
+        "advantage_mean": advantage_mean,
+        "advantage_std": advantage_std,
+        "value_target_mean": sum(item[1] for item in dataset) / len(dataset),
+        "reward_mean": sum(item[3] for item in dataset) / len(dataset),
         **{name: sum(item[name] for item in stats) / len(stats)
            for name in ("policy", "value", "entropy")},
     }
