@@ -21,7 +21,7 @@ from torch.nn import functional as F
 from .shared_game_objects import SHARED_OBJECT_SCHEMA, EncodedDecision, encode_public_decision
 from .shared_transformer import H7Config, SharedObjectTransformer, collate_h7
 
-H14_MACRO_MODEL_FORMAT = "sts2-h14-macro-policy-value-v1"
+H14_MACRO_MODEL_FORMAT = "sts2-h14-macro-policy-value-v2"
 
 
 @dataclass(frozen=True)
@@ -49,7 +49,10 @@ class H14MacroActorCritic(nn.Module):
         if not decisions or any(decision.phase != "macro" for decision in decisions):
             raise ValueError("H14 macro actor/critic requires only macro decisions")
         batch = collate_h7(decisions).to(next(self.parameters()).device)
-        return self.transformer(batch, known_phase=1)
+        # TD(lambda) return targets may exceed +/-1 after shaped progress.
+        # H9 retains the legacy tanh path; only the H14 continuation critic
+        # uses an unrestricted output.
+        return self.transformer(batch, known_phase=1, squash_value=False)
 
     def evaluate(self, public_state: dict[str, Any],
                  legal_actions: Sequence[Any]) -> H14MacroScores:
@@ -123,7 +126,7 @@ class H14MacroActorCritic(nn.Module):
         selected_actions: Tensor, behavior_log_probabilities: Tensor,
         behavior_values: Tensor, returns: Tensor, clip_epsilon: float = 0.2,
         value_weight: float = 0.5, entropy_weight: float = 0.01,
-        behavior_temperature: float = 1.0,
+        behavior_temperature: float = 1.0, advantages: Tensor | None = None,
     ) -> tuple[Tensor, dict[str, float]]:
         """On-policy macro PPO using certified run outcomes as value targets.
 
@@ -142,7 +145,7 @@ class H14MacroActorCritic(nn.Module):
         if any(x.shape != values.shape for x in (chosen, old_logp, old_v, targets)):
             raise ValueError("H14 PPO batch shapes disagree")
         if (not torch.isfinite(old_logp).all() or not torch.isfinite(old_v).all()
-                or not torch.isfinite(targets).all() or (targets.abs() > 1).any()):
+                or not torch.isfinite(targets).all()):
             raise ValueError("H14 PPO requires finite certified returns")
         masks = collate_h7(decisions).action_mask.to(device)
         if ((chosen < 0).any() or (chosen >= masks.shape[1]).any()
@@ -150,7 +153,13 @@ class H14MacroActorCritic(nn.Module):
             raise ValueError("Invalid selected macro action")
         logp = F.log_softmax(logits / behavior_temperature, dim=-1)
         selected_logp = logp.gather(1, chosen[:, None]).squeeze(1)
-        advantage = (targets - old_v).detach()
+        advantage = (
+            (targets - old_v) if advantages is None
+            else advantages.to(device=device, dtype=dtype)
+        )
+        if advantage.shape != values.shape or not torch.isfinite(advantage).all():
+            raise ValueError("H14 PPO advantages must be finite and match states")
+        advantage = advantage.detach()
         ratio = torch.exp(selected_logp - old_logp)
         policy_loss = -torch.minimum(
             ratio * advantage,
