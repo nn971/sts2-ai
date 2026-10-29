@@ -13,7 +13,6 @@ import json
 import os
 import tempfile
 import time
-from collections import Counter
 from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
@@ -30,14 +29,6 @@ from sts2_ai.training.h7_combat_ppo import H7CombatPPO
 from sts2_ai.training.h10_native_transformer import (
     NATIVE_REWARD, native_cohort, select_native, summarize_native,
     verify_corpora,
-)
-from sts2_ai.training.native_adaptive_curriculum import (
-    NativeAdaptiveProgress,
-    family_key,
-    family_pools,
-    feedback_means,
-    fixed_probe_recipes,
-    weighted_native_selection,
 )
 from train_h7_reference_combat import (
     atomic_torch, collect, summarize as summarize_synthetic,
@@ -95,10 +86,6 @@ def main() -> None:
     p.add_argument("--output-root", type=Path, required=True)
     p.add_argument("--rounds", type=int, default=40)
     p.add_argument("--native-per-round", type=int, default=64)
-    p.add_argument("--adaptive-native", action="store_true",
-                   help="H9-style native encounter learning-progress sampling")
-    p.add_argument("--adaptive-interval", type=int, default=10)
-    p.add_argument("--adaptive-probes-per-family", type=int, default=4)
     p.add_argument("--synthetic-per-round", type=int, default=32)
     p.add_argument("--workers", type=int, default=15)
     p.add_argument("--max-native-decisions", type=int, default=512)
@@ -125,23 +112,9 @@ def main() -> None:
             or args.structured_curriculum_seed < 0
             or not 0 < args.temperature <= 5):
         p.error("Invalid H10 native PPO configuration")
-    if args.adaptive_native and (args.adaptive_interval < 1 or
-                                 args.adaptive_probes_per_family < 1):
-        p.error("Native adaptive curriculum requires positive probe interval/count")
     train = load_recipes(args.train_corpus)
     heldout = load_recipes(args.holdout_corpus)
     verify_corpora(train, heldout, emulator_revision=args.emulator_revision)
-    native_families = family_pools(train) if args.adaptive_native else {}
-    probe_recipes = (
-        fixed_probe_recipes(
-            train, per_family=args.adaptive_probes_per_family,
-            study_seed=args.study_seed,
-        ) if args.adaptive_native else ()
-    )
-    adaptive = (
-        NativeAdaptiveProgress(tuple(native_families))
-        if args.adaptive_native else None
-    )
     config = {
         "schema": RUN_SCHEMA,
         "native_reward": NATIVE_REWARD,
@@ -170,9 +143,6 @@ def main() -> None:
         "heldout_entries": len(heldout),
         "planned_native": args.native_per_round * args.rounds,
         "planned_synthetic": args.synthetic_per_round * args.rounds,
-        "adaptive_native": args.adaptive_native,
-        "adaptive_families": len(native_families),
-        "adaptive_fixed_probe_entries": len(probe_recipes),
         "execute": args.execute,
     }, indent=2), flush=True)
     if not args.execute:
@@ -201,14 +171,6 @@ def main() -> None:
         learner.model.load_state_dict(saved["model"], strict=True)
         learner.optimizer.load_state_dict(saved["optimizer"])
         history = saved["history"]
-        if adaptive is not None:
-            if "adaptive_progress" not in saved or saved["adaptive_progress"] is None:
-                p.error("Adaptive native resume requires saved curriculum state")
-            adaptive = NativeAdaptiveProgress.from_dict(
-                saved["adaptive_progress"],
-            )
-            if adaptive.families != tuple(native_families):
-                p.error("Adaptive resume encounter families differ from source corpus")
         if len(history) > args.rounds:
             p.error("Existing PPO checkpoint exceeds configured rounds")
         torch.set_rng_state(saved["torch_rng"])
@@ -227,46 +189,9 @@ def main() -> None:
             actor_path, seed=args.actor_seed,
             temperature=args.temperature, greedy=False,
         )
-        adaptive_feedback = None
-        if adaptive is not None and round_index % args.adaptive_interval == 0:
-            # Deterministic player actions at fixed exact-native entry points.
-            # Probe fights NEVER enter PPO; they update only sampling weights.
-            probe_spec = H7PlayerSpec.from_file(
-                actor_path, seed=args.actor_seed,
-                temperature=args.temperature, greedy=True,
-            )
-            probe_rollouts = native_cohort(
-                selected=probe_recipes, round_index=0, spec=probe_spec,
-                emulator_root=args.emulator_root,
-                emulator_revision=args.emulator_revision,
-                workers=args.workers,
-                max_decisions=args.max_native_decisions,
-            )
-            if any(ep.outcome == "censored" for ep in probe_rollouts):
-                raise RuntimeError(
-                    "Fixed native adaptive probe was censored; increase "
-                    "--max-native-decisions before a new fingerprinted run"
-                )
-            adaptive_feedback = adaptive.update(
-                feedback_means(probe_recipes, probe_rollouts),
-            )
-            print(
-                f"[h10-native-adaptive-probe] round={round_index+1} "
-                f"families={len(adaptive.families)} "
-                f"fixed_probes={len(probe_recipes)} "
-                f"evaluations={adaptive.evaluations}",
-                flush=True,
-            )
-        selected = (
-            weighted_native_selection(
-                train, count=args.native_per_round,
-                study_seed=args.study_seed, round_index=round_index,
-                weights=adaptive.weights,
-            )
-            if adaptive is not None else select_native(
-                train, count=args.native_per_round,
-                study_seed=args.study_seed, round_index=round_index,
-            )
+        selected = select_native(
+            train, count=args.native_per_round,
+            study_seed=args.study_seed, round_index=round_index,
         )
         native = native_cohort(
             selected=selected, round_index=round_index,
@@ -325,19 +250,6 @@ def main() -> None:
                 [recipe.seed, recipe.exact_hash] for recipe in selected
             ]),
             "native": summarize_native(native),
-            "adaptive_native": (
-                None if adaptive is None else {
-                    "probe": adaptive_feedback,
-                    "evaluations": adaptive.evaluations,
-                    "weights": dict(adaptive.weights),
-                    "selected_families": dict(Counter(
-                        family_key(recipe) for recipe in selected
-                    )),
-                    "distinct_entries": len({
-                        (recipe.seed, recipe.exact_hash) for recipe in selected
-                    }),
-                }
-            ),
             "synthetic": synthetic_row,
             "elapsed_seconds": time.monotonic() - begun,
             **diagnostics,
@@ -348,9 +260,6 @@ def main() -> None:
             "model": learner.model.state_dict(),
             "optimizer": learner.optimizer.state_dict(),
             "history": history,
-            "adaptive_progress": (
-                None if adaptive is None else adaptive.to_dict()
-            ),
             "torch_rng": torch.get_rng_state(),
             "cuda_rng": (
                 torch.cuda.get_rng_state_all()
@@ -364,14 +273,10 @@ def main() -> None:
         atomic_json(progress_path, {
             "schema": RUN_SCHEMA, "fingerprint": fingerprint,
             "config": config, "history": history,
-            "adaptive_progress": (
-                None if adaptive is None else adaptive.to_dict()
-            ),
         })
         print(
             f"[h10-native] round={round_index+1}/{args.rounds} "
             f"native={len(native)} native_wins={row['native']['outcomes'].get('victory', 0)} "
-            f"adaptive={'yes' if adaptive is not None else 'no'} "
             f"synthetic={args.synthetic_per_round} "
             f"updates={diagnostics['updates']} "
             f"decisions={diagnostics['source_decisions']} "
