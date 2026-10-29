@@ -176,3 +176,93 @@ Only after the fair sampler is working is it appropriate to write a
 training. The existing offline `train_h15_search_distill.py` already
 consumes the target-record format; neither the macro training system nor
 H9 reward needs a redesign.
+
+
+## M3 — runnable fixed-fixture H8 Reference Nature search (research model)
+
+The first executable search collector uses a **declared, limited chance
+prior**, `h15-h8-fixed-fixture-independent-reference-nature-v1`.
+It holds an H8 source-supported A10 Silent combat fixture and all
+non-Reference-Nature seed-derived mechanics fixed; it varies only the
+63-bit H8 Reference Nature seed. Search samples new independent seeds,
+replays the observed combat action/observation/legal-menu prefix, and
+accepts a candidate only when every public frame and menu matches.
+This is exact rejection conditioning **under that explicitly fixed
+fixture/Reference Nature prior** (up to the deterministic PRNG model).
+It does not claim native-run posterior fairness or H14 deck distributions.
+All unsupported Nature boundaries and rejection exhaustion fail closed.
+
+The H8 JSONL runtime mutates its versioned session in place. H15 now
+supports that exact capability while continuing to release normal
+immutable-state handles as before. Full independent combat rollouts
+grow the PUCT information-set tree across repeated simulations.
+Results include both search visits and the actual completed fight's H9
+terminal reward. The data file records `chance_prior_id` and
+`experiment_regime`, and distillation requires an exact matching
+`--accepted-chance-prior`.
+
+Run **one small experiment** before any long searches. This uses the
+existing `sts2-emulator` directory and a compiled .NET 9 DLL:
+
+```fish
+cd ~/projects/sts2-ai
+git fetch origin
+git switch research/h15-combat-search-guided-20261029
+git pull --ff-only
+source .venv/bin/activate.fish
+
+set emu ~/projects/sts2-emulator
+set rev (git -C $emu rev-parse HEAD)
+dotnet build $emu/Sts2Emulator.sln -c Release -m:1
+
+python -m pytest -q \
+    tests/test_h15_h8_reference.py \
+    tests/test_h15_combat_search.py \
+    tests/test_h15_public_combat_adapter.py \
+    tests/test_h15_native_search_collector.py
+
+python -u tools/collect_h15_h8_reference.py \
+    --emulator-root $emu \
+    --emulator-revision $rev \
+    --emulator-dll $emu/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+    --h9-checkpoint results/h9-adaptive-totalhp-r40-r250/models/player-r0250.pt \
+    --output-root results/h15-h8-reference-smoke-001 \
+    --scenario mawler-a10 --deck silent-starter-v1 \
+    --simulations 4 --max-searches 1 --max-candidates 16384 \
+    --device cuda --execute
+```
+
+If a source-specific public opening is so rare that the independent
+Reference Nature seed rejection runs out of candidates, the experiment
+will explicitly fail rather than resample the live hidden seed. This
+rejection procedure is a correctness-first research baseline; its cost
+will likely preclude large training on arbitrary late-game histories.
+
+To distill targets from that experiment, explicitly name the same
+model prior:
+
+```fish
+python -u tools/train_h15_search_distill.py \
+    --initialize-from-model results/h9-adaptive-totalhp-r40-r250/models/player-r0250.pt \
+    --search-data results/h15-h8-reference-smoke-001/targets.jsonl \
+    --accepted-chance-prior h15-h8-fixed-fixture-independent-reference-nature-v1 \
+    --output results/h15-h8-reference-smoke-001/player-m1.pt \
+    --device cuda --execute
+```
+
+**Do not infer policy improvement from the one-fight smoke.** Follow-up
+requires disjoint fixture/seed cohorts, many combat searches, measured
+per-fight compute, and comparison of H9, H9+search and standalone H15
+on identical held-out source distributions.
+
+### Native full-run H14 integration remains separate
+
+`collect_native_combat_search` retains its separate pinned H10
+`CombatSnapshotRecipe` reconstruction, but cannot use the fixed-fixture
+sampler for full native H14 histories. Such a substitution would fix
+hidden non-Nature state from one realized run and misrepresent its
+posterior. Implement an H8 native combat-root constructor with public
+HP/deck/relic/enemy state and a public-history-conditioned joint
+stochastic provider before asserting a genuinely native full-run
+continuation distribution. Search under the limited Reference Nature
+fixture model is preparatory learning, not the final deployed agent.
