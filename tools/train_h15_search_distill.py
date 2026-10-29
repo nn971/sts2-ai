@@ -34,6 +34,10 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--initialize-from-model", required=True, type=Path)
     p.add_argument("--search-data", required=True, type=Path)
+    p.add_argument(
+        "--accepted-chance-prior", required=True,
+        help="Exact versioned chance-prior ID of the complete search corpus",
+    )
     p.add_argument("--output", required=True, type=Path)
     p.add_argument("--epochs", type=int, default=8)
     p.add_argument("--batch-size", type=int, default=32)
@@ -58,6 +62,10 @@ def main() -> None:
             if not isinstance(row, dict):
                 raise ValueError(f"Row {index} is not an object")
             sample = decode_target(row)
+            if row.get("chance_prior_id") != args.accepted_chance_prior:
+                raise ValueError(
+                    f"Row {index}: search chance prior mismatch or missing provenance"
+                )
             if sample.search_model_sha256 != model_sha:
                 raise ValueError(f"Row {index}: wrong search-teacher checkpoint SHA256")
             rows.append(sample)
@@ -65,7 +73,8 @@ def main() -> None:
         raise ValueError("Empty certified search dataset")
     fingerprints = {s.source_seed for s in rows}
     print(f"[h15-preflight] samples={len(rows)} source_seeds={len(fingerprints)} "
-          f"teacher_sha256={model_sha} reward={REWARD_VERSION} schema={SAMPLE_SCHEMA}",
+          f"teacher_sha256={model_sha} reward={REWARD_VERSION} schema={SAMPLE_SCHEMA} "
+          f"chance_prior={args.accepted_chance_prior}",
           flush=True)
     if not args.execute:
         print("[h15-preflight] no optimizer run (pass --execute)", flush=True)
@@ -114,6 +123,7 @@ def main() -> None:
             "search_data_sha256": sha256(args.search_data),
             "reward_version": REWARD_VERSION,
             "target_schema": SAMPLE_SCHEMA,
+            "chance_prior": args.accepted_chance_prior,
             "epochs": args.epochs,
             "seed": args.seed,
         },
