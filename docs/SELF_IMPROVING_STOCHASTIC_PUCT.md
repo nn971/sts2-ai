@@ -1,5 +1,14 @@
 # Self-improving stochastic PUCT: bounded variance roadmap
 
+
+> **Historical plan, superseded as the current model architecture on 2026-10-29.**
+> Follow [Hierarchical MuZero-inspired architecture](HIERARCHICAL_MUZERO_ARCHITECTURE.md).
+> The old variance-only value target and ordering below are retained for
+> reproducibility and reusable search infrastructure. The word *active*
+> in the historical status records its status at the time, not the current
+> canonical development decision.
+
+
 **Status:** active implementation; an opt-in public-history-conditioned rejection
 reference, empirical finite-cohort sampler, and stochastic PUCT kernel exist.
 A *scalable, native-probability-calibrated* fair search/data-collection loop,
