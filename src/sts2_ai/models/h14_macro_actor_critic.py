@@ -8,9 +8,10 @@ PyTorch is the explicit optional `neural` dependency.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import torch
 from torch import Tensor, nn
