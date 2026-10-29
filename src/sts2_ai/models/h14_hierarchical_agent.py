@@ -13,7 +13,7 @@ import math
 import random
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import torch
 
@@ -73,7 +73,7 @@ class FrozenH9CombatActor:
         # Reinterpret *only the schema label* for the same fixed-size H7
         # collator. Actual H9 object/action tokens are unchanged.
         batch = collate_h7([
-            replace(encoded, schema=SHARED_OBJECT_SCHEMA),
+            cast(EncodedDecision, replace(encoded, schema=SHARED_OBJECT_SCHEMA)),
         ]).to(next(self.model.parameters()).device)
         with torch.inference_mode():
             logits, _ = self.model(batch, known_phase=0)
