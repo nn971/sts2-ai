@@ -313,9 +313,15 @@ class H7CombatPPO:
         if audited:
             cpu_reference = deepcopy(self.model).to("cpu").eval()
             for index, sample in sorted(audited.items()):
-                cpu_logp, cpu_value = verify_native_singleton(
-                    cpu_reference, sample, temperature=self.temperature,
-                )
+                try:
+                    cpu_logp, cpu_value = verify_native_singleton(
+                        cpu_reference, sample, temperature=self.temperature,
+                    )
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Native CPU actor provenance audit failed at "
+                        f"prepared index={index}: {exc}"
+                    ) from exc
                 native_cpu_audits += 1
                 max_native_cpu_logp_drift = max(
                     max_native_cpu_logp_drift, cpu_logp)
