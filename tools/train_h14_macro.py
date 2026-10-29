@@ -50,6 +50,7 @@ class Episode:
     act1_cleared: bool | None
     decisions: int
     samples: tuple[H14MacroActionSample, ...]
+    macro_history: tuple[dict[str, Any], ...]
 
 
 def sha256_file(path: Path) -> str:
@@ -127,6 +128,7 @@ def run_episode(request: tuple[int, str, float, int]) -> tuple[int, Episode]:
     return index, Episode(
         seed, result.outcome, result.censored, certified,
         result.decisions, tuple(agent.samples) if certified is not None else (),
+        tuple(agent.macro_history),
     )
 
 
@@ -313,10 +315,21 @@ def main() -> None:
                     "act1_cleared": episode.act1_cleared,
                     "censored": episode.censored,
                     "macro_samples": len(episode.samples),
+                    "macro_actions": len(episode.macro_history),
                 }, sort_keys=True), flush=True)
         if set(completed) != set(range(args.runs_per_round)):
             raise RuntimeError("Incomplete native H14 source-run cohort")
         episodes = [completed[i] for i in range(args.runs_per_round)]
+        history_path = args.output_root / f"round-{round_index:04d}-history.jsonl"
+        with history_path.open("w", encoding="utf-8") as history_file:
+            for episode in episodes:
+                history_file.write(json.dumps({
+                    "source_run_seed": episode.seed,
+                    "outcome": episode.outcome,
+                    "censored": episode.censored,
+                    "act1_cleared": episode.act1_cleared,
+                    "macro_decisions": episode.macro_history,
+                }, sort_keys=True) + "\\n")
         stats = train_round(
             network, optimizer, episodes, device=args.device,
             ppo_epochs=args.ppo_epochs, minibatch=args.ppo_minibatch,
@@ -334,6 +347,8 @@ def main() -> None:
             "optimizer": str(opt.relative_to(args.output_root)),
             "optimizer_sha256": sha256_file(opt),
             "behavior_sha256": source_sha,
+            "history_file": history_path.name,
+            "history_sha256": sha256_file(history_path),
             "outcomes": {
                 "act1_cleared": sum(e.act1_cleared is True for e in episodes),
                 "certified_defeats": sum(e.act1_cleared is False for e in episodes),
