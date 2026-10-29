@@ -189,3 +189,43 @@ def test_h7_public_actor_uses_existing_p0_menu_without_teacher(tmp_path: Path):
     assert row["behavior_model_id"].startswith("h7-")
     assert row["source_legal_actions"] == legal_source
     assert row["source_observation"] == frame()
+
+
+def test_large_combat_legal_menu_is_encoded_without_truncation():
+    # Native combat can expose more than 128 distinct card/target actions.
+    state = frame()
+    hand = [
+        {"instance_id": i + 1000, "card_id": f"card-{i}", "cost": 1}
+        for i in range(48)
+    ]
+    enemies = [
+        {"instance_id": i + 2000, "enemy_id": f"enemy-{i}",
+         "hp": 25, "max_hp": 25}
+        for i in range(4)
+    ]
+    state["combat"]["hand"] = hand
+    state["combat"]["enemies"] = enemies
+    menu = actions(*[
+        ("play_card", {"CardInstanceId": card["instance_id"],
+                       "TargetEnemyId": enemy["instance_id"]})
+        for card in hand for enemy in enemies
+    ])
+    assert len(menu) == 192
+    wide = encode_public_decision(state, menu)
+    narrow = encode_public_decision(state, menu[:1])
+    assert len(wide.actions) == len(menu)
+    assert len(set(wide.actions)) == len(menu)
+    batch = collate_h7([wide, narrow])
+    assert batch.action_mask.shape == (2, 192)
+    assert batch.action_mask[0].sum().item() == 192
+    assert batch.action_mask[1].sum().item() == 1
+
+    net = model().eval()
+    with torch.no_grad():
+        logits, values = net(batch)
+        single_logits, single_values = net(collate_h7([narrow]))
+    assert logits.shape == (2, 192)
+    assert torch.isfinite(logits[0]).all()
+    assert (logits[1, 1:] < -1e20).all()
+    torch.testing.assert_close(logits[1, 0], single_logits[0, 0], atol=2e-5, rtol=2e-5)
+    torch.testing.assert_close(values[1], single_values[0], atol=2e-5, rtol=2e-5)
