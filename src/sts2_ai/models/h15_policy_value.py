@@ -47,6 +47,7 @@ class H15CombatEvaluator:
             p.requires_grad_(False)
         self.checkpoint_sha256 = checkpoint_sha256
         self.clipped_negative_values = 0
+        self.public_selection_fallbacks = 0
 
     @classmethod
     def load(cls, checkpoint: Path, *, device: str = "cpu") -> H15CombatEvaluator:
@@ -68,10 +69,22 @@ class H15CombatEvaluator:
                 legal_actions: tuple[LegalAction, ...]) -> CombatPrediction:
         if observation.policy_id != FAIR_POLICY_ID or not legal_actions:
             raise ValueError("H15 search requires fair nonempty combat menu")
+        public = json.loads(observation.payload_json)
+        if not isinstance(public, dict):
+            raise ValueError("Malformed fair public observation")
+        choice = public.get("h15_player_choice_kind")
+        if choice is not None:
+            if choice not in ("player_card_selection", "draw_hook_action_choice"):
+                raise ValueError("Unknown H15 public player-choice kind")
+            if not isinstance(public.get("combat"), dict):
+                raise ValueError("Nested choice must remain inside combat")
+            # H9 never learned out-of-hand selection pointers. Uniform legal
+            # priors are an explicit temporary rollout policy, not a neural
+            # prediction. The search still evaluates these actions through
+            # completed combat outcomes and records their frequency.
+            self.public_selection_fallbacks += 1
+            return CombatPrediction((0.0,) * len(legal_actions), 0.5, 0.5)
         if self.codec_schema == SHARED_OBJECT_SCHEMA:
-            public = json.loads(observation.payload_json)
-            if not isinstance(public, dict):
-                raise ValueError("Malformed fair public observation")
             encoded = encode_public_decision(public, legal_actions)
             batch = collate_h7([encoded])
         else:
