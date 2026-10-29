@@ -81,6 +81,7 @@ def play_run(
         Callable[[StateHandle, Observation, tuple[LegalAction, ...], Decision], None]
         | None
     ) = None,
+    public_frame_observer: Callable[[dict[str, Any]], None] | None = None,
 ) -> RunSummary:
     """Drive to the versioned goal boundary, never exposing hidden emulator state."""
 
@@ -102,6 +103,8 @@ def play_run(
             raw = json.loads(observation.payload_json)
             current = cast(dict[str, Any], raw if isinstance(raw, dict) else {})
             final_state = current
+            if public_frame_observer is not None:
+                public_frame_observer(current)
             boss_tracker.observe(current)
             hp = current.get("hp")
             if isinstance(hp, int):
