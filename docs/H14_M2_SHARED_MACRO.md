@@ -101,8 +101,10 @@ python -u tools/train_h14_macro.py \
 Preflight now launches the pinned emulator bridge, verifies an actual
 Ascension 10 native reset, and encodes the first legal Neow macro menu. The
 emulator's A5+ initial curse is **Ascender's Bane**; A0 uses Restlessness.
-The pinned native RNG map profile is
-`native-overgrowth-map-native-rng-v0.111.0-v1`.
+The strict native-start guard accepts two audited generation profiles:
+`native-overgrowth-map-structure-v0.111.0-v1` (older emulator gitlink)
+and `native-overgrowth-map-native-rng-v0.111.0-v1` (your pinned
+`2c46c703` revision). All other map profiles are rejected.
 
 If the previous attempt failed before producing `latest.json`, rerun the
 same `--execute` command without deleting the result directory: the trainer
