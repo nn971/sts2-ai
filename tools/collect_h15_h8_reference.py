@@ -19,6 +19,7 @@ from pathlib import Path
 from sts2_ai.emulator.chance import PublicHistoryStep
 from sts2_ai.emulator.h15_h8_reference import (
     H8_REFERENCE_MODEL,
+    H8_DECLARED_LAW_MODEL,
     H8FixtureEntry,
     H8ReferenceCombatBackend,
     H8ReferenceNaturePosterior,
@@ -56,6 +57,8 @@ def main() -> None:
     p.add_argument("--tree-depth", type=int, default=16)
     p.add_argument("--rollout-depth", type=int, default=512)
     p.add_argument("--device", default="cpu")
+    p.add_argument("--use-declared-chance-laws", action="store_true",
+                   help="Use emulator-advertised Chance Laws and external Nature outcomes (fixed-fixture prior only)")
     p.add_argument("--execute", action="store_true")
     args = p.parse_args()
     if (not args.emulator_revision or len(args.emulator_revision) != 40
@@ -80,9 +83,13 @@ def main() -> None:
     )
     dll_hash = hashlib.sha256(args.emulator_dll.read_bytes()).hexdigest()
     model_hash = hashlib.sha256(args.h9_checkpoint.read_bytes()).hexdigest()
+    chance_model = (
+        H8_DECLARED_LAW_MODEL if args.use_declared_chance_laws
+        else H8_REFERENCE_MODEL
+    )
     config = {
         "schema": REPORT_SCHEMA,
-        "chance_model": H8_REFERENCE_MODEL,
+        "chance_model": chance_model,
         "emulator_revision": args.emulator_revision,
         "emulator_dll_sha256": dll_hash,
         "h9_teacher_sha256": model_hash,
@@ -111,6 +118,7 @@ def main() -> None:
     with Session(["dotnet", str(args.emulator_dll), "prototype-ai-jsonl"]) as session:
         backend = H8ReferenceCombatBackend(
             session, entry, emulator_revision=args.emulator_revision,
+            use_declared_chance_laws=args.use_declared_chance_laws,
         )
         sampler = H8ReferenceNaturePosterior(
             backend, max_candidates=args.max_candidates,
@@ -148,8 +156,12 @@ def main() -> None:
         raise FileExistsError("Refusing to overwrite existing H15 search targets")
     with data_path.open("w", encoding="utf-8") as f:
         for sample in report.targets:
-            sample["chance_prior_id"] = H8_REFERENCE_MODEL
-            sample["experiment_regime"] = "fixed-h8-fixture-reference-nature"
+            sample["chance_prior_id"] = chance_model
+            sample["experiment_regime"] = (
+                "fixed-h8-fixture-declared-chance-law"
+                if args.use_declared_chance_laws
+                else "fixed-h8-fixture-reference-nature"
+            )
             f.write(json.dumps(sample, sort_keys=True) + "\n")
     result = {
         **config,
