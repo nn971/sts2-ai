@@ -233,3 +233,37 @@ command **without** `--resume`. Existing completed PPO rounds require
   separate milestone after native combat generalization.
 - Remote GitHub changes require **local .NET and CUDA integration
   validation** before the results are trusted.
+
+## H10 synthetic death-summon HP hotfix (2026-10-29)
+
+The 64-native/32-synthetic full run completed round 1, then failed in
+round 2 during the synthetic Phrog Parasite elite's on-death summons:
+`UNSUPPORTED_CONTROLLED_CHANCE site=combat.initial_unique_hp
+operation=choose_index requires a saved continuation`.
+
+The exact structural issue was in the legacy choice dispatcher
+(`RandomIndexProvidersV111.cs`): it omitted the already-existing
+`IsEngineOwnedDeathSummonHpRequest` authorization, although
+`PrototypeCombat.ResolveLegacyDeathSummonHp` entered that narrow guarded
+scope. Emulator commit `2bbf2eb` connects the authorization; commit
+`37ff9e9` tests the limited draw, RNG state, and rejection of unrelated
+randomness. All unrelated controlled chance sites remain fail-closed.
+A passing standalone test does not substitute for one H8 replay on the
+failing Phrog Parasite scenario.
+
+**Provenance:** round 1 saved `optimizer-checkpoint.pt` using the old
+emulator revision and DLL fingerprint. Pulling the patched emulator changes
+both. Do not alter `fingerprint`, quietly retag the old JSONL corpora, or
+use `--resume` with incompatible emulator binaries. The clean path is to
+rebuild the patched emulator, recollect source-run-disjoint native train and
+holdout corpora (see collection commands above), and restart the 40-round
+experiment from the unchanged H9 R250 model in a NEW output directory.
+Keep the original progress and checkpoint as historical evidence.
+
+For focused local acceptance:
+```fish
+cd ~/projects/sts2-emulator
+dotnet test tests/Sts2Emulator.Core.Tests -c Release \
+  --filter FullyQualifiedName~RandomIndexProvidersV111Tests
+dotnet build src/Sts2Emulator.Cli -c Release
+```
