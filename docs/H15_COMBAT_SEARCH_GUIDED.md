@@ -293,3 +293,92 @@ selection menu and train those decisions directly.
 Nested choices must be processed by player action, never by a Nature
 draw/intent resolver, and must never be silently skipped. Unsupported
 choice kinds continue to fail closed.
+
+
+## M4 — primary dataset from actual native runs
+
+**Important change in priority:** `tools/collect_h15_long.py` remains a
+*research-only synthetic fixture* experiment. It is NOT the primary long
+training source. Instead `tools/collect_h15_native_entries.py` records
+`CombatSnapshotRecipe` entries while a real policy plays entire native
+Overgrowth A10 runs. The emulator generates each legal deck, relic, potion,
+HP, floor, map, opponent and card acquisition history jointly; no manual
+deck sampling is used for the primary corpus.
+
+The collector implements:
+
+- 15 CPU workers, each with a persistent emulator and pinned frozen H9
+  combat model and an H10 phase-split macro checkpoint. Multiple distinct
+  H10 macro checkpoints can be supplied to broaden policy coverage.
+- Separate full-run train/heldout seeds, never a random split of combat
+  snapshots from the same seed. Every native entry has a replayable public
+  action prefix, fair observation identity and auditor-only exact state hash.
+- Per-run atomic/resumable artifacts. Consolidated `train.jsonl` and
+  `heldout.jsonl` use the existing H10 `load_recipes` format. A public-only
+  build descriptor hashes normalized actual deck contents and records
+  encounter, floor, HP, relic and potion inventory for coverage reporting.
+- Explicit run/error accounting, structured live progress and
+  `coverage.json`. Repeat the same invocation to resume. Use
+  `--retry-failed` to retry errored source runs after diagnosing the cause.
+- Initial pinned distribution: H10 frozen H9 + *H10 phase-split macro*.
+  This is a genuine native macro-to-combat configuration distribution.
+  The stronger H14 macro policy currently lives on a separate experimental
+  branch and is **not yet an accepted loader** for this collector. Integrate
+  its versioned macro codec/checkpoint loader or collect from the H14 branch
+  before declaring the final joint actor distribution representative.
+
+First check CLI and a very small *native* collection:
+
+```fish
+cd ~/projects/sts2-ai
+git fetch origin
+git switch research/h15-combat-search-guided-20261029
+git pull --ff-only
+source .venv/bin/activate.fish
+
+set emu ~/projects/sts2-emulator
+set rev (git -C $emu rev-parse HEAD)
+# Set $macro to an existing H10-compatible phase-split macro .pt checkpoint.
+set macro /path/to/existing/h10-phase-split-macro.pt
+
+python -m pytest -q tests/test_h15_native_entry_corpus.py
+python -u tools/collect_h15_native_entries.py \
+    --emulator-root $emu \
+    --emulator-revision $rev \
+    --emulator-dll $emu/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+    --combat-checkpoint results/h9-adaptive-totalhp-r40-r250/models/player-r0250.pt \
+    --macro-model $macro \
+    --output-root results/h15-native-a10-source-v1 \
+    --train-runs 8 --heldout-runs 4 \
+    --workers 4 --execute
+```
+
+For a *new* long-run corpus, choose a new output root and use
+`--train-runs 2048 --heldout-runs 256 --workers 15 --execute` while
+retaining the checkpoint/revision/seed-prefix identity. Each run produces
+zero or more native entries. Check `coverage.json` for rare elites/bosses,
+weak early-game concentration, and failures before choosing training
+weights. The default old H10 policy may reach the boss rarely.
+
+Once the native source corpus has nonempty train AND heldout splits, the
+existing `tools/train_h10_native_combat.py` can train from them using
+`--synthetic-per-round 0` if a fully native PPO control experiment is
+desired. That is legitimate on-policy combat learning from actual native
+run entries. It does **not** yet produce H15 PUCT search visit targets.
+
+### Intended joint-policy collection cycle
+
+After the H14 actor is integrated, regenerate native source cohorts from
+the *current* macro policy and current frozen/updated combat policy in
+alternating training generations. Keep each cohort's policy/checkpoint
+SHA and source-run seeds, and reserve independent evaluation runs. A
+small, explicitly labeled supplementary stream of generated elite/boss
+fixtures can improve coverage when the policy rarely reaches later acts;
+never report that oversampled stream as naturally encountered frequency.
+
+A native replay recipe faithfully reproduces the original hidden RNG
+state for evaluation. It must **not** be handed to PUCT as a fair posterior
+sample: fair search still requires a conditional chance provider for the
+actual public history. The fixed-fixture Reference Nature sampler remains
+limited to synthetic fixtures. Do not mix its targets into native-search
+training without an explicit chance-model distinction.
