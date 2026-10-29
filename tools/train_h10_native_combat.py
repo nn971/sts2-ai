@@ -280,6 +280,8 @@ def main() -> None:
             f"synthetic={args.synthetic_per_round} "
             f"updates={diagnostics['updates']} "
             f"decisions={diagnostics['source_decisions']} "
+            f"native_cuda_logp_drift={diagnostics['max_native_logp_drift']:.5f} "
+            f"cpu_audits={diagnostics['native_cpu_audits']} "
             f"elapsed_s={row['elapsed_seconds']:.1f}",
             flush=True,
         )
