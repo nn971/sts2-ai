@@ -165,6 +165,7 @@ class SharedObjectTransformer(nn.Module):
 
     def forward(
         self, batch: H7Batch, *, known_phase: int | None = None,
+        squash_value: bool = True,
     ) -> tuple[Tensor, Tensor]:
         """Evaluate shared objects/actions, optionally with a trusted uniform phase.
 
@@ -205,13 +206,16 @@ class SharedObjectTransformer(nn.Module):
             macro_logits = self.policy_heads[1](attended).squeeze(-1)
             phase = (batch.phases == 0).unsqueeze(1)
             logits = torch.where(phase, combat_logits, macro_logits)
-            value0 = torch.tanh(self.value_heads[0](context[:, 0]).squeeze(-1))
-            value1 = torch.tanh(self.value_heads[1](context[:, 0]).squeeze(-1))
+            value0 = self.value_heads[0](context[:, 0]).squeeze(-1)
+            value1 = self.value_heads[1](context[:, 0]).squeeze(-1)
+            if squash_value:
+                value0, value1 = torch.tanh(value0), torch.tanh(value1)
             values = torch.where(batch.phases == 0, value0, value1)
         else:
             logits = self.policy_heads[known_phase](attended).squeeze(-1)
-            values = torch.tanh(
-                self.value_heads[known_phase](context[:, 0]).squeeze(-1))
+            values = self.value_heads[known_phase](context[:, 0]).squeeze(-1)
+            if squash_value:
+                values = torch.tanh(values)
         logits = logits.masked_fill(~batch.action_mask, torch.finfo(logits.dtype).min)
         return logits, values
 
