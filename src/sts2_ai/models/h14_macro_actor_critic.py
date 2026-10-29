@@ -123,6 +123,7 @@ class H14MacroActorCritic(nn.Module):
         selected_actions: Tensor, behavior_log_probabilities: Tensor,
         behavior_values: Tensor, returns: Tensor, clip_epsilon: float = 0.2,
         value_weight: float = 0.5, entropy_weight: float = 0.01,
+        behavior_temperature: float = 1.0,
     ) -> tuple[Tensor, dict[str, float]]:
         """On-policy macro PPO using certified run outcomes as value targets.
 
@@ -130,7 +131,7 @@ class H14MacroActorCritic(nn.Module):
         contributes only after its Act-1 clear/defeat label is established.
         """
         if (not 0 < clip_epsilon < 1 or value_weight < 0
-                or entropy_weight < 0):
+                or entropy_weight < 0 or behavior_temperature <= 0):
             raise ValueError("Invalid H14 PPO coefficients")
         logits, values = self.forward(decisions)
         device, dtype = values.device, values.dtype
@@ -147,7 +148,7 @@ class H14MacroActorCritic(nn.Module):
         if ((chosen < 0).any() or (chosen >= masks.shape[1]).any()
                 or not masks.gather(1, chosen[:, None]).all()):
             raise ValueError("Invalid selected macro action")
-        logp = F.log_softmax(logits, dim=-1)
+        logp = F.log_softmax(logits / behavior_temperature, dim=-1)
         selected_logp = logp.gather(1, chosen[:, None]).squeeze(1)
         advantage = (targets - old_v).detach()
         ratio = torch.exp(selected_logp - old_logp)
