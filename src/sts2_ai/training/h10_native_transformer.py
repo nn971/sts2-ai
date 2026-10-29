@@ -94,6 +94,7 @@ def build_gae(
         gae = delta + gamma * gae_lambda * gae
         prepared.append(PreparedH7(
             encoded, chosen, logp, value, gae, gae + value,
+            actor_origin="native-cpu",
         ))
     return tuple(reversed(prepared))
 
