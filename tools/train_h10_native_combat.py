@@ -241,6 +241,7 @@ def main() -> None:
             }
         diagnostics = learner.update_prepared(
             prepared, seed=args.study_seed * 1000003 + round_index,
+            allow_native_cpu_actor=True,
         )
         row = {
             "round": round_index + 1,
