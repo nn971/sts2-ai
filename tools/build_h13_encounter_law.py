@@ -43,8 +43,11 @@ def main() -> None:
                 continue
             run = json.loads(line)
             seed = run.get("source_run_seed")
-            if not isinstance(seed, str) or seed in seeds:
-                parser.error("Missing or duplicate full-run source seed")
+            index = run.get("source_run_index")
+            if (type(index) is not int or index < 0
+                    or seed != f"{header['source_seed_prefix']}-{index}"
+                    or seed in seeds):
+                parser.error("Invalid, mismatched or duplicated source seed/index")
             if run.get("schema") != H12_RUN_SCHEMA:
                 parser.error("Unexpected native H12 run schema")
             if run.get("policy_identity") != identity:
@@ -75,6 +78,10 @@ def main() -> None:
                 for groups, count in sorted(counts.items())
             ],
         })
+    if not rows and seeds:
+        parser.error(
+            "No observed map destinations; verify H13 decision observer"
+        )
     output = {
         "schema": ENCOUNTER_LAW_SCHEMA,
         "source_journal_sha256": file_sha256(args.journal),
