@@ -30,6 +30,11 @@ class PreparedH7:
     old_value: float
     advantage: float
     target: float
+    # Native exact-state rollouts evaluate a pinned fp32 actor on CPU; H8
+    # synthetic actors and PPO ratio verification use CUDA when configured.
+    # Record the provenance so relaxed cross-device bounds are never applied
+    # to the synthetic reference-law path.
+    actor_origin: str = "h8-synthetic"
 
 
 class H7CombatPPO:
@@ -173,12 +178,21 @@ class H7CombatPPO:
     def update_prepared(
         self, prepared: list[PreparedH7], *,
         seed: int, prepare_seconds: float = 0.0,
+        allow_native_cpu_actor: bool = False,
+        native_logp_tolerance: float = 0.01,
+        native_value_tolerance: float = 0.01,
     ) -> dict[str, float | int]:
-        """Update from verified on-policy H7 decisions, including native forks.
+        """Update from a frozen actor's verified on-policy action samples.
 
-        Callers must capture their logits/value from a frozen model checkpoint.
-        Exact log-probability and critic parity are verified *before* mutation.
+        H8/synthetic actor parity remains strict. Native workers execute the
+        same pinned fp32 weights on CPU; CUDA recomputation can differ slightly
+        due to device-specific kernels and padding/batching. An explicit opt-in
+        accepts only bounded numerical drift and reports its maximum. The
+        original behavior log-probabilities remain the PPO denominators.
         """
+        if (not 0 < native_logp_tolerance <= 0.02
+                or not 0 < native_value_tolerance <= 0.02):
+            raise ValueError("Invalid bounded cross-device actor tolerance")
         started = time.perf_counter()
         if len(prepared) < 2:
             raise ValueError("H7 PPO requires at least two source-public decisions")
@@ -189,6 +203,9 @@ class H7CombatPPO:
         # Recompute once before ANY mutation, proving that the captured frozen
         # actor corresponds to the exact trainable source policy revision.
         self.model.eval()
+        max_native_logp_drift = 0.0
+        max_native_value_drift = 0.0
+        native_actor_decisions = 0
         with torch.no_grad():
             for begin in range(0, len(prepared), self.minibatch):
                 chunk = prepared[begin:begin + self.minibatch]
@@ -200,10 +217,38 @@ class H7CombatPPO:
                 logps = torch.log_softmax(logits.float() / self.temperature, dim=1)
                 current = logps.gather(1, selected).squeeze(1).cpu().tolist()
                 predicted = values.float().cpu().tolist()
-                for p, observed, value in zip(chunk, current, predicted, strict=True):
-                    if (abs(p.old_logp - observed) > 5e-4
-                            or abs(p.old_value - value) > 5e-4):
-                        raise ValueError("H7 behavior policy mismatch before PPO update")
+                for offset, (p, observed, value) in enumerate(
+                    zip(chunk, current, predicted, strict=True)
+                ):
+                    logp_drift = abs(p.old_logp - observed)
+                    value_drift = abs(p.old_value - value)
+                    if p.actor_origin == "native-cpu":
+                        if not allow_native_cpu_actor:
+                            raise ValueError(
+                                "Native CPU actor requires explicit cross-device PPO opt-in"
+                            )
+                        native_actor_decisions += 1
+                        max_native_logp_drift = max(
+                            max_native_logp_drift, logp_drift)
+                        max_native_value_drift = max(
+                            max_native_value_drift, value_drift)
+                        logp_limit, value_limit = (
+                            native_logp_tolerance, native_value_tolerance,
+                        )
+                    elif p.actor_origin == "h8-synthetic":
+                        logp_limit = value_limit = 5e-4
+                    else:
+                        raise ValueError("Unknown H7 actor origin")
+                    if (not math.isfinite(logp_drift)
+                            or not math.isfinite(value_drift)
+                            or logp_drift > logp_limit or value_drift > value_limit):
+                        raise ValueError(
+                            "H7 behavior policy mismatch before PPO update: "
+                            f"origin={p.actor_origin} index={begin + offset} "
+                            f"logp_drift={logp_drift:.8g} "
+                            f"value_drift={value_drift:.8g} "
+                            f"limits=({logp_limit:g},{value_limit:g})"
+                        )
 
         ratio_verification_seconds = time.perf_counter() - started
         optimization_started = time.perf_counter()
@@ -273,6 +318,9 @@ class H7CombatPPO:
             "total_update_seconds": time.perf_counter() - started + prepare_seconds,
             "decisions": len(prepared),
             "source_decisions": total_valid_decisions,
+            "native_actor_decisions": native_actor_decisions,
+            "max_native_logp_drift": max_native_logp_drift,
+            "max_native_value_drift": max_native_value_drift,
             "updates": len(diagnostics),
             "approx_kl": sum(x[0] for x in diagnostics) / len(diagnostics),
             "clip_fraction": sum(x[1] for x in diagnostics) / len(diagnostics),
