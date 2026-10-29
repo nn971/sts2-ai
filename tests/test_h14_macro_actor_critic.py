@@ -49,7 +49,7 @@ def test_h14_macro_shared_policy_and_critic_both_receive_gradients():
         "hp": 49, "gold": 90, "event": {"event_id": "ev"},
     }, menu())
     assert len(result.action_logits) == 2
-    assert -1 <= result.continuation_value <= 1
+    assert torch.isfinite(torch.tensor(result.continuation_value))
 
 
 def test_h14_search_distillation_preserves_chance_vs_player_actions():
@@ -85,3 +85,21 @@ def test_h14_new_checkpoint_rejects_legacy_schema(tmp_path: Path):
     torch.save(raw, path)
     with pytest.raises(ValueError, match="Unsupported"):
         H14MacroActorCritic.load_checkpoint(path)
+
+
+def test_ppo_accepts_separate_gae_advantage_and_unbounded_critic_target():
+    net = H14MacroActorCritic(H7Config(
+        width=32, layers=1, heads=4, feedforward=64,
+    ))
+    loss, _ = net.ppo_loss(
+        [decision()], selected_actions=torch.tensor([0]),
+        behavior_log_probabilities=torch.tensor([-0.7]),
+        behavior_values=torch.tensor([0.1]),
+        returns=torch.tensor([1.08]),
+        advantages=torch.tensor([0.3]),
+        behavior_temperature=0.85,
+    )
+    assert torch.isfinite(loss)
+    loss.backward()
+    assert net.transformer.policy_heads[1][-1].weight.grad is not None
+    assert net.transformer.value_heads[1][-1].weight.grad is not None
