@@ -111,22 +111,41 @@ class H8ReferenceCombatBackend:
 
     @staticmethod
     def _actions(status: Mapping[str, Any]) -> tuple[LegalAction, ...]:
-        if status.get("kind") == "terminal":
+        kind = status.get("kind")
+        if kind == "terminal":
             return ()
-        if status.get("kind") != "player":
+        if kind not in ("player", "player_choice"):
             raise FairContinuationUnavailable(
-                "Reference Nature did not reach a supported ordinary player decision: "
-                + str(status.get("kind"))
+                "Reference Nature encountered unsupported player boundary: "
+                + str(kind)
             )
         frame = status.get("playerFrame")
         if not isinstance(frame, dict) or not isinstance(frame.get("actions"), list):
             raise ValueError("Missing H8 inline source-public player menu")
+        public_menu = frame["actions"]
         actions = tuple(LegalAction(
             a["actionId"], a["kind"], a["payloadJson"],
-        ) for a in frame["actions"])
+        ) for a in public_menu)
         if (not actions or len({a.action_id for a in actions}) != len(actions)
                 or [a.action_id for a in actions] != status.get("playerActionIds")):
             raise ValueError("H8 player menu disagrees with boundary status")
+        if kind == "player_choice":
+            # The H8 status describes which source-legal choices are pending,
+            # but ONLY actions from the public observation are returned to
+            # the player. Reuse the source-verified legality filter.
+            from sts2_ai.nature.draw_only_episode import fair_player_choice_actions
+
+            pending = status.get("playerChoicePending")
+            if not isinstance(pending, dict) or pending.get("kind") not in (
+                    "player_card_selection", "draw_hook_action_choice"):
+                raise FairContinuationUnavailable(
+                    "H8 pending player selection is unsupported"
+                )
+            selected = fair_player_choice_actions(pending, public_menu)
+            ids = {a["actionId"] for a in selected}
+            actions = tuple(action for action in actions if action.action_id in ids)
+            if not actions:
+                raise ValueError("H8 nested player choice has no public actions")
         return actions
 
     @staticmethod
@@ -155,6 +174,15 @@ class H8ReferenceCombatBackend:
         public = frame["observation"]
         if not isinstance(public.get("combat"), dict):
             raise ValueError("H8 ordinary player decision outside combat")
+        if status.get("kind") == "player_choice":
+            pending = status.get("playerChoicePending")
+            if not isinstance(pending, dict) or pending.get("kind") not in (
+                    "player_card_selection", "draw_hook_action_choice"):
+                raise FairContinuationUnavailable("Unsupported H8 nested player choice")
+            # Public kind marker only. The source pending object (which can
+            # contain private implementation details) is never forwarded.
+            public = dict(public)
+            public["h15_player_choice_kind"] = pending["kind"]
         payload = json.dumps(public, sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(payload.encode()).hexdigest()
         return Observation(FAIR_POLICY_ID, payload, digest)
@@ -165,7 +193,7 @@ class H8ReferenceCombatBackend:
             raise ValueError("Invalid or duplicate H8 session handle")
         if status.get("schemaId") != H8_RUNTIME_SCHEMA:
             raise ValueError("H8 runtime schema mismatch")
-        if status.get("kind") not in ("player", "terminal"):
+        if status.get("kind") not in ("player", "player_choice", "terminal"):
             raise FairContinuationUnavailable(
                 "H8 reference start has unsupported boundary "
                 + str(status.get("kind"))
@@ -228,12 +256,12 @@ class H8ReferenceCombatBackend:
             raise ValueError("H8 changed an in-place session handle")
         if nxt.get("boundaryVersion", -1) <= live.status["boundaryVersion"]:
             raise ValueError("H8 reference step failed to advance")
-        if nxt.get("kind") not in ("player", "terminal"):
+        if nxt.get("kind") not in ("player", "player_choice", "terminal"):
             raise FairContinuationUnavailable(
                 "H8 reference future encountered unsupported boundary "
                 + str(nxt.get("kind"))
             )
-        if nxt.get("kind") == "player":
+        if nxt.get("kind") in ("player", "player_choice"):
             self._actions(nxt)
         live.status = nxt
         return Transition(state, action, state, self.is_terminal(state))
