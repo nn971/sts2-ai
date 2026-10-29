@@ -38,9 +38,13 @@ def main() -> None:
     p.add_argument("--emulator-dll", type=Path, required=True)
     p.add_argument("--h9-checkpoint", type=Path, required=True)
     p.add_argument("--output-root", type=Path, required=True)
-    p.add_argument("--scenario", choices=sorted(
-        key for key, value in SCENARIOS.items() if value.ascension == 10,
-    ), default="mawler-a10")
+    p.add_argument(
+        "--scenario",
+        choices=sorted([
+            key for key, value in SCENARIOS.items() if value.ascension == 10
+        ]),
+        default="mawler-a10",
+    )
     p.add_argument("--deck", choices=DECK_PRESETS, default="silent-starter-v1")
     p.add_argument("--fixture-seed", default="h15-m3-fixed-fixture-v1")
     p.add_argument("--source-nature-seed", type=int, default=113)
