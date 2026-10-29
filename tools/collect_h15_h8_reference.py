@@ -156,6 +156,8 @@ def main() -> None:
         "outcome": report.outcome, "realized_combat_reward": report.reward,
         "exit_hp": report.exit_hp, "searched_decisions": report.searched_decisions,
         "combat_decisions": report.combat_decisions,
+        "nested_choice_uniform_fallbacks":
+            teacher.public_selection_fallbacks,
         "targets_sha256": hashlib.sha256(data_path.read_bytes()).hexdigest(),
     }
     (args.output_root / "report.json").write_text(
