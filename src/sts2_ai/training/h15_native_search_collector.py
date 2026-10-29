@@ -15,7 +15,11 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from sts2_ai.emulator.chance import FairContinuationSampler, PublicHistoryStep
+from sts2_ai.emulator.chance import (
+    FairContinuationSampler,
+    PublicHistoryStep,
+    require_fair_sampler,
+)
 from sts2_ai.emulator.protocol import EmulatorBackend, LegalAction, StateHandle
 from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH, reset_training_run
 from sts2_ai.evaluation.combat_snapshots import (
@@ -104,6 +108,9 @@ def collect_native_combat_search(
     if (min(simulations, max_decisions, max_searches, tree_depth, rollout_depth) < 1
             or seed < 0):
         raise ValueError("Invalid native combat-search budget")
+    # Reject unsupported samplers BEFORE replaying or owning a live native
+    # state, so a missing capability cannot leak the source combat handle.
+    require_fair_sampler(fair_sampler)
     current, initial_history = replay_native_public_history(backend, recipe)
     history = list(initial_history)
     adapter = H15PublicCombatAdapter(backend, sampler=fair_sampler)
