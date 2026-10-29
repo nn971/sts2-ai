@@ -8,9 +8,10 @@ from types import SimpleNamespace
 import pytest
 
 from sts2_ai.models.shared_game_objects import (
-    SHARED_OBJECT_SCHEMA, encode_public_decision,
+    SHARED_OBJECT_SCHEMA,
+    encode_public_decision,
 )
-from sts2_ai.models.shared_transformer import SharedObjectTransformer, H7Config, collate_h7
+from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer, collate_h7
 
 
 def legal(*items):
