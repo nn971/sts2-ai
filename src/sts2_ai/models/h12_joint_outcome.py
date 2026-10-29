@@ -138,10 +138,14 @@ def _potion_slots(entry: dict[str, Any], after: dict[str, Any]
     return ids, mask, retained
 
 
-def training_example(combat: dict[str, Any]
+def training_example(combat: dict[str, Any], *,
+                     resource_exit: dict[str, Any] | None = None
                      ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
     entry = combat["entry"]
+    # Survival and HP always describe the immediate combat exit. Other
+    # resources may be measured after the frozen policy settles room rewards.
     after = combat["exit"]
+    resources = resource_exit if resource_exit is not None else after
     if not isinstance(entry.get("combat"), dict):
         raise ValueError("H12 outcome training requires the combat-entry observation")
     max_hp = entry.get("max_hp")
@@ -153,14 +157,16 @@ def training_example(combat: dict[str, Any]
         raise ValueError("Combat lacks an observed survival label")
     if survived != (exit_hp > 0):
         raise ValueError("Combat survival and exit HP disagree")
-    pid, mask, retained = _potion_slots(entry, after)
+    pid, mask, retained = _potion_slots(entry, resources)
+    gold_change = resources["gold"] - entry["gold"]
     outcome = torch.tensor([
         float(survived),
         max(0., min(1., exit_hp / max_hp)),
-        math.tanh(combat["gold_delta"] / 100.),
-        float(entry["deck"] != after["deck"]),
-        float(entry["relics"] != after["relics"]),
-        float(bool(combat["potion_transition"]["gained"])),
+        math.tanh(gold_change / 100.),
+        float(entry["deck"] != resources["deck"]),
+        float(entry["relics"] != resources["relics"]),
+        float(bool((Counter(_ids(resources.get("potions"), "potion_id"))
+                    - Counter(_ids(entry.get("potions"), "potion_id"))))),
     ], dtype=torch.float32)
     return public_features(entry), pid, mask, retained, outcome
 
