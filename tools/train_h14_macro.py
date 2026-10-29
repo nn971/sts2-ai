@@ -25,7 +25,7 @@ from typing import Any
 import torch
 
 from sts2_ai.emulator import FAIR_POLICY_ID, InformationPolicy, JsonlEmulatorBackend
-from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH
+from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH, reset_training_run
 from sts2_ai.evaluation import play_run
 from sts2_ai.models.h14_hierarchical_agent import (
     FrozenH9CombatActor,
@@ -33,6 +33,7 @@ from sts2_ai.models.h14_hierarchical_agent import (
     H14MacroActionSample,
 )
 from sts2_ai.models.h14_macro_actor_critic import H14MacroActorCritic
+from sts2_ai.models.shared_game_objects import encode_public_decision
 from sts2_ai.models.shared_transformer import H7Config
 
 SCHEMA = "sts2-h14-native-macro-ppo-v1"
