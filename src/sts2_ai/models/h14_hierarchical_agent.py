@@ -35,6 +35,7 @@ class H14MacroActionSample:
     selected: int
     behavior_log_probability: float
     behavior_value: float
+    progress_floor: int = 0
 
 
 class FrozenH9CombatActor:
@@ -133,6 +134,12 @@ class H14HierarchicalAgent:
             index = self.rng.choices(range(len(legal_actions)), weights=probs, k=1)[0]
         self.samples.append(H14MacroActionSample(
             decision, index, math.log(probs[index]), score.continuation_value,
+            progress_floor=(
+                max(0, min(16, public["floor"]))
+                if type(public.get("floor")) is int and public.get("act") == 1
+                else 16 if type(public.get("act")) is int and public["act"] >= 2
+                else 0
+            ),
         ))
         chosen = legal_actions[index]
         details: dict[str, Any] = {
