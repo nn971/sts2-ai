@@ -43,9 +43,19 @@ def state(*, hp=60, combat=False, reward=False):
     }
     if combat:
         observation["combat"] = {
-            "turn": 2, "hand": [{"card_id": "strike"}],
-            "enemies": [{"enemy_id": "visible-beetle"}],
+            "turn": 2, "energy": 3, "player_block": 4,
+            "draw_pile_count": 6,
+            "hand": [{"card_id": "strike", "upgrade_level": 0}],
+            "discard_pile": [], "exhaust_pile": [], "play_pile": [],
+            "enemies": [{
+                "enemy_id": "visible-beetle", "hp": 20, "block": 0,
+                "move_id": "visible-attack", "intent_damage": 7,
+                "statuses": {"poison": 3}, "powers": [],
+                "hidden_intent": "HIDDEN-INTENT",
+            }],
+            "player_powers": [],
             "rng_state": "HIDDEN-COMBAT-RNG",
+            "draw_pile_order": "HIDDEN-DRAW-ORDER",
         }
     if reward:
         observation["reward"] = {
@@ -92,6 +102,11 @@ def test_combat_exit_freezes_before_reward_selection_and_logs_potions():
     )
     entry = state(combat=True)
     recorder.observe(entry)
+    assert recorder._pending is not None
+    combat_entry = recorder._pending["entry"]["combat"]
+    assert combat_entry["hand"][0]["card_id"] == "strike"
+    assert combat_entry["enemies"][0]["intent_damage"] == 7
+    assert "HIDDEN-" not in repr(combat_entry)
     recorder.record_committed_action(
         entry, kind="use_potion", payload={"Slot": 1, "TargetEnemyId": 2},
     )
