@@ -1,0 +1,48 @@
+name: h12-joint-outcomes
+
+on:
+  push:
+    branches:
+      - research/h12-**
+  pull_request:
+    paths:
+      - src/sts2_ai/training/h12_transition_data.py
+      - src/sts2_ai/models/h12_joint_outcome.py
+      - src/sts2_ai/evaluation/run.py
+      - tools/collect_h12_joint_outcomes.py
+      - tools/train_h12_joint_outcomes.py
+      - tests/test_h12_joint_outcome.py
+      - .github/workflows/h12-joint-outcomes.yml
+
+jobs:
+  h12-public-joint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -U pip
+      - run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: python -m pip install -e '.[neural,dev]'
+      - name: Check H12 source modules
+        run: |
+          python -m compileall -q \
+            src/sts2_ai/training/h12_transition_data.py \
+            src/sts2_ai/models/h12_joint_outcome.py \
+            src/sts2_ai/evaluation/run.py \
+            tools/collect_h12_joint_outcomes.py \
+            tools/train_h12_joint_outcomes.py \
+            tests/test_h12_joint_outcome.py
+          python -m ruff check \
+            src/sts2_ai/training/h12_transition_data.py \
+            src/sts2_ai/models/h12_joint_outcome.py \
+            tools/collect_h12_joint_outcomes.py \
+            tools/train_h12_joint_outcomes.py \
+            tests/test_h12_joint_outcome.py
+      - name: Joint-outcome and shared-macro compatibility
+        run: |
+          python -m pytest -q \
+            tests/test_h12_joint_outcome.py \
+            tests/test_h11_shared_macro_objects.py \
+            tests/test_shared_transformer_h7.py
