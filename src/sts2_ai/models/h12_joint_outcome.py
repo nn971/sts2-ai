@@ -165,8 +165,8 @@ def training_example(combat: dict[str, Any], *,
         math.tanh(gold_change / 100.),
         float(entry["deck"] != resources["deck"]),
         float(entry["relics"] != resources["relics"]),
-        float(bool((Counter(_ids(resources.get("potions"), "potion_id"))
-                    - Counter(_ids(entry.get("potions"), "potion_id"))))),
+        float(bool(Counter(_ids(resources.get("potions"), "potion_id"))
+                    - Counter(_ids(entry.get("potions"), "potion_id")))),
     ], dtype=torch.float32)
     return public_features(entry), pid, mask, retained, outcome
 
