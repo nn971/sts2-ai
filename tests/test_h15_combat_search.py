@@ -221,7 +221,9 @@ def test_h9_teacher_uses_original_codec_and_identical_logits():
     from sts2_ai.emulator.jsonl_backend import FAIR_POLICY_ID
     from sts2_ai.models.h15_policy_value import H15CombatEvaluator
     from sts2_ai.models.shared_transformer import (
-        H7Config, SharedObjectTransformer, collate_h7,
+        H7Config,
+        SharedObjectTransformer,
+        collate_h7,
     )
 
     model = SharedObjectTransformer(
