@@ -96,6 +96,9 @@ def public_features(state: dict[str, Any]) -> Tensor:
             terms.append(f"hand:{card['card_id']}:u{card.get('upgrade_level', 0)}")
     terms.extend(f"relic:{r}" for r in relics if isinstance(r, str))
     terms.extend(f"potion:{r}" for r in _ids(potions, "potion_id"))
+    for room_key, count in (state.get("public_map_future_room_counts") or {}).items():
+        if isinstance(room_key, str) and type(count) is int:
+            terms.extend([f"visible-map:{room_key}"] * min(8, max(0, count)))
     for enemy in enemies:
         if not isinstance(enemy, dict):
             continue
