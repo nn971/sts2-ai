@@ -100,3 +100,53 @@ cohort as a fresh unbiased model-selection result. After deciding on
 the boundary and architecture, collect a new independent validation
 cohort for the next final comparison. Do not deploy the continuation
 head until its target and representation are redesigned.
+
+
+## Reward-settlement audit and next fit
+
+The user's `--resource-boundary postreward` dry run, with the original
+1,024/256 source runs, produced:
+
+| Resource target | Training (5,445) | Heldout (1,400) |
+|---|---:|---:|
+| `settlement_settled` | 4,490 | 1,168 |
+| `settlement_defeat_immediate` | 955 | 232 |
+| Deck changed | 4,487 | 1,166 |
+| Relics changed | 465 | 125 |
+| New named potion | 1,887 | 518 |
+
+There are no `settlement_immediate_only` surviving encounters. This
+confirms the original public journals are sufficient for postreward
+resource labels. The near-universal deck changes **conditional on
+survival** (4,487/4,490 and 1,166/1,168) require caution:
+predicting whether a card was added is nearly constant under the
+frozen H6-C reward-choice policy. The current heads model event
+indicators, not new card/relic/potion identities.
+
+The `--outcomes-only` flag skips the previously unsuccessful
+continuation critic and its 43,135 public macro-state tensors. The
+new outcome evaluator reports for deck/relic/potion gain both
+unconditional and survival-conditioned Brier scores, each versus
+the best constant-rate baseline. Conditional results help distinguish
+genuinely learned resource predictions from the trivial fact that
+a dead player receives no rewards. Heldout baselines are optimistic,
+computed using heldout prevalence, so beating them is meaningful;
+treat this previously inspected heldout cohort as *development data*.
+
+After `git pull --ff-only`, run:
+
+```fish
+python -u tools/train_h12_joint_outcomes.py \
+  --train results/h12-joint/train.jsonl \
+  --heldout results/h12-joint/heldout.jsonl \
+  --checkpoint results/h12-joint/outcome-postreward.pt \
+  --report results/h12-joint/heldout-postreward-report.json \
+  --resource-boundary postreward --outcomes-only \
+  --epochs 30 --batch-size 256 --device cuda --execute \
+  2>&1 | tee results/h12-joint/postreward-fit.log
+```
+
+Preserve the original immediate-exit H12 model and its report. A
+new independent final evaluation cohort is required before accepting
+new model-selection claims. Neither outcome-only training nor the
+postreward supervision permits counterfactual reward inference.
