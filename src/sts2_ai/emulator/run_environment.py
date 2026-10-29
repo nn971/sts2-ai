@@ -19,6 +19,10 @@ ENVIRONMENTS = (NATIVE_OVERGROWTH, LEGACY)
 # Versioned native Overgrowth public bridge contract.
 NATIVE_RESET_SCHEMA = "prototype-native-overgrowth-reset-v1"
 NATIVE_MAP_PROFILE = "native-overgrowth-map-native-rng-v0.111.0-v1"
+NATIVE_COMPATIBLE_MAP_PROFILES = frozenset((
+    NATIVE_MAP_PROFILE,
+    "native-overgrowth-map-structure-v0.111.0-v1",
+))
 
 
 def require_environment(backend: EmulatorBackend, environment: str) -> None:
@@ -43,7 +47,7 @@ def validate_native_start(observation: Observation, *, ascension: int = 0) -> No
     """Validate a native public opening against its explicit Ascension contract.
 
     The authoritative native factory replaces Restlessness with Ascender's
-    Bane at A5+. Use exactly the native RNG map profile of the pinned emulator.
+    Bane at A5+. Accept only the two audited native Overgrowth map profiles.
     Never substitute a legacy prototype, even if it happens to have 13 cards.
     """
     from .jsonl_backend import JsonlBridgeError
@@ -70,8 +74,13 @@ def validate_native_start(observation: Observation, *, ascension: int = 0) -> No
         if isinstance(deck, list) else []
     )
     mismatches: dict[str, object] = {}
+    profile = raw.get("map_generation_profile_id")
+    if profile not in NATIVE_COMPATIBLE_MAP_PROFILES:
+        mismatches["map_generation_profile_id"] = {
+            "expected_one_of": sorted(NATIVE_COMPATIBLE_MAP_PROFILES),
+            "observed": profile,
+        }
     for key, expected in (
-        ("map_generation_profile_id", NATIVE_MAP_PROFILE),
         ("act", 1), ("floor", 0),
         ("event_id", "proto.native.event.neow"),
     ):
