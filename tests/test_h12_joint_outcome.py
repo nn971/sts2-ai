@@ -5,11 +5,15 @@ import math
 import torch
 
 from sts2_ai.models.h12_joint_outcome import (
-    FEATURE_DIM, H12JointOutcomeMixture, H12MacroContinuation,
-    public_features, training_example,
+    FEATURE_DIM,
+    H12JointOutcomeMixture,
+    H12MacroContinuation,
+    public_features,
+    training_example,
 )
 from sts2_ai.training.h12_transition_data import (
-    PublicJointRunTrace, public_resources,
+    PublicJointRunTrace,
+    public_resources,
 )
 
 
