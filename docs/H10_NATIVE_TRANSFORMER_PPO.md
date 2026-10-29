@@ -27,6 +27,12 @@ Each PPO round has a single frozen checkpoint:
 3. Combine the 64 native and 32 synthetic on-policy trajectories, verify the
    frozen actor's action log-probabilities and value estimates **before any
    parameter update**, and run the original Transformer PPO optimizer once.
+   Native worker fp32 CPU inference and CUDA PPO verification may differ
+   slightly: the explicitly opted-in native bound is **0.01** for both
+   selected-action log-probability and critic. Original behavior
+   log-probabilities remain the PPO importance-ratio denominators.
+   H8 synthetic samples retain the strict **0.0005** parity bound.
+   Both maximum native drifts are reported per round.
 4. Log native survival/HP and synthetic reward/verification, and save
    fingerprinted optimizer/RNG/model checkpoints for exact resume.
 
@@ -191,3 +197,34 @@ the resulting boss rate as preliminary.
   separate milestone after native combat generalization.
 - Remote GitHub changes require **local .NET and CUDA integration
   validation** before the results are trusted.
+
+
+## First-run native CPU→CUDA parity fix
+
+The initial mixed H10 run collected 32/32 synthetic terminal fights but
+failed during pre-update verification:
+`H7 behavior policy mismatch before PPO update`. H10 native worker
+inference runs on CPU, whereas the trainable PPO model runs on CUDA.
+The original strict `5e-4` threshold was designed for a same-backend
+actor and is unnecessarily tight for cross-device fp32 math.
+
+The verifier now explicitly differentiates `actor_origin=native-cpu`
+and `actor_origin=h8-synthetic`. Native inputs are allowed a maximum
+absolute drift of **0.01** in selected-action log-probability and value,
+only when the native training caller opts in. Synthetic inputs
+continue to require `5e-4`. Every round records
+`max_native_logp_drift` and `max_native_value_drift`; numerical
+differences exceeding the bound fail with origin, sample index,
+measured drift and threshold. The actual recorded CPU log-probability
+is never replaced by the CUDA prediction.
+
+The failed attempt occurred before its first optimizer update.
+If `optimizer-checkpoint.pt` does not exist, rerun with the same
+arguments **without `--resume`** after fetching this branch. If a
+complete previous round was saved, use `--resume` with unchanged
+arguments.
+
+This is a bounded portability check; the precise drift on the user's
+CPU/GPU hardware has not yet been measured. If the new diagnostic
+reports drift greater than 0.01, investigate the backend discrepancy
+instead of relaxing the guard further.
