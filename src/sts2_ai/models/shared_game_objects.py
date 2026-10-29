@@ -13,6 +13,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from sts2_ai.training.h14_boundaries import PERSISTENT_COUNTERS
+
 SHARED_OBJECT_SCHEMA = "sts2-h14-public-shared-objects-v1"
 IDENTITY_BUCKETS = 4096
 ACTION_BUCKETS = 2048
@@ -33,9 +35,6 @@ ZONES = (
 MAX_OBJECTS = 256
 
 # Shared audited metadata for both the tactical and macro fair codecs.
-from sts2_ai.training.h14_boundaries import PERSISTENT_COUNTERS  # noqa: E402
-
-
 def _persistent_relic_tokens(relic: dict[str, Any]) -> list[tuple[str, int]]:
     """Audit-listed player-visible counter residues, independent per relic copy.
 
