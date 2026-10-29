@@ -31,7 +31,8 @@ ZONES = (
     "inventory", "map", "shop", "reward", "event",
 )
 MAX_OBJECTS = 256
-MAX_ACTIONS = 128
+# Action menus are variable length. The model and collator support arbitrary
+# legal-menu sizes; limiting them here silently excludes reachable decisions.
 
 
 def _bucket(name: str, mod: int) -> int:
@@ -105,7 +106,10 @@ def encode_public_decision(
     if not isinstance(state, dict) or not legal_actions:
         raise ValueError("Need a public state and a nonempty legal action menu")
     combat = state.get("combat")
-    phase = "combat" if isinstance(combat, dict) else "macro"
+    if not isinstance(combat, dict):
+        from .shared_macro_objects import encode_macro_public_decision
+        return encode_macro_public_decision(state, legal_actions)
+    phase = "combat"
     objects: list[ObjectToken] = []
     lookup: dict[tuple[str, object], int] = {}
 
@@ -177,8 +181,6 @@ def encode_public_decision(
         add("room", _entry_id(room, "room_type"), "map", room)
 
     action_tokens: list[ActionToken] = []
-    if len(legal_actions) > MAX_ACTIONS:
-        raise ValueError("Legal action cap exceeded: all legal actions must remain present")
     for action in legal_actions:
         kind = action.kind
         try:
