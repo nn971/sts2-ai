@@ -7,24 +7,27 @@ Requires an already-built pinned semantic-combat emulator and Python bindings.
 from __future__ import annotations
 
 import argparse
-from collections import Counter
 import json
 import os
 import statistics
 import tempfile
+from collections import Counter
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 import torch
 
-from sts2_ai.nature.adaptive_rich_curriculum import (
-    AdaptiveRichProgress, encounter_mean_rewards, probe_sources,
-    weighted_train_sources, FAMILIES,
-)
 from sts2_ai.models.h7_public_policy import H7PlayerSpec
 from sts2_ai.models.shared_game_objects import SHARED_OBJECT_SCHEMA
 from sts2_ai.models.shared_transformer import H7_MODEL_FORMAT, H7Config, SharedObjectTransformer
+from sts2_ai.nature.adaptive_rich_curriculum import (
+    FAMILIES,
+    AdaptiveRichProgress,
+    encounter_mean_rewards,
+    probe_sources,
+    weighted_train_sources,
+)
 from sts2_ai.nature.corpus import file_sha256
 from sts2_ai.nature.draw_only_workers import draw_only_batch
 from sts2_ai.nature.h4_reward import H4_REWARD, H9_TOTAL_HP_REWARD
@@ -40,6 +43,8 @@ from sts2_ai.nature.protocol import canonical_sha256
 from sts2_ai.nature.research_combat_fixtures import (
     fixture_from_source,
     rich_source_bank,
+)
+from sts2_ai.nature.research_combat_fixtures import (
     source_bank as structured_source_bank,
 )
 from sts2_ai.training.h7_combat_ppo import H7_PPO_SCHEMA, H7CombatPPO
