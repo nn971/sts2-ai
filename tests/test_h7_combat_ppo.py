@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -131,4 +132,99 @@ def test_h7_sampled_terminal_replay_requires_explicit_optimizer_opt_in(tmp_path:
         learner.update(
             tuple(tampered), captures, behavior_model_id=policy_id,
             seed=9, allow_sampled_terminal_replay=True,
+        )
+
+
+def test_native_cpu_actor_audits_singleton_provenance_without_loosening_h8(tmp_path: Path):
+    from types import MethodType
+
+    torch.set_num_threads(1)
+    net, spec, episodes, captures = make_cohort(tmp_path)
+    learner = H7CombatPPO(net, temperature=0.85, epochs=1, minibatch=2)
+    prepared = [
+        learner._prepare_episode(
+            episode, capture,
+            behavior_model_id=f"h7-{spec.model_sha256[:16]}",
+            temperature=0.85, gamma=1.0, gae_lambda=0.98,
+        )[0]
+        for episode, capture in zip(episodes, captures, strict=True)
+    ]
+    native = replace(prepared[0], actor_origin="native-cpu")
+    with pytest.raises(ValueError, match="explicit cross-device"):
+        learner.update_prepared([native, prepared[1]], seed=9)
+
+    # A fake CPU behavior record must be rejected by the actual singleton
+    # reference check, even if its error is within the GPU safety bound.
+    tampered_native = replace(native, old_logp=native.old_logp + 0.0205)
+    with pytest.raises(ValueError, match="Native CPU actor provenance mismatch"):
+        learner.update_prepared(
+            [tampered_native, prepared[1]], seed=9,
+            allow_native_cpu_actor=True,
+        )
+
+    # Synthetic/reference-law decisions keep their strict 5e-4 check.
+    wrong_synthetic = replace(
+        prepared[1], old_logp=prepared[1].old_logp + 0.002,
+    )
+    with pytest.raises(ValueError, match="origin=h8-synthetic"):
+        learner.update_prepared(
+            [native, wrong_synthetic], seed=9, allow_native_cpu_actor=True,
+        )
+
+    # Simulate a 2-item batch numerical path that differs from the CPU
+    # singleton actor, without altering the pinned model parameters.
+    original = type(net).forward
+
+    def batch_sensitive(self, batch, **kwargs):
+        logits, values = original(self, batch, **kwargs)
+        if batch.phases.shape[0] > 1:
+            delta = torch.zeros_like(logits)
+            delta[:, 0] = 0.08
+            logits = logits + delta
+        return logits, values
+
+    net.forward = MethodType(batch_sensitive, net)
+    both_native = [
+        replace(prepared[0], actor_origin="native-cpu"),
+        replace(prepared[1], actor_origin="native-cpu"),
+    ]
+    stats = learner.update_prepared(
+        both_native, seed=9, allow_native_cpu_actor=True,
+    )
+    assert stats["native_actor_decisions"] == 2
+    assert stats["native_cpu_audits"] >= 1
+    assert stats["max_native_logp_drift"] > 0.001
+    assert stats["max_native_cpu_logp_drift"] < 5e-4
+    assert stats["source_decisions"] == 2
+    assert both_native[0].old_logp == prepared[0].old_logp
+
+
+def test_h7_native_cross_device_guard_rejects_large_ratio_divergence(tmp_path: Path):
+    from types import MethodType
+
+    torch.set_num_threads(1)
+    net, spec, episodes, captures = make_cohort(tmp_path)
+    learner = H7CombatPPO(net, temperature=0.85, epochs=1, minibatch=2)
+    prepared = [
+        replace(
+            learner._prepare_episode(
+                ep, cap, behavior_model_id=f"h7-{spec.model_sha256[:16]}",
+                temperature=0.85, gamma=1.0, gae_lambda=0.98,
+            )[0],
+            actor_origin="native-cpu",
+        )
+        for ep, cap in zip(episodes, captures, strict=True)
+    ]
+    original = type(net).forward
+
+    def grossly_wrong_batch(self, batch, **kwargs):
+        logits, values = original(self, batch, **kwargs)
+        logits = logits.clone()
+        logits[:, 0] += 2.0
+        return logits, values
+
+    net.forward = MethodType(grossly_wrong_batch, net)
+    with pytest.raises(ValueError, match="importance-ratio bound"):
+        learner.update_prepared(
+            prepared, seed=9, allow_native_cpu_actor=True,
         )
