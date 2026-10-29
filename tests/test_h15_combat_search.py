@@ -190,6 +190,7 @@ def test_terminal_rollout_uses_actual_fight_reward_without_critic_cutoffs():
     )
     result = puct.search(frame(), simulations=100)
     assert result.rollout_mode == "terminal"
+    assert result.expanded_information_sets > 1
     assert result.terminal_evaluations == 100
     assert result.neural_cutoffs == 0
     assert result.transitions == 200
