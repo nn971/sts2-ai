@@ -130,7 +130,7 @@ def _reward_choice(
         match = pending("pending_extra_relic_rewards", index)
         name = match.get("relic_id") if match else None
         return (name, {"count": int(match.get("is_wax") is True)}
-                ) if isinstance(name, str) else None
+                ) if isinstance(name, str) and match is not None else None
 
     if kind in ("take_reward_extra_potion", "replace_reward_extra_potion",
                 "skip_reward_extra_potion"):
@@ -225,17 +225,18 @@ def encode_macro_public_decision(
         add("card", _entry_id(card, "card_id"), "deck", record,
             ref=("deck_card", instance) if type(instance) is int else None)
 
-    for plural, kind in (("relics", "relic"), ("potions", "potion")):
+    for plural, inventory_kind in (("relics", "relic"), ("potions", "potion")):
         entries = state.get(plural)
         for value in entries if isinstance(entries, list) else []:
-            item = ({kind + "_id": value} if isinstance(value, str)
+            item = ({inventory_kind + "_id": value} if isinstance(value, str)
                     else value if isinstance(value, dict) else None)
             if item is None:
                 continue
-            slot = item.get("slot") if kind == "potion" else None
-            idx = add(kind, _entry_id(item, kind + "_id", "id"), "inventory", item,
+            slot = item.get("slot") if inventory_kind == "potion" else None
+            idx = add(inventory_kind, _entry_id(item, inventory_kind + "_id", "id"),
+                      "inventory", item,
                       ref=("potion_slot", slot) if type(slot) is int else None)
-            if kind == "relic":
+            if inventory_kind == "relic":
                 for identity, count in _persistent_relic_tokens(item):
                     add("power", identity, "inventory", {"count": count}, owner=idx)
 
@@ -323,7 +324,7 @@ def encode_macro_public_decision(
             event = state.get("event")
             event_id = (event.get("event_id", state.get("event_id", ""))
                         if isinstance(event, dict) else state.get("event_id", ""))
-            record: dict[str, Any] = {}
+            record = {}
             if isinstance(event, dict):
                 match = next((x for x in _records(event.get("visible_choice_values"))
                               if x.get("choice_id") == choice), None)
