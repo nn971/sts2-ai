@@ -109,3 +109,70 @@ source-conditioned native sampler and distribution test remain next work.
 
 `models/h15_policy_value.py` supplies frozen H9/H15 checkpoint inference
 for search, with move-aware encoding and a counted [0,1] critic clamp.
+
+
+## M2 implementation: native history collector and robust search teacher
+
+The following code is now present on this branch, but **native fair
+rollouts are not yet executable** until the H8 sampler contract below exists.
+
+- `H15CombatEvaluator` loads the old H9 checkpoint with the **original H7
+  public combat codec** and unchanged logits. H15-trained checkpoints use
+  the move-aware codec. Adding enemy move tokens to H9 before distillation
+  would silently change the policy through attention and is prohibited.
+- `CombatPuct(..., leaf_mode="terminal")` now completes sampled combat
+  futures by following the frozen policy's legal-action priors. Chance
+  events come from the independent fair sampler. Censored futures raise
+  `IncompleteCombatRollout`: the teacher must never treat a cutoff
+  critic estimate as a real H9 combat outcome. The existing `value`
+  leaf mode remains available for later calibrated critics. Search target
+  rows explicitly record the leaf mode and complete-terminal/cutoff counts.
+- `training/h15_native_search_collector.py` reconstructs the entire
+  player-visible observation/action/LEGAL-MENU history from an H10
+  `CombatSnapshotRecipe` using the pinned native A10 run. The exact
+  hash is used only by the replay verifier. For each searched combat
+  decision, it conditions independent simulations on the public history,
+  chooses the most visited legal action, executes that action in the
+  actual run, and at combat exit labels every saved search root with
+  the **realized** `encounter_nonminion_total_hp_v1` score. An unfinished
+  combat yields no targets. The collector is an API requiring an
+  independently certified `FairContinuationSampler`, NOT a CLI that
+  silently falls back to an exact fork.
+- `search/h15_public_combat_adapter.py` now hashes newly revealed public
+  actions/states incrementally inside each simulation; it stores the
+  complete public prefix only for roots at which a fresh hidden
+  continuation must be drawn. This removes repeated quadratic copies
+  of long full-run transcripts during tree search.
+
+### Blocking emulator contract: fair native combat continuations
+
+The current H8 runtime has provider-controlled local reference card draws,
+enemy intents, exact decision replay, version-owned combat sessions, and
+source-valid combat mechanics. It does **not** yet provide an independently
+certified *public-history-conditional combat-root sampler* that supports the
+arbitrary native H10/H14 deck, HP, relic, enemy state, and observed reveals.
+
+An implementer must connect the H8 stochastic provider to native combat
+state construction **without retaining unseen future outcomes from a live
+run's RNG cursor**. In particular, a plain H10 `backend.fork(handle)`,
+an H8 fork with an unchanged hidden provider, or changing only the local
+reference seed while retaining other hidden future random state cannot be
+asserted to be fair. The sampler must either reconstruct independent
+publicly conditioned combat states or prove that the retained checkpoint
+has no relevant hidden future state for each supported chance site. It must
+return owned `StateHandle` objects through the existing
+`FairContinuationSampler` contract, with an explicit versioned scope of
+supported sites. Unsupported conditioning must fail loudly.
+
+Native acceptance should start with first-combat public states, verify
+chance distributions (card draws, enemy intents, random targets and
+source-dependent effects), then progressively enable later public roots
+and multi-stage boss mechanics. Do not use source-run future draws,
+hidden seed, RNG cursor, or exact-state MCTS visit statistics as
+search-policy labels.
+
+Only after the fair sampler is working is it appropriate to write a
+15-worker native collection CLI and launch long H15 search/distillation
+training. The existing offline `train_h15_search_distill.py` already
+consumes the target-record format; neither the macro training system nor
+H9 reward needs a redesign.
