@@ -62,6 +62,8 @@ def test_frozen_h9_uses_legacy_codec_and_h14_macro_collects_own_choices(tmp_path
     assert chosen.action in macro_menu
     assert len(agent.samples) == 1
     assert agent.samples[0].decision.phase == "macro"
+    assert len(agent.macro_history) == 1
+    assert agent.macro_history[0]["kind"] == "event_choice"
 
     combat_menu = [
         LegalAction("end", "end_turn", "{}"),
