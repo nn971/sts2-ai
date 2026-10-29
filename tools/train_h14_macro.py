@@ -134,6 +134,7 @@ def train_round(
     network: H14MacroActorCritic, optimizer: torch.optim.Optimizer,
     episodes: list[Episode], *, device: str, ppo_epochs: int,
     minibatch: int, sample_limit: int, round_index: int,
+    temperature: float,
 ) -> dict[str, Any]:
     dataset = [
         (sample, (1.0 if episode.act1_cleared else -1.0))
@@ -164,6 +165,7 @@ def train_round(
                 encoded, selected_actions=selected,
                 behavior_log_probabilities=logp,
                 behavior_values=old_values, returns=returns,
+                behavior_temperature=temperature,
             )
             if not torch.isfinite(loss):
                 raise ValueError("Nonfinite H14 macro PPO loss")
@@ -319,6 +321,7 @@ def main() -> None:
             network, optimizer, episodes, device=args.device,
             ppo_epochs=args.ppo_epochs, minibatch=args.ppo_minibatch,
             sample_limit=args.ppo_sample_limit, round_index=round_index,
+            temperature=args.temperature,
         )
         checkpoint = models / f"macro-r{round_index:04d}.pt"
         network.save_checkpoint(checkpoint, provenance=provenance)
