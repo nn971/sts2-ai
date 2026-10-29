@@ -61,7 +61,8 @@ def _read(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     return manifest, runs
 
 
-def _dataset(runs: list[dict[str, Any]], *, resource_boundary: str = "immediate"
+def _dataset(runs: list[dict[str, Any]], *, resource_boundary: str = "immediate",
+             include_macro: bool = True
              ) -> tuple[tuple[Tensor, ...], tuple[Tensor, ...], dict[str, int]]:
     if resource_boundary not in ("immediate", "postreward"):
         raise ValueError("Unknown H12 resource boundary")
@@ -91,18 +92,19 @@ def _dataset(runs: list[dict[str, Any]], *, resource_boundary: str = "immediate"
             gaps["changed_relics"] += (
                 encounter["entry"]["relics"] != resource_exit["relics"]
             )
-        if not run["censored"]:
+        if include_macro and not run["censored"]:
             for state in run["macro_states"]:
                 macro.append((
                     public_features(state["state"]),
                     torch.tensor(state["continuation_target"], dtype=torch.float32),
                 ))
-    if not combats or not macro:
+    if not combats or (include_macro and not macro):
         raise ValueError("H12 collected insufficient completed combats/macro states")
     fight_data = tuple(torch.stack([r[i] for r in combats]) for i in range(5))
     macro_data = (
-        torch.stack([r[0] for r in macro]),
-        torch.stack([r[1] for r in macro]),
+        (torch.stack([r[0] for r in macro]),
+         torch.stack([r[1] for r in macro]))
+        if include_macro else ()
     )
     return fight_data, macro_data, dict(gaps)
 
@@ -123,6 +125,15 @@ def _evaluate_outcomes(model: H12JointOutcomeMixture,
     survival_prob, survival_true = [], []
     hp_predict, hp_true = [], []
     retention_bce: list[float] = []
+    events = {
+        "deck_change": (4, 3),
+        "relic_change": (5, 4),
+        "new_potion": (6, 5),
+    }
+    event_preds: dict[str, list[float]] = {name: [] for name in events}
+    event_truth: dict[str, list[float]] = {name: [] for name in events}
+    alive_event_preds: dict[str, list[float]] = {name: [] for name in events}
+    alive_event_truth: dict[str, list[float]] = {name: [] for name in events}
     for indices in _batched_indices(len(data[0]), batch_size, seed=0):
         features, pid, mask, retained, outcome = (
             x[indices].to(device) for x in data
@@ -137,6 +148,21 @@ def _evaluate_outcomes(model: H12JointOutcomeMixture,
         survival_true.extend(outcome[:, 0].cpu().tolist())
         hp_predict.extend(expected_hp.cpu().tolist())
         hp_true.extend(outcome[:, 1].cpu().tolist())
+        for name, (logit_col, outcome_col) in events.items():
+            component = torch.sigmoid(params[:, :, logit_col])
+            unconditional = (prob * component).sum(dim=1)
+            conditional = (
+                prob * component * torch.sigmoid(params[:, :, 0])
+            ).sum(dim=1) / alive_prob.clamp_min(1e-6)
+            event_preds[name].extend(unconditional.cpu().tolist())
+            event_truth[name].extend(outcome[:, outcome_col].cpu().tolist())
+            mask_alive = outcome[:, 0] > 0.5
+            alive_event_preds[name].extend(
+                conditional[mask_alive].cpu().tolist()
+            )
+            alive_event_truth[name].extend(
+                outcome[mask_alive, outcome_col].cpu().tolist()
+            )
         pot_p = (
             prob[:, :, None] * torch.sigmoid(retained_logits)
         ).sum(dim=1).clamp(1e-6, 1-1e-6)
@@ -159,8 +185,37 @@ def _evaluate_outcomes(model: H12JointOutcomeMixture,
                 "predicted_survival": sum(p for p, _ in selected)/len(selected),
                 "observed_survival": sum(y for _, y in selected)/len(selected),
             })
+    def event_summary(predicted: list[float], observed: list[float]
+                      ) -> dict[str, float | int]:
+        count = len(predicted)
+        if not count:
+            return {"samples": 0}
+        baseline_frequency = sum(observed) / count
+        return {
+            "samples": count,
+            "observed_frequency": baseline_frequency,
+            "predicted_mean": sum(predicted) / count,
+            "brier": sum(
+                (p - y) ** 2 for p, y in zip(predicted, observed, strict=True)
+            ) / count,
+            # Best possible constant for this evaluation set; conservative
+            # benchmark, never fitted on heldout observations.
+            "constant_brier": baseline_frequency * (1 - baseline_frequency),
+        }
+
     return {
         "combats": n,
+        "resource_event_metrics": {
+            name: {
+                "unconditional": event_summary(
+                    event_preds[name], event_truth[name],
+                ),
+                "given_survival": event_summary(
+                    alive_event_preds[name], alive_event_truth[name],
+                ),
+            }
+            for name in events
+        },
         "mean_nll": sum(losses)/n,
         "survival_brier": brier,
         "constant_survival_brier": prevalence*(1-prevalence),
@@ -233,6 +288,10 @@ def main() -> None:
     p.add_argument("--resource-boundary", choices=("immediate", "postreward"),
                    default="immediate",
                    help="Use immediate combat exit or reconstructed settled room resources")
+    p.add_argument(
+        "--outcomes-only", action="store_true",
+        help="Skip the failed H12 continuation head; fit combat outcomes only",
+    )
     p.add_argument("--epochs", type=int, default=30)
     p.add_argument("--batch-size", type=int, default=256)
     p.add_argument("--lr", type=float, default=3e-4)
@@ -256,6 +315,7 @@ def main() -> None:
     identity = {
         "schema": TRAIN_SCHEMA, "model_schema": MODEL_SCHEMA,
         "resource_boundary": args.resource_boundary,
+        "outcomes_only": args.outcomes_only,
         "train_sha256": file_sha256(args.train),
         "heldout_sha256": file_sha256(args.heldout),
         "policy_identity": train_manifest["identity"],
@@ -274,9 +334,11 @@ def main() -> None:
         # nondegenerate resource labels before any new optimizer run.
         _, _, train_coverage = _dataset(
             train_runs, resource_boundary=args.resource_boundary,
+            include_macro=not args.outcomes_only,
         )
         _, _, held_coverage = _dataset(
             heldout_runs, resource_boundary=args.resource_boundary,
+            include_macro=not args.outcomes_only,
         )
         print("[h12-audit] " + json.dumps({
             "resource_boundary": args.resource_boundary,
@@ -292,19 +354,26 @@ def main() -> None:
     torch.manual_seed(20261029)
     train_fight, train_macro, train_gaps = _dataset(
         train_runs, resource_boundary=args.resource_boundary,
+        include_macro=not args.outcomes_only,
     )
     held_fight, held_macro, held_gaps = _dataset(
         heldout_runs, resource_boundary=args.resource_boundary,
+        include_macro=not args.outcomes_only,
     )
     outcome = H12JointOutcomeMixture().to(args.device)
-    continuation = H12MacroContinuation().to(args.device)
+    continuation = (
+        None if args.outcomes_only else H12MacroContinuation().to(args.device)
+    )
+    trainable = list(outcome.parameters())
+    if continuation is not None:
+        trainable.extend(continuation.parameters())
     opt = torch.optim.AdamW(
-        list(outcome.parameters()) + list(continuation.parameters()),
-        lr=args.lr, weight_decay=0.01,
+        trainable, lr=args.lr, weight_decay=0.01,
     )
     for epoch in range(args.epochs):
         outcome.train()
-        continuation.train()
+        if continuation is not None:
+            continuation.train()
         sum_outcome_loss, sum_value_loss = 0., 0.
         for indices in _batched_indices(
             len(train_fight[0]), args.batch_size, seed=epoch+20261029,
@@ -321,30 +390,35 @@ def main() -> None:
             loss.backward()
             torch.nn.utils.clip_grad_norm_(outcome.parameters(), 1.)
             opt.step()
-            sum_outcome_loss += float(loss)*len(indices)
-        for indices in _batched_indices(
-            len(train_macro[0]), args.batch_size, seed=epoch+31337,
-        ):
-            features, target = (
-                x[indices].to(args.device) for x in train_macro
-            )
-            opt.zero_grad(set_to_none=True)
-            loss = F.mse_loss(continuation(features), target)
-            if not torch.isfinite(loss):
-                raise ValueError("Nonfinite H12 continuation loss")
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(continuation.parameters(), 1.)
-            opt.step()
-            sum_value_loss += float(loss)*len(indices)
+            sum_outcome_loss += loss.detach().item()*len(indices)
+        if continuation is not None:
+            for indices in _batched_indices(
+                len(train_macro[0]), args.batch_size, seed=epoch+31337,
+            ):
+                features, target = (
+                    x[indices].to(args.device) for x in train_macro
+                )
+                opt.zero_grad(set_to_none=True)
+                loss = F.mse_loss(continuation(features), target)
+                if not torch.isfinite(loss):
+                    raise ValueError("Nonfinite H12 continuation loss")
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(continuation.parameters(), 1.)
+                opt.step()
+                sum_value_loss += loss.detach().item()*len(indices)
         print("[h12-fit-epoch] " + json.dumps({
             "epoch": epoch+1,
             "outcome_nll": sum_outcome_loss/len(train_fight[0]),
-            "continuation_mse": sum_value_loss/len(train_macro[0]),
+            "continuation_mse": (
+                sum_value_loss/len(train_macro[0])
+                if continuation is not None else None
+            ),
             "combats": len(train_fight[0]),
-            "macro_states": len(train_macro[0]),
+            "macro_states": len(train_macro[0]) if continuation is not None else 0,
         }, sort_keys=True), flush=True)
     outcome.eval()
-    continuation.eval()
+    if continuation is not None:
+        continuation.eval()
     report = {
         "schema": TRAIN_SCHEMA, "identity": identity,
         "fingerprint": canonical_sha256({
@@ -359,11 +433,13 @@ def main() -> None:
         "heldout_outcome": _evaluate_outcomes(
             outcome, held_fight, args.device, args.batch_size,
         ),
-        "train_continuation": _evaluate_macro(
-            continuation, train_macro, args.device, args.batch_size,
+        "train_continuation": (
+            _evaluate_macro(continuation, train_macro, args.device, args.batch_size)
+            if continuation is not None else None
         ),
-        "heldout_continuation": _evaluate_macro(
-            continuation, held_macro, args.device, args.batch_size,
+        "heldout_continuation": (
+            _evaluate_macro(continuation, held_macro, args.device, args.batch_size)
+            if continuation is not None else None
         ),
         "known_limitations": [
             "Postreward resource labels are reconstructed from the last visible "
@@ -379,7 +455,10 @@ def main() -> None:
         "schema": TRAIN_SCHEMA, "identity": identity,
         "fingerprint": report["fingerprint"],
         "outcome_model": {k:v.detach().cpu() for k,v in outcome.state_dict().items()},
-        "continuation_model": {k:v.detach().cpu() for k,v in continuation.state_dict().items()},
+        "continuation_model": (
+            {k: v.detach().cpu() for k, v in continuation.state_dict().items()}
+            if continuation is not None else None
+        ),
     })
     _atomic_json(args.report, report)
     print("[h12-fit] " + json.dumps({
