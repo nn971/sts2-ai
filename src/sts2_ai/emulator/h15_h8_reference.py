@@ -17,7 +17,7 @@ import hashlib
 import json
 import random
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from sts2_ai.emulator.chance import (
