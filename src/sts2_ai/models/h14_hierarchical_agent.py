@@ -4,6 +4,7 @@ The two networks intentionally have separate public codecs. The old H9
 checkpoint receives its original H7 combat tokens; H14's macro network sees
 new persistent-state features. No hidden emulator access or outcome modes.
 """
+# mypy: disable-error-code="import-not-found,misc,no-any-return"
 from __future__ import annotations
 
 import hashlib
@@ -19,11 +20,9 @@ import torch
 from sts2_ai.agents.base import Decision
 from sts2_ai.emulator import FAIR_POLICY_ID, LegalAction, Observation
 
+from .h9_frozen_codec import SHARED_OBJECT_SCHEMA as H9_OBJECT_SCHEMA
+from .h9_frozen_codec import encode_public_decision as encode_h9_combat
 from .h14_macro_actor_critic import H14MacroActorCritic
-from .h9_frozen_codec import (
-    SHARED_OBJECT_SCHEMA as H9_OBJECT_SCHEMA,
-    encode_public_decision as encode_h9_combat,
-)
 from .shared_game_objects import SHARED_OBJECT_SCHEMA, EncodedDecision, encode_public_decision
 from .shared_transformer import H7Config, SharedObjectTransformer, collate_h7
 
@@ -94,7 +93,8 @@ class H14HierarchicalAgent:
         *, episode_seed: str, macro_checkpoint_sha256: str,
         temperature: float = 1.0, greedy_macro: bool = False,
     ) -> None:
-        if not episode_seed or not macro_checkpoint_sha256 or not math.isfinite(temperature) or temperature <= 0:
+        if (not episode_seed or not macro_checkpoint_sha256
+                or not math.isfinite(temperature) or temperature <= 0):
             raise ValueError("Invalid hierarchical actor provenance")
         self.combat = combat
         self.macro = macro.eval()
