@@ -180,7 +180,12 @@ def collect_live_combat_search(
             menu = tuple(backend.legal_actions(current))
             if menu != history[-1].legal_actions:
                 raise ValueError("Actual legal menu drifted from recorded public history")
-            if len(saved) < max_searches:
+            # H9's historical codec cannot represent some selections from
+            # outside the hand. Search can traverse those public actions with
+            # neutral priors, but they are not direct H15 training roots until
+            # the selection-action codec is versioned and implemented.
+            is_nested_choice = "h15_player_choice_kind" in public
+            if len(saved) < max_searches and not is_nested_choice:
                 root = adapter.root(history)
                 stats = search.search(root, simulations=simulations)
                 if (stats.neural_cutoffs != 0
