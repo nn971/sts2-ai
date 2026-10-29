@@ -2,7 +2,7 @@
 
 ## Status
 
-Implementation on \`research/h12-native-joint-outcomes-20261029\`, **based on
+Implementation on `research/h12-native-joint-outcomes-20261029`, **based on
 H11's unmerged shared-Transformer branch**. This is the first usable M3 data and
 supervision stage, NOT an M4 combat-policy update and NOT yet a deployed macro
 lookahead policy. The collection and training tools require a local native
@@ -26,10 +26,10 @@ H9 combat checkpoint formats are untouched.
 
 ## M3 components implemented
 
-1. **Public-frame hook:** optional \`public_frame_observer\` in \`play_run\`.
+1. **Public-frame hook:** optional `public_frame_observer` in `play_run`.
    It observes every published fair-player state, including terminal states.
-   All other users of \`play_run\` retain the existing behavior.
-2. **Native joint-outcome journal:** \`tools/collect_h12_joint_outcomes.py\`.
+   All other users of `play_run` retain the existing behavior.
+2. **Native joint-outcome journal:** `tools/collect_h12_joint_outcomes.py`.
    Uses 15 long-lived CPU-worker backends, a pinned H6-C macro checkpoint,
    and frozen H9 combat. Every full-run source seed owns all its entries.
    Captures first **public** combat entry and first public exit or terminal
@@ -37,16 +37,16 @@ H9 combat checkpoint formats are untouched.
    changes; macro decision history and subsequent full-run continuation target.
    Censored combat exits have **no** fabricated transition labels.
    Existing journal records are durable after an interrupted collection;
-   \`--resume\` refuses changed policy/emulator fingerprints.
+   `--resume` refuses changed policy/emulator fingerprints.
 3. **Shared-latent probabilistic model:** 
-   \`src/sts2_ai/models/h12_joint_outcome.py\`.
+   `src/sts2_ai/models/h12_joint_outcome.py`.
    An 8-component conditional mixture jointly models survival, exit HP,
    named *held* potion retention, gold delta, and deck/relic change events.
    The shared component induces statistical correlation across resource
    outcomes. A separate public-state continuation critic is fitted to
    native full-run target outcomes.
 4. **Source-seed-disjoint fit/evaluation:**
-   \`tools/train_h12_joint_outcomes.py\` checks train/heldout seed prefixes,
+   `tools/train_h12_joint_outcomes.py` checks train/heldout seed prefixes,
    source-run sets, both frozen model SHA-256 hashes, and emulator/DLL
    fingerprint. It trains without using heldout examples for updates or
    early stopping. Its report contains survival Brier score and reliability
@@ -69,7 +69,7 @@ automatically a value for every alternative action.
 
 Work on the **AI branch**; do not switch or modify the emulator feature branch.
 
-\`\`\`fish
+```fish
 cd ~/projects/sts2-ai
 git fetch origin
 git switch --track origin/research/h12-native-joint-outcomes-20261029
@@ -119,10 +119,10 @@ python -u tools/train_h12_joint_outcomes.py \
     --report results/h12-joint/heldout-report.json \
     --epochs 30 --batch-size 256 --device cuda --execute \
     2>&1 | tee results/h12-joint/fit.log
-\`\`\`
+```
 
 Resume a partially completed collection with the **identical arguments** plus
-\`--resume\` and append the log via \`tee -a\`. A completed fit refuses to
+`--resume` and append the log via `tee -a`. A completed fit refuses to
 overwrite an existing model/report.
 
 ## Checkpoints for next stage
