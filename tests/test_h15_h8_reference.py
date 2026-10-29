@@ -174,3 +174,140 @@ def test_h8_native_reference_collector_has_real_outcome_and_no_handle_leaks():
     assert decode_target(report.targets[0]).realized_reward == pytest.approx(1.5)
     assert report.targets[0]["search_neural_cutoffs"] == 0
     assert backend.live_handles == 0
+
+
+class NestedChoiceTransport(ToyH8Transport):
+    """Model H8 selecting one of two public cards after a playable skill."""
+
+    def call(self, op, **args):
+        if op == "h8_step":
+            handle = args["h8_handle"]
+            before, seed = self.statuses[handle]
+            assert args["boundary_version"] == before["boundaryVersion"]
+            assert args["local_reference_seed"] == seed
+            action = args["action_id"]
+            if before["kind"] == "player" and action == "safe":
+                version = before["boundaryVersion"] + 1
+                status = self._status(handle, seed, version=version)
+                status["kind"] = "player_choice"
+                status["playerChoicePending"] = {
+                    "kind": "player_card_selection",
+                    "actions": [
+                        {"actionId": "select:a"},
+                        {"actionId": "select:b"},
+                    ],
+                }
+                status["playerActionIds"] = ["select:a", "end_turn", "select:b"]
+                status["playerFrame"]["actions"] = [
+                    {"actionId": "select:a", "kind": "select_card",
+                     "payloadJson": "{}"},
+                    {"actionId": "end_turn", "kind": "end_turn",
+                     "payloadJson": "{}"},
+                    {"actionId": "select:b", "kind": "select_card",
+                     "payloadJson": "{}"},
+                ]
+            else:
+                assert (before["kind"] == "player_choice"
+                        and action in ("select:a", "select:b")) or (
+                            before["kind"] == "player" and action == "risk"
+                        )
+                outcome = "victory" if action.startswith("select:") else "defeat"
+                status = self._status(
+                    handle, seed, version=before["boundaryVersion"] + 1,
+                    outcome=outcome,
+                )
+            self.statuses[handle] = (status, seed)
+            return {"result": status}
+        return super().call(op, **args)
+
+
+def test_nested_choice_is_fair_public_filtered_and_conditionable():
+    transport = NestedChoiceTransport()
+    backend = H8ReferenceCombatBackend(
+        transport, fixture(), emulator_revision="d" * 40,
+    )
+    source = backend.begin_reference(3)
+    start = backend.observe(source, POLICY)
+    opening_menu = backend.legal_actions(source)
+    backend.step(source, opening_menu[0])
+    after = backend.observe(source, POLICY)
+    nested_menu = backend.legal_actions(source)
+
+    assert [a.action_id for a in nested_menu] == ["select:a", "select:b"]
+    assert "h15_player_choice_kind" in json.loads(after.payload_json)
+    # Internal pending action support is never presented in the observation.
+    assert "playerChoicePending" not in after.payload_json
+    assert "end_turn" not in [a.action_id for a in nested_menu]
+
+    sampler = H8ReferenceNaturePosterior(backend, max_candidates=500)
+    conditioned = sampler.sample_fair_continuations((
+        PublicHistoryStep(start, opening_menu[0], opening_menu),
+        PublicHistoryStep(after, None, nested_menu),
+    ), search_rng=random.Random(101), count=2)
+    assert all(backend.observe(h, POLICY) == after for h in conditioned)
+    assert all(backend.legal_actions(h) == nested_menu for h in conditioned)
+    backend.release_many((*conditioned, source))
+    assert backend.live_handles == 0
+
+
+def test_nested_choice_search_rollout_reaches_terminal_outcome():
+    pytest.importorskip("torch")
+    from types import SimpleNamespace
+
+    from sts2_ai.training.h15_native_search_collector import collect_live_combat_search
+    from sts2_ai.training.h15_search_supervision import decode_target
+
+    transport = NestedChoiceTransport()
+    backend = H8ReferenceCombatBackend(
+        transport, fixture(), emulator_revision="e" * 40,
+    )
+    source = backend.begin_reference(3)
+    start = backend.observe(source, POLICY)
+    history = (PublicHistoryStep(start, None, backend.legal_actions(source)),)
+
+    class Teacher:
+        checkpoint_sha256 = "d" * 64
+
+        def __call__(self, observation, actions):
+            return ((0.0,) * len(actions), 0.5)
+
+        def predict(self, observation, actions):
+            return SimpleNamespace(logits=(0.0,) * len(actions))
+
+    report = collect_live_combat_search(
+        backend, source, history,
+        fair_sampler=H8ReferenceNaturePosterior(backend, max_candidates=500),
+        teacher=Teacher(), source_seed="fixture-seed-3",
+        entry_hash=start.observation_hash, encounter_tier="normal",
+        simulations=80, max_searches=1, max_decisions=3,
+        tree_depth=2, rollout_depth=5, seed=20261029,
+    )
+    assert report.outcome == "victory"
+    assert report.combat_decisions == 2
+    assert report.searched_decisions == 1
+    assert decode_target(report.targets[0]).realized_reward == pytest.approx(1.5)
+    assert backend.live_handles == 0
+
+
+def test_h9_nested_choice_uses_explicit_uniform_fallback():
+    torch = pytest.importorskip("torch")
+    from sts2_ai.models.h15_policy_value import H15CombatEvaluator
+    from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
+
+    backend = H8ReferenceCombatBackend(
+        NestedChoiceTransport(), fixture(), emulator_revision="f" * 40,
+    )
+    source = backend.begin_reference(3)
+    backend.step(source, backend.legal_actions(source)[0])
+    teacher = H15CombatEvaluator(
+        SharedObjectTransformer(H7Config(
+            width=32, layers=1, heads=4, feedforward=64,
+        )).eval(), checkpoint_sha256="f" * 64,
+    )
+    estimate = teacher.predict(
+        backend.observe(source, POLICY), backend.legal_actions(source),
+    )
+    assert estimate.logits == (0.0, 0.0)
+    assert estimate.value == 0.5
+    assert teacher.public_selection_fallbacks == 1
+    backend.release_many((source,))
