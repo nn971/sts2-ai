@@ -114,7 +114,7 @@ def collect_native_combat_search(
     saved: list[tuple[CombatFrame, Any]] = []
     count = 0
     try:
-        while count < max_decisions:
+        while True:
             observation = history[-1].observation
             public = json.loads(observation.payload_json)
             if not isinstance(public, dict):
@@ -141,6 +141,10 @@ def collect_native_combat_search(
                         source_seed=recipe.seed,
                         emulator_revision=backend.emulator_revision,
                     ) for root, stats in saved),
+                )
+            if count >= max_decisions:
+                raise RuntimeError(
+                    "Actual native combat was censored; refusing incomplete targets"
                 )
             menu = tuple(backend.legal_actions(current))
             if menu != history[-1].legal_actions:
@@ -176,6 +180,5 @@ def collect_native_combat_search(
             )
             history.append(PublicHistoryStep(next_observation, None, next_menu))
             count += 1
-        raise RuntimeError("Actual native combat was censored; refusing incomplete targets")
     finally:
         backend.release_many([current])
