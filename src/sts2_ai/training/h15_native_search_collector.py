@@ -173,6 +173,7 @@ def collect_native_combat_search(
     seed: int = 20261029, tree_depth: int = 16,
     rollout_depth: int = 512, leaf_mode: str = "terminal",
     search_schedule: str = "first",
+    record_final_turn: bool = False,
 ) -> NativeSearchCollection:
     """Search only selected moves; label all saved roots after actual combat.
 
@@ -199,6 +200,7 @@ def collect_native_combat_search(
         max_searches=max_searches, seed=seed, tree_depth=tree_depth,
         rollout_depth=rollout_depth, leaf_mode=leaf_mode,
         search_schedule=search_schedule,
+        record_final_turn=record_final_turn,
     )
 
 
@@ -211,6 +213,7 @@ def collect_live_combat_search(
     seed: int = 20261029, tree_depth: int = 16,
     rollout_depth: int = 512, leaf_mode: str = "terminal",
     search_schedule: str = "first",
+    record_final_turn: bool = False,
 ) -> NativeSearchCollection:
     """Consume a verified public combat entry and own/release its handle.
 
@@ -255,7 +258,10 @@ def collect_live_combat_search(
                     combat_decisions=count,
                     searched_decisions=len(saved),
                     searched_root_diagnostics=tuple(search_diagnostics),
-                    final_player_turn=summarize_final_player_turn(history, teacher),
+                    final_player_turn=(
+                        summarize_final_player_turn(history, teacher)
+                        if record_final_turn else None
+                    ),
                     targets=tuple(target_record(
                         root, stats, terminal_reward=score,
                         search_model_sha256=teacher.checkpoint_sha256,
