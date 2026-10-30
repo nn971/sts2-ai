@@ -1,35 +1,13 @@
-# H15 M1 — fair stochastic combat PUCT and policy/value distillation
+# H15 M1–M13 historical implementation and experiment log
 
-**Current integration note (2026-10-30):** The statements below
-are chronological H15 milestone records. We already have
-`ReferenceNatureV111`, `H8LocalReferenceNatureV1`, the atomic
-`ReferenceNatureSessionV111` family, and the AI's
-`H8ReferenceNaturePosterior` conditioning independent Nature seeds
-on complete *fixed-fixture combat-local* public history. The missing
-component is a certified posterior for authentic native-entry histories,
-**not** a generic sampler from scratch. H15's M7–M9
-`H15ControlledCombatSessionV1` is an experimental narrow
-continuation branch. Its duplicate Python `_sample_law` has now been
-removed on the independent H15 research branch: reference choices
-use the emulator's `ReferenceNatureV111.SampleValidated` with an
-atomic reference cursor and receipt, while explicit external choices
-remain available for scripted/learned Nature. Audited card and
-potion effects also use one `SemanticPlayerActionEngineV111`.
-Its independent candidate still is **not** conditioned on the
-authentic source public history, its law provenance remains
-`UNVERIFIED`, and its supported continuation sites remain narrower
-than the full semantic combat provider. The H10-based 120-round A10 PPO launch belongs to the
-existing native-*structure*, **prototype-combat-RNG** training
-distribution; its eventual outcomes do not prove native-game parity.
-See the emulator
-[canonical stochastic architecture](https://github.com/nn971/sts2-emulator/blob/research/h15-experimental-search-20261030/docs/UNIFIED_STOCHASTIC_ARCHITECTURE.md).
-
-**Implementation status:** search kernel, public move-aware codec, strict sample
-schema, and offline trainer. **No native H8 fair-combat adapter or native
-training result yet.** This branch is based on H10's native-state combat stack
-so the native research fixtures and corrected H9 reward remain available.
-H14 macro/GAE and its checkpoints are unchanged. This is the first milestone
-of the agreed hierarchical MuZero-inspired design.
+> **ARCHIVED MILESTONE LOG — NOT AN ACTIVE H15 IMPLEMENTATION PLAN (2026-10-30).**
+> **Current plan:** [H15 canonical search-training execution](H15_SEARCH_TRAINING_PLAN.md).
+>
+> This file preserves chronological M1–M13 design notes, interfaces, experiments, run commands and earlier claims so results remain interpretable. Any "required", "must", "blocking", "next step", "fair native sampler", "native posterior", or "after certification" instruction below is **historical and superseded** when it conflicts with the canonical H15 plan. In particular, authentic native-run posterior certification and original-game chance calibration are **not prerequisites** for emulator-relative ReferenceNature PUCT training. The M13 prototype-RNG candidate sessions remain diagnostic, with zero *certified fair-native* PUCT training targets. The H10-based 120-round PPO run contained **no search-guided learning**.
+>
+> The active deliverable is a complete existing-ReferenceNature neural PUCT → search visits + realized value → optimizer → renewed search cycle. Only the canonical plan and AGENTS.md can change that priority, after explicitly surfacing conflicts to the user.
+>
+> The H9 terminal total-nonminion-HP reward formula and historical implementation details below are retained as evidence.
 
 ## Reward (unchanged H9)
 
