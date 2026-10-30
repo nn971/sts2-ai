@@ -209,3 +209,65 @@ def test_reference_choice_rejects_missing_receipt_and_invalid_version():
     with pytest.raises(ValueError, match="ReferenceNature"):
         bridge.h15_experimental_reference_choose("h15-1", -1)
     assert not calls
+
+
+def test_reference_batch_advances_atomically_with_replayable_event_receipts():
+    receipts = [
+        {
+            "lawId": "draw-law", "eventId": "draw-event",
+            "outcomeId": "card_instance:11", "outcomeIndex": 0,
+            "providerId": "reference-nature-splitmix64-v1",
+        },
+        {
+            "lawId": "intent-law", "eventId": "intent-event",
+            "outcomeId": "attack", "outcomeIndex": 1,
+            "providerId": "reference-nature-splitmix64-v1",
+        },
+    ]
+    bridge, calls = backend(response(
+        version=4, boundaryKind="player",
+        referenceNatureSelections=receipts,
+        referenceNatureSelection=None,
+        referenceNatureSampleCount=2,
+    ))
+    result = bridge.h15_experimental_reference_advance(
+        "h15-1", 2, max_nature_decisions=8,
+    )
+    assert result["referenceNatureSelections"] == receipts
+    assert calls == [(
+        "h15_experimental_reference_advance",
+        {"h15_handle": "h15-1", "version": 2,
+         "max_nature_decisions": 8},
+    )]
+
+
+@pytest.mark.parametrize("invalid", [
+    {"referenceNatureSelections": []},
+    {"referenceNatureSelections": [{"lawId": "only-law"}]},
+    {"referenceNatureSelections": [{
+        "lawId": "law", "eventId": "event",
+        "outcomeId": "choice", "outcomeIndex": 0,
+        "providerId": "wrong-provider",
+    }]},
+    {"version": 4, "referenceNatureSampleCount": 0},
+    {"boundaryKind": "draw_card", "chanceLaw": {
+        "probabilityStatus": "UNVERIFIED",
+        "outcomes": [{"outcomeId": "card_instance:2"}],
+    }},
+])
+def test_reference_batch_rejects_incomplete_or_stale_receipts(invalid):
+    valid = {
+        "lawId": "law", "eventId": "event",
+        "outcomeId": "card_instance:2", "outcomeIndex": 0,
+        "providerId": "reference-nature-splitmix64-v1",
+    }
+    raw = response(
+        version=3, referenceNatureSelections=[valid],
+        referenceNatureSampleCount=1,
+    )
+    raw.update(invalid)
+    bridge, _ = backend(raw)
+    with pytest.raises(JsonlBridgeError):
+        bridge.h15_experimental_reference_advance(
+            "h15-1", 2, max_nature_decisions=2,
+        )
