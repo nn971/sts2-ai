@@ -19,7 +19,10 @@ import torch
 from sts2_ai.models.h15_combat_codec import H15_COMBAT_SCHEMA
 from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
 from sts2_ai.training.h15_search_supervision import (
-    REWARD_VERSION, SAMPLE_SCHEMA, decode_target, search_policy_value_loss,
+    REWARD_VERSION,
+    SAMPLE_SCHEMA,
+    decode_target,
+    search_policy_value_loss,
 )
 
 H15_FORMAT = "sts2-h15-combat-search-policy-value-v1"
