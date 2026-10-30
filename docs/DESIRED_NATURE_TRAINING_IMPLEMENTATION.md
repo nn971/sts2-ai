@@ -1,3 +1,11 @@
+> **HISTORICAL Nature research proposal, not an H15 execution plan (2026-10-30).**
+> Current combat-search implementation priorities and acceptance gates are in
+> [H15 canonical search training](H15_SEARCH_TRAINING_PLAN.md).
+> Native full-history posterior certification is **not** a prerequisite to
+> ReferenceNature-model search training. The stochastic ownership contract in
+> the emulator remains authoritative. Retain this proposal for Nature/importance-
+> sampling research history; do not use its "next" steps to switch H15 focus.
+
 # Desired Nature Training Implementation
 
 **Current reading note (2026-10-30):** This is a preserved
