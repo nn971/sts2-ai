@@ -12,6 +12,7 @@ alone cannot satisfy it. Missing conditioning fails before any target is saved.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -44,6 +45,7 @@ class NativeSearchCollection:
     combat_decisions: int
     searched_decisions: int
     targets: tuple[dict[str, Any], ...]
+    searched_root_diagnostics: tuple[dict[str, Any], ...] = ()
 
 
 def replay_native_public_history(
@@ -148,6 +150,7 @@ def collect_live_combat_search(
         rollout_depth=rollout_depth, leaf_mode=leaf_mode,
     )
     saved: list[tuple[CombatFrame, Any]] = []
+    search_diagnostics: list[dict[str, Any]] = []
     count = 0
     try:
         while True:
@@ -171,6 +174,7 @@ def collect_live_combat_search(
                     exit_hp=public["hp"],
                     combat_decisions=count,
                     searched_decisions=len(saved),
+                    searched_root_diagnostics=tuple(search_diagnostics),
                     targets=tuple(target_record(
                         root, stats, terminal_reward=score,
                         search_model_sha256=teacher.checkpoint_sha256,
@@ -201,6 +205,40 @@ def collect_live_combat_search(
                     range(len(menu)),
                     key=lambda i: (stats.visits[i], menu[i].action_id),
                 )
+                # Measure actual search interventions against the *same*
+                # checkpoint's raw greedy policy at this public decision.
+                logits = teacher.predict(observation, menu).logits
+                if len(logits) != len(menu) or not all(
+                    math.isfinite(logit) for logit in logits
+                ):
+                    raise ValueError("H15 search root has invalid greedy logits")
+                greedy_index = max(
+                    range(len(menu)),
+                    key=lambda i: (logits[i], menu[i].action_id),
+                )
+                scaled = [math.exp(logit - max(logits)) for logit in logits]
+                total = math.fsum(scaled)
+                neural_priors = [weight / total for weight in scaled]
+                visit_sum = sum(stats.visits)
+                if visit_sum <= 0:
+                    raise ValueError("H15 search root returned no visits")
+                prior_kl = math.fsum(
+                    (n / visit_sum) * math.log(
+                        (n / visit_sum) / neural_priors[i]
+                    )
+                    for i, n in enumerate(stats.visits) if n > 0
+                )
+                search_diagnostics.append({
+                    "decision_index": count,
+                    "public_observation_hash": observation.observation_hash,
+                    "greedy_action_id": menu[greedy_index].action_id,
+                    "search_action_id": menu[index].action_id,
+                    "search_overrode_greedy": index != greedy_index,
+                    "visit_policy_kl_from_prior": prior_kl,
+                    "search_simulations": stats.simulations,
+                    "search_neural_cutoffs": stats.neural_cutoffs,
+                    "search_terminal_evaluations": stats.terminal_evaluations,
+                })
                 saved.append((root, stats))
             else:
                 logits = teacher.predict(observation, menu).logits
