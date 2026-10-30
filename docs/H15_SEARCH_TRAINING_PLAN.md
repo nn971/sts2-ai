@@ -136,3 +136,65 @@ failures if they occur; once this completes, scale to a source-supported
 A10 Nature combat curriculum and repeated search-training updates under
 disjoint reference seeds. For comparative strength claims, follow the
 experiment evidence standard and multiple independent training seeds.
+
+
+## M14 workstation result and codec-controlled follow-up (2026-10-30)
+
+**Integration smoke succeeded on user-provided reports**, under emulator revision
+`a411a19491a93b58ae4fdbc6d1f3345c9fca67cf` and declared fixed-fixture
+prior `h15-h8-fixed-fixture-declared-chance-law-v1` (Silent A10 Mawler,
+starter deck, source Nature seed 113). The initial and updated root observations
+and legal-action menus match exactly.
+
+| Metric | Before H15 optimizer | After H15 optimizer |
+| --- | ---: | ---: |
+| Completed combat | victory | victory |
+| Exit HP | 28 | 32 |
+| Realized H9 encounter reward | 1.4 | 1.457142857 |
+| Executed combat decisions | 27 | 23 |
+| Root search visits | 16 | 16 |
+| Search neural-value cutoffs | 16 | 16 |
+| Search terminal evaluations | 0 | 0 |
+| In-sample policy loss, measured by H15 codec | 2.23785591 | 1.54206824 |
+| In-sample value loss | 0.0000005354 | 0.0000374693 |
+
+The optimizer made **one** step, changing 103 tensors (`L2=0.1030645`).
+Opening visits changed from `[3,0,5,5,3,0]` to `[5,1,3,3,4,0]`
+for (Strike #5, Survivor #12, Defend #9, Defend #6, Strike #2, end
+turn). Visit-policy L1 change was 0.5. These are **integration diagnostics**
+only: one training root and one realization per policy cannot establish
+an improvement or reliable action-value ranking. The value loss grew,
+though it remained small in absolute magnitude.
+
+**Identified control defect in the v1 feedback-cycle comparison:** the initial
+teacher checkpoint was `sts2-h7-shared-object-transformer-v1` using
+`SHARED_OBJECT_SCHEMA`, whereas the post-update checkpoint was an H15
+checkpoint using the move-augmented `H15_COMBAT_SCHEMA`. A single gradient
+step therefore coincided with a **codec change**. Although both reported
+training losses use the H15 codec, the before/after *search* comparison
+cannot attribute its policy shift to optimization alone.
+
+**Correction committed for subsequent cycles:** feedback-cycle schema v2
+writes `bootstrap-h15.pt` by promoting the H9 checkpoint metadata to
+`H15_COMBAT_SCHEMA` while asserting the weights remain byte-for-byte
+tensor-identical. **Both** initial and updated PUCT calls now use the H15
+codec, and the optimizer receipt is bound to the promoted checkpoint SHA.
+The original source checkpoint SHA and bootstrap SHA are reported separately.
+The existing v1 files remain valid historical evidence and are **not
+retrospectively renamed** to v2. Use a **new output directory** and rerun the
+same smoke once to establish the codec-controlled baseline.
+
+A separate narrow H15 experimental ReferenceNature posterior CI check found
+that the batch adapter only checked `providerId` in its receipts. The first
+batch event now verifies its law ID, event ID, selected outcome index and
+outcome ID against the advertised pending Chance Law; later batch events
+remain emulator-owned. This change does not alter H8 fixture chance sampling
+or the successful M14 execution.
+
+**Next:** after the v2 codec-controlled replay, move directly to a *substantive*
+search-guided training run covering multiple supported A10 scenarios/independent
+Nature seeds, refreshing PUCT targets after each learner update. Preserve 15
+workers, a held-out reference-seed split, compute accounting, and periodic
+evaluation against frozen H9 and raw/distilled H15 policies. Choose search
+budgets based on observed throughput; do not interpret the original 16-visit
+smoke as a search-budget optimum.
