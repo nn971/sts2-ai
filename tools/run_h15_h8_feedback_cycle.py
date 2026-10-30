@@ -38,7 +38,7 @@ def prepare_consistent_h15_teacher(source: Path, destination: Path) -> dict[str,
     import torch
 
     from sts2_ai.models.h15_combat_codec import H15_COMBAT_SCHEMA
-    from sts2_ai.models.h15_policy_value import H15_FORMAT, H7_FORMAT
+    from sts2_ai.models.h15_policy_value import H7_FORMAT, H15_FORMAT
     from sts2_ai.models.shared_game_objects import SHARED_OBJECT_SCHEMA
 
     initial = torch.load(source, map_location="cpu", weights_only=True)
@@ -112,7 +112,7 @@ def compare_first_root(before: dict[str, Any], after: dict[str, Any]) -> dict[st
         "before_policy": [v / total0 for v in v0],
         "after_policy": [v / total1 for v in v1],
         "visit_policy_l1_change": sum(
-            abs(a / total0 - b / total1) for a, b in zip(v0, v1)
+            abs(a / total0 - b / total1) for a, b in zip(v0, v1, strict=True)
         ),
     }
 
@@ -273,7 +273,10 @@ def main() -> None:
         "search_seed": args.search_seed, "output_root": str(output_root),
     }, sort_keys=True), flush=True)
     if not args.execute:
-        print("[h15-cycle-dry-run:bootstrap] promote original H9/H15 weights to H15 codec at " + str(bootstrap_path), flush=True)
+        print(
+            "[h15-cycle-dry-run:bootstrap] promote H9/H15 weights to "
+            "H15 codec at " + str(bootstrap_path), flush=True,
+        )
         for name, command in [
             ("before", collection_command(bootstrap_path, before_dir)),
             ("fit", train_command),
