@@ -31,7 +31,7 @@ from sts2_ai.evaluation.combat_snapshots import (
 from sts2_ai.models.h15_policy_value import H15CombatEvaluator
 from sts2_ai.search.combat_puct import CombatFrame, CombatPuct
 from sts2_ai.search.h15_public_combat_adapter import H15PublicCombatAdapter
-from sts2_ai.training.h15_search_supervision import target_record
+from sts2_ai.training.h15_search_supervision import target_record, value_target_record
 
 
 @dataclass(frozen=True)
@@ -47,6 +47,63 @@ class NativeSearchCollection:
     targets: tuple[dict[str, Any], ...]
     searched_root_diagnostics: tuple[dict[str, Any], ...] = ()
     final_player_turn: dict[str, Any] | None = None
+
+
+
+
+def select_late_value_indices(
+    history: list[PublicHistoryStep], *,
+    min_turn: int, max_player_hp: int, max_enemy_hp: int,
+    max_samples: int, exclude: set[int],
+) -> list[int]:
+    """Select public-only endgame observations, with bounded turn coverage.
+
+    This rule could run online: it inspects only the decision's own public
+    observation/menu and earlier selected turns, never terminal outcomes.
+    The eventual terminal reward is attached *after* real combat completion.
+    """
+    if (min_turn < 1 or max_player_hp < 0 or max_enemy_hp < 0
+            or max_samples < 0):
+        raise ValueError("Invalid H15 late value-sampling limits")
+    chosen: list[int] = []
+    sampled_turns: set[int] = set()
+    sampled_lethal_turns: set[int] = set()
+    for index, step in enumerate(history):
+        if len(chosen) >= max_samples:
+            break
+        if step.chosen_action is None or not step.legal_actions:
+            continue
+        public = json.loads(step.observation.payload_json)
+        combat = public.get("combat") if isinstance(public, dict) else None
+        if not isinstance(combat, dict) or "h15_player_choice_kind" in public:
+            continue
+        turn, hp = combat.get("turn"), public.get("hp")
+        if type(turn) is not int or turn < min_turn or type(hp) is not int:
+            continue
+        enemies = combat.get("enemies")
+        if not isinstance(enemies, list):
+            raise ValueError("Public late combat missing enemy roster")
+        enemy_hps = [
+            x["hp"] for x in enemies if isinstance(x, dict)
+            and type(x.get("hp")) is int and x["hp"] > 0
+        ]
+        if not enemy_hps or (hp > max_player_hp
+                and min(enemy_hps) > max_enemy_hp):
+            continue
+        # One decision when entering danger on each new turn, plus one
+        # additional within-turn choice when a visible enemy is <= 12 HP.
+        lethal = min(enemy_hps) <= 12
+        new_turn = turn not in sampled_turns
+        new_lethal = lethal and turn not in sampled_lethal_turns
+        if not (new_turn or new_lethal):
+            continue
+        sampled_turns.add(turn)
+        if lethal:
+            sampled_lethal_turns.add(turn)
+        # Do not apply the same realized return twice at a searched root.
+        if index not in exclude:
+            chosen.append(index)
+    return chosen
 
 
 def summarize_final_player_turn(
@@ -189,6 +246,8 @@ def collect_native_combat_search(
     rollout_depth: int = 512, leaf_mode: str = "terminal",
     search_schedule: str = "first",
     record_final_turn: bool = False,
+    late_value_max: int = 0, late_value_min_turn: int = 7,
+    late_value_player_hp: int = 25, late_value_enemy_hp: int = 40,
 ) -> NativeSearchCollection:
     """Search only selected moves; label all saved roots after actual combat.
 
@@ -201,7 +260,9 @@ def collect_native_combat_search(
     if (min(simulations, max_decisions, tree_depth, rollout_depth) < 1
             or max_searches < 0 or seed < 0
             or leaf_mode not in ("terminal", "value")
-            or search_schedule not in ("first", "turn_start")):
+            or search_schedule not in ("first", "turn_start")
+            or late_value_max < 0 or late_value_min_turn < 1
+            or late_value_player_hp < 0 or late_value_enemy_hp < 0):
         raise ValueError("Invalid native combat-search budget")
     # Reject unsupported samplers BEFORE replaying or owning a live native
     # state, so a missing capability cannot leak the source combat handle.
@@ -216,6 +277,10 @@ def collect_native_combat_search(
         rollout_depth=rollout_depth, leaf_mode=leaf_mode,
         search_schedule=search_schedule,
         record_final_turn=record_final_turn,
+        late_value_max=late_value_max,
+        late_value_min_turn=late_value_min_turn,
+        late_value_player_hp=late_value_player_hp,
+        late_value_enemy_hp=late_value_enemy_hp,
     )
 
 
@@ -229,6 +294,8 @@ def collect_live_combat_search(
     rollout_depth: int = 512, leaf_mode: str = "terminal",
     search_schedule: str = "first",
     record_final_turn: bool = False,
+    late_value_max: int = 0, late_value_min_turn: int = 7,
+    late_value_player_hp: int = 25, late_value_enemy_hp: int = 40,
 ) -> NativeSearchCollection:
     """Consume a verified public combat entry and own/release its handle.
 
@@ -238,7 +305,9 @@ def collect_live_combat_search(
     if (min(simulations, max_decisions, tree_depth, rollout_depth) < 1
             or max_searches < 0 or seed < 0
             or leaf_mode not in ("terminal", "value")
-            or search_schedule not in ("first", "turn_start")):
+            or search_schedule not in ("first", "turn_start")
+            or late_value_max < 0 or late_value_min_turn < 1
+            or late_value_player_hp < 0 or late_value_enemy_hp < 0):
         raise ValueError("Invalid H15 combat collection/evaluation budget")
     history = list(initial_history)
     adapter = H15PublicCombatAdapter(backend, sampler=fair_sampler)
@@ -277,12 +346,31 @@ def collect_live_combat_search(
                         summarize_final_player_turn(history, teacher)
                         if record_final_turn else None
                     ),
-                    targets=tuple(target_record(
-                        root, stats, terminal_reward=score,
-                        search_model_sha256=teacher.checkpoint_sha256,
-                        source_seed=source_seed,
-                        emulator_revision=backend.emulator_revision,
-                    ) for root, stats in saved),
+                    targets=(
+                        tuple(target_record(
+                            root, stats, terminal_reward=score,
+                            search_model_sha256=teacher.checkpoint_sha256,
+                            source_seed=source_seed,
+                            emulator_revision=backend.emulator_revision,
+                        ) for root, stats in saved)
+                        + tuple(value_target_record(
+                            history[i].observation, history[i].legal_actions,
+                            terminal_reward=score,
+                            search_model_sha256=teacher.checkpoint_sha256,
+                            source_seed=source_seed,
+                            emulator_revision=backend.emulator_revision,
+                            decision_index=i,
+                        ) for i in select_late_value_indices(
+                            history,
+                            min_turn=late_value_min_turn,
+                            max_player_hp=late_value_player_hp,
+                            max_enemy_hp=late_value_enemy_hp,
+                            max_samples=late_value_max,
+                            exclude={
+                                d["decision_index"] for d in search_diagnostics
+                            },
+                        ))
+                    ),
                 )
             if count >= max_decisions:
                 raise RuntimeError(
