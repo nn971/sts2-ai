@@ -6,6 +6,7 @@ on:
       - 'tools/train_h15_reference_rounds.py'
       - 'tools/audit_h15_reference_search.py'
       - 'tools/probe_h15_reference_search_budget.py'
+      - 'tools/probe_h15_final_turn.py'
       - 'tools/run_h15_h8_feedback_cycle.py'
       - 'tools/train_h15_search_distill.py'
       - 'src/sts2_ai/training/h15_native_search_collector.py'
@@ -15,6 +16,7 @@ on:
       - 'tests/test_h15_native_search_collector.py'
       - 'tests/test_h15_reference_search_audit.py'
       - 'tests/test_h15_reference_search_budget.py'
+      - 'tests/test_h15_final_turn_probe.py'
       - '.github/workflows/h15-reference-search-training.yml'
   pull_request:
   workflow_dispatch:
@@ -38,12 +40,15 @@ jobs:
           python -m compileall -q tools/run_h15_h8_feedback_cycle.py
           python -m compileall -q tools/audit_h15_reference_search.py
           python -m compileall -q tools/probe_h15_reference_search_budget.py
+          python -m compileall -q tools/probe_h15_final_turn.py
+          python tools/probe_h15_final_turn.py --help > /dev/null
           python tools/probe_h15_reference_search_budget.py --help > /dev/null
           python tools/audit_h15_reference_search.py --help > /dev/null
           python -m ruff check \
             tools/train_h15_reference_rounds.py \
             tools/audit_h15_reference_search.py \
             tools/probe_h15_reference_search_budget.py \
+            tools/probe_h15_final_turn.py \
             tools/run_h15_h8_feedback_cycle.py \
             tools/train_h15_search_distill.py \
             src/sts2_ai/training/h15_search_supervision.py
@@ -54,4 +59,5 @@ jobs:
             tests/test_h15_native_search_collector.py \
             tests/test_h15_reference_search_audit.py \
             tests/test_h15_reference_search_budget.py \
+            tests/test_h15_final_turn_probe.py \
             tests/test_h15_combat_search.py
