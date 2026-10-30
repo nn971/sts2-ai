@@ -29,7 +29,7 @@ def compare_root_actions(
     backend: Any, source: str, teacher: Any, *,
     seed_prefix: str, candidate_limit: int = 3,
     samples_per_action: int = 2,
-    limits: RolloutLimits = RolloutLimits(),
+    limits: RolloutLimits | None = None,
 ) -> dict[str, Any]:
     """Compare source-legal root alternatives under an unverified Nature prior.
 
@@ -40,6 +40,7 @@ def compare_root_actions(
     """
     if not seed_prefix or candidate_limit < 1 or samples_per_action < 1:
         raise ValueError("Root comparison needs positive budgets and a seed prefix")
+    limits = limits if limits is not None else RolloutLimits()
     limits.validate()
     # Create a fresh independent root for public-only policy evaluation.
     # Release it before any rollout. No search code observes its private state.
