@@ -8,12 +8,17 @@ are chronological H15 milestone records. We already have
 on complete *fixed-fixture combat-local* public history. The missing
 component is a certified posterior for authentic native-entry histories,
 **not** a generic sampler from scratch. H15's M7–M9
-`H15ControlledCombatSessionV1` plus Python `_sample_law` is an
-experimental narrow branch that duplicates some shared stochastic
-provider logic; its independent candidate is not conditioned on the
-source public history and all its laws remain `UNVERIFIED`. It should
-be migrated to shared ReferenceNature ownership before becoming a new
-search backend. The H10-based 120-round A10 PPO launch belongs to the
+`H15ControlledCombatSessionV1` is an experimental narrow
+continuation branch. Its duplicate Python `_sample_law` has now been
+removed on the independent H15 research branch: reference choices
+use the emulator's `ReferenceNatureV111.SampleValidated` with an
+atomic reference cursor and receipt, while explicit external choices
+remain available for scripted/learned Nature. Audited card and
+potion effects also use one `SemanticPlayerActionEngineV111`.
+Its independent candidate still is **not** conditioned on the
+authentic source public history, its law provenance remains
+`UNVERIFIED`, and its supported continuation sites remain narrower
+than the full semantic combat provider. The H10-based 120-round A10 PPO launch belongs to the
 existing native-*structure*, **prototype-combat-RNG** training
 distribution; its eventual outcomes do not prove native-game parity.
 See the emulator
@@ -842,3 +847,64 @@ unsupported card/draw/potion sites and full public-history-conditioned
 Nature distributions remain future work. `fairContinuationCapability`
 continues to advertise `unavailable`, so the H15 PUCT collector and
 search-policy distillation remain disabled.
+
+
+## M11 — canonical provider reuse and recorded architecture mistake
+
+The independent research branches `research/h15-experimental-search-20261030`
+(leave the pinned PPO branches alone) remove two H15-specific implementations:
+
+1. The Python diagnostic no longer implements `_sample_law` or holds a
+   separate per-event `random.Random` sampler. The C# H15 session now
+   owns a forkable `ReferenceNatureStateV111` cursor, initialized through
+   `ReferenceNatureRunCursorV111.Begin`. One
+   `h15_experimental_reference_choose` transaction uses
+   `ReferenceNatureV111.SampleValidated`, resolves the existing typed
+   `SemanticEndTurnEngineV111` continuation, and publishes a law/event/
+   outcome/provider receipt. Failed continuations do not advance the
+   published mechanics state or Nature cursor. The original
+   `h15_experimental_choose` remains for externally scripted/learned
+   outcomes and does not consume the reference cursor.
+2. The duplicated H15 potion allowlist and draw-pile checks were deleted;
+   the restricted card/potion player path is now owned by
+   `SemanticPlayerActionEngineV111` with one source replay/guard/
+   semantic-deck validation contract.
+
+The root comparison tool continues to report `UNVERIFIED`,
+`fair_search_roots=0` and `training_targets=0`. Matching seeds
+across root-action candidates now drive the *same emulator-owned
+ReferenceNature provider* and candidate-state initialization;
+there is no second Python chance stream.
+
+The underlying `H15NativeCombatEntryCandidateV1` remains an
+independently reseeded, **native-structure/prototype-combat-RNG**
+candidate, not a history-conditioned true native-run posterior.
+Similarly the narrower `SemanticEndTurnV111` H15 adapter has not
+been magically converted into the larger
+`SemanticPilotCombatV111` reference-session family. Those are
+distinct source-mechanics admission/conditioning tasks, and we should
+reuse existing continuation owners when expanding coverage.
+
+The root-cause retrospective and mandatory provider-inventory checklist
+live in [emulator ADR 0005](https://github.com/nn971/sts2-emulator/blob/research/h15-experimental-search-20261030/docs/adr/0005-h15-reference-nature-reuse-retrospective.md).
+The AI repository's `AGENTS.md` requires reading them before future
+stochastic implementation work.
+
+**Local validation after the existing long PPO experiment completes:**
+
+```fish
+set emu ~/projects/sts2-emulator
+set ai ~/projects/sts2-ai
+
+git -C $emu switch research/h15-experimental-search-20261030
+git -C $emu pull --ff-only
+dotnet test $emu/tests/Sts2Emulator.Core.Tests -c Release \
+    --filter 'FullyQualifiedName~H15ControlledCombatSessionV1Tests|FullyQualifiedName~RandomIndexProvidersV111Tests'
+
+git -C $ai switch research/h15-experimental-search-20261030
+git -C $ai pull --ff-only
+cd $ai
+python -m pytest -q \
+    tests/test_h15_controlled_turn_protocol.py \
+    tests/test_h15_experimental_rollout.py
+```
