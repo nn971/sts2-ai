@@ -67,11 +67,12 @@ def exercise(
             )
         return {
             "status": ("next_player_or_exit"
-                       if status["boundaryKind"] in ("player", "terminal")
+                       if status["boundaryKind"] in ("player", "combat_exit")
                        else "unsupported_boundary"),
             "nature_boundaries": kinds,
             "final_boundary": status["boundaryKind"],
             "combat_exit": status["combatExit"],
+            "combat_outcome": status.get("combatOutcome"),
         }
     except Exception as exc:
         return {
