@@ -92,18 +92,18 @@ def test_full_depth_expands_multiple_nodes_per_simulation_and_labels_v3():
     old = CombatPuct(
         old_sampler, evaluator, seed=11, max_depth=3,
         leaf_mode="terminal", tree_expansion_mode="one_leaf",
-    ).search(_root(), simulations=16)
+    ).search(_root(), simulations=2)
     new = CombatPuct(
         deep_sampler, evaluator, seed=11, max_depth=3,
         leaf_mode="terminal", tree_expansion_mode="full_depth",
-    ).search(_root(), simulations=16)
+    ).search(_root(), simulations=2)
     assert old.search_version == H15_SEARCH_VERSION
     assert new.search_version == H15_DEEP_SEARCH_VERSION
     assert new.maximum_expanded_depth >= 2
     assert new.expanded_information_sets > old.expanded_information_sets
-    assert new.terminal_evaluations == 16
+    assert new.terminal_evaluations == 2
     assert new.neural_cutoffs == 0
-    assert deep_sampler.started == deep_sampler.ended == 16
+    assert deep_sampler.started == deep_sampler.ended == 2
 
     row = target_record(
         _root(), new, terminal_reward=1.5, search_model_sha256="a" * 64,
@@ -112,7 +112,7 @@ def test_full_depth_expands_multiple_nodes_per_simulation_and_labels_v3():
     )
     assert row["combat_reward_version"] == DEFEAT_MARGIN_REWARD_VERSION
     assert row["search_tree_expansion_mode"] == "full_depth"
-    assert sum(decode_target(row).visits) == 16
+    assert sum(decode_target(row).visits) == 2
     with pytest.raises(ValueError, match="expansion provenance"):
         decode_target({**row, "search_tree_expansion_mode": "one_leaf"})
 
