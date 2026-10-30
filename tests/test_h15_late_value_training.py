@@ -122,3 +122,21 @@ def test_value_only_gradient_updates_critic_but_cannot_imprint_policy():
     assert model.value_heads[0][-1].weight.grad is not None
     policy_grad = model.policy_heads[0][-1].weight.grad
     assert policy_grad is None or torch.count_nonzero(policy_grad) == 0
+
+
+def test_completed_fight_without_public_danger_target_is_accounted():
+    from tools.train_h15_reference_rounds import aggregate
+
+    row = {
+        "case_id": "short-boss-combat",
+        "encounter": "ceremonial-beast-boss-a10",
+        "deck": "silent-boss-cycle-20-v1",
+        "outcome": "defeat", "reward": 0.7, "exit_hp": 0,
+        "decisions": 3, "searched_roots": 0, "search_overrides": 0,
+        "searched_root_diagnostics": [], "late_value_targets": 0,
+        "targets": [],
+    }
+    report = aggregate([row])
+    assert report["combats"] == 1
+    assert report["combats_without_training_targets"] == 1
+    assert report["searched_roots"] == 0
