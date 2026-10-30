@@ -30,7 +30,10 @@ from sts2_ai.evaluation.combat_snapshots import (
 )
 from sts2_ai.models.h15_policy_value import H15CombatEvaluator
 from sts2_ai.search.combat_puct import CombatFrame, CombatPuct
-from sts2_ai.search.h15_public_combat_adapter import H15PublicCombatAdapter
+from sts2_ai.search.h15_public_combat_adapter import (
+    H15PublicCombatAdapter,
+    H15RootConditionedCombatAdapter,
+)
 from sts2_ai.training.h15_search_supervision import target_record, value_target_record
 
 
@@ -245,6 +248,8 @@ def collect_native_combat_search(
     seed: int = 20261029, tree_depth: int = 16,
     rollout_depth: int = 512, leaf_mode: str = "terminal",
     search_schedule: str = "first",
+    search_provider: str = "fair_posterior",
+    leaf_mode_override: str | None = None,
     record_final_turn: bool = False,
     late_value_max: int = 0, late_value_min_turn: int = 7,
     late_value_player_hp: int = 25, late_value_enemy_hp: int = 40,
@@ -260,13 +265,15 @@ def collect_native_combat_search(
     if (min(simulations, max_decisions, tree_depth, rollout_depth) < 1
             or max_searches < 0 or seed < 0
             or leaf_mode not in ("terminal", "value")
-            or search_schedule not in ("first", "turn_start")
+            or search_schedule not in ("first", "turn_start", "danger")
+            or search_provider not in ("fair_posterior", "root_conditioned")
             or late_value_max < 0 or late_value_min_turn < 1
             or late_value_player_hp < 0 or late_value_enemy_hp < 0):
         raise ValueError("Invalid native combat-search budget")
     # Reject unsupported samplers BEFORE replaying or owning a live native
     # state, so a missing capability cannot leak the source combat handle.
-    require_fair_sampler(fair_sampler)
+    if search_provider == "fair_posterior":
+        require_fair_sampler(fair_sampler)
     current, initial_history = replay_native_public_history(backend, recipe)
     return collect_live_combat_search(
         backend, current, initial_history,
@@ -276,6 +283,8 @@ def collect_native_combat_search(
         max_searches=max_searches, seed=seed, tree_depth=tree_depth,
         rollout_depth=rollout_depth, leaf_mode=leaf_mode,
         search_schedule=search_schedule,
+        search_provider=search_provider,
+        leaf_mode_override=leaf_mode_override,
         record_final_turn=record_final_turn,
         late_value_max=late_value_max,
         late_value_min_turn=late_value_min_turn,
@@ -293,6 +302,8 @@ def collect_live_combat_search(
     seed: int = 20261029, tree_depth: int = 16,
     rollout_depth: int = 512, leaf_mode: str = "terminal",
     search_schedule: str = "first",
+    search_provider: str = "fair_posterior",
+    leaf_mode_override: str | None = None,
     record_final_turn: bool = False,
     late_value_max: int = 0, late_value_min_turn: int = 7,
     late_value_player_hp: int = 25, late_value_enemy_hp: int = 40,
@@ -305,12 +316,19 @@ def collect_live_combat_search(
     if (min(simulations, max_decisions, tree_depth, rollout_depth) < 1
             or max_searches < 0 or seed < 0
             or leaf_mode not in ("terminal", "value")
-            or search_schedule not in ("first", "turn_start")
+            or search_schedule not in ("first", "turn_start", "danger")
+            or search_provider not in ("fair_posterior", "root_conditioned")
             or late_value_max < 0 or late_value_min_turn < 1
             or late_value_player_hp < 0 or late_value_enemy_hp < 0):
         raise ValueError("Invalid H15 combat collection/evaluation budget")
     history = list(initial_history)
-    adapter = H15PublicCombatAdapter(backend, sampler=fair_sampler)
+    adapter = (
+        H15PublicCombatAdapter(backend, sampler=fair_sampler)
+        if search_provider == "fair_posterior"
+        else H15RootConditionedCombatAdapter(backend, current)
+    )
+    if leaf_mode_override is not None:
+        leaf_mode = leaf_mode_override
     search = CombatPuct(
         adapter, teacher, seed=seed, max_depth=tree_depth,
         rollout_depth=rollout_depth, leaf_mode=leaf_mode,
@@ -385,14 +403,33 @@ def collect_live_combat_search(
             # the selection-action codec is versioned and implemented.
             is_nested_choice = "h15_player_choice_kind" in public
             turn: int | None = None
-            if search_schedule == "turn_start" and not is_nested_choice:
+            if search_schedule in ("turn_start", "danger") and not is_nested_choice:
                 turn = public["combat"].get("turn")
                 if type(turn) is not int or turn < 1:
                     raise ValueError("H15 turn-start search needs public combat turn")
+            eligible_danger = False
+            if search_schedule == "danger" and not is_nested_choice:
+                enemies = public["combat"].get("enemies", [])
+                hp = public.get("hp")
+                live_enemy_hp = [
+                    enemy["hp"] for enemy in enemies
+                    if isinstance(enemy, dict)
+                    and type(enemy.get("hp")) is int and enemy["hp"] > 0
+                ]
+                eligible_danger = (
+                    turn >= late_value_min_turn
+                    and type(hp) is int
+                    and bool(live_enemy_hp)
+                    and (hp <= late_value_player_hp
+                         or min(live_enemy_hp) <= late_value_enemy_hp)
+                )
             search_here = (
                 len(saved) < max_searches
                 and not is_nested_choice
-                and (search_schedule == "first" or turn != last_searched_turn)
+                and (search_schedule == "first"
+                     or (turn != last_searched_turn and
+                         (search_schedule == "turn_start"
+                          or eligible_danger)))
             )
             if search_here:
                 root = adapter.root(history)
@@ -448,7 +485,7 @@ def collect_live_combat_search(
                     "search_transitions": stats.transitions,
                 })
                 saved.append((root, stats))
-                if search_schedule == "turn_start":
+                if search_schedule in ("turn_start", "danger"):
                     last_searched_turn = turn
             else:
                 logits = teacher.predict(observation, menu).logits
