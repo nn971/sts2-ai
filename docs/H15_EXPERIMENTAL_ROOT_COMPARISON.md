@@ -49,8 +49,12 @@ expected public root hash/menu:
    **never** evaluate a fallback instead and attribute it to that action.
 5. For subsequent player choices, use the same frozen policy and explicitly
    record any unsupported fallback.
-6. Sample every declared Nature boundary from the integer-weight law,
-   retaining law IDs, outcome IDs and event order.
+6. Invoke `h15_experimental_reference_choose`: the emulator
+   samples the declared `UNVERIFIED` law using
+   `ReferenceNatureV111.SampleValidated`, advances its session-owned
+   `ReferenceNatureStateV111` cursor together with the mechanics,
+   and returns the exact law/event/outcome/provider receipt.
+   **There is no separate Python weighted-law sampler.**
 7. Stop on true reward/defeat, an unsupported boundary, an unexpected
    mechanics error, or explicit rollout budgets. Release the session in
    every case.
@@ -108,7 +112,12 @@ python -u tools/compare_h15_experimental_roots.py \
 ```
 
 The comparator uses CPU by default, and execution can be expensive because
-every candidate/replica plays a whole combat. It should not compete for
+every candidate/replica plays a whole combat.
+The independent seed now drives both the separately rekeyed experimental
+candidate and the **emulator-owned** reference cursor via distinct
+derivation domains; Python no longer tracks an additional RNG stream.
+The externally supplied `h15_experimental_choose` remains available for
+scripted/learned Nature but does not advance this reference cursor. It should not compete for
 the running PPO experiment's compute resources.
 
 ## Next development decision
