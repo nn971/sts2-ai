@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Distill certified fair H15 combat-search data into the H9 policy/value net.
+"""Distill genuine H15 PUCT policies and public realized-return value targets.
 
-This CLI fits already-collected, source-provenanced public targets. The native
-fair chance sampler/collector is not yet implemented; do not feed exact-state
-MCTS results or fabricate training targets from ordinary H14 histories.
+Only actual PUCT roots supervise policy; bounded late public observations
+supervise the critic alone. All rewards are from completed ReferenceNature
+combats and no hidden-state fork supplies a policy target.
 """
 from __future__ import annotations
 
@@ -21,6 +21,8 @@ from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
 from sts2_ai.training.h15_search_supervision import (
     REWARD_VERSION,
     SAMPLE_SCHEMA,
+    VALUE_SAMPLE_SCHEMA,
+    SearchTrainingSample,
     decode_target,
     search_policy_value_loss,
 )
@@ -75,7 +77,13 @@ def main() -> None:
     if not rows:
         raise ValueError("Empty certified search dataset")
     fingerprints = {s.source_seed for s in rows}
-    print(f"[h15-preflight] samples={len(rows)} source_seeds={len(fingerprints)} "
+    policy_samples = sum(isinstance(s, SearchTrainingSample) for s in rows)
+    value_only_samples = len(rows) - policy_samples
+    if policy_samples == 0:
+        raise ValueError("H15 search distillation requires genuine PUCT policy roots")
+    print(f"[h15-preflight] samples={len(rows)} "
+          f"policy_roots={policy_samples} value_only={value_only_samples} "
+          f"source_seeds={len(fingerprints)} "
           f"teacher_sha256={model_sha} reward={REWARD_VERSION} schema={SAMPLE_SCHEMA} "
           f"chance_prior={args.accepted_chance_prior}",
           flush=True)
@@ -97,21 +105,27 @@ def main() -> None:
     rng = random.Random(args.seed)
 
     def evaluate_training_fit() -> dict[str, float]:
-        """Diagnostic in-sample fit; never use this as a held-out strength claim."""
+        """In-sample diagnostics with correct search-only metric denominator."""
         model.eval()
-        total = {
+        policy_total = {
             "policy_loss": 0.0, "policy_target_entropy": 0.0,
-            "policy_kl_to_search": 0.0, "value_loss": 0.0,
+            "policy_kl_to_search": 0.0,
         }
+        value_total = 0.0
         with torch.no_grad():
             for start in range(0, len(rows), args.batch_size):
                 batch = rows[start:start + args.batch_size]
                 _, metrics = search_policy_value_loss(
                     model, batch, value_weight=args.value_weight,
                 )
-                for key in total:
-                    total[key] += metrics[key] * len(batch)
-        return {key: value / len(rows) for key, value in total.items()}
+                for key in policy_total:
+                    policy_total[key] += metrics[key] * metrics["policy_samples"]
+                value_total += metrics["value_loss"] * len(batch)
+        return {
+            **{key: value / policy_samples
+               for key, value in policy_total.items()},
+            "value_loss": value_total / len(rows),
+        }
 
     fit_before = evaluate_training_fit()
     optimizer_steps = 0
@@ -158,6 +172,11 @@ def main() -> None:
             "search_data_sha256": sha256(args.search_data),
             "reward_version": REWARD_VERSION,
             "target_schema": SAMPLE_SCHEMA,
+            "additional_value_schema": (
+                VALUE_SAMPLE_SCHEMA if value_only_samples else None
+            ),
+            "policy_roots": policy_samples,
+            "value_only_samples": value_only_samples,
             "chance_prior": args.accepted_chance_prior,
             "epochs": args.epochs,
             "seed": args.seed,
