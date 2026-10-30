@@ -119,6 +119,12 @@ def _collect_worker(
                     rollout_depth=cfg["rollout_depth"], leaf_mode="value",
                     search_schedule=cfg["search_schedule"],
                     record_final_turn=cfg.get("record_final_turn", False),
+                    late_value_max=(
+                        cfg.get("late_value_max", 0) if mode == "train" else 0
+                    ),
+                    late_value_min_turn=cfg.get("late_value_min_turn", 7),
+                    late_value_player_hp=cfg.get("late_value_player_hp", 25),
+                    late_value_enemy_hp=cfg.get("late_value_enemy_hp", 40),
                 )
                 if backend.live_handles:
                     raise RuntimeError("H15 worker leaked H8 reference handle(s)")
@@ -143,6 +149,9 @@ def _collect_worker(
                     "outcome": report.outcome, "reward": report.reward,
                     "exit_hp": report.exit_hp, "decisions": report.combat_decisions,
                     "searched_roots": report.searched_decisions,
+                    "late_value_targets": (
+                        len(targets) - report.searched_decisions
+                    ),
                     "searched_root_diagnostics": list(report.searched_root_diagnostics),
                     "search_overrides": sum(
                         bool(d["search_overrode_greedy"])
@@ -154,7 +163,9 @@ def _collect_worker(
                 print(f"[h15-reference-{mode}] case={case_id} "
                       f"encounter={scenario.scenario_id} deck={deck} "
                       f"outcome={report.outcome} hp={report.exit_hp} "
-                      f"roots={len(targets)}", flush=True)
+                      f"roots={report.searched_decisions} "
+                      f"late_value={len(targets) - report.searched_decisions}",
+                      flush=True)
             except Exception as exc:
                 try:
                     backend.close()
@@ -275,6 +286,9 @@ def aggregate(records: list[dict[str, Any]]) -> dict[str, Any]:
         "mean_reward": sum(r["reward"] for r in records) / n,
         "mean_decisions": sum(r["decisions"] for r in records) / n,
         "searched_roots": sum(r["searched_roots"] for r in records),
+        "late_value_targets": sum(
+            r.get("late_value_targets", 0) for r in records
+        ),
         "search_overrides": sum(r["search_overrides"] for r in records),
         "search_override_rate": (
             sum(r["search_overrides"] for r in records) /
@@ -335,6 +349,10 @@ def main() -> None:
     p.add_argument("--seed", type=int, default=20261030)
     p.add_argument("--simulations", type=int, default=32)
     p.add_argument("--max-searches", type=int, default=1)
+    p.add_argument("--late-value-max", type=int, default=0)
+    p.add_argument("--late-value-min-turn", type=int, default=7)
+    p.add_argument("--late-value-player-hp", type=int, default=25)
+    p.add_argument("--late-value-enemy-hp", type=int, default=40)
     p.add_argument(
         "--search-schedule", choices=("first", "turn_start"), default="first",
     )
@@ -354,7 +372,9 @@ def main() -> None:
             args.eval_every, args.workers, args.simulations,
             args.max_searches, args.tree_depth, args.rollout_depth,
             args.max_candidates, args.max_decisions, args.epochs,
-            args.batch_size) <= 0 or args.seed < 0
+            args.batch_size, args.late_value_min_turn) <= 0
+            or min(args.late_value_max, args.late_value_player_hp,
+                   args.late_value_enemy_hp) < 0 or args.seed < 0
             or not math.isfinite(args.lr) or args.lr <= 0
             or not math.isfinite(args.value_weight) or args.value_weight < 0
             or not args.fixture_seed or not args.seed_prefix
@@ -368,6 +388,11 @@ def main() -> None:
             or not decks or len(set(decks)) != len(decks)
             or any(x not in DECK_PRESETS for x in decks)):
         p.error("Only explicit, unique supported A10 scenarios/decks are valid")
+    if (any(SCENARIOS[name].total_floor == 6 for name in scenarios)
+            and any(deck not in (
+                "silent-boss-cycle-20-v1", "silent-boss-poison-20-v1",
+            ) for deck in decks)):
+        p.error("H8 fixed A10 boss entries require boss-conditioned decks")
     dll = args.emulator_dll.resolve()
     initial = args.initialize_from_model.resolve()
     emulator_root = args.emulator_root.resolve()
@@ -393,6 +418,10 @@ def main() -> None:
         "fixture_seed": args.fixture_seed, "seed_prefix": args.seed_prefix,
         "workers": args.workers, "simulations": args.simulations,
         "max_searches": args.max_searches,
+        "late_value_max": args.late_value_max,
+        "late_value_min_turn": args.late_value_min_turn,
+        "late_value_player_hp": args.late_value_player_hp,
+        "late_value_enemy_hp": args.late_value_enemy_hp,
         "search_schedule": args.search_schedule, "tree_depth": args.tree_depth,
         "rollout_depth": args.rollout_depth, "max_candidates": args.max_candidates,
         "max_decisions": args.max_decisions, "train_combats": args.train_combats,
@@ -416,7 +445,8 @@ def main() -> None:
     }
     print("[h15-reference-preflight] " + json.dumps({
         **{k: config[k] for k in ("schema", "emulator_revision", "scenarios",
-            "decks", "workers", "train_combats", "eval_combats", "simulations")},
+            "decks", "workers", "train_combats", "eval_combats", "simulations",
+            "late_value_max", "late_value_min_turn")},
         "rounds": args.rounds, "output_root": str(args.output_root),
         "execute": args.execute,
     }, sort_keys=True), flush=True)
@@ -490,16 +520,18 @@ def main() -> None:
                 f"{args.seed_prefix}:heldout:i{i:05d}"
                 for i in range(args.eval_combats)
             ]
-            frozen_report = out / "frozen-h9-eval.json"
+            frozen_report = out / "frozen-initial-eval.json"
             if frozen_report.exists():
-                evaluation["frozen_h9"] = json.loads(frozen_report.read_text())
+                evaluation["frozen_initial"] = json.loads(
+                    frozen_report.read_text()
+                )
             else:
                 baseline_records = collect_cases(
                     config, initial, holdout_ids, "greedy",
-                    out / "frozen-h9-eval-parts",
+                    out / "frozen-initial-eval-parts",
                 )
-                evaluation["frozen_h9"] = aggregate(baseline_records)
-                atomic_json(frozen_report, evaluation["frozen_h9"])
+                evaluation["frozen_initial"] = aggregate(baseline_records)
+                atomic_json(frozen_report, evaluation["frozen_initial"])
             evaluation["h15_raw"] = aggregate(collect_cases(
                 config, updated, holdout_ids, "greedy",
                 partial / "eval-raw",
@@ -533,6 +565,8 @@ def main() -> None:
                 "in_sample_policy_kl": item["training_fit"][
                     "in_sample_fit_after"]["policy_kl_to_search"],
                 "mean_reward": item["collection"]["mean_reward"],
+                "searched_roots": item["collection"]["searched_roots"],
+                "late_value_targets": item["collection"]["late_value_targets"],
                 "evaluation": item["evaluation"],
             } for item in completed],
         })
