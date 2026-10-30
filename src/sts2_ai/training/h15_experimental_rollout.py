@@ -13,14 +13,15 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sts2_ai.emulator.h15_public_protocol import (
     NATURE_KINDS,
     choose_reference_at_pending,
     public_player_frame,
 )
-from sts2_ai.models.h15_policy_value import H15CombatEvaluator
+if TYPE_CHECKING:
+    from sts2_ai.models.h15_policy_value import H15CombatEvaluator
 from sts2_ai.nature.h4_reward import encounter_total_hp_score
 
 H15_ROLLOUT_SCHEMA = "sts2-h15-unverified-policy-multiturn-rollout-v1"
