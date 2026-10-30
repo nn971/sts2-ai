@@ -107,8 +107,10 @@ def test_native_collector_terminal_at_exact_decision_budget(monkeypatch):
     assert len(batch.searched_root_diagnostics) == 1
     diag = batch.searched_root_diagnostics[0]
     assert diag["search_action_id"] == "safe"
-    assert diag["greedy_action_id"] == "risk"
-    assert diag["search_overrode_greedy"] is True
+    # ToyTeacher returns equal logits; the production argmax breaks ties
+    # by action_id, so the greedy choice is also "safe".
+    assert diag["greedy_action_id"] == "safe"
+    assert diag["search_overrode_greedy"] is False
     assert diag["visit_policy_kl_from_prior"] >= 0
     assert batch.outcome == "victory"
     assert batch.reward == pytest.approx(1.5)
