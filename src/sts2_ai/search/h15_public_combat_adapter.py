@@ -19,7 +19,9 @@ from sts2_ai.emulator.chance import (
     require_fair_sampler,
 )
 from sts2_ai.emulator.protocol import EmulatorBackend, InformationPolicy, LegalAction
-from sts2_ai.nature.h4_reward import encounter_total_hp_score
+from sts2_ai.nature.h4_reward import (
+    encounter_total_hp_score, encounter_total_hp_defeat_margin_score,
+)
 
 from .combat_puct import FAIR_COMBAT_CAPABILITY, CombatFrame
 
@@ -27,7 +29,11 @@ from .combat_puct import FAIR_COMBAT_CAPABILITY, CombatFrame
 class H15PublicCombatAdapter:
     fair_combat_capability_id = FAIR_COMBAT_CAPABILITY
 
-    def __init__(self, backend: EmulatorBackend, *, sampler: FairContinuationSampler):
+    def __init__(self, backend: EmulatorBackend, *, sampler: FairContinuationSampler,
+                 defeat_margin_beta: float = 0.0):
+        if not 0 <= defeat_margin_beta < 1:
+            raise ValueError("Invalid H15 combat reward beta")
+        self._defeat_margin_beta = defeat_margin_beta
         self._backend = backend
         self._sampler = require_fair_sampler(sampler)
         self._histories: dict[str, tuple[PublicHistoryStep, ...]] = {}
@@ -52,7 +58,8 @@ class H15PublicCombatAdapter:
         ).hexdigest()
 
     @staticmethod
-    def _combat_result(public: dict[str, Any]) -> float | None:
+    def _combat_result(public: dict[str, Any], *,
+                       defeat_margin_beta: float = 0.0) -> float | None:
         if isinstance(public.get("combat"), dict):
             if public.get("terminal_outcome") == "defeat":
                 raise ValueError("Contradictory defeated public combat frame")
@@ -61,11 +68,20 @@ class H15PublicCombatAdapter:
         if type(hp) is not int or type(max_hp) is not int:
             raise ValueError("Postcombat public player HP missing")
         defeat = public.get("terminal_outcome") == "defeat" or hp == 0
-        return encounter_total_hp_score(
-            "defeat" if defeat else "victory",
+        reward = (
+            encounter_total_hp_score if defeat_margin_beta == 0
+            else encounter_total_hp_defeat_margin_score
+        )
+        args = dict(
             player_exit_hp=hp, player_max_hp=max_hp,
             total_enemy_hp=public.get("defeat_total_non_minion_enemy_hp"),
             remaining_enemy_hp=public.get("defeat_remaining_non_minion_enemy_hp"),
+        )
+        return reward(
+            "defeat" if defeat else "victory",
+            **args,
+            **({"beta": defeat_margin_beta}
+               if defeat_margin_beta != 0 else {}),
         )
 
     def root(self, history: Sequence[PublicHistoryStep]) -> CombatFrame:
@@ -126,7 +142,9 @@ class H15PublicCombatAdapter:
         public = json.loads(observed.payload_json)
         if not isinstance(public, dict):
             raise ValueError("Malformed poststep public observation")
-        score = self._combat_result(public)
+        score = self._combat_result(
+            public, defeat_margin_beta=self._defeat_margin_beta,
+        )
         child_legal = (
             () if score is not None
             else tuple(self._backend.legal_actions(transition.child))
@@ -167,7 +185,11 @@ class H15RootConditionedCombatAdapter(H15PublicCombatAdapter):
     """
     fair_combat_capability_id = "h15-h8-root-conditioned-combat-v1"
 
-    def __init__(self, backend: EmulatorBackend, root_handle: str):
+    def __init__(self, backend: EmulatorBackend, root_handle: str, *,
+                 defeat_margin_beta: float = 0.0):
+        if not 0 <= defeat_margin_beta < 1:
+            raise ValueError("Invalid H15 combat reward beta")
+        self._defeat_margin_beta = defeat_margin_beta
         self._backend = backend
         self._sampler = None
         self._histories = {}
