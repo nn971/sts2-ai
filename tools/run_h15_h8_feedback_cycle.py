@@ -96,6 +96,34 @@ def verify_parameter_update(before: Path, after: Path) -> dict[str, Any]:
     return {"changed_tensors": changed, "model_delta_l2": math.sqrt(squared_change)}
 
 
+
+def verify_distillation_receipt(
+    student: Path, *, initial_sha: str, source_sha: str,
+    expected_steps: int,
+) -> dict[str, Any]:
+    """Ensure the optimizer receipt refers to exactly these search visits."""
+    import torch
+
+    checkpoint = torch.load(student, weights_only=True, map_location="cpu")
+    provenance = checkpoint.get("provenance")
+    if not isinstance(provenance, dict) or (
+        provenance.get("base_checkpoint_sha256") != initial_sha
+        or provenance.get("search_data_sha256") != source_sha
+        or provenance.get("chance_prior") != H8_DECLARED_LAW_MODEL
+        or provenance.get("optimizer_steps") != expected_steps
+    ):
+        raise ValueError("H15 student checkpoint has inconsistent optimizer provenance")
+    values: dict[str, Any] = {}
+    for key in ("in_sample_fit_before", "in_sample_fit_after"):
+        row = provenance.get(key)
+        if not isinstance(row, dict) or set(row) != {"policy_loss", "value_loss"}:
+            raise ValueError("H15 student checkpoint lacks pre/post fit metrics")
+        if any(type(v) not in (float, int) or not math.isfinite(v) for v in row.values()):
+            raise ValueError("Nonfinite H15 student fit metric")
+        values[key] = row
+    return {"optimizer_steps": expected_steps, **values}
+
+
 def run_stage(name: str, command: list[str], *, root: Path) -> None:
     print(f"[h15-cycle-{name}] {shlex.join(command)}", flush=True)
     subprocess.run(command, cwd=root, check=True)
@@ -207,6 +235,12 @@ def main() -> None:
                          checkpoint_sha256=original_sha, simulations=args.simulations)
     run_stage("fit", train_command, root=root)
     update = verify_parameter_update(start_path, updated_path)
+    fitted_steps = args.epochs * math.ceil(len(first) / args.batch_size)
+    fitted = verify_distillation_receipt(
+        updated_path, initial_sha=original_sha,
+        source_sha=file_sha256(before_dir / "targets.jsonl"),
+        expected_steps=fitted_steps,
+    )
     updated_sha = file_sha256(updated_path)
     run_stage("after", collection_command(updated_path, after_dir), root=root)
     second = read_targets(after_dir / "targets.jsonl",
@@ -225,7 +259,7 @@ def main() -> None:
         "before_targets_sha256": file_sha256(before_dir / "targets.jsonl"),
         "after_targets_sha256": file_sha256(after_dir / "targets.jsonl"),
         "epochs": args.epochs, "batch_size": args.batch_size,
-        "optimizer_steps": args.epochs * math.ceil(len(first) / args.batch_size),
+        "training_fit": fitted,
         "parameter_update": update, "first_root": comparison,
         "before_outcome": json.loads((before_dir / "report.json").read_text())["outcome"],
         "after_outcome": json.loads((after_dir / "report.json").read_text())["outcome"],
