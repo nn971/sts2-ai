@@ -92,6 +92,23 @@ def main() -> None:
     torch.manual_seed(args.seed)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
     rng = random.Random(args.seed)
+
+    def evaluate_training_fit() -> dict[str, float]:
+        """Diagnostic in-sample fit; never use this as a held-out strength claim."""
+        model.eval()
+        total = {"policy_loss": 0.0, "value_loss": 0.0}
+        with torch.no_grad():
+            for start in range(0, len(rows), args.batch_size):
+                batch = rows[start:start + args.batch_size]
+                _, metrics = search_policy_value_loss(
+                    model, batch, value_weight=args.value_weight,
+                )
+                for key in total:
+                    total[key] += metrics[key] * len(batch)
+        return {key: value / len(rows) for key, value in total.items()}
+
+    fit_before = evaluate_training_fit()
+    optimizer_steps = 0
     for epoch in range(1, args.epochs + 1):
         rng.shuffle(rows)
         metrics = []
@@ -105,12 +122,24 @@ def main() -> None:
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
+            optimizer_steps += 1
             metrics.append(log)
         print("[h15-fit] "+json.dumps({
             "epoch": epoch,
             "policy_loss": sum(x["policy_loss"] for x in metrics) / len(metrics),
             "value_loss": sum(x["value_loss"] for x in metrics) / len(metrics),
         }), flush=True)
+
+    fit_after = evaluate_training_fit()
+    if not all(
+        torch.isfinite(torch.tensor(value))
+        for metrics in (fit_before, fit_after) for value in metrics.values()
+    ):
+        raise RuntimeError("Nonfinite pre/post H15 distillation fit")
+    print("[h15-fit-in-sample] " + json.dumps({
+        "before": fit_before, "after": fit_after,
+        "optimizer_steps": optimizer_steps,
+    }, sort_keys=True), flush=True)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     torch.save({
@@ -126,6 +155,9 @@ def main() -> None:
             "chance_prior": args.accepted_chance_prior,
             "epochs": args.epochs,
             "seed": args.seed,
+            "optimizer_steps": optimizer_steps,
+            "in_sample_fit_before": fit_before,
+            "in_sample_fit_after": fit_after,
         },
     }, args.output)
     print("[h15-saved] "+str(args.output), flush=True)
