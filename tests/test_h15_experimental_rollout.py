@@ -1,7 +1,6 @@
 """Diagnostic multi-turn H15 rollout: public policy, fallback, weighted Nature."""
 from __future__ import annotations
 
-import random
 from types import SimpleNamespace
 
 import pytest
@@ -9,7 +8,7 @@ import pytest
 from sts2_ai.emulator import FAIR_POLICY_ID
 from sts2_ai.search.h15_experimental_root_compare import compare_root_actions
 from sts2_ai.training.h15_experimental_rollout import (
-    RolloutLimits, _policy_input, _sample_law, run_policy_combat,
+    RolloutLimits, _policy_input, run_policy_combat,
 )
 
 
@@ -43,6 +42,7 @@ def frame(kind: str, version: int, *, menu=(), law=None, exit_hp=None):
 
 LAW = {
     "lawId": "mock-h15-draw-law-v1",
+    "eventId": "mock-h15-draw-event-v1",
     "probabilityStatus": "UNVERIFIED",
     "totalWeight": 4,
     "outcomes": [
@@ -85,11 +85,18 @@ class DemoBackend:
             self.current = frame("combat_exit", 4, exit_hp=32)
         return self.current
 
-    def h15_experimental_choose(self, handle, version, law, outcome_id):
+    def h15_experimental_reference_choose(self, handle, version):
         assert handle == "h15-test"
-        assert version == 2 and law == LAW
-        assert outcome_id in ("card_instance:11", "card_instance:12")
+        assert version == 2
         self.current = frame("player", 3, menu=(("end_turn", "end"),))
+        self.current["referenceNatureSelection"] = {
+            "lawId": LAW["lawId"],
+            "eventId": LAW["eventId"],
+            "outcomeId": "card_instance:12",
+            "outcomeIndex": 1,
+            "providerId": "reference-nature-splitmix64-v1",
+        }
+        self.current["referenceNatureSampleCount"] = 1
         return self.current
 
     def h15_experimental_release_many(self, handles):
@@ -113,7 +120,7 @@ def test_multiturn_uses_public_policy_and_tracks_unsupported_fallback():
     backend = DemoBackend()
     result = run_policy_combat(
         backend, "source", independent_seed="independent",
-        teacher=DemoTeacher(), rng=random.Random(10),
+        teacher=DemoTeacher(),
     )
     assert result["status"] == "combat_exit", result.get("reason")
     assert result["outcome"] == "victory"
@@ -142,21 +149,28 @@ def test_policy_requires_exact_public_observation():
                       | {"observationPolicyId": "private-exact"})
 
 
-def test_weighted_law_sampling_and_inconsistent_support():
-    rng = random.Random(42)
-    seen = [_sample_law(LAW, rng) for _ in range(150)]
-    assert seen.count("card_instance:12") > seen.count("card_instance:11")
-    with pytest.raises(ValueError, match="weight total"):
-        _sample_law(LAW | {"totalWeight": 5}, rng)
-    with pytest.raises(ValueError, match="unverified"):
-        _sample_law(LAW | {"probabilityStatus": "SOURCE_VERIFIED"}, rng)
+def test_reference_choice_receipt_binds_advertised_law():
+    class MismatchedReceiptBackend(DemoBackend):
+        def h15_experimental_reference_choose(self, handle, version):
+            result = super().h15_experimental_reference_choose(handle, version)
+            result["referenceNatureSelection"]["lawId"] = "other-law"
+            return result
+
+    backend = MismatchedReceiptBackend()
+    result = run_policy_combat(
+        backend, "source", independent_seed="independent",
+        teacher=DemoTeacher(),
+    )
+    assert result["status"] == "rejected"
+    assert "ReferenceNature receipt mismatches" in result["reason"]
+    assert backend.released == ["h15-test"]
 
 
 def test_limits_do_not_masquerade_as_terminal_outcomes():
     backend = DemoBackend()
     result = run_policy_combat(
         backend, "source", independent_seed="independent",
-        teacher=DemoTeacher(), rng=random.Random(5),
+        teacher=DemoTeacher(),
         limits=RolloutLimits(max_player_actions=1),
     )
     assert result["status"] == "censored"
@@ -174,7 +188,7 @@ def test_unexpected_bridge_error_is_reported_not_hidden_by_policy_fallback():
     backend = BrokenBackend()
     result = run_policy_combat(
         backend, "source", independent_seed="independent",
-        teacher=DemoTeacher(), rng=random.Random(4),
+        teacher=DemoTeacher(),
     )
     assert result["status"] == "rejected"
     assert "mechanics invariant broke" in result["reason"]
@@ -186,7 +200,7 @@ def test_forced_root_action_never_falls_back_to_another_action():
     backend = DemoBackend()
     result = run_policy_combat(
         backend, "source", independent_seed="independent",
-        teacher=DemoTeacher(), rng=random.Random(10),
+        teacher=DemoTeacher(),
         forced_root_action_id="bad",
         expected_root_observation_hash="public-0",
         expected_root_action_ids=("bad", "good", "end"),
@@ -201,7 +215,7 @@ def test_forced_good_root_completes_with_h9_terminal_reward():
     backend = DemoBackend()
     result = run_policy_combat(
         backend, "source", independent_seed="independent",
-        teacher=DemoTeacher(), rng=random.Random(10),
+        teacher=DemoTeacher(),
         forced_root_action_id="good",
         expected_root_observation_hash="public-0",
         expected_root_action_ids=("bad", "good", "end"),
@@ -216,7 +230,7 @@ def test_forced_root_rejects_mismatched_public_candidate_and_releases_handle():
     backend = DemoBackend()
     result = run_policy_combat(
         backend, "source", independent_seed="independent",
-        teacher=DemoTeacher(), rng=random.Random(10),
+        teacher=DemoTeacher(),
         forced_root_action_id="good",
         expected_root_observation_hash="different-public-root",
     )
