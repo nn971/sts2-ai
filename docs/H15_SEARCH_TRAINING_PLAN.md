@@ -198,3 +198,115 @@ workers, a held-out reference-seed split, compute accounting, and periodic
 evaluation against frozen H9 and raw/distilled H15 policies. Choose search
 budgets based on observed throughput; do not interpret the original 16-visit
 smoke as a search-budget optimum.
+
+
+## M15 — repeated ReferenceNature search-guided combat training (implementation committed)
+
+The user-supplied **v2 codec-controlled integration** completed under emulator
+`a411a19491a93b58ae4fdbc6d1f3345c9fca67cf`, with genuine A10 Mawler
+combat rewards. One H15-codec model update changed 103 tensors; terminal exit
+HP was 24 before and 35 after, both victories. The root visit distribution
+shifted from `[3,8,1,1,3,0]` to `[7,2,0,0,7,0]` (16 visits per
+search), while the H15 in-sample policy cross-entropy **rose**
+`1.331495→1.673004` and value MSE fell
+`0.00077505→0.00019169`. The search target's entropy was
+`1.320888`, yielding initial policy KL≈`0.010607` and post-step
+KL≈`0.352116`. This near-zero starting KL suggests that this small
+search mostly reproduced its existing network prior; the optimizer moved
+the policy away from the target. The reports support integration, **not**
+improvement, or an attribution of the policy-loss change to any specific
+gradient component.
+
+**Next executable tool:** `tools/train_h15_reference_rounds.py` runs
+multiple **full, real H8 ReferenceNature A10 combats per round**, collects
+genuine PUCT visit distributions at executed root decisions, then invokes
+the H15 policy/value distillation optimizer and repeats with the refreshed
+checkpoint. Each cohort deterministically assigns explicitly supported
+scenario/deck combinations using the existing H2 seed-assignment helpers;
+distinct train and heldout source seed namespaces prevent overlap. **No
+native-run posterior and no new random sampler were introduced.**
+
+- Default **15 CPU actor workers** each reuse one emulator JSONL process
+  and a frozen model; main process trains on CUDA. No need to run 15
+  separate GPU models.
+- Default **80 rounds**, **128 training combats/round**, **32 PUCT
+  simulations/root**, 1 searched root/combat, 1 optimizer epoch with LR
+  `3e-6`, 64 heldout combats every ten rounds, source-seed-disjoint.
+  These are initial resource defaults, **not experimentally selected
+  optimal hyperparameters**. Search targets are rejected if any
+  controlled fight cannot complete; unsupported sites fail closed.
+- Full per-case outcome, target, chance-prior, source scenario/deck/seed,
+  model SHA, numeric optimizer receipt, training policy KL to search and
+  entropy, stable per-worker chunk files, and per-round progress files.
+- Evaluation compares **frozen H9 greedy**, **updated H15 greedy**, and
+  **updated H15 PUCT** under the same heldout H8 ReferenceNature
+  case seeds. Fixed seed is a pairing device only: changed player actions
+  can change the downstream sequence of chance requests. H9 and H15
+  policy codecs also differ; this remains an explicit baseline comparison.
+- Completed rounds are immutable; the runner checks emulator DLL SHA,
+  source model SHA, code hashes, model/target/optimizer identities and
+  saved worker chunk case IDs before continuing a partially completed
+  round. An incompatible code/emulator/config change must start a new
+  experiment identity. Outputs stay inside `sts2-ai/results/`.
+
+**One cohort integration smoke (separate output directory):**
+
+```fish
+set ai ~/projects/sts2-ai
+set emu ~/projects/sts2-emulator
+cd $ai
+source .venv/bin/activate.fish
+git pull --ff-only
+
+python -m pytest -q tests/test_h15_feedback_cycle.py \
+    tests/test_h15_native_search_collector.py
+
+python -u tools/train_h15_reference_rounds.py \
+    --emulator-root $emu \
+    --emulator-revision (git -C $emu rev-parse HEAD) \
+    --emulator-dll $emu/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+    --initialize-from-model results/h9-adaptive-totalhp-r40-r250/models/player-r0250.pt \
+    --output-root results/h15-reference-m15-cohort-smoke-v1 \
+    --rounds 1 --train-combats 15 --eval-combats 15 --eval-every 1 \
+    --workers 15 --simulations 16 --max-searches 1 \
+    --scenarios mawler-a10,cubex-a10,vine-shambler-a10 \
+    --decks silent-starter-v1,silent-strike-heavy-v1,silent-defend-heavy-v1 \
+    --learner-device cuda --execute
+```
+
+This tests collection with **several encounters, complete fights and
+checkpoint refresh** once, then evaluates the three actual policies.
+An unsupported scenario/deck combination is a concrete mechanics/codec
+coverage failure. Report it; use the source-supported narrower pool until
+the owner is extended, rather than silently skipping the source cohort.
+
+**Substantive H15 search training (start fresh after the cohort works):**
+
+```fish
+python -u tools/train_h15_reference_rounds.py \
+    --emulator-root $emu \
+    --emulator-revision (git -C $emu rev-parse HEAD) \
+    --emulator-dll $emu/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+    --initialize-from-model results/h9-adaptive-totalhp-r40-r250/models/player-r0250.pt \
+    --output-root results/h15-reference-m15-a10-long-v1 \
+    --rounds 80 --train-combats 128 --eval-combats 64 --eval-every 10 \
+    --workers 15 --simulations 32 --max-searches 1 \
+    --scenarios mawler-a10,cubex-a10,vine-shambler-a10 \
+    --decks silent-starter-v1,silent-strike-heavy-v1,silent-defend-heavy-v1 \
+    --epochs 1 --batch-size 32 --lr 0.000003 \
+    --learner-device cuda --execute
+```
+
+Identical configuration and output root resumes completed rounds and
+per-worker chunks; increasing `--rounds` extends a run. The main
+`progress.json` reports train rewards, heldout comparisons and
+per-round KL after each finished optimizer update. Re-run first with
+fewer scenarios/decks only when the explicit coverage report shows
+unsupported combinations, and give that alternate pool a **new**
+experiment identity.
+
+**Validation status:** implementation committed to the independent H15
+research branch, focused Python CI added, full workstation multi-encounter
+smoke and long search training have **not yet run**. This stays a draft
+until genuine collection and holdout evidence exist. The original native
+game law calibration is independent of this emulator-reference training.
