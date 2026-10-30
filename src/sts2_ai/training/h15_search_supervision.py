@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from sts2_ai.emulator.jsonl_backend import FAIR_POLICY_ID
 from sts2_ai.emulator.protocol import LegalAction
 from sts2_ai.models.h15_combat_codec import (
     H15_COMBAT_SCHEMA,
@@ -85,7 +86,7 @@ def value_target_record(
     source_seed: str, emulator_revision: str, decision_index: int,
 ) -> dict[str, Any]:
     """Build value-only supervision from an actually played public decision."""
-    if (not legal_actions or observation.policy_id != "prototype-fair-v0"
+    if (not legal_actions or observation.policy_id != FAIR_POLICY_ID
             or not emulator_revision or type(decision_index) is not int
             or decision_index < 0):
         raise ValueError("H15 value sample needs a fair, live public decision")
