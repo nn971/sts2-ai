@@ -116,8 +116,10 @@ def _collect_worker(
                     max_searches=searches_for_mode(mode, cfg["max_searches"]),
                     seed=seed63(case_id + ":search"),
                     tree_depth=cfg["tree_depth"],
-                    rollout_depth=cfg["rollout_depth"], leaf_mode="value",
+                    rollout_depth=cfg["rollout_depth"],
+                    leaf_mode=cfg["search_leaf_mode"],
                     search_schedule=cfg["search_schedule"],
+                    search_provider=cfg["search_provider"],
                     record_final_turn=cfg.get("record_final_turn", False),
                     late_value_max=(
                         cfg.get("late_value_max", 0) if mode == "train" else 0
@@ -316,6 +318,7 @@ def run_optimizer(cfg: dict[str, Any], teacher: Path, data: Path,
         "--initialize-from-model", str(teacher),
         "--search-data", str(data),
         "--accepted-chance-prior", H8_DECLARED_LAW_MODEL,
+        "--accepted-search-provider", cfg["search_provider"],
         "--output", str(output), "--epochs", str(cfg["epochs"]),
         "--batch-size", str(cfg["batch_size"]),
         "--lr", str(cfg["lr"]),
@@ -354,7 +357,16 @@ def main() -> None:
     p.add_argument("--late-value-player-hp", type=int, default=25)
     p.add_argument("--late-value-enemy-hp", type=int, default=40)
     p.add_argument(
-        "--search-schedule", choices=("first", "turn_start"), default="first",
+        "--search-schedule",
+        choices=("first", "turn_start", "danger"), default="first",
+    )
+    p.add_argument(
+        "--search-provider",
+        choices=("fair_posterior", "root_conditioned"),
+        default="fair_posterior",
+    )
+    p.add_argument(
+        "--search-leaf-mode", choices=("value", "terminal"), default="value",
     )
     p.add_argument("--tree-depth", type=int, default=8)
     p.add_argument("--rollout-depth", type=int, default=128)
@@ -422,7 +434,10 @@ def main() -> None:
         "late_value_min_turn": args.late_value_min_turn,
         "late_value_player_hp": args.late_value_player_hp,
         "late_value_enemy_hp": args.late_value_enemy_hp,
-        "search_schedule": args.search_schedule, "tree_depth": args.tree_depth,
+        "search_schedule": args.search_schedule,
+        "search_provider": args.search_provider,
+        "search_leaf_mode": args.search_leaf_mode,
+        "tree_depth": args.tree_depth,
         "rollout_depth": args.rollout_depth, "max_candidates": args.max_candidates,
         "max_decisions": args.max_decisions, "train_combats": args.train_combats,
         "eval_combats": args.eval_combats, "eval_every": args.eval_every,
@@ -437,6 +452,7 @@ def main() -> None:
                 "tools/train_h15_search_distill.py",
                 "src/sts2_ai/training/h15_native_search_collector.py",
                 "src/sts2_ai/search/combat_puct.py",
+                "src/sts2_ai/search/h15_public_combat_adapter.py",
                 "src/sts2_ai/training/h15_search_supervision.py",
                 "src/sts2_ai/emulator/h15_h8_reference.py",
                 "src/sts2_ai/models/h15_combat_codec.py",
@@ -446,7 +462,8 @@ def main() -> None:
     print("[h15-reference-preflight] " + json.dumps({
         **{k: config[k] for k in ("schema", "emulator_revision", "scenarios",
             "decks", "workers", "train_combats", "eval_combats", "simulations",
-            "late_value_max", "late_value_min_turn")},
+            "late_value_max", "late_value_min_turn",
+            "search_provider", "search_leaf_mode")},
         "rounds": args.rounds, "output_root": str(args.output_root),
         "execute": args.execute,
     }, sort_keys=True), flush=True)
@@ -536,7 +553,11 @@ def main() -> None:
                 config, updated, holdout_ids, "greedy",
                 partial / "eval-raw",
             ))
-            evaluation["h15_puct"] = aggregate(collect_cases(
+            search_label = (
+                "h15_puct" if args.search_provider == "fair_posterior"
+                else "h15_root_conditioned_puct"
+            )
+            evaluation[search_label] = aggregate(collect_cases(
                 config, updated, holdout_ids, "search",
                 partial / "eval-search",
             ))
