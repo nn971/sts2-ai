@@ -111,6 +111,7 @@ def _collect_worker(
                     seed=seed63(case_id + ":search"),
                     tree_depth=cfg["tree_depth"],
                     rollout_depth=cfg["rollout_depth"], leaf_mode="value",
+                    search_schedule=cfg["search_schedule"],
                 )
                 if backend.live_handles:
                     raise RuntimeError("H15 worker leaked H8 reference handle(s)")
@@ -289,6 +290,9 @@ def main() -> None:
     p.add_argument("--seed", type=int, default=20261030)
     p.add_argument("--simulations", type=int, default=32)
     p.add_argument("--max-searches", type=int, default=1)
+    p.add_argument(
+        "--search-schedule", choices=("first", "turn_start"), default="first",
+    )
     p.add_argument("--tree-depth", type=int, default=8)
     p.add_argument("--rollout-depth", type=int, default=128)
     p.add_argument("--max-candidates", type=int, default=4096)
@@ -343,7 +347,8 @@ def main() -> None:
         "scenarios": list(scenarios), "decks": list(decks),
         "fixture_seed": args.fixture_seed, "seed_prefix": args.seed_prefix,
         "workers": args.workers, "simulations": args.simulations,
-        "max_searches": args.max_searches, "tree_depth": args.tree_depth,
+        "max_searches": args.max_searches,
+        "search_schedule": args.search_schedule, "tree_depth": args.tree_depth,
         "rollout_depth": args.rollout_depth, "max_candidates": args.max_candidates,
         "max_decisions": args.max_decisions, "train_combats": args.train_combats,
         "eval_combats": args.eval_combats, "eval_every": args.eval_every,
