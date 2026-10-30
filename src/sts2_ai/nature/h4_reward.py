@@ -92,3 +92,28 @@ def encounter_total_hp_score(
             "Defeat requires authoritative total and remaining non-minion HP"
         )
     return 1.0 - remaining_enemy_hp / total_enemy_hp
+
+
+H15_DEFEAT_MARGIN_REWARD = "encounter_nonminion_total_hp_defeat_margin_beta050_v1"
+
+
+def encounter_total_hp_defeat_margin_score(
+    outcome: str, *, player_exit_hp: int, player_max_hp: int,
+    total_enemy_hp: int | None, remaining_enemy_hp: int | None,
+    beta: float = 0.5,
+) -> float:
+    """H15 M17: retain full victory HP reward, discount defeat progress.
+
+    Every win is worth >=1; every loss is worth <=1-beta. This objective
+    is deliberately separate from the historical H9 reward, so earlier
+    checkpoints and labels remain interpretable under their original law.
+    """
+    import math
+
+    if not math.isfinite(beta) or not 0 <= beta < 1:
+        raise ValueError("Defeat margin beta must lie in [0,1)")
+    base = encounter_total_hp_score(
+        outcome, player_exit_hp=player_exit_hp, player_max_hp=player_max_hp,
+        total_enemy_hp=total_enemy_hp, remaining_enemy_hp=remaining_enemy_hp,
+    )
+    return (1.0 - beta) * base if outcome == "defeat" else base
