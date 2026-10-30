@@ -107,4 +107,4 @@ rejection/finite-cohort experimental samplers.
 
 No training data should mistake independent draws from this *idealized*
 law for full independent conditioned complete-run outcomes. See also
-[stochastic self-improvement roadmap](SELF_IMPROVING_STOCHASTIC_PUCT.md).
+[current H15 search-training plan](H15_SEARCH_TRAINING_PLAN.md). The older variance/PUCT roadmap was retired on 2026-10-30.
