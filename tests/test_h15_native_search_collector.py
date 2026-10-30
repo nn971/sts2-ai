@@ -104,6 +104,14 @@ def test_native_collector_terminal_at_exact_decision_budget(monkeypatch):
     )
     assert batch.combat_decisions == 1
     assert batch.searched_decisions == 1
+    assert len(batch.searched_root_diagnostics) == 1
+    diag = batch.searched_root_diagnostics[0]
+    assert diag["search_action_id"] == "safe"
+    # ToyTeacher returns equal logits; the production argmax breaks ties
+    # by action_id, so the greedy choice is also "safe".
+    assert diag["greedy_action_id"] == "safe"
+    assert diag["search_overrode_greedy"] is False
+    assert diag["visit_policy_kl_from_prior"] >= 0
     assert batch.outcome == "victory"
     assert batch.reward == pytest.approx(1.5)
     assert len(batch.targets) == 1
@@ -113,3 +121,96 @@ def test_native_collector_terminal_at_exact_decision_budget(monkeypatch):
     assert batch.targets[0]["search_rollout_mode"] == "terminal"
     assert sampler.calls == 32
     assert len(backend.released) == 66
+
+
+def test_native_collector_value_leaf_search_keeps_realized_reward(monkeypatch):
+    """Value leaves guide search; the actual played fight still labels critic."""
+    backend = ToyBackend()
+    root = backend.observe("source:root", POLICY)
+    monkeypatch.setattr(
+        collector, "replay_native_public_history",
+        lambda _backend, _recipe: (
+            "source:root", (PublicHistoryStep(root, None, ACTIONS),),
+        ),
+    )
+    recipe = SimpleNamespace(seed="source-seed", exact_hash="verified-entry",
+                             tier="weak")
+    batch = collector.collect_native_combat_search(
+        backend, recipe, fair_sampler=IndependentSampler(),
+        teacher=ToyTeacher(), simulations=12, max_searches=1,
+        max_decisions=1, seed=5, leaf_mode="value",
+    )
+    assert batch.outcome == "victory"
+    assert batch.reward == pytest.approx(1.5)
+    assert len(batch.targets) == 1
+    row = batch.targets[0]
+    assert row["search_rollout_mode"] == "value"
+    assert row["realized_reward"] == pytest.approx(1.5)
+    assert sum(decode_target(row).visits) == 12
+
+
+def test_no_search_reference_baseline_keeps_actual_reward_and_no_targets():
+    backend = ToyBackend()
+    root = backend.observe("source:root", POLICY)
+    sampler = IndependentSampler()
+    batch = collector.collect_live_combat_search(
+        backend, "source:root", (PublicHistoryStep(root, None, ACTIONS),),
+        fair_sampler=sampler, teacher=ToyTeacher(),
+        source_seed="heldout-1", entry_hash="verified-entry",
+        encounter_tier="normal", simulations=8, max_searches=0,
+        max_decisions=1, leaf_mode="value",
+    )
+    assert batch.outcome == "victory"
+    assert batch.reward == pytest.approx(1.5)
+    assert batch.searched_decisions == 0
+    assert batch.targets == ()
+    assert batch.searched_root_diagnostics == ()
+    assert sampler.calls == 0
+
+
+def test_turn_start_schedule_samples_each_new_combat_turn(monkeypatch):
+    """Distinct after-draw turn boundaries, even with multiple card decisions."""
+    from sts2_ai.search.combat_puct import H15_SEARCH_VERSION, CombatSearchResult
+
+    class FourDecisionBackend(ToyBackend):
+        def observe(self, handle, policy):
+            obs = super().observe(handle, policy)
+            if handle.startswith("end:"):
+                return obs
+            index = int(handle.split("-")[-1])
+            state = json.loads(obs.payload_json)
+            state["combat"]["turn"] = 1 if index < 2 else 2
+            return Observation(obs.policy_id, json.dumps(state), "public:" + handle)
+
+        def step(self, handle, action):
+            index = int(handle.split("-")[-1])
+            following = "phase-" + str(index + 1) if index < 3 else "end:safe"
+            return Transition(handle, action, following, index == 3)
+
+    class FixedSearch:
+        def __init__(self, sampler, teacher, **kwargs):
+            del sampler, teacher, kwargs
+
+        def search(self, root, *, simulations):
+            return CombatSearchResult(
+                H15_SEARCH_VERSION, root.information_key,
+                tuple(a.action_id for a in root.legal_actions),
+                (simulations, 0), (0.5, None), 0.5,
+                simulations, 0, simulations, simulations, "value", 2,
+            )
+
+    monkeypatch.setattr(collector, "CombatPuct", FixedSearch)
+    backend = FourDecisionBackend()
+    root = backend.observe("phase-0", POLICY)
+    batch = collector.collect_live_combat_search(
+        backend, "phase-0", (PublicHistoryStep(root, None, ACTIONS),),
+        fair_sampler=IndependentSampler(), teacher=ToyTeacher(),
+        source_seed="two-turns", entry_hash="verified-entry",
+        encounter_tier="normal", simulations=8, max_searches=4,
+        max_decisions=4, leaf_mode="value", search_schedule="turn_start",
+    )
+    assert batch.combat_decisions == 4
+    assert batch.searched_decisions == 2
+    assert [row["decision_index"] for row in batch.searched_root_diagnostics] == [0, 2]
+    assert len(batch.targets) == 2
+    assert batch.outcome == "victory"

@@ -2,6 +2,16 @@
 
 This file is project policy for AI assistants, coding agents and reviewers.
 
+## Mandatory H15 implementation priority and conflict disclosure (2026-10-30)
+
+**Current accepted H15 execution plan:** [docs/H15_SEARCH_TRAINING_PLAN.md](docs/H15_SEARCH_TRAINING_PLAN.md). Read it **before any H15 code change, training run, task recommendation, PR description or roadmap edit**. The next deliverable is one complete **existing ReferenceNature / Chance Law -> neural PUCT -> real visit targets -> policy/value optimizer -> updated search** cycle on a supported A10 combat subset. Its integration smoke precedes a substantive held-out comparison; no further H10/PPO-only rounds may be described as search training.
+
+**Do not make posterior recovery a general prerequisite.** Reuse the existing emulator stochastic providers, Nature-mode unresolved deck constraints and semantic continuations. Root-conditioned exact-state UCT/PUCT may be used only with explicit leakage/provenance labels. Calibrated native RNG, true full-history posterior and installed-game fidelity are separate investigations, not training gates. Any proposed new stochastic provider requires an explicit, concrete deficiency of all existing owners and the user's decision.
+
+**Mandatory conflict response:** If a milestone log, old roadmap, source guard/comment, test, or experimental constraint disagrees with this plan, **tell the user before shifting work**. Quote the conflicting location/claim, distinguish actual mechanics blockers from optional fairness/fidelity projects, propose the smallest plan-preserving route, and obtain an explicit decision before materially changing implementation goals, adding acceptance gates or launching long alternative experiments. When a plan is revised, update this file, the canonical plan, and documentation entry points in the same change. Silence or implicit scope drift is a process failure.
+
+**Document precedence for H15:** current H15 plan + this file > emulator canonical stochastic ownership (for mechanics/providers) > H15 experimental logs and historical Nature/PUCT/prototype roadmaps (evidence only). Do not promote historical "next steps" into active gates.
+
 ## Mandatory separation: training versus original-game fidelity
 
 **Native-game fidelity checks must never block agent training.** This is a
@@ -31,6 +41,41 @@ parity gate.
 Related: [emulator #143](https://github.com/nn971/sts2-emulator/issues/143),
 [AI Nature PR #82](https://github.com/nn971/sts2-ai/pull/82),
 [emulator #122](https://github.com/nn971/sts2-emulator/issues/122).
+
+## Mandatory stochastic architecture reuse (H15 retrospective)
+
+**Read the emulator's canonical**
+[`UNIFIED_STOCHASTIC_ARCHITECTURE.md`](https://github.com/nn971/sts2-emulator/blob/research/h15-experimental-search-20261030/docs/UNIFIED_STOCHASTIC_ARCHITECTURE.md)
+**and**
+[`ADR 0005`](https://github.com/nn971/sts2-emulator/blob/research/h15-experimental-search-20261030/docs/adr/0005-h15-reference-nature-reuse-retrospective.md)
+**before proposing or coding ANY new RNG, Nature, Chance Law, stochastic
+continuation, or H15 fair-search feature.** The previous implementation
+mistake was reasoning from recent H15 milestones alone, overlooking
+`ReferenceNatureV111`, atomic reference sessions and the already-written
+fixed-fixture `H8ReferenceNaturePosterior`; it produced a redundant
+Python chance sampler and incorrect descriptions of what was missing.
+
+- First inspect `StochasticSiteRegistryV111`, `ChanceLawV111`,
+  `ReferenceNatureV111`, `H8LocalReferenceNatureV1`, existing
+  `ReferenceNature*SessionV111` owners, and
+  `sts2_ai.emulator.h15_h8_reference`.
+- Reuse the emulator's reference sampler and mechanics continuation.
+  Python may implement **learned proposal** sampling but must not
+  reimplement reference-law roulette under an H15-only name.
+- Always distinguish source legality, `SOURCE_VERIFIED` local
+  probabilities, a posterior under a **declared fixture prior**, and a
+  native full-run posterior. Do not refer to native-structure
+  **prototype-combat-RNG** corpora as native-RNG calibrated.
+- The existing M13 experimental native-entry candidate paths remain `UNVERIFIED`
+  and have produced no certified fair PUCT targets. Keep their provenance
+  intact. This statement is **not** a prohibition on new, explicitly
+  root-conditioned/ReferenceNature-model search-training experiments.
+  Preserve pinned PPO artifact identities; require focused provider/cursor/
+  event tests when the stochastic boundary actually changes.
+- Before adding a new system, explicitly identify why the existing
+  provider or session API cannot own the operation and document that
+  gap. Append new capabilities to the current-state crosswalk rather
+  than copying historical progress text into new architecture.
 
 ## Mandatory research evidence discipline
 

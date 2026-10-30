@@ -1,5 +1,7 @@
 # sts2-ai
 
+**Current H15 priority (2026-10-30):** [Canonical H15 search-training execution plan](docs/H15_SEARCH_TRAINING_PLAN.md). The next milestone is **ReferenceNature-backed neural PUCT → search-policy/value targets → optimizer update → renewed search** in a supported A10 combat. Reuse the existing emulator Chance Law and ReferenceNature infrastructure; native RNG parity and certified original-run hidden-state posteriors are independent work. Older prototype, Nature, variance-PUCT and H15 M1–M13 milestone documents below are historical evidence, not alternative current instructions. [AGENTS.md](AGENTS.md) requires explicit user-visible conflict disclosure before changing this priority.
+
 Research infrastructure for building an AI that can make strong **whole-run strategic decisions** in *Slay the Spire 2*.
 
 ## Integrated research baseline (H6-F + H7)
@@ -15,7 +17,7 @@ H7's real-emulator one-round PPO smoke is **integration evidence** only.
 Its macro head is not wired to H6-F's operation-aware choices and
 must not be used for macro PPO until representation coverage is verified.
 
-**Nature development:** see [Desired Nature Training Implementation](docs/DESIRED_NATURE_TRAINING_IMPLEMENTATION.md), [N0–N4 groundwork](docs/NATURE_GROUNDWORK_RUNBOOK.md), and [N3 isolated 15-worker corpus](docs/NATURE_N3_CORPUS_RUNBOOK.md), plus the [semantic-event adapter](docs/NATURE_SEMANTIC_ADAPTER_N1N2.md). Typed policies, an isolated HP/intent bridge, exact synthetic chance-gradient checks, and resumable replay infrastructure are implemented on the Nature PR stack. Full playable controlled combat and learned Nature training depend on the [missing emulator interfaces](docs/NATURE_EMULATOR_INTERFACE_GAPS.md); existing v15 training remains unchanged.
+**Historical Nature work:** [former design proposal](docs/DESIRED_NATURE_TRAINING_IMPLEMENTATION.md), [N0–N4 groundwork](docs/NATURE_GROUNDWORK_RUNBOOK.md), and [N3 corpus](docs/NATURE_N3_CORPUS_RUNBOOK.md) document earlier experiments. The authoritative current stochastic-provider ownership is in the emulator's [unified architecture](https://github.com/nn971/sts2-emulator/blob/research/h15-experimental-search-20261030/docs/UNIFIED_STOCHASTIC_ARCHITECTURE.md).
 
 The long-term objective is an agent that reasons jointly about:
 
@@ -64,7 +66,7 @@ All training, agent, sampling and Nature comparisons follow the
 [project-wide experiment evidence standard](docs/EXPERIMENT_EVIDENCE_STANDARD.md).
 **Short runs (including 20-round pilots) establish only smoke/diagnostic
 evidence.** Feature-quality conclusions require substantial
-learning-curve coverage, matched compute and native-RNG evaluation,
+learning-curve coverage, matched compute and independent held-out ReferenceNature evaluation,
 independent training seeds, and quantified training/evaluation uncertainty.
 
 ## Current status
@@ -209,15 +211,9 @@ prior fidelity remains to be validated. See
 The default agents and oracle-exact UCT remain unchanged.
 
 
-**New optional research components (PR #13):** a provenance-checked, aggregate
-human card-reward prior (with missing-card/Skip fallback), and a mathematical
-stochastic PUCT kernel over full public-history keys. These are independently
-tested scaffolds, not a live fair-game agent. See
-[human statistics prior](docs/HUMAN_CARD_PRIORS.md) and
-[stochastic PUCT roadmap](docs/SELF_IMPROVING_STOCHASTIC_PUCT.md).
+**Historical research components (PR #13):** a prior human card-reward baseline and preliminary stochastic PUCT scaffolding; see [human statistics prior](docs/HUMAN_CARD_PRIORS.md) and the [H15 historical milestone log](docs/H15_COMBAT_SEARCH_GUIDED.md). Those historical components do not define current training gates.
 
-
-**Next development direction (early implementation in PR #12):** fair stochastic neural-guided PUCT and iterative self-improvement, with compact normalized progress/HP mean-and-variance predictions. See the [implementation roadmap](docs/SELF_IMPROVING_STOCHASTIC_PUCT.md).
+**Active implementation direction:** [canonical H15 search training](docs/H15_SEARCH_TRAINING_PLAN.md), using existing ReferenceNature and a neural PUCT policy/value head. The old bounded-variance PUCT roadmap and first-prototype search-first handoff have been superseded.
 
 This repository has **working experimental agents, but not a trained expert**.
 The `emulator/` submodule is pinned to an implemented whole-run Silent prototype.
@@ -242,7 +238,8 @@ sts2-ai benchmark --budgets --seeds 8 --no-include-random
 ```
 
 See [current project status](PROJECT_STATUS.md),
-[AI prototype roadmap](docs/AI_PROTOTYPE_ROADMAP.md), and
+[canonical H15 plan](docs/H15_SEARCH_TRAINING_PLAN.md),
+[historical prototype roadmap](docs/AI_PROTOTYPE_ROADMAP.md), and
 [route-planning baseline](docs/ROUTE_PLANNING_BASELINE.md).
 
 
@@ -374,7 +371,8 @@ See [`docs/INFORMATION_POLICY.md`](docs/INFORMATION_POLICY.md).
 - [`docs/EMULATOR_CONTRACT.md`](docs/EMULATOR_CONTRACT.md) — what this repo may assume from `sts2-emulator`
 - [`docs/INFORMATION_POLICY.md`](docs/INFORMATION_POLICY.md) — engine state vs fair observation
 - [`docs/SEARCH_AND_LEARNING.md`](docs/SEARCH_AND_LEARNING.md) — proposed expert-iteration loop
-- [`docs/SELF_IMPROVING_STOCHASTIC_PUCT.md`](docs/SELF_IMPROVING_STOCHASTIC_PUCT.md) — **next implementation plan:** fair chance sampling, PUCT, bounded uniformized variance, annealed auxiliaries, and teacher-free self-improvement
+- [`docs/H15_SEARCH_TRAINING_PLAN.md`](docs/H15_SEARCH_TRAINING_PLAN.md) — **current H15 implementation plan and conflict procedure**
+- [`docs/H15_COMBAT_SEARCH_GUIDED.md`](docs/H15_COMBAT_SEARCH_GUIDED.md) — historical H15 M1–M13 milestone evidence; not the current gating plan
 - [`docs/NEURAL_POLICY_VALUE_PROTOTYPE.md`](docs/NEURAL_POLICY_VALUE_PROTOTYPE.md) — first neural training, MCTS deployment, and held-out experiments
 - [`docs/TEACHER_QUALITY_EXPERIMENT.md`](docs/TEACHER_QUALITY_EXPERIMENT.md) — semantic teacher audit, exact-root shadow search, and Q-based policy targets
 - [`docs/STRATEGY_DATABASE.md`](docs/STRATEGY_DATABASE.md) — persistent strategic evidence

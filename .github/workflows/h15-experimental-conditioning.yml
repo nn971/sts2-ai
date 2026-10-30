@@ -1,0 +1,42 @@
+name: h15-experimental-conditioning
+
+on:
+  push:
+    paths:
+      - 'src/sts2_ai/emulator/h15_public_protocol.py'
+      - 'src/sts2_ai/emulator/h15_experimental_posterior.py'
+      - 'src/sts2_ai/training/h15_experimental_rollout.py'
+      - 'tests/test_h15_experimental_posterior.py'
+      - 'tests/test_h15_experimental_rollout.py'
+      - 'tests/test_h15_controlled_turn_protocol.py'
+      - 'tools/probe_h15_experimental_conditioning.py'
+      - '.github/workflows/h15-experimental-conditioning.yml'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  public-history-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install lightweight Python testing tools
+        run: python -m pip install -e '.[dev]'
+      - name: Lint changed H15 code
+        run: |
+          python -m ruff check \
+            src/sts2_ai/emulator/h15_public_protocol.py \
+            src/sts2_ai/emulator/h15_experimental_posterior.py \
+            src/sts2_ai/training/h15_experimental_rollout.py \
+            tests/test_h15_experimental_posterior.py \
+            tests/test_h15_experimental_rollout.py \
+            tools/probe_h15_experimental_conditioning.py
+      - name: Source-history posterior and emulator receipt contracts
+        run: |
+          python -m pytest -q \
+            tests/test_h15_experimental_posterior.py \
+            tests/test_h15_experimental_rollout.py \
+            tests/test_h15_controlled_turn_protocol.py

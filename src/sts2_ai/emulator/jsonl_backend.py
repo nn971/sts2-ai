@@ -423,6 +423,30 @@ class JsonlEmulatorBackend:
                 "H15 controlled turn response lacks experimental-only provenance"
             )
         kind = response["boundaryKind"]
+        # The H9 terminal HP accounting must be visible only when combat
+        # has genuinely exited. Requiring it here prevents a research
+        # comparator from silently using a made-up defeat score.
+        terminal_public = response.get("combatExitH9Reward")
+        if kind == "combat_exit":
+            if (not isinstance(terminal_public, dict)
+                    or type(terminal_public.get("hp")) is not int
+                    or type(terminal_public.get("maxHp")) is not int
+                    or terminal_public["maxHp"] <= 0
+                    or not 0 <= terminal_public["hp"] <= terminal_public["maxHp"]):
+                raise JsonlBridgeError(
+                    "H15 combat exit lacks valid source H9 terminal reward"
+                )
+            if response["combatOutcome"] == "defeat":
+                total = terminal_public.get("defeatTotalNonMinionEnemyHp")
+                remaining = terminal_public.get("defeatRemainingNonMinionEnemyHp")
+                if (type(total) is not int or type(remaining) is not int
+                        or total <= 0 or not 0 <= remaining <= total):
+                    raise JsonlBridgeError(
+                        "H15 defeat lacks authoritative nonminion HP accounting"
+                    )
+        elif terminal_public is not None:
+            raise JsonlBridgeError(
+                "H15 active combat leaked terminal reward observation")
         law = response.get("chanceLaw")
         if kind in ("enemy_action", "enemy_intent", "draw_card", "random_target"):
             if (not isinstance(law, dict)
@@ -491,6 +515,80 @@ class JsonlEmulatorBackend:
             h15_handle=handle, version=version,
             chance_law=dict(law), outcome_id=outcome_id,
         ), expected_handle=handle)
+
+    def h15_experimental_reference_choose(
+        self, handle: str, version: int,
+    ) -> dict[str, Any]:
+        """Atomically sample the current UNVERIFIED Chance Law in emulator.
+
+        Delegates to ReferenceNatureV111.SampleValidated; the result and
+        private sampler cursor are committed together with the mechanics.
+        No Python-side chance RNG or hidden cursor is kept.
+        """
+        if type(version) is not int or version < 0 or not handle:
+            raise ValueError("Invalid H15 ReferenceNature request")
+        response = self._h15_experimental_response(self._request(
+            "h15_experimental_reference_choose",
+            h15_handle=handle, version=version,
+        ), expected_handle=handle)
+        selection = response.get("referenceNatureSelection")
+        if (not isinstance(selection, dict)
+                or not all(isinstance(selection.get(k), str)
+                           and selection[k] for k in (
+                               "lawId", "eventId", "outcomeId", "providerId"))
+                or selection["providerId"] !=
+                    "reference-nature-splitmix64-v1"
+                or type(selection.get("outcomeIndex")) is not int
+                or selection["outcomeIndex"] < 0
+                or type(response.get("referenceNatureSampleCount")) is not int
+                or response["referenceNatureSampleCount"] < 1
+                or response["version"] != version + 1):
+            raise JsonlBridgeError(
+                "H15 ReferenceNature did not publish an atomic choice receipt"
+            )
+        return response
+
+    def h15_experimental_reference_advance(
+        self, handle: str, version: int, *, max_nature_decisions: int = 1200,
+    ) -> dict[str, Any]:
+        """One atomic emulator transaction until the next public decision.
+
+        Every underlying law/outcome is still sampled by the shared
+        ReferenceNatureV111 provider and returned as a replayable receipt.
+        """
+        if (not handle or type(version) is not int or version < 0
+                or type(max_nature_decisions) is not int
+                or max_nature_decisions < 1):
+            raise ValueError("Invalid H15 ReferenceNature continuation request")
+        response = self._h15_experimental_response(self._request(
+            "h15_experimental_reference_advance",
+            h15_handle=handle, version=version,
+            max_nature_decisions=max_nature_decisions,
+        ), expected_handle=handle)
+        receipts = response.get("referenceNatureSelections")
+        if (not isinstance(receipts, list)
+                or not 1 <= len(receipts) <= max_nature_decisions
+                or response.get("referenceNatureSelection") is not None
+                or response["version"] != version + len(receipts)
+                or response["boundaryKind"] not in ("player", "combat_exit")
+                or type(response.get("referenceNatureSampleCount")) is not int
+                or response["referenceNatureSampleCount"] < len(receipts)):
+            raise JsonlBridgeError(
+                "H15 ReferenceNature batch omitted its atomic event receipts"
+            )
+        for receipt in receipts:
+            if (not isinstance(receipt, dict)
+                    or not all(isinstance(receipt.get(key), str)
+                               and receipt[key] for key in (
+                                   "lawId", "eventId", "outcomeId"))
+                    or receipt.get("providerId") !=
+                        "reference-nature-splitmix64-v1"
+                    or type(receipt.get("outcomeIndex")) is not int
+                    or receipt["outcomeIndex"] < 0):
+                raise JsonlBridgeError(
+                    "H15 ReferenceNature batch contains an invalid selection"
+                )
+        return response
 
     def h15_experimental_release_many(self, handles: Sequence[str]) -> int:
         result = self._request(

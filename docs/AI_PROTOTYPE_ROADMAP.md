@@ -1,6 +1,14 @@
-# AI prototype roadmap
+# Historical AI prototype roadmap (2026-10-07/08)
 
-This document is the handoff point for the next `sts2-ai` development phase.
+> **SUPERSEDED IMPLEMENTATION ROADMAP.** This is a preserved historical
+> search-first prototype log, including old UCT diagnostics and early model
+> experiments. The current H15 implementation plan is
+> [H15 canonical search training](H15_SEARCH_TRAINING_PLAN.md).
+> Its older "current decision", "immediate objective", and "next milestone"
+> language is not actionable. Follow [AGENTS.md](../AGENTS.md) to disclose
+> conflicts instead of reverting H15 scope.
+
+This document was the handoff point for an earlier development phase.
 
 ## Current decision
 

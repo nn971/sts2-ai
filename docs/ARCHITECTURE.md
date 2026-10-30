@@ -40,7 +40,13 @@ Search orchestration and reusable result structures. Search calls the emulator; 
 
 ### `sts2_ai.models`
 
-Interfaces/adapters for policy/value or other learned estimators. No heavy ML framework is selected in the starter scaffold.
+Interfaces/adapters for policy/value and other learned estimators. The
+current research stack uses PyTorch Transformer actor/critic policies
+(H7/H9/H10/H15) and PPO training; the original framework-neutral
+scaffold language is historical. The emulator retains ownership
+of all stochastic game mechanics, Chance Laws and ReferenceNature
+implementations, while the AI owns learned policies, proposal models
+and search orchestration.
 
 ### `sts2_ai.training`
 

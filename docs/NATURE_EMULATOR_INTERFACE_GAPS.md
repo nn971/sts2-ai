@@ -1,5 +1,20 @@
 # Emulator interfaces needed for playable Nature training
 
+**Current reading note (2026-10-30): HISTORICAL GAP SNAPSHOT.**
+The proposed `semanticChanceSchemaId`, `controlled_advance`, and
+`controlled_resolve` shape below was a 2026-10-14 exploration,
+not the current API inventory. The emulator now implements
+`ChanceLawV111`, `ReferenceNatureV111`, numerous atomic
+ReferenceNature run/combat/event/reward sessions, and an H8 local
+reference sampler. AI also contains the fixed-fixture
+`H8ReferenceNaturePosterior` with full combat-local visible-history
+rejection conditioning. Consult the emulator's
+[canonical stochastic architecture](https://github.com/nn971/sts2-emulator/blob/research/h15-experimental-search-20261030/docs/UNIFIED_STOCHASTIC_ARCHITECTURE.md)
+for current ownership and coverage. Remaining H15 native-fair-search
+work is authentic-entry posterior reconstruction and unsupported
+stochastic-mechanics coverage; it does **not** begin with inventing
+a new Chance Law or ReferenceNature provider.
+
 **Recorded:** 2026-10-14. **Owner of this note:** `sts2-ai`. No changes
 to `sts2-emulator` code or to the emulator submodule pin are included.
 See [desired Nature design](DESIRED_NATURE_TRAINING_IMPLEMENTATION.md).

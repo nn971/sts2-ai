@@ -1,5 +1,10 @@
 # Search and learning program
 
+> This is the long-term conceptual overview. For current H15 priorities,
+> execution order and concrete acceptance gates, consult the
+> [canonical H15 search-training plan](H15_SEARCH_TRAINING_PLAN.md).
+
+
 ## Why search + learning
 
 Whole-run Slay the Spire strategy has a huge branching factor and long horizon. Pure brute-force search is infeasible, while purely model-free learning can require enormous data and may struggle to reason about rare strategic forks.

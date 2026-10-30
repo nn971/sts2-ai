@@ -1,11 +1,13 @@
-# H15 M1 — fair stochastic combat PUCT and policy/value distillation
+# H15 M1–M13 historical implementation and experiment log
 
-**Implementation status:** search kernel, public move-aware codec, strict sample
-schema, and offline trainer. **No native H8 fair-combat adapter or native
-training result yet.** This branch is based on H10's native-state combat stack
-so the native research fixtures and corrected H9 reward remain available.
-H14 macro/GAE and its checkpoints are unchanged. This is the first milestone
-of the agreed hierarchical MuZero-inspired design.
+> **ARCHIVED MILESTONE LOG — NOT AN ACTIVE H15 IMPLEMENTATION PLAN (2026-10-30).**
+> **Current plan:** [H15 canonical search-training execution](H15_SEARCH_TRAINING_PLAN.md).
+>
+> This file preserves chronological M1–M13 design notes, interfaces, experiments, run commands and earlier claims so results remain interpretable. Any "required", "must", "blocking", "next step", "fair native sampler", "native posterior", or "after certification" instruction below is **historical and superseded** when it conflicts with the canonical H15 plan. In particular, authentic native-run posterior certification and original-game chance calibration are **not prerequisites** for emulator-relative ReferenceNature PUCT training. The M13 prototype-RNG candidate sessions remain diagnostic, with zero *certified fair-native* PUCT training targets. The H10-based 120-round PPO run contained **no search-guided learning**.
+>
+> The active deliverable is a complete existing-ReferenceNature neural PUCT → search visits + realized value → optimizer → renewed search cycle. Only the canonical plan and AGENTS.md can change that priority, after explicitly surfacing conflicts to the user.
+>
+> The H9 terminal total-nonminion-HP reward formula and historical implementation details below are retained as evidence.
 
 ## Reward (unchanged H9)
 
@@ -823,3 +825,203 @@ unsupported card/draw/potion sites and full public-history-conditioned
 Nature distributions remain future work. `fairContinuationCapability`
 continues to advertise `unavailable`, so the H15 PUCT collector and
 search-policy distillation remain disabled.
+
+
+## M11 — canonical provider reuse and recorded architecture mistake
+
+The independent research branches `research/h15-experimental-search-20261030`
+(leave the pinned PPO branches alone) remove two H15-specific implementations:
+
+1. The Python diagnostic no longer implements `_sample_law` or holds a
+   separate per-event `random.Random` sampler. The C# H15 session now
+   owns a forkable `ReferenceNatureStateV111` cursor, initialized through
+   `ReferenceNatureRunCursorV111.Begin`. One
+   `h15_experimental_reference_choose` transaction uses
+   `ReferenceNatureV111.SampleValidated`, resolves the existing typed
+   `SemanticEndTurnEngineV111` continuation, and publishes a law/event/
+   outcome/provider receipt. Failed continuations do not advance the
+   published mechanics state or Nature cursor. The original
+   `h15_experimental_choose` remains for externally scripted/learned
+   outcomes and does not consume the reference cursor.
+2. The duplicated H15 potion allowlist and draw-pile checks were deleted;
+   the restricted card/potion player path is now owned by
+   `SemanticPlayerActionEngineV111` with one source replay/guard/
+   semantic-deck validation contract.
+
+The root comparison tool continues to report `UNVERIFIED`,
+`fair_search_roots=0` and `training_targets=0`. Matching seeds
+across root-action candidates now drive the *same emulator-owned
+ReferenceNature provider* and candidate-state initialization;
+there is no second Python chance stream.
+
+The underlying `H15NativeCombatEntryCandidateV1` remains an
+independently reseeded, **native-structure/prototype-combat-RNG**
+candidate, not a history-conditioned true native-run posterior.
+Similarly the narrower `SemanticEndTurnV111` H15 adapter has not
+been magically converted into the larger
+`SemanticPilotCombatV111` reference-session family. Those are
+distinct source-mechanics admission/conditioning tasks, and we should
+reuse existing continuation owners when expanding coverage.
+
+The root-cause retrospective and mandatory provider-inventory checklist
+live in [emulator ADR 0005](https://github.com/nn971/sts2-emulator/blob/research/h15-experimental-search-20261030/docs/adr/0005-h15-reference-nature-reuse-retrospective.md).
+The AI repository's `AGENTS.md` requires reading them before future
+stochastic implementation work.
+
+**Local validation after the existing long PPO experiment completes:**
+
+```fish
+set emu ~/projects/sts2-emulator
+set ai ~/projects/sts2-ai
+
+git -C $emu switch research/h15-experimental-search-20261030
+git -C $emu pull --ff-only
+dotnet test $emu/tests/Sts2Emulator.Core.Tests -c Release \
+    --filter 'FullyQualifiedName~H15ControlledCombatSessionV1Tests|FullyQualifiedName~RandomIndexProvidersV111Tests'
+
+git -C $ai switch research/h15-experimental-search-20261030
+git -C $ai pull --ff-only
+cd $ai
+python -m pytest -q \
+    tests/test_h15_controlled_turn_protocol.py \
+    tests/test_h15_experimental_rollout.py
+```
+
+## M12 — remove the remaining H8 declared-law Python sampler
+
+The fixed-fixture `H8ReferenceCombatBackend(use_declared_chance_laws=True)`
+previously used a separate Python `random.Random` cursor and weighted roulette
+in `_resolve_declared_laws`. This duplicate implementation has been removed.
+Both H8 fixed-fixture reference modes now resolve Nature entirely inside the
+emulator:
+
+- The default fast mode uses existing H8 event-keyed
+  `H8LocalReferenceNatureV1`, with `local_reference_seed`.
+- The explicit declared-law mode starts `ReferenceNatureStateV111` with
+  `declared_reference_seed`, queries the current typed `ChanceLawV111`, uses
+  `ReferenceNatureV111.SampleValidated`, and resolves the selected outcome
+  through `H8CombatRuntimeV1.ChooseChanceLawOutcome`.
+  The H8 JSONL session owns the persistent immutable cursor across player
+  decisions and forks; release disposes its cursor. External selection is
+  rejected on an attached declared-reference session. Only the emulator
+  sees stochastic outcome selection.
+- The Python posterior still samples **independent candidate seeds** for
+  the fixed-fixture prior and replays the entire combat-local public history
+  for acceptance. Seed proposal in Python is distinct from sampling a
+  Chance Law outcome, which now belongs exclusively to the engine.
+
+These two H8 reference providers have distinct random-stream conventions.
+The declared-law mode now uses emulator SplitMix64, replacing the previous
+Python MT19937 stream. The declared probabilities themselves retain their
+existing source-law provenance; the new stream does **not** claim replay
+equivalence with old same-seed Python trajectories.
+
+**Scope:** The same fixed-fixture prior and public-history conditioning
+restrictions remain. This refactor introduces no native-structure posterior,
+fair native PUCT labels, or evidence of policy improvement. The existing
+H15 experimental native-entry interface continues to advertise
+`fairContinuationCapability=unavailable`. The pinned 120-round PPO
+experiment is unchanged.
+
+Validation on the experimental branches (run separately from the pinned
+PPO checkout):
+
+```fish
+dotnet test ~/projects/sts2-emulator/tests/Sts2Emulator.Core.Tests -c Release \
+    --filter 'FullyQualifiedName~H8CombatRuntimeV1Tests'
+cd ~/projects/sts2-ai
+python -m pytest -q tests/test_h15_h8_reference.py
+```
+
+The C# regression checks typed-law provenance, provider journal,
+persistent cursor progression, replay and stale-boundary rejection.
+The Python regression checks that declared mode passes the seed
+directly to the emulator and does not call a Python chance sampler.
+End-to-end .NET/Python runtime validation is pending local execution.
+
+## M13 — experimental public-history conditioning from real A10 combat entries
+
+The research-only `H15ExperimentalReferencePosterior` now consumes a
+previously exact-replayed `CombatSnapshotRecipe` source handle. The source
+handle remains untouched; each proposal calls the existing
+`h15_experimental_begin` to construct an independently seeded,
+native-structure/**prototype-combat-RNG** candidate. Every Nature boundary
+then resolves atomically in the emulator's existing
+`ReferenceNatureV111.SampleValidated`; Python never chooses the weighted
+Chance Law outcome.
+
+`capture_source_public_history` gathers only fair player observations,
+the **entire ordered legal-action menu**, and the public action that led to
+the next observable decision. The conditioning sampler replays *all* of those
+actions on each independent candidate, checks every public observation
+**payload and hash** and the exact action menu, and rejects candidates that
+differ. All rejected sessions are released. Exhausting the rejection budget
+releases previously accepted sessions and returns a typed unavailability
+instead of an incomplete sample. Encountering an unsupported mechanics site
+**aborts** conditioning rather than selecting only proposals on which our
+emulator implementation happened to be complete.
+
+The shared `h15_public_protocol` helper now owns the player-frame encoder
+and ReferenceNature selection-receipt validation used by multi-turn
+rollouts. Posterior conditioning uses the additional
+`h15_experimental_reference_advance` operation, which resolves all
+consecutive Nature events in one atomic emulator transaction until the
+next player/combat-exit decision. Every event has an ordered
+law/event/outcome/provider receipt. The engine retains the cursor; Python
+verifies the version, receipt count, provider and sample-count increments.
+Unsupported sites and budget exhaustion discard the entire pending
+transaction. This avoids one JSONL round trip per small stochastic trigger
+while adding no duplicate Python law sampler.
+
+**Important statistical provenance:** this computes a rejection posterior
+under the **explicit independent experimental candidate prior**. It does
+not recover the hidden stochastic distribution of the real source run,
+condition on its macro history, or certify H15 fair PUCT. The candidate model
+is still marked `UNVERIFIED`; `FairContinuationSampler`/PUCT capability
+remains unavailable; **zero training targets** are exported. Full observed
+public histories may have very low acceptance or zero support, which is
+reported as such. This is an experimental bridge and coverage tool, not an
+agent-strength assessment.
+
+To inspect the existing authentic A10 entry corpus, after the pinned PPO
+checkout is no longer in use:
+
+```fish
+set ai ~/projects/sts2-ai
+set emu ~/projects/sts2-emulator
+
+git -C $emu switch research/h15-experimental-search-20261030
+git -C $emu pull --ff-only
+git -C $ai switch research/h15-experimental-search-20261030
+git -C $ai pull --ff-only
+cd $ai
+source .venv/bin/activate.fish
+
+python -m pytest -q tests/test_h15_experimental_posterior.py \
+    tests/test_h15_experimental_rollout.py \
+    tests/test_h15_controlled_turn_protocol.py
+
+python -u tools/probe_h15_experimental_conditioning.py \
+    --emulator-root $emu \
+    --emulator-revision (git -C $emu rev-parse HEAD) \
+    --source-revision 2c46c703a30875d6ef84fcbe0a0511fec9c74dcd \
+    --train-corpus results/h15-native-source-long/train.jsonl \
+    --output results/h15-native-source-long/experimental-conditioning-v1.jsonl \
+    --limit 12 --action-mode end_turn \
+    --samples 1 --max-candidates 128
+```
+
+The historical corpus command requires that its actual stored source
+revision equal `2c46c703...` and that the current emulator descends from
+it. Choose `--action-mode root_only` to isolate the root-construction
+contract (no observed continuation), or `first_card` to audit a
+deterministic-looking first card before attempting `end_turn`.
+These short invocations are **integration diagnostics only**, governed
+by `docs/EXPERIMENT_EVIDENCE_STANDARD.md`.
+
+**Next engineering step:** use these reports to identify which existing
+semantic action/continuation owner can cover real public prefixes, then
+support model-conditioned continuation from accepted handles without
+advertising native fair PUCT or distillation targets. Longer training on
+the independent on-policy PPO track may proceed regardless of original-game
+RNG calibration.
