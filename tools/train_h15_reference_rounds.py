@@ -56,7 +56,9 @@ def _collect_worker(
     torch.set_num_threads(1)
     from sts2_ai.emulator.chance import PublicHistoryStep
     from sts2_ai.emulator.h15_h8_reference import (
-        H8FixtureEntry, H8ReferenceCombatBackend, H8ReferenceNaturePosterior,
+        H8FixtureEntry,
+        H8ReferenceCombatBackend,
+        H8ReferenceNaturePosterior,
     )
     from sts2_ai.evaluation.combat_snapshots import POLICY
     from sts2_ai.models.h15_policy_value import H15CombatEvaluator
@@ -256,7 +258,10 @@ def main() -> None:
     p.add_argument("--eval-every", type=int, default=10)
     p.add_argument("--workers", type=int, default=15)
     p.add_argument("--scenarios", default="mawler-a10,cubex-a10,vine-shambler-a10")
-    p.add_argument("--decks", default="silent-starter-v1,silent-strike-heavy-v1,silent-defend-heavy-v1")
+    p.add_argument(
+        "--decks",
+        default="silent-starter-v1,silent-strike-heavy-v1,silent-defend-heavy-v1",
+    )
     p.add_argument("--fixture-seed", default="h15-reference-m15-fixture-v1")
     p.add_argument("--seed-prefix", default="h15-reference-m15-v1")
     p.add_argument("--seed", type=int, default=20261030)
@@ -303,7 +308,8 @@ def main() -> None:
     # sys.path. Import the existing feedback helpers from that same directory.
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from run_h15_h8_feedback_cycle import (
-        prepare_consistent_h15_teacher, verify_distillation_receipt,
+        prepare_consistent_h15_teacher,
+        verify_distillation_receipt,
         verify_parameter_update,
     )
 
