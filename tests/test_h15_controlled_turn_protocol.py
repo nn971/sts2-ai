@@ -131,3 +131,26 @@ def test_experimental_boundary_refuses_unannounced_combat_result():
     ))
     with pytest.raises(JsonlBridgeError, match="provenance"):
         bridge.h15_experimental_status("h15-1")
+
+
+def test_real_player_action_is_versioned_and_keeps_experimental_provenance():
+    bridge, calls = backend(response(version=1))
+    result = bridge.h15_experimental_player_action(
+        "h15-1", 0, "play-card-action",
+    )
+    assert result["fairContinuationCapability"] == "unavailable"
+    assert calls == [(
+        "h15_experimental_player_action",
+        {"h15_handle": "h15-1", "version": 0,
+         "action_id": "play-card-action"},
+    )]
+
+
+@pytest.mark.parametrize("version,action", [(-1, "play"), (0, ""), (True, "play")])
+def test_player_action_invalid_request_never_reaches_bridge(version, action):
+    bridge, calls = backend(response())
+    with pytest.raises(ValueError, match="player-action"):
+        bridge.h15_experimental_player_action(
+            "h15-1", version, action,
+        )
+    assert not calls
