@@ -33,6 +33,16 @@ def test_search_q_probe_reports_real_cutoffs_and_action_separation():
     assert stats["mean_expanded_public_histories"] == 3
     assert stats["total_neural_cutoffs"] == 4
     assert stats["total_terminal_evaluations"] == 0
+    assert stats["evaluated_roots"] == 1
+    extra = {
+        "searched_root_diagnostics": [{
+            **sample["searched_root_diagnostics"][0],
+            "root_mean_action_values": [0.9, 0.4, None],
+        }],
+    }
+    multiroot = summarize_search_q([sample, extra])
+    assert multiroot["evaluated_roots"] == 2
+    assert multiroot["mean_visited_action_q_spread"] == pytest.approx(0.39)
 
 
 def test_search_q_probe_rejects_stale_or_incomplete_telemetry():
