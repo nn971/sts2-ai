@@ -24,8 +24,8 @@ def summarize_search_q(records: list[dict[str, Any]]) -> dict[str, Any]:
         for record in records
         for diagnostic in record["searched_root_diagnostics"]
     ]
-    if len(diagnostics) != len(records):
-        raise ValueError("Probe requires exactly one real searched root per combat")
+    if not diagnostics or any(not record["searched_root_diagnostics"] for record in records):
+        raise ValueError("Probe requires at least one real searched root per combat")
     spreads = []
     for diagnostic in diagnostics:
         visits = diagnostic["root_visits"]
@@ -41,6 +41,7 @@ def summarize_search_q(records: list[dict[str, Any]]) -> dict[str, Any]:
             raise ValueError("Invalid selected H15 action value estimate")
         spreads.append(max(selected_q) - min(selected_q))
     return {
+        "evaluated_roots": len(diagnostics),
         "mean_visited_action_q_spread": sum(spreads) / len(spreads),
         "mean_expanded_public_histories": sum(
             d["search_expanded_information_sets"] for d in diagnostics
@@ -90,9 +91,13 @@ def main() -> None:
     p.add_argument("--budgets", default="16,64,128")
     p.add_argument("--cases", type=int, default=15)
     p.add_argument("--workers", type=int, default=15)
+    p.add_argument("--max-searches", type=int, default=1)
+    p.add_argument(
+        "--search-schedule", choices=("first", "turn_start"), default="first",
+    )
     p.add_argument("--execute", action="store_true")
     args = p.parse_args()
-    if min(args.round, args.cases, args.workers) < 1:
+    if min(args.round, args.cases, args.workers, args.max_searches) < 1:
         p.error("Positive round/cases/workers required")
     try:
         budgets = validate_budgets(args.budgets)
@@ -121,7 +126,8 @@ def main() -> None:
     paired_raw = {k: frozen_raw[k] for k in ids}
     config = dict(source_config)
     config["workers"] = args.workers
-    config["max_searches"] = 1
+    config["max_searches"] = args.max_searches
+    config["search_schedule"] = args.search_schedule
     config["max_decisions"] = source_config["max_decisions"]
     config["code_sha256"] = {
         name: sha256(Path(__file__).resolve().parents[1] / name)
@@ -143,6 +149,8 @@ def main() -> None:
         "code_sha256": config["code_sha256"], "emulator_revision": config["emulator_revision"],
         "emulator_dll_sha256": config["emulator_dll_sha256"],
         "workers": args.workers,
+        "max_searches": args.max_searches,
+        "search_schedule": args.search_schedule,
     }
     print("[h15-budget-preflight] " + json.dumps(experiment, sort_keys=True), flush=True)
     if not args.execute:
@@ -169,14 +177,14 @@ def main() -> None:
         # Each target must remain grounded in an independently played combat
         # with exactly this search budget and a pinned model identity.
         for record in records:
-            if len(record["targets"]) != 1:
-                raise ValueError("Expected exactly one searched root per reference fight")
-            target = record["targets"][0]
-            sample = decode_target(target)
-            if (target["search_simulations"] != budget
-                    or sample.search_model_sha256 != model_hash
-                    or sample.source_seed != record["case_id"]):
-                raise ValueError("Stale or incorrectly budgeted H15 search target")
+            if not 1 <= len(record["targets"]) <= args.max_searches:
+                raise ValueError("Invalid number of searched roots in reference fight")
+            for target in record["targets"]:
+                sample = decode_target(target)
+                if (target["search_simulations"] != budget
+                        or sample.search_model_sha256 != model_hash
+                        or sample.source_seed != record["case_id"]):
+                    raise ValueError("Stale or incorrectly budgeted H15 search target")
         matches = compare_saved_evaluations(
             paired_raw, {r["case_id"]: r for r in records},
         )
