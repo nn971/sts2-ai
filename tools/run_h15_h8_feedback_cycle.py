@@ -20,12 +20,59 @@ from typing import Any
 from sts2_ai.emulator.h15_h8_reference import H8_DECLARED_LAW_MODEL
 from sts2_ai.training.h15_search_supervision import decode_target
 
-SCHEMA = "sts2-h15-reference-nature-feedback-cycle-v1"
+SCHEMA = "sts2-h15-reference-nature-feedback-cycle-v2"
 REGIME = "fixed-h8-fixture-declared-chance-law"
 
 
 def file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def prepare_consistent_h15_teacher(source: Path, destination: Path) -> dict[str, str]:
+    """Retain H9 weights but fix the H15 codec BEFORE the first PUCT search.
+
+    H9 and H15 checkpoints use the same tensor shapes. Changing the encoding
+    changes their predictions, so it must never occur between before/after
+    search when attributing a policy difference to a gradient update.
+    """
+    import torch
+
+    from sts2_ai.models.h15_combat_codec import H15_COMBAT_SCHEMA
+    from sts2_ai.models.h15_policy_value import H15_FORMAT, H7_FORMAT
+    from sts2_ai.models.shared_game_objects import SHARED_OBJECT_SCHEMA
+
+    initial = torch.load(source, map_location="cpu", weights_only=True)
+    fmt, codec = initial.get("format"), initial.get("object_schema")
+    if ((fmt, codec) not in (
+        (H7_FORMAT, SHARED_OBJECT_SCHEMA),
+        (H15_FORMAT, H15_COMBAT_SCHEMA),
+    ) or not isinstance(initial.get("config"), dict)
+            or not isinstance(initial.get("state_dict"), dict)):
+        raise ValueError("Expected an intact H9/H15 policy-value checkpoint")
+    before_sha = file_sha256(source)
+    converted = dict(initial)
+    converted["format"] = H15_FORMAT
+    converted["object_schema"] = H15_COMBAT_SCHEMA
+    converted["provenance"] = {
+        "bootstrap_kind": "h15-codec-promotion-with-unchanged-weights-v1",
+        "source_checkpoint_sha256": before_sha,
+        "source_format": fmt,
+        "source_object_schema": codec,
+        "source_provenance": initial.get("provenance"),
+    }
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(converted, destination)
+    # A codec migration may alter the NN function, but it never trains weights.
+    restored = torch.load(destination, map_location="cpu", weights_only=True)
+    if any(not torch.equal(before, restored["state_dict"][name])
+           for name, before in initial["state_dict"].items()):
+        raise RuntimeError("Codec promotion modified frozen H9/H15 model weights")
+    return {
+        "source_sha256": before_sha,
+        "bootstrap_sha256": file_sha256(destination),
+        "source_codec": codec,
+        "bootstrap_codec": H15_COMBAT_SCHEMA,
+    }
 
 
 def read_targets(path: Path, *, checkpoint_sha256: str, simulations: int) -> list[dict[str, Any]]:
@@ -199,9 +246,10 @@ def main() -> None:
         ]
     before_dir, after_dir = output_root / "before", output_root / "after"
     updated_path = output_root / "student.pt"
+    bootstrap_path = output_root / "bootstrap-h15.pt"
     train_command = [
         sys.executable, str(root / "tools/train_h15_search_distill.py"),
-        "--initialize-from-model", str(start_path),
+        "--initialize-from-model", str(bootstrap_path),
         "--search-data", str(before_dir / "targets.jsonl"),
         "--accepted-chance-prior", H8_DECLARED_LAW_MODEL,
         "--output", str(updated_path),
@@ -222,22 +270,26 @@ def main() -> None:
         "search_seed": args.search_seed, "output_root": str(output_root),
     }, sort_keys=True), flush=True)
     if not args.execute:
+        print("[h15-cycle-dry-run:bootstrap] promote original H9/H15 weights to H15 codec at " + str(bootstrap_path), flush=True)
         for name, command in [
-            ("before", collection_command(start_path, before_dir)),
+            ("before", collection_command(bootstrap_path, before_dir)),
             ("fit", train_command),
             ("after", collection_command(updated_path, after_dir)),
         ]:
             print(f"[h15-cycle-dry-run:{name}] {shlex.join(command)}", flush=True)
         return
 
-    run_stage("before", collection_command(start_path, before_dir), root=root)
+    bootstrap = prepare_consistent_h15_teacher(start_path, bootstrap_path)
+    bootstrap_sha = bootstrap["bootstrap_sha256"]
+    print("[h15-cycle-bootstrap] " + json.dumps(bootstrap, sort_keys=True), flush=True)
+    run_stage("before", collection_command(bootstrap_path, before_dir), root=root)
     first = read_targets(before_dir / "targets.jsonl",
-                         checkpoint_sha256=original_sha, simulations=args.simulations)
+                         checkpoint_sha256=bootstrap_sha, simulations=args.simulations)
     run_stage("fit", train_command, root=root)
-    update = verify_parameter_update(start_path, updated_path)
+    update = verify_parameter_update(bootstrap_path, updated_path)
     fitted_steps = args.epochs * math.ceil(len(first) / args.batch_size)
     fitted = verify_distillation_receipt(
-        updated_path, initial_sha=original_sha,
+        updated_path, initial_sha=bootstrap_sha,
         source_sha=file_sha256(before_dir / "targets.jsonl"),
         expected_steps=fitted_steps,
     )
@@ -253,7 +305,9 @@ def main() -> None:
         "chance_prior": H8_DECLARED_LAW_MODEL,
         "probability_claim": "declared-emulator-law-only",
         "training_source": REGIME, "leaf_mode": "value",
-        "initial_teacher_sha256": original_sha,
+        "initial_source_sha256": original_sha,
+        "initial_teacher_sha256": bootstrap_sha,
+        "codec_bootstrap": bootstrap,
         "updated_teacher_sha256": updated_sha,
         "before_targets": len(first), "after_targets": len(second),
         "before_targets_sha256": file_sha256(before_dir / "targets.jsonl"),
