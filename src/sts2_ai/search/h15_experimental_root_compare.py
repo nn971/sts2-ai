@@ -11,7 +11,6 @@ critic supervision target is emitted by this module.
 from __future__ import annotations
 
 import hashlib
-import json
 from collections import Counter
 from typing import Any
 
