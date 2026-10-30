@@ -1,5 +1,14 @@
 # Project status
 
+> **CURRENT H15 DECISION (2026-10-30):**
+> [Canonical search-training plan](docs/H15_SEARCH_TRAINING_PLAN.md)
+> is the active implementation priority. Entries below are dated historical
+> status records. In particular, old "next implementation plan" and "current
+> phase" sections do **not** supersede the ReferenceNature → neural PUCT →
+> search targets → optimizer → renewed search milestone. Document contradictions
+> must be disclosed to the user under [AGENTS.md](AGENTS.md).
+
+
 ## Native Overgrowth Wriggler blocker cleared in emulator (2026-10-09)
 
 The emulator regression for Dense Vegetation Wriggler AI (issue #6) is fixed
@@ -317,9 +326,13 @@ validated history-conditioned adapter; the current UCT and default agents
 are unchanged.
 
 
-## Next implementation plan — fair stochastic self-improvement (2026-10-08)
+## Historical implementation plan — stochastic PUCT prototype (2026-10-08)
 
-The active **planned** direction is [self-improving stochastic PUCT with bounded uniformized variance](docs/SELF_IMPROVING_STOCHASTIC_PUCT.md). It specifies a seed-blind, known-probability chance interface, small PUCT neural model, direct normalized progress/HP variance heads, annealed auxiliary losses, teacher-free iterative run generation, and compute-matched held-out evaluation. **The S0/S1 goal-label, bounded-moment and known-deck-law foundations are implemented in PR #12; fair hidden-state sampling, PUCT and self-play remain pending.** Existing exact-state MCTS remains an oracle-only research baseline.
+The previous bounded-variance / fairness-gated PUCT proposal is **superseded**
+for H15. Its design and historical progress remain accessible in Git history.
+Current H15 training uses the existing emulator ReferenceNature and Chance Law
+machinery; a certified native-run posterior is a separate research topic.
+See [the canonical H15 plan](docs/H15_SEARCH_TRAINING_PLAN.md).
 
 ## Current phase — search-first strategic AI experiments
 
@@ -367,9 +380,10 @@ yet an information-set agent.
    and validate an improved value/policy model.
 5. Profile real search before investing in additional emulator optimization.
 
-See [the AI prototype roadmap](docs/AI_PROTOTYPE_ROADMAP.md) for prior
+See [the historical AI prototype roadmap](docs/AI_PROTOTYPE_ROADMAP.md) for prior
 experiments and [the route-planning baseline](docs/ROUTE_PLANNING_BASELINE.md)
-for the current new experiment.
+for its original experiment. Current work is governed by
+[H15 search training](docs/H15_SEARCH_TRAINING_PLAN.md).
 
 
 ### Initial route-planning measurement (2026-10-08)
