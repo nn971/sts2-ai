@@ -378,3 +378,74 @@ that PUCT helps or hurts. The 80-round plan is retained as an
 **initial experimental configuration**, with decisions about actual
 budget informed by throughput, search interventions and genuine
 heldout reference-law outcomes.
+
+
+## M15 heldout search-intervention audit and budget-probe gate (2026-10-30)
+
+The user-supplied offline audit `search-audit-round-0001.json` reads
+the actual completed 15-case heldout cohort. **PUCT overrode the
+same checkpoint's greedy opening action in 0/15 cases.** The paired
+raw-H15 and PUCT records have identical combat outcomes, remaining HP,
+rewards and decision counts on **every case** (not merely equal means).
+Each root had 16 simulations, each ending with a neural-value cutoff:
+`240` neural cutoffs, `0` internal terminal outcomes. The mean
+search-visit-to-prior KL was just `0.0301383` nats. Six root visit
+histograms cover all 15 roots, with three distinct selected greedy
+action IDs. The differences reported in v2's single fixture do not
+contradict this result: the present audit evaluates the **new student
+on 15 different heldout fixture instances**, and at this low budget
+its search never changed the raw policy's selected action.
+
+**Assessment:** the existing one-root/16-simulation configuration
+provides essentially no evidence that PUCT teaches a better policy
+than the network already produces. The report establishes observed
+behavior on this cohort; possible causes include insufficient search
+budget/depth and limited value-head discrimination. Merely scaling
+the same training loop to 80 rounds risks self-distillation. Avoid
+conclusions about performance from the current small saturated sample,
+and keep the native-game probability-calibration project separate.
+
+**New diagnostic (committed):** `tools/probe_h15_reference_search_budget.py`
+reuses the *existing frozen round-1 student checkpoint* and the
+*exact same saved heldout case IDs, encounter/deck specifications and
+independent ReferenceNature seeds*. It runs 16, 64 and 128 simulated
+PUCT visits at the first decision, with **no optimizer updates**.
+It compares to the immutable per-case saved raw-H15 evaluation.
+New PUCT root diagnostics include neural-value-cutoff count, actual
+terminal count, expanded public histories, simulated state
+transitions, and the per-action empirical backed-up Q values.
+The resulting `mean_visited_action_q_spread` tests whether search
+estimates meaningful **action-dependent** differences rather than
+only replicating neural priors. All outcomes are measured in the H8
+declared reference-law game.
+
+Run this *before* the expensive 80-round experiment, in a new
+output directory (fish):
+
+```fish
+set ai ~/projects/sts2-ai
+cd $ai
+git pull --ff-only
+source .venv/bin/activate.fish
+
+python -m pytest -q \
+    tests/test_h15_native_search_collector.py \
+    tests/test_h15_reference_search_audit.py \
+    tests/test_h15_reference_search_budget.py
+
+python -u tools/probe_h15_reference_search_budget.py \
+    --source-run results/h15-reference-m15-cohort-smoke-v1 \
+    --round 1 \
+    --output-root results/h15-reference-m15-puct-budget-probe-v1 \
+    --budgets 16,64,128 --cases 15 --workers 15 --execute
+```
+
+The probe saves one `budget.json` per simulation budget plus a
+combined `progress.json`, and resumes completed per-worker chunks
+only when their case set, model SHA, budget, code/emulator identity and
+prior configuration agree. The completed original cohort is immutable.
+After this controlled budget probe, select a substantive budget and
+increase **search decisions per combat** on a source-supported
+A10 subset. Later public-history conditioning can be more expensive
+than the first root: profile acceptance rates and report explicit
+rejection exhaustion rather than silently omitting roots.
