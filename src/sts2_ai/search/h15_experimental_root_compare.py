@@ -15,7 +15,9 @@ from collections import Counter
 from typing import Any
 
 from sts2_ai.training.h15_experimental_rollout import (
-    RolloutLimits, _policy_input, run_policy_combat,
+    RolloutLimits,
+    _policy_input,
+    run_policy_combat,
 )
 
 EXPERIMENTAL_COMPARE_SCHEMA = (
