@@ -66,7 +66,12 @@ def probe_entry(
         )
         status, reason = "conditioned", None
     except ExperimentalConditioningUnavailable as exc:
-        status, reason = "unavailable", str(exc)
+        reason = str(exc)
+        status = (
+            "exhausted" if "conditioning exhausted" in reason
+            else "censored" if "budget" in reason
+            else "unsupported"
+        )
     finally:
         if accepted:
             backend.h15_experimental_release_many(accepted)
