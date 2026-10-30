@@ -74,3 +74,39 @@ def test_student_receipt_is_bound_to_the_real_teacher_and_targets(tmp_path):
             student, initial_sha="a" * 64, source_sha="c" * 64,
             expected_steps=2,
         )
+
+
+def test_h9_codec_promotion_keeps_weights_and_is_idempotent(tmp_path):
+    import torch
+    from dataclasses import asdict
+
+    from sts2_ai.models.h15_combat_codec import H15_COMBAT_SCHEMA
+    from sts2_ai.models.h15_policy_value import (
+        H15_FORMAT, H7_FORMAT, H15CombatEvaluator,
+    )
+    from sts2_ai.models.shared_game_objects import SHARED_OBJECT_SCHEMA
+    from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
+
+    config = H7Config(width=32, layers=1, heads=4, feedforward=64)
+    model = SharedObjectTransformer(config)
+    old = tmp_path / "h9.pt"
+    promoted = tmp_path / "h15-bootstrap.pt"
+    promoted_twice = tmp_path / "h15-bootstrap-copy.pt"
+    torch.save({
+        "format": H7_FORMAT,
+        "object_schema": SHARED_OBJECT_SCHEMA,
+        "config": asdict(config),
+        "state_dict": model.state_dict(),
+    }, old)
+    receipt = cycle.prepare_consistent_h15_teacher(old, promoted)
+    assert receipt["source_codec"] == SHARED_OBJECT_SCHEMA
+    assert receipt["bootstrap_codec"] == H15_COMBAT_SCHEMA
+    h15 = torch.load(promoted, map_location="cpu", weights_only=True)
+    assert h15["format"] == H15_FORMAT
+    assert all(torch.equal(value, h15["state_dict"][name])
+               for name, value in model.state_dict().items())
+    # The actual search-teacher loader must use the move-aware H15 codec.
+    evaluator = H15CombatEvaluator.load(promoted, device="cpu")
+    assert evaluator.codec_schema == H15_COMBAT_SCHEMA
+    followup = cycle.prepare_consistent_h15_teacher(promoted, promoted_twice)
+    assert followup["source_codec"] == H15_COMBAT_SCHEMA
