@@ -1,3 +1,11 @@
+> **HISTORICAL H15 diagnostic, superseded for training planning (2026-10-30).**
+> See the [current H15 search-training plan](H15_SEARCH_TRAINING_PLAN.md).
+> Statements below that general H15 training "still requires" a native full-run
+> posterior describe this experiment's original *certified fair-native claim*
+> and are **not H15 training gates**. ReferenceNature/root-conditioned search
+> can be explicitly labelled and evaluated under its declared emulator model.
+> Preserve the M13 candidate's \`UNVERIFIED\` and zero fair-target provenance.
+
 # H15 experimental root-action comparison (independent research branch)
 
 **Branches:**
