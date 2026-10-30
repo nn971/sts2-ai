@@ -7,6 +7,7 @@ from tools.probe_h15_reference_search_budget import (
     summarize_search_q,
     validate_budgets,
 )
+from tools.train_h15_reference_rounds import searches_for_mode
 
 
 def test_budget_parser_requires_positive_sorted_unique_budgets():
@@ -55,3 +56,11 @@ def test_search_q_probe_rejects_stale_or_incomplete_telemetry():
     }
     with pytest.raises(ValueError, match="Invalid selected"):
         summarize_search_q([sample])
+
+
+def test_training_and_search_both_honor_multi_root_budget():
+    assert searches_for_mode("train", 3) == 3
+    assert searches_for_mode("search", 3) == 3
+    assert searches_for_mode("greedy", 3) == 0
+    with pytest.raises(ValueError, match="Invalid H15 collection"):
+        searches_for_mode("unknown", 3)
