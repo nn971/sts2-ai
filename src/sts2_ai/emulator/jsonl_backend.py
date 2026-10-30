@@ -423,6 +423,29 @@ class JsonlEmulatorBackend:
                 "H15 controlled turn response lacks experimental-only provenance"
             )
         kind = response["boundaryKind"]
+        # The H9 terminal HP accounting must be visible only when combat
+        # has genuinely exited. Requiring it here prevents a research
+        # comparator from silently using a made-up defeat score.
+        terminal_public = response.get("combatExitPublicObservationJson")
+        if kind == "combat_exit":
+            if not isinstance(terminal_public, str):
+                raise JsonlBridgeError(
+                    "H15 combat exit lacks source public H9 terminal state"
+                )
+            try:
+                observed_exit = json.loads(terminal_public)
+            except json.JSONDecodeError as exc:
+                raise JsonlBridgeError(
+                    "H15 combat exit contains invalid public terminal JSON"
+                ) from exc
+            if (not isinstance(observed_exit, dict)
+                    or isinstance(observed_exit.get("combat"), dict)):
+                raise JsonlBridgeError(
+                    "H15 combat exit has malformed terminal combat projection"
+                )
+        elif terminal_public is not None:
+            raise JsonlBridgeError(
+                "H15 active combat leaked terminal reward observation")
         law = response.get("chanceLaw")
         if kind in ("enemy_action", "enemy_intent", "draw_card", "random_target"):
             if (not isinstance(law, dict)
