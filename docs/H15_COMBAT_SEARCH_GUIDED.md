@@ -632,3 +632,60 @@ Rerun the **same** 12-entry probe after fetching both branches, using
 (the prior report is intentionally immutable). The goal is to verify
 that this one boss continuation now advances; further unsupported
 chance sites should be recorded rather than bypassed.
+
+
+## M8 — audited real player actions (experimental)
+
+The unchanged 12-entry `controlled-turn-coverage-v2.jsonl` report
+advanced all 12 genuine native-structure combat entries through
+one end turn: **60 draw_card** and **5 enemy_intent** Nature selections,
+with zero rejections. This validates the narrow source end-turn route,
+not a fair conditional continuation posterior.
+
+The existing `H15ControlledCombatSessionV1` now exposes
+`PlayerAction(actionId)` to execute legal `play_card` or `use_potion`
+actions at real combat player boundaries. Card plays reuse
+`SemanticPlayerActionEngineV111.Step` for its audited
+supported-card allowlist, physical/semantic hidden-deck invariant,
+and controlled RNG guard. The first potion gate covers source-implemented,
+deck-neutral block/dexterity/energy/strength/explosive/fire/poison/weak
+effects; unknown potions, arbitrary card-draw hooks, nested player
+selections and non-migrated stochastic sites fail closed.
+The existing `EndTurn` and `Choose` flows remain intact, and
+each successfully committed action increments the session version.
+JSONL `h15_experimental_player_action` and Python
+`h15_experimental_player_action` preserve the same isolated, unverified
+provenance contract. Client-side requests reject invalid versions.
+
+The new `tools/probe_h15_player_actions.py` replays exact native-structure
+corpus roots, attempts an audited legal card/potion action, checks
+that rejected actions leave the session unchanged, then takes an
+ordinary end turn and resolves declared Nature events. It writes
+specific accepted/rejected actions and unsupported chance-site
+diagnostics. The first action exercised in each entry depends on
+its legal action order; this tool is a coverage gate rather than
+a policy benchmark.
+
+Fish verification:
+
+```fish
+set emu ~/projects/sts2-emulator
+set ai ~/projects/sts2-ai
+git -C $emu pull --ff-only
+dotnet test $emu/tests/Sts2Emulator.Core.Tests -c Release \
+    --filter 'FullyQualifiedName~H15ControlledCombatSessionV1Tests|FullyQualifiedName~PrototypeTheKinTests'
+cd $ai
+git pull --ff-only
+python -m pytest -q tests/test_h15_controlled_turn_protocol.py
+python -u tools/probe_h15_player_actions.py \
+    --emulator-root $emu \
+    --emulator-revision (git -C $emu rev-parse HEAD) \
+    --source-revision 2c46c703a30875d6ef84fcbe0a0511fec9c74dcd \
+    --train-corpus results/h15-native-source-long/train.jsonl \
+    --output results/h15-native-source-long/player-action-coverage-v1.jsonl \
+    --limit 12
+```
+
+Every candidate remains experimental and the session explicitly
+advertises `fairContinuationCapability: unavailable`. No fair
+PUCT labels or long-run search supervision are produced by M8.
