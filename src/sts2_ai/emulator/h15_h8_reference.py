@@ -257,8 +257,9 @@ class H8ReferenceCombatBackend:
             return child
         except Exception:
             if isinstance(handle, str):
-                self.release_many((handle,))
-                if handle not in self._live:
+                if handle in self._live:
+                    self.release_many((handle,))
+                else:
                     self._session.call("h8_release_many", h8_handles=[handle])
             raise
 
