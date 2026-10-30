@@ -20,6 +20,7 @@ from typing import Protocol, runtime_checkable
 from sts2_ai.emulator.protocol import LegalAction, Observation
 
 FAIR_COMBAT_CAPABILITY = "h15-public-history-combat-chance-v1"
+ROOT_CONDITIONED_COMBAT_CAPABILITY = "h15-h8-root-conditioned-combat-v1"
 H15_SEARCH_VERSION = "h15-combat-puct-v2"
 
 
@@ -102,6 +103,7 @@ class CombatSearchResult:
     transitions: int
     rollout_mode: str = "value"
     expanded_information_sets: int = 0
+    chance_capability: str = FAIR_COMBAT_CAPABILITY
 
     @property
     def policy(self) -> tuple[float, ...]:
@@ -118,8 +120,10 @@ class CombatPuct:
                  c_puct: float = 1.5, max_depth: int = 256, seed: int = 0,
                  leaf_mode: str = "value", rollout_depth: int = 512):
         if (not isinstance(sampler, FairCombatSampler) or
-                sampler.fair_combat_capability_id != FAIR_COMBAT_CAPABILITY):
-            raise ValueError("H15 requires a certified fair-combat sampler")
+                sampler.fair_combat_capability_id not in (
+                    FAIR_COMBAT_CAPABILITY, ROOT_CONDITIONED_COMBAT_CAPABILITY,
+                )):
+            raise ValueError("H15 requires an explicitly certified combat sampler")
         if (not math.isfinite(c_puct) or c_puct <= 0 or max_depth <= 0
                 or leaf_mode not in ("value", "terminal") or rollout_depth <= 0):
             raise ValueError("Invalid combat search configuration")
@@ -263,4 +267,5 @@ class CombatPuct:
             tuple(e.q if e.visits else None for e in edges),
             root_value_sum / simulations, simulations, terminals, cutoffs,
             transitions, self._leaf_mode, len(table),
+            self._sampler.fair_combat_capability_id,
         )
