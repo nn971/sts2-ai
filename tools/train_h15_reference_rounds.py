@@ -296,7 +296,10 @@ def main() -> None:
             or not (emulator_root / "bindings/python").is_dir()):
         p.error("Missing pinned DLL, model, or emulator Python bindings")
 
-    from tools.run_h15_h8_feedback_cycle import (
+    # Direct CLI execution places tools/ (not necessarily the repo root) on
+    # sys.path. Import the existing feedback helpers from that same directory.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from run_h15_h8_feedback_cycle import (
         prepare_consistent_h15_teacher, verify_distillation_receipt,
         verify_parameter_update,
     )
