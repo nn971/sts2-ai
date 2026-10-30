@@ -314,56 +314,39 @@ def test_h9_nested_choice_uses_explicit_uniform_fallback():
 
 
 class DeclaredLawTransport(ToyH8Transport):
-    """A chance boundary that must be resolved through the emulator law API."""
+    """The emulator owns declared-law sampling and the reference cursor.
+
+    This transport deliberately has no h8_reference_law or Python outcome
+    chooser: begin_reference must call the single engine-owned endpoint.
+    """
 
     def __init__(self):
         super().__init__()
         self.chosen = []
-        self.law_reads = 0
+        self.declared_seeds = []
 
     def call(self, op, **args):
         if op == "h8_begin_seeded":
             assert "local_reference_seed" not in args
+            seed = args["declared_reference_seed"]
+            self.declared_seeds.append(seed)
+            # Toy response: the real weights and ReferenceNature sampler
+            # are exercised in C#; the Python bridge observes only status.
+            selected = ("card_instance:1" if seed % 4 != 0
+                        else "card_instance:2")
+            self.chosen.append(selected)
             handle = "h" + str(self.next_handle)
             self.next_handle += 1
-            status = self._status(handle, 0)
-            status["kind"] = "draw_card"
-            status.pop("playerFrame")
-            self.statuses[handle] = (status, 0)
-            return {"result": status}
-        if op == "h8_reference_law":
-            status, _ = self.statuses[args["h8_handle"]]
-            assert status["kind"] == "draw_card"
-            assert args["boundary_version"] == status["boundaryVersion"]
-            self.law_reads += 1
-            return {"pending": {
-                "kind": "draw_card", "eventId": "draw-0",
-                "chanceLaw": {
-                    "eventId": "draw-0", "totalWeight": 4,
-                    "outcomes": [
-                        {"outcomeId": "card_instance:1", "weight": 3},
-                        {"outcomeId": "card_instance:2", "weight": 1},
-                    ],
-                },
-            }}
-        if op == "h8_resolve_chance_law_outcome":
-            handle = args["h8_handle"]
-            before, _ = self.statuses[handle]
-            assert before["kind"] == "draw_card"
-            assert args["boundary_version"] == before["boundaryVersion"]
-            assert args["chance_law"]["totalWeight"] == 4
-            selected = args["outcome_id"]
-            assert selected in ("card_instance:1", "card_instance:2")
-            assert args["provider_id"] == "h15-declared-law-reference-v1"
-            self.chosen.append(selected)
-            seed = 1 if selected == "card_instance:1" else 2
-            status = self._status(handle, seed, version=before["boundaryVersion"] + 1)
+            status = self._status(handle, 1 if selected.endswith(":1") else 2,
+                                  version=1)
             self.statuses[handle] = (status, seed)
             return {"result": status}
         if op == "h8_step":
             handle = args["h8_handle"]
             before, seed = self.statuses[handle]
             assert "local_reference_seed" not in args
+            assert "declared_reference_seed" not in args
+            assert args["boundary_version"] == before["boundaryVersion"]
             outcome = "victory" if args["action_id"] == "safe" else "defeat"
             status = self._status(
                 handle, seed, version=before["boundaryVersion"] + 1,
@@ -374,7 +357,8 @@ class DeclaredLawTransport(ToyH8Transport):
         return super().call(op, **args)
 
 
-def test_explicit_chance_law_mode_samples_only_advertised_outcomes():
+
+def test_explicit_chance_law_mode_uses_emulator_owned_reference_cursor():
     from sts2_ai.emulator.h15_h8_reference import H8_DECLARED_LAW_MODEL
 
     transport = DeclaredLawTransport()
@@ -385,7 +369,7 @@ def test_explicit_chance_law_mode_samples_only_advertised_outcomes():
     samples = tuple(backend.begin_reference(seed) for seed in range(40))
     assert backend.reference_model_id == H8_DECLARED_LAW_MODEL
     assert H8ReferenceNaturePosterior(backend).prior_id == H8_DECLARED_LAW_MODEL
-    assert transport.law_reads == len(samples)
+    assert transport.declared_seeds == list(range(40))
     assert len(transport.chosen) == len(samples)
     assert set(transport.chosen) == {"card_instance:1", "card_instance:2"}
 
