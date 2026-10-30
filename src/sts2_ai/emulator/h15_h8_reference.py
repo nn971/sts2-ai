@@ -236,6 +236,32 @@ class H8ReferenceCombatBackend:
                 self._session.call("h8_release_many", h8_handles=[handle])
             raise
 
+    def fork_reference(self, state: str) -> str:
+        """Fork the existing H8 mechanics *and* emulator ReferenceNature cursor.
+
+        This is intentionally root-conditioned: every fork retains the same
+        already-realized hidden state. It is suitable for an explicitly
+        labelled approximate PUCT teacher, never a fair posterior sample.
+        """
+        parent = self._live[state]
+        result = self._session.call(
+            "h8_fork", h8_handle=state, include_player_frame=True,
+        )["result"]
+        handle = result.get("h8Handle")
+        try:
+            child = self._store(result, parent.nature_seed)
+            if (self.observe(child, InformationPolicy(FAIR_POLICY_ID))
+                    != self.observe(state, InformationPolicy(FAIR_POLICY_ID))
+                    or self.legal_actions(child) != self.legal_actions(state)):
+                raise ValueError("H8 fork differs from its public source root")
+            return child
+        except Exception:
+            if isinstance(handle, str):
+                self.release_many((handle,))
+                if handle not in self._live:
+                    self._session.call("h8_release_many", h8_handles=[handle])
+            raise
+
     def observe(self, state: str, policy: InformationPolicy) -> Observation:
         if policy.policy_id != FAIR_POLICY_ID:
             raise ValueError("H8 search only exposes the fair player observation")
