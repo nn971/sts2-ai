@@ -543,9 +543,10 @@ existing emulator-owned declared-law `H8ReferenceCombatBackend`
 with `ReferenceNatureV111`, and executes baseline fights without PUCT
 or optimizer changes. A single 15-worker screening cohort covers
 **both source-supported A10 boss fixtures** (Ceremonial Beast and Vantom)
-paired with starter, poison-kit, 20-card boss-cycle and 20-card boss-poison
-decks (8 combinations, 12 independent combats per combination by
-default). Source IDs and boss/deck allocation are fixed *before* the
+paired with the **two eligible boss-conditioned 20-card decks**:
+boss-cycle and boss-poison (4 combinations, 12 independent combats per
+combination by default). Standard and poison-kit decks create a normal-room
+fixture and are invalid for these boss entries. Source IDs and boss/deck allocation are fixed *before* the
 outcomes. The candidate whose measured win rate is closest to 50%
 is validated on **32 independent fresh combats**; the result explicitly
 reports both rates, Wilson intervals and whether the chosen candidate
@@ -640,3 +641,49 @@ the full original per-case traceback should now appear. Only that
 actual failure should motivate a subsequent mechanics change; the
 existing reference-law training run remains independent.
 
+
+
+
+## M15 boss-room fixture eligibility correction (2026-10-30)
+
+The second final-turn screening run unmasked the real emulator exception
+`InvalidDataException: Fixed playable encounter is ineligible for its run entry.`
+at `backend.begin_reference()` for a **Ceremonial Beast + Silent starter
+deck** source case. The pinned emulator `ControlledPlayableCombatV111.cs`
+lines 790–807 assigns a Boss room only for
+`SemanticConditionedDeckPresetV111.IsBossDeck(fixtureDeckPresetId)`
+(or an explicitly specified boss research fixture). The method
+`IsBossDeck` recognizes **only** `silent-boss-cycle-20-v1` and
+`silent-boss-poison-20-v1`. Starter, poison-kit and other ordinary decks
+enter a Combat room and correctly fail boss encounter eligibility.
+This was an **invalid source scenario/deck pairing in the AI probe**, not
+an RNG coupling or missing native-game parity concern.
+
+Corrected `tools/probe_h15_final_turn.py` to screen the **four valid
+boss/deck combinations**, and reject normal-room deck presets before
+launching 15 emulator workers. This keeps the purpose of the study
+unchanged: measure a source-supported difficult A10 combat's empirical
+raw-policy win rate, select the one nearest 50%, independently validate,
+and inspect the ordered **last actual combat turn** for wins and defeats.
+
+The corrected independent experiment identity is
+`results/h15-a10-boss-final-turn-v3`:
+
+```fish
+cd ~/projects/sts2-ai
+git pull --ff-only
+source .venv/bin/activate.fish
+python -m pytest -q tests/test_h15_final_turn_probe.py \
+    tests/test_h15_native_search_collector.py
+python -u tools/probe_h15_final_turn.py \
+    --source-run results/h15-reference-m15-cohort-smoke-v1 \
+    --round 1 --output-root results/h15-a10-boss-final-turn-v3 \
+    --screen-per-pair 12 --validate-combats 32 \
+    --workers 15 --execute
+```
+
+Four screening pairs × 12 fights = **48 screening fights**, followed by
+**32 separately seeded validation fights**. Existing versioned v1/v2
+experiment directories remain untouched. Observations are under the
+existing declared-law H8 ReferenceNature distribution, and this study
+does **not** gate substantive search-guided training.
