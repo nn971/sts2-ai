@@ -46,6 +46,12 @@ def atomic_json(path: Path, record: Any) -> None:
     tmp.replace(path)
 
 
+def searches_for_mode(mode: str, max_searches: int) -> int:
+    if mode not in ("train", "search", "greedy") or max_searches < 0:
+        raise ValueError("Invalid H15 collection mode or search budget")
+    return max_searches if mode in ("train", "search") else 0
+
+
 def _collect_worker(
     cfg: dict[str, Any], checkpoint: str, case_ids: list[str],
     mode: str,
@@ -106,9 +112,7 @@ def _collect_worker(
                     ),
                     simulations=cfg["simulations"],
                     max_decisions=cfg["max_decisions"],
-                    max_searches=(
-                        cfg["max_searches"] if mode in ("train", "search") else 0
-                    ),
+                    max_searches=searches_for_mode(mode, cfg["max_searches"]),
                     seed=seed63(case_id + ":search"),
                     tree_depth=cfg["tree_depth"],
                     rollout_depth=cfg["rollout_depth"], leaf_mode="value",
