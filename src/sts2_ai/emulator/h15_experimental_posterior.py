@@ -22,7 +22,6 @@ from typing import Any
 from sts2_ai.emulator.chance import PublicHistoryStep
 from sts2_ai.emulator.h15_public_protocol import (
     NATURE_KINDS,
-    choose_reference_at_pending,
     public_player_frame,
 )
 from sts2_ai.emulator.jsonl_backend import FAIR_POLICY_ID
@@ -100,24 +99,49 @@ class H15ExperimentalReferencePosterior:
     def _settle_reference(
         self, handle: str, frame: dict[str, Any], remaining: int,
     ) -> tuple[dict[str, Any], int]:
-        resolved = 0
-        while frame.get("boundaryKind") in NATURE_KINDS:
-            if resolved >= remaining:
+        if frame.get("boundaryKind") in NATURE_KINDS:
+            if remaining <= 0:
                 raise ExperimentalConditioningUnavailable(
                     "H15 candidate exceeded its Nature-event conditioning budget"
                 )
+            previous_version = frame.get("version")
             old_count = frame.get("referenceNatureSampleCount")
-            frame, _ = choose_reference_at_pending(self.backend, handle, frame)
-            if (type(old_count) is not int
-                    or frame.get("referenceNatureSampleCount") != old_count + 1):
-                raise ValueError("H15 ReferenceNature cursor count did not advance once")
-            resolved += 1
+            try:
+                # The emulator executes all pending stochastic events in one
+                # atomic transaction, using its *existing* typed providers.
+                frame = self.backend.h15_experimental_reference_advance(
+                    handle, previous_version, max_nature_decisions=remaining,
+                )
+            except Exception as exc:
+                if "UNSUPPORTED_" in str(exc):
+                    raise ExperimentalConditioningUnavailable(
+                        "H15 candidate reference continuation is unsupported: " +
+                        str(exc)
+                    ) from exc
+                raise
+            receipts = frame.get("referenceNatureSelections")
+            if (not isinstance(receipts, list) or not receipts
+                    or len(receipts) > remaining
+                    or type(previous_version) is not int
+                    or frame.get("version") != previous_version + len(receipts)
+                    or type(old_count) is not int
+                    or frame.get("referenceNatureSampleCount") !=
+                        old_count + len(receipts)):
+                raise ValueError(
+                    "H15 ReferenceNature batch did not advance one cursor per event"
+                )
+            for receipt in receipts:
+                if (not isinstance(receipt, dict)
+                        or receipt.get("providerId") !=
+                            "reference-nature-splitmix64-v1"):
+                    raise ValueError("H15 ReferenceNature batch has invalid provenance")
+            return frame, len(receipts)
         if frame.get("boundaryKind") not in ("player", "combat_exit"):
             raise ExperimentalConditioningUnavailable(
                 "H15 candidate hit unsupported mechanics boundary: " +
                 str(frame.get("boundaryKind"))
             )
-        return frame, resolved
+        return frame, 0
 
     def _matches(
         self, handle: str, frame: dict[str, Any],
