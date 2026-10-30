@@ -114,6 +114,10 @@ def _collect_worker(
                     row = dict(row)
                     row["chance_prior_id"] = H8_DECLARED_LAW_MODEL
                     row["experiment_regime"] = REGIME
+                    row["source_scenario_id"] = scenario.scenario_id
+                    row["source_deck_preset_id"] = deck
+                    row["source_nature_seed"] = source_seed
+                    row["source_fixture_seed"] = cfg["fixture_seed"]
                     if (decode_target(row).search_model_sha256 !=
                             teacher.checkpoint_sha256):
                         raise ValueError("H15 teacher target checkpoint drift")
@@ -253,7 +257,7 @@ def main() -> None:
     p.add_argument("--fixture-seed", default="h15-reference-m15-fixture-v1")
     p.add_argument("--seed-prefix", default="h15-reference-m15-v1")
     p.add_argument("--seed", type=int, default=20261030)
-    p.add_argument("--simulations", type=int, default=16)
+    p.add_argument("--simulations", type=int, default=32)
     p.add_argument("--max-searches", type=int, default=1)
     p.add_argument("--tree-depth", type=int, default=8)
     p.add_argument("--rollout-depth", type=int, default=128)
