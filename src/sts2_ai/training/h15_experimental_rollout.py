@@ -110,6 +110,7 @@ def run_policy_combat(
     limits.validate()
     handle: str | None = None
     chosen: list[dict[str, Any]] = []
+    history: list[dict[str, Any]] = []
     rejection_counts: Counter[str] = Counter()
     chance_counts: Counter[str] = Counter()
     counts: Counter[str] = Counter()
@@ -134,9 +135,17 @@ def run_policy_combat(
                     break
                 law = frame["chanceLaw"]
                 outcome_id = _sample_law(law, rng)
+                at_version = frame["version"]
                 frame = backend.h15_experimental_choose(
-                    handle, frame["version"], law, outcome_id,
+                    handle, at_version, law, outcome_id,
                 )
+                history.append({
+                    "type": "nature",
+                    "version": at_version,
+                    "boundary_kind": kind,
+                    "law_id": law["lawId"],
+                    "outcome_id": outcome_id,
+                })
                 counts["nature"] += 1
                 chance_counts[kind] += 1
                 continue
@@ -200,9 +209,19 @@ def run_policy_combat(
                     continue
                 chosen.append({
                     "kind": action.kind,
+                    "action_id": action.action_id,
                     "policy_rank": rank,
                     "turn": frame.get("combatTurn"),
+                    "public_observation_hash": frame["observationHash"],
                     "value_estimate": prediction.value,
+                })
+                history.append({
+                    "type": "player",
+                    "version": frame["version"],
+                    "public_observation_hash": frame["observationHash"],
+                    "action_id": action.action_id,
+                    "action_kind": action.kind,
+                    "policy_rank": rank,
                 })
                 counts["player"] += 1
                 if action.kind == "end_turn":
@@ -242,4 +261,5 @@ def run_policy_combat(
         "nature_kinds": dict(chance_counts),
         "rejections": dict(rejection_counts),
         "policy_choices": chosen,
+        "decision_history": history,
     }
