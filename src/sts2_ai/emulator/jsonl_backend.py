@@ -353,10 +353,11 @@ class JsonlEmulatorBackend:
     def probe_h15_native_combat_candidate(
         self, state: StateHandle, *, independent_seed: str,
     ) -> dict[str, Any]:
-        """Validate independent native-combat candidate construction.
+        """Construct a diagnostic-only entry candidate with explicit RNG provenance.
 
-        This is a diagnostic only: the emulator discards the candidate and
-        returns no hidden state handle. It cannot supply fair PUCT roots.
+        The native-structure Overgrowth source corpus uses prototype combat
+        RNG, not opt-in native-combat RNG. Both modes remain unverified and
+        cannot supply a fair PUCT continuation handle.
         """
         if not independent_seed:
             raise ValueError("H15 candidate needs a nonempty independent seed")
@@ -364,8 +365,15 @@ class JsonlEmulatorBackend:
             "h15_native_combat_candidate_probe",
             state_handle=state, independent_seed=independent_seed,
         )
-        if (response.get("schemaId") !=
-                "h15-native-combat-entry-independent-candidate-unverified-v1"
+        models = {
+            "prototype-combat-rng":
+                "h15-native-structure-prototype-rng-candidate-unverified-v1",
+            "native-combat-rng":
+                "h15-native-combat-entry-independent-candidate-unverified-v1",
+        }
+        provider = response.get("providerClass")
+        if (not isinstance(provider, str)
+                or response.get("schemaId") != models.get(provider)
                 or response.get("fairContinuationCapability") != "unavailable"
                 or response.get("stateHandleReturned") is not False
                 or type(response.get("unknownDrawPositions")) is not int
@@ -378,6 +386,7 @@ class JsonlEmulatorBackend:
             )
         return {
             "candidate_model": response["schemaId"],
+            "provider_class": provider,
             "fair_continuation_capability": "unavailable",
             "observation_hash": response["observationHash"],
             "legal_action_count": response["legalActionCount"],
