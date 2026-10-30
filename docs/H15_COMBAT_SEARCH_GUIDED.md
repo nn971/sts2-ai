@@ -600,3 +600,35 @@ continuations; any `UNSUPPORTED_CONTROLLED_CHANCE` errors identify
 unowned source RNG sites requiring migration. Only proceed to fair
 PUCT training when an independent public-history-conditioned Nature
 model has been implemented and validated.
+
+
+### M7 first corpus coverage: The Kin source-provenance correction
+
+The first 12-entry controlled-turn report
+(`controlled-turn-coverage-v1.jsonl`) reached a new player decision for
+**11/12** source-exact-replayed entries, resolving **55 draw-card** and
+**5 intent** Nature selections across those 11. No enemy-action or
+random-target boundary was exercised by this deterministic first-outcome
+probe. Zero fair PUCT search roots were generated.
+
+One boss entry rejected at the first end-turn with
+`InvalidOperationException: Unknown native KinFollower starting slot.`
+The root was a provider-semantics mismatch: the native `TheKinBoss`
+intent preprocessing expects `slot1`/`slot2`, while the
+`native-overgrowth` corpus uses the prototype-RNG combat whose
+followers already carry `quick`/`dance` slot names.
+
+The experimental controlled session now uses
+`h15-prototype:<encounter-id>` as the intent selector's non-native
+context, preserving the ordinary prototype source behavior. Native
+encounter identities remain a separate coverage gate. A focused
+`PrototypeTheKinTests.H15PrototypeContinuationKeepsTheKinFollowerSlotSemantics`
+regression verifies both followers' intent results against the
+ordinary prototype selector. This fix does not change game mechanics,
+the recorded source corpus, or the fair-search capability.
+
+Rerun the **same** 12-entry probe after fetching both branches, using
+`--output results/h15-native-source-long/controlled-turn-coverage-v2.jsonl`
+(the prior report is intentionally immutable). The goal is to verify
+that this one boss continuation now advances; further unsupported
+chance sites should be recorded rather than bypassed.
