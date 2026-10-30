@@ -35,6 +35,7 @@ def frame(kind: str, version: int, *, menu=(), law=None, exit_hp=None):
 
 
 LAW = {
+    "lawId": "mock-h15-draw-law-v1",
     "probabilityStatus": "UNVERIFIED",
     "totalWeight": 4,
     "outcomes": [
