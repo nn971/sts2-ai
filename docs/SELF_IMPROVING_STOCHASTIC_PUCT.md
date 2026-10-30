@@ -2,6 +2,19 @@
 
 > **Interchangeable chance provider plan:** [Desired Nature Training Implementation](DESIRED_NATURE_TRAINING_IMPLEMENTATION.md) and its [emulator RNG counterpart](https://github.com/nn971/sts2-emulator/pull/119). The new plan first establishes mechanically sound controlled chance transitions; public-history-conditional probability calibration and fair stochastic search remain separate later validation gates.
 
+**Current reading note (2026-10-30): HISTORICAL ROADMAP.** The
+early baseline statement below that stochastic PUCT and a trained
+Transformer do not exist is obsolete. `search/combat_puct.py`, the
+H15 policy/value codec and distillation interfaces, H7/H9/H10 PPO,
+and the fixed-fixture H8 Reference Nature conditional posterior have
+since been implemented. Certified *authentic native-entry* H15
+counterfactual sampling, broad mechanics coverage, calibrated native
+law provenance, and validated native search-guided training remain
+open. The older variance-model proposal is not the agreed H15
+hierarchical policy/value structure; consult
+[H15 combat search status](H15_COMBAT_SEARCH_GUIDED.md)
+and the emulator's canonical stochastic contract.
+
 **Status:** active implementation; an opt-in public-history-conditioned rejection
 reference, empirical finite-cohort sampler, and stochastic PUCT kernel exist.
 A *scalable, native-probability-calibrated* fair search/data-collection loop,
