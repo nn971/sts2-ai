@@ -449,3 +449,80 @@ increase **search decisions per combat** on a source-supported
 A10 subset. Later public-history conditioning can be more expensive
 than the first root: profile acceptance rates and report explicit
 rejection exhaustion rather than silently omitting roots.
+
+
+## M15 matched search-budget result and post-draw turn-start pilot (2026-10-30)
+
+The user-uploaded `progress(20261030-145422).json` provides **real**
+A10 ReferenceNature budget-probe results on the same fifteen heldout cases,
+frozen H15 model, opening public roots and declared emulator chance model:
+
+| Simulations per root | 16 | 64 | 128 |
+| --- | ---: | ---: | ---: |
+| PUCT override of greedy | 0/15 | 0/15 | 0/15 |
+| KL(search visit policy || neural prior) | .0301383 | .0133173 | .0036900 |
+| Mean visited-action backed-up Q spread | .01720 | .02561 | .14610 |
+| Mean expanded information sets | 17.0 | 63.93 | 98.67 |
+| Mean simulated transitions | 40.67 | 311.93 | 741.33 |
+| Internal terminal evaluations | 0 | 0 | 0 |
+
+All 15 matched raw/PUCT **individual** completed fights had identical
+outcomes, exit HP, decisions and rewards at every budget. All simulations
+ended at neural-value cutoffs (240/960/1920). The Q-value spread increased
+by 128 simulations, but the visit policy **converged toward the neural
+prior**, and it never changed a selected opening action. This demonstrates
+the current **opening-root-only, value-cutoff** search makes no measured
+policy intervention on this limited cohort despite considerable added work.
+It does not establish that PUCT generally fails, and it does not measure
+later-decision searches or terminal-rollout search.
+
+**Next controlled pilot:** search at the **first ordinary player decision
+of successive turns**, after new draws, instead of the first several
+actions of the opening turn. The collector, round trainer and matched
+budget probe now accept `--search-schedule turn_start`; the existing
+`first` behavior remains the default. The schedule saves one search
+per eligible public combat turn, bounded by `--max-searches`, and uses
+the **existing H8 public-history-conditioned independent ReferenceNature
+sampler**. Each searched root still gets its real completed-fight HP
+reward for the value target; all chance outcomes remain emulator-owned.
+This is an independent new experiment identity; the previous heldout
+cohort and budget-probe outputs stay immutable.
+
+First test **three source cases**, at most **two turns** and 16
+simulations per selected root. This is a conditioning/coverage smoke,
+not a training run:
+
+```fish
+cd ~/projects/sts2-ai
+git pull --ff-only
+source .venv/bin/activate.fish
+
+python -m pytest -q \
+    tests/test_h15_native_search_collector.py \
+    tests/test_h15_reference_search_budget.py
+
+python -u tools/probe_h15_reference_search_budget.py \
+    --source-run results/h15-reference-m15-cohort-smoke-v1 \
+    --round 1 \
+    --output-root results/h15-reference-m15-turnstart-probe-v1 \
+    --budgets 16 --cases 3 --workers 15 \
+    --max-searches 2 --search-schedule turn_start \
+    --execute
+```
+
+Inspect `results/h15-reference-m15-turnstart-probe-v1/progress.json`
+for searched root count, override rate, Q separation and terminal/cutoff
+counts. The per-worker source case diagnostics identify any unsupported
+mechanics or posterior rejection exhaustion. If later-turn conditioning
+exhausts the existing budget, this is a **provider coverage/throughput
+finding**, rather than a reason to switch to an unverified native-RNG
+model or block first-root training. Revisit the bounded H8
+conditioning algorithm or choose supported combat snapshots at later
+observable decisions as separate independent search roots.
+
+**Decision before long training:** choose the search-root curriculum
+and budget from demonstrated variation in state/turn and meaningful
+counterfactual signal; then run extended search-guided learning on
+A10/reference-law source runs. Preserve the original user preference
+for 15 workers and full-length training once the learning signal has
+actually been characterized.
