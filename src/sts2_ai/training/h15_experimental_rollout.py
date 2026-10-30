@@ -11,7 +11,6 @@ must never be used as fair PUCT or policy/value training labels.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
