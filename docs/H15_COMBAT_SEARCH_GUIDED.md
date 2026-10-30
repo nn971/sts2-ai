@@ -761,3 +761,65 @@ next step after this rollout is to repair the *highest-coverage
 blocking combat effect or Nature site* reported by real policy
 decisions, and ultimately establish a history-conditioned fair
 continuation sampler before launching PUCT supervision.
+
+
+## M10 — training begins on the existing on-policy native PPO track
+
+**Track A: usable neural training now.** H15's fair search sampler is still
+unavailable, but the existing H10 native-combat PPO trainer can learn from
+actual A10 emulator fights with a public-only actor. It collects fresh on-policy
+combat trajectories and uses source terminal H9 total-nonminion-HP reward.
+No counterfactual hidden-state posterior is required. Do **not** relabel the
+current H15 `independent-candidate` diagnostic rollouts as fair or PPO
+training data.
+
+`tools/run_h15_native_ppo_long.fish` is the pinned execution entry point:
+- Builds the research emulator, runs the existing H10 PPO/corpus tests.
+- Collects new source-run-distinct **256 training / 64 heldout** A10
+  macro-generated source-run populations under the *current exact emulator
+  commit*. The prior 11,000/1,418 H15 recipes refer to an older emulator SHA;
+  do not silently reinterpret or retag them.
+- Starts the existing H10 optimizer, warm-started from frozen H9 R250, for
+  **120 rounds × (64 native + 32 synthetic)** on-policy combats,
+  **15 native workers** and CUDA learner.
+- Writes incremental collector logs, `train.log`, atomic
+  `optimizer-checkpoint.pt`, `progress.json` per round, and model exports
+  every ten rounds. Rerunning on the same commit/input fingerprint resumes
+  only when a checkpoint exists. An emulator update generates a separate
+  experiment directory, and the trainer rejects mismatched corpus/dll/model
+  fingerprints.
+- Keeps all generated artifacts inside `~/projects/sts2-ai/results/`;
+  creates no additional project checkout or worktree.
+
+```fish
+cd ~/projects/sts2-emulator
+git switch research/h15-native-chance-law-20261030
+git pull --ff-only
+dotnet test tests/Sts2Emulator.Core.Tests -c Release \
+    --filter 'FullyQualifiedName~H15ControlledCombatSessionV1Tests|FullyQualifiedName~PrototypeTheKinTests'
+
+cd ~/projects/sts2-ai
+git switch research/h15-combat-search-guided-20261029
+git pull --ff-only
+source .venv/bin/activate.fish
+fish tools/run_h15_native_ppo_long.fish
+```
+
+The launcher runs **on the user's CUDA workstation**. Remote repository
+changes alone do not launch GPU training. Existing H10 checkpoint verification,
+exact source replay, and corpus disjointness remain authoritative. A failed
+source-mechanics transition should be fixed rather than masked as a training
+loss or substituted synthetic episode. Compare final and baseline on the
+new heldout corpus using the existing H10 evaluation tool once a genuine
+training checkpoint is available.
+
+**Track B: H15 stochastic PUCT.** M9's 64-combat frozen-policy diagnostic
+can run separately on the old exact-replay H15 corpus. The source-compatible
+semantic card adapter now accepts a genuine player-card kill that enters
+the postcombat reward/defeat boundary, with only previously audited reward
+RNG sites delegated to the source engine. The regression test constructs a
+test-only low-HP combat end from a real native-structure entry. Additional
+unsupported card/draw/potion sites and full public-history-conditioned
+Nature distributions remain future work. `fairContinuationCapability`
+continues to advertise `unavailable`, so the H15 PUCT collector and
+search-policy distillation remain disabled.
