@@ -117,6 +117,7 @@ def _collect_worker(
                     tree_depth=cfg["tree_depth"],
                     rollout_depth=cfg["rollout_depth"], leaf_mode="value",
                     search_schedule=cfg["search_schedule"],
+                    record_final_turn=cfg.get("record_final_turn", False),
                 )
                 if backend.live_handles:
                     raise RuntimeError("H15 worker leaked H8 reference handle(s)")
@@ -146,6 +147,7 @@ def _collect_worker(
                         bool(d["search_overrode_greedy"])
                         for d in report.searched_root_diagnostics
                     ),
+                    "final_player_turn": report.final_player_turn,
                     "targets": targets,
                 })
                 print(f"[h15-reference-{mode}] case={case_id} "
