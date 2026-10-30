@@ -105,6 +105,7 @@ class H15ExperimentalReferencePosterior:
                     "H15 candidate exceeded its Nature-event conditioning budget"
                 )
             previous_version = frame.get("version")
+            frame_before_law = frame.get("chanceLaw")
             old_count = frame.get("referenceNatureSampleCount")
             try:
                 # The emulator executes all pending stochastic events in one
@@ -130,6 +131,23 @@ class H15ExperimentalReferencePosterior:
                 raise ValueError(
                     "H15 ReferenceNature batch did not advance one cursor per event"
                 )
+            # The first event's complete law is advertised at the pending
+            # boundary. Check its receipt against that law before accepting
+            # the atomic batch; subsequent laws are private to the emulator
+            # and the batch API currently exposes their receipts only.
+            law = frame_before_law
+            first = receipts[0]
+            if (not isinstance(law, dict)
+                    or law.get("probabilityStatus") != "UNVERIFIED"
+                    or not isinstance(law.get("outcomes"), list)
+                    or not isinstance(first, dict)
+                    or type(first.get("outcomeIndex")) is not int
+                    or not 0 <= first["outcomeIndex"] < len(law["outcomes"])
+                    or first.get("lawId") != law.get("lawId")
+                    or first.get("eventId") != law.get("eventId")
+                    or first.get("outcomeId") !=
+                        law["outcomes"][first["outcomeIndex"]].get("outcomeId")):
+                raise ValueError("H15 ReferenceNature receipt mismatches advertised law")
             for receipt in receipts:
                 if (not isinstance(receipt, dict)
                         or receipt.get("providerId") !=
