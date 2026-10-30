@@ -1,4 +1,9 @@
-# Roadmap
+# Long-term roadmap (historical sequencing)
+
+> **Current implementation priority:** [H15 canonical search training](H15_SEARCH_TRAINING_PLAN.md).
+> The following high-level sequencing predates H15 and is for background only;
+> do not infer a new training blocker or change of focus from it.
+
 
 ## Near term: emulator first
 
