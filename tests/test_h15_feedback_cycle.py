@@ -48,3 +48,29 @@ def test_feedback_requires_real_parameter_update(tmp_path):
     report = cycle.verify_parameter_update(initial, updated)
     assert report["changed_tensors"] == 1
     assert report["model_delta_l2"] == pytest.approx(0.5)
+
+
+def test_student_receipt_is_bound_to_the_real_teacher_and_targets(tmp_path):
+    import torch
+
+    student = tmp_path / "student.pt"
+    record = {
+        "base_checkpoint_sha256": "a" * 64,
+        "search_data_sha256": "b" * 64,
+        "chance_prior": cycle.H8_DECLARED_LAW_MODEL,
+        "optimizer_steps": 2,
+        "in_sample_fit_before": {"policy_loss": 1.0, "value_loss": 0.2},
+        "in_sample_fit_after": {"policy_loss": 0.8, "value_loss": 0.1},
+    }
+    torch.save({"provenance": record}, student)
+    receipt = cycle.verify_distillation_receipt(
+        student, initial_sha="a" * 64, source_sha="b" * 64,
+        expected_steps=2,
+    )
+    assert receipt["optimizer_steps"] == 2
+    assert receipt["in_sample_fit_after"]["policy_loss"] == pytest.approx(0.8)
+    with pytest.raises(ValueError, match="inconsistent optimizer provenance"):
+        cycle.verify_distillation_receipt(
+            student, initial_sha="a" * 64, source_sha="c" * 64,
+            expected_steps=2,
+        )
