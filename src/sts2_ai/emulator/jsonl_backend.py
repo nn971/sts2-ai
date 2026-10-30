@@ -350,6 +350,40 @@ class JsonlEmulatorBackend:
         response = self._request("reset", seed=seed, ascension=ascension)
         return self._require_string(response, "stateHandle")
 
+    def probe_h15_native_combat_candidate(
+        self, state: StateHandle, *, independent_seed: str,
+    ) -> dict[str, Any]:
+        """Validate independent native-combat candidate construction.
+
+        This is a diagnostic only: the emulator discards the candidate and
+        returns no hidden state handle. It cannot supply fair PUCT roots.
+        """
+        if not independent_seed:
+            raise ValueError("H15 candidate needs a nonempty independent seed")
+        response = self._request(
+            "h15_native_combat_candidate_probe",
+            state_handle=state, independent_seed=independent_seed,
+        )
+        if (response.get("schemaId") !=
+                "h15-native-combat-entry-independent-candidate-unverified-v1"
+                or response.get("fairContinuationCapability") != "unavailable"
+                or response.get("stateHandleReturned") is not False
+                or type(response.get("unknownDrawPositions")) is not int
+                or response["unknownDrawPositions"] < 0
+                or type(response.get("legalActionCount")) is not int
+                or response["legalActionCount"] < 1
+                or not isinstance(response.get("observationHash"), str)):
+            raise JsonlBridgeError(
+                "H15 native candidate response lacks explicit non-fair provenance"
+            )
+        return {
+            "candidate_model": response["schemaId"],
+            "fair_continuation_capability": "unavailable",
+            "observation_hash": response["observationHash"],
+            "legal_action_count": response["legalActionCount"],
+            "unknown_draw_positions": response["unknownDrawPositions"],
+        }
+
     @property
     def hypothetical_draw_order_schema(self) -> str | None:
         """Experimental structural operation; NOT a fair chance sampler."""
