@@ -230,7 +230,9 @@ def search_policy_value_loss(
         i for i, sample in enumerate(samples)
         if isinstance(sample, SearchTrainingSample)
     ]
-    policy_loss = logits.sum() * 0.0
+    # Masked legal-action logits may contain -inf for padding; use the
+    # finite value head for the differentiable zero on critic-only batches.
+    policy_loss = values.sum() * 0.0
     policy_entropy = logits.new_zeros(())
     policy_kl = logits.new_zeros(())
     if policy_indices:
