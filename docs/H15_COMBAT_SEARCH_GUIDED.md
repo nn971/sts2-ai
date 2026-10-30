@@ -908,3 +908,55 @@ python -m pytest -q \
     tests/test_h15_controlled_turn_protocol.py \
     tests/test_h15_experimental_rollout.py
 ```
+
+## M12 — remove the remaining H8 declared-law Python sampler
+
+The fixed-fixture `H8ReferenceCombatBackend(use_declared_chance_laws=True)`
+previously used a separate Python `random.Random` cursor and weighted roulette
+in `_resolve_declared_laws`. This duplicate implementation has been removed.
+Both H8 fixed-fixture reference modes now resolve Nature entirely inside the
+emulator:
+
+- The default fast mode uses existing H8 event-keyed
+  `H8LocalReferenceNatureV1`, with `local_reference_seed`.
+- The explicit declared-law mode starts `ReferenceNatureStateV111` with
+  `declared_reference_seed`, queries the current typed `ChanceLawV111`, uses
+  `ReferenceNatureV111.SampleValidated`, and resolves the selected outcome
+  through `H8CombatRuntimeV1.ChooseChanceLawOutcome`.
+  The H8 JSONL session owns the persistent immutable cursor across player
+  decisions and forks; release disposes its cursor. External selection is
+  rejected on an attached declared-reference session. Only the emulator
+  sees stochastic outcome selection.
+- The Python posterior still samples **independent candidate seeds** for
+  the fixed-fixture prior and replays the entire combat-local public history
+  for acceptance. Seed proposal in Python is distinct from sampling a
+  Chance Law outcome, which now belongs exclusively to the engine.
+
+These two H8 reference providers have distinct random-stream conventions.
+The declared-law mode now uses emulator SplitMix64, replacing the previous
+Python MT19937 stream. The declared probabilities themselves retain their
+existing source-law provenance; the new stream does **not** claim replay
+equivalence with old same-seed Python trajectories.
+
+**Scope:** The same fixed-fixture prior and public-history conditioning
+restrictions remain. This refactor introduces no native-structure posterior,
+fair native PUCT labels, or evidence of policy improvement. The existing
+H15 experimental native-entry interface continues to advertise
+`fairContinuationCapability=unavailable`. The pinned 120-round PPO
+experiment is unchanged.
+
+Validation on the experimental branches (run separately from the pinned
+PPO checkout):
+
+```fish
+dotnet test ~/projects/sts2-emulator/tests/Sts2Emulator.Core.Tests -c Release \
+    --filter 'FullyQualifiedName~H8CombatRuntimeV1Tests'
+cd ~/projects/sts2-ai
+python -m pytest -q tests/test_h15_h8_reference.py
+```
+
+The C# regression checks typed-law provenance, provider journal,
+persistent cursor progression, replay and stale-boundary rejection.
+The Python regression checks that declared mode passes the seed
+directly to the emulator and does not call a Python chance sampler.
+End-to-end .NET/Python runtime validation is pending local execution.
