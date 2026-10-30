@@ -56,6 +56,7 @@ def main() -> None:
     p.add_argument("--max-decisions", type=int, default=512)
     p.add_argument("--tree-depth", type=int, default=16)
     p.add_argument("--rollout-depth", type=int, default=512)
+    p.add_argument("--leaf-mode", choices=("terminal", "value"), default="terminal")
     p.add_argument("--device", default="cpu")
     p.add_argument("--use-declared-chance-laws", action="store_true",
                    help="Use emulator-advertised Chance Laws and external Nature outcomes (fixed-fixture prior only)")
@@ -102,6 +103,7 @@ def main() -> None:
         "max_decisions": args.max_decisions,
         "tree_depth": args.tree_depth,
         "rollout_depth": args.rollout_depth,
+        "leaf_mode": args.leaf_mode,
     }
     print("[h15-h8-reference-preflight] " + json.dumps(config, sort_keys=True), flush=True)
     if not args.execute:
@@ -145,7 +147,7 @@ def main() -> None:
             simulations=args.simulations,
             max_decisions=args.max_decisions, max_searches=args.max_searches,
             seed=args.search_seed, tree_depth=args.tree_depth,
-            rollout_depth=args.rollout_depth,
+            rollout_depth=args.rollout_depth, leaf_mode=args.leaf_mode,
         )
         if backend.live_handles:
             raise RuntimeError("H8 search leaked an owned emulator handle")
