@@ -593,3 +593,50 @@ chunks permit safe resume; a pinned SHA manifest rejects changed
 code/DLL/model/data configurations. **No new training gate is added.**
 The established search-guided trainer remains independently runnable,
 and the H15 learning agenda is unchanged.
+
+## M15 difficult-combat multiprocessing exception transfer (2026-10-30)
+
+The first 96-case A10 boss/deck screen failed in the **parent process**
+while deserializing a worker-side exception:
+
+`ModuleNotFoundError: No module named 'sts2_emulator'`,
+reported as `BrokenProcessPool`.
+
+The `sts2_emulator` Python binding defines its own `EmulatorError` class,
+and worker imports were local to `_collect_worker`. A failure of
+`backend.begin_reference` occurred **before** the per-case exception
+handler, so the process manager tried to transport the custom exception
+instead of a string. The underlying boss/fixture/codec error is **not
+yet known**.
+
+**Correction:** `tools/train_h15_reference_rounds.py` now registers
+the emulator Python binding path in the parent; wraps worker failures
+in JSON/pickle-safe text tracebacks before they cross the process
+boundary; and includes `begin_reference` within the case-context
+handler. This changes diagnostics, not the H15 search/learning
+algorithm. A regression verifies safe transport of worker exceptions
+without requiring their custom class in the parent.
+
+The original `results/h15-a10-boss-final-turn-v1` manifest contains
+old source-code hashes. To preserve experiment provenance, retry in
+a **new** output directory:
+
+```fish
+cd ~/projects/sts2-ai
+git pull --ff-only
+source .venv/bin/activate.fish
+python -m pytest -q tests/test_h15_final_turn_probe.py \
+    tests/test_h15_native_search_collector.py
+python -u tools/probe_h15_final_turn.py \
+    --source-run results/h15-reference-m15-cohort-smoke-v1 \
+    --round 1 \
+    --output-root results/h15-a10-boss-final-turn-v2 \
+    --screen-per-pair 12 --validate-combats 32 \
+    --workers 15 --execute
+```
+
+If the resumed screen fails on a specific boss/deck or source action,
+the full original per-case traceback should now appear. Only that
+actual failure should motivate a subsequent mechanics change; the
+existing reference-law training run remains independent.
+
