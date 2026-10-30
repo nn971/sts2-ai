@@ -249,7 +249,6 @@ def collect_native_combat_search(
     rollout_depth: int = 512, leaf_mode: str = "terminal",
     search_schedule: str = "first",
     search_provider: str = "fair_posterior",
-    leaf_mode_override: str | None = None,
     record_final_turn: bool = False,
     late_value_max: int = 0, late_value_min_turn: int = 7,
     late_value_player_hp: int = 25, late_value_enemy_hp: int = 40,
@@ -284,7 +283,6 @@ def collect_native_combat_search(
         rollout_depth=rollout_depth, leaf_mode=leaf_mode,
         search_schedule=search_schedule,
         search_provider=search_provider,
-        leaf_mode_override=leaf_mode_override,
         record_final_turn=record_final_turn,
         late_value_max=late_value_max,
         late_value_min_turn=late_value_min_turn,
@@ -303,7 +301,6 @@ def collect_live_combat_search(
     rollout_depth: int = 512, leaf_mode: str = "terminal",
     search_schedule: str = "first",
     search_provider: str = "fair_posterior",
-    leaf_mode_override: str | None = None,
     record_final_turn: bool = False,
     late_value_max: int = 0, late_value_min_turn: int = 7,
     late_value_player_hp: int = 25, late_value_enemy_hp: int = 40,
@@ -327,8 +324,6 @@ def collect_live_combat_search(
         if search_provider == "fair_posterior"
         else H15RootConditionedCombatAdapter(backend, current)
     )
-    if leaf_mode_override is not None:
-        leaf_mode = leaf_mode_override
     search = CombatPuct(
         adapter, teacher, seed=seed, max_depth=tree_depth,
         rollout_depth=rollout_depth, leaf_mode=leaf_mode,
