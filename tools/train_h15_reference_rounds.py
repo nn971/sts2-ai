@@ -21,7 +21,10 @@ from typing import Any
 
 from sts2_ai.emulator.h15_h8_reference import H8_DECLARED_LAW_MODEL
 from sts2_ai.nature.combat_scenarios import (
-    DECK_PRESETS, SCENARIOS, deck_for_seed, scenario_for_seed,
+    DECK_PRESETS,
+    SCENARIOS,
+    deck_for_seed,
+    scenario_for_seed,
 )
 from sts2_ai.training.h15_search_supervision import decode_target
 
