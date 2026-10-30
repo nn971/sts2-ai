@@ -23,7 +23,7 @@ from sts2_ai.training.h15_search_supervision import (  # noqa: E402
 )
 
 ACTIONS = (
-    LegalAction("safe", "play_card", '{"CardInstanceId":1,"TargetEnemyId":1}'),
+    LegalAction("safe", "end_turn", "{}"),
     LegalAction("risk", "end_turn", "{}"),
 )
 
