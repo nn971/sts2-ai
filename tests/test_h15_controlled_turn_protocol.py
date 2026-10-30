@@ -178,3 +178,34 @@ def test_experimental_bridge_rejects_missing_exit_hp_accounting():
     ))
     with pytest.raises(JsonlBridgeError, match="H9 terminal"):
         obj.h15_experimental_status("h15-1")
+
+
+def test_reference_choice_invokes_atomic_emulator_sampler_with_no_python_law():
+    selection = {
+        "lawId": "h15-law", "eventId": "h15-event",
+        "outcomeId": "card_instance:12", "outcomeIndex": 1,
+        "providerId": "reference-nature-splitmix64-v1",
+    }
+    bridge, calls = backend(response(
+        version=3, boundaryKind="player",
+        referenceNatureSelection=selection,
+        referenceNatureSampleCount=1,
+    ))
+    received = bridge.h15_experimental_reference_choose("h15-1", 2)
+    assert received["referenceNatureSelection"] == selection
+    assert calls == [(
+        "h15_experimental_reference_choose",
+        {"h15_handle": "h15-1", "version": 2},
+    )]
+
+
+def test_reference_choice_rejects_missing_receipt_and_invalid_version():
+    bridge, calls = backend(response(version=3))
+    with pytest.raises(JsonlBridgeError, match="choice receipt"):
+        bridge.h15_experimental_reference_choose("h15-1", 2)
+    assert len(calls) == 1
+
+    bridge, calls = backend(response())
+    with pytest.raises(ValueError, match="ReferenceNature"):
+        bridge.h15_experimental_reference_choose("h15-1", -1)
+    assert not calls
