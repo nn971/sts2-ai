@@ -141,9 +141,13 @@ def _collect_worker(
                       f"encounter={scenario.scenario_id} deck={deck} "
                       f"outcome={report.outcome} hp={report.exit_hp} "
                       f"roots={len(targets)}", flush=True)
-            except BaseException:
+            except BaseException as exc:
                 backend.close()
-                raise
+                raise RuntimeError(
+                    f"H15 ReferenceNature case={case_id} "
+                    f"scenario={scenario.scenario_id} deck={deck} "
+                    f"mode={mode} failed: {type(exc).__name__}: {exc}"
+                ) from exc
     return {
         "teacher_sha256": teacher.checkpoint_sha256, "mode": mode,
         "cases": case_ids, "records": records,
