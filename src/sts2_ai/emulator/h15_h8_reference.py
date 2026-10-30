@@ -86,7 +86,6 @@ class _LiveH8:
     status: dict[str, Any]
     nature_seed: int
     opening_max_hp: int
-    chance_rng: random.Random | None = None
 
 
 class H8ReferenceCombatBackend:
@@ -195,70 +194,7 @@ class H8ReferenceCombatBackend:
         digest = hashlib.sha256(payload.encode()).hexdigest()
         return Observation(FAIR_POLICY_ID, payload, digest)
 
-    def _resolve_declared_laws(
-        self, status: dict[str, Any], rng: random.Random,
-    ) -> dict[str, Any]:
-        """Sample only from the emulator-declared conditional laws.
-
-        This exercises the same typed Nature interface needed by native H15.
-        It remains a *fixed-fixture* stochastic model; it does not construct
-        the posterior over arbitrary authentic native-run hidden states.
-        """
-        for _ in range(1200):
-            kind = status.get("kind")
-            if kind in ("player", "player_choice", "terminal"):
-                return status
-            if kind not in ("draw_card", "enemy_intent", "random_target"):
-                raise FairContinuationUnavailable(
-                    "No declared H8 Chance Law for boundary " + str(kind)
-                )
-            handle = status.get("h8Handle")
-            token = {
-                "h8_handle": handle,
-                "runtime_id": status["runtimeId"],
-                "boundary_version": status["boundaryVersion"],
-            }
-            pending = self._session.call("h8_reference_law", **token)["pending"]
-            law = pending.get("chanceLaw")
-            if (pending.get("kind") != kind or not isinstance(law, dict)
-                    or law.get("eventId") != pending.get("eventId")):
-                raise ValueError("Declared Chance Law does not match pending event")
-            candidates = law.get("outcomes")
-            total = law.get("totalWeight")
-            if (not isinstance(candidates, list) or not candidates
-                    or type(total) is not int or total <= 0):
-                raise ValueError("Invalid H8 Chance Law support")
-            weights = [candidate.get("weight") for candidate in candidates]
-            if (any(type(w) is not int or w <= 0 for w in weights)
-                    or sum(weights) != total):
-                raise ValueError("Inconsistent declared Chance Law weights")
-            ticket = rng.randrange(total)
-            selected = None
-            for candidate, weight in zip(candidates, weights, strict=True):
-                ticket -= weight
-                if ticket < 0:
-                    selected = candidate.get("outcomeId")
-                    break
-            if not isinstance(selected, str) or not selected:
-                raise ValueError("Malformed H8 Chance Law outcome")
-            following = self._session.call(
-                "h8_resolve_chance_law_outcome", **token,
-                chance_law=law, outcome_id=selected,
-                provider_id="h15-declared-law-reference-v1",
-                include_player_frame=True,
-            )["result"]
-            if (following.get("h8Handle") != handle
-                    or following.get("runtimeId") != status["runtimeId"]
-                    or following.get("boundaryVersion", -1) <=
-                    status["boundaryVersion"]):
-                raise ValueError("H8 Chance Law resolution failed to advance")
-            status = following
-        raise FairContinuationUnavailable(
-            "H8 declared Chance Law continuation exceeded 1200 events"
-        )
-
-    def _store(self, status: dict[str, Any], nature_seed: int,
-               chance_rng: random.Random | None = None) -> str:
+    def _store(self, status: dict[str, Any], nature_seed: int) -> str:
         handle = status.get("h8Handle")
         if not isinstance(handle, str) or not handle or handle in self._live:
             raise ValueError("Invalid or duplicate H8 session handle")
@@ -278,25 +214,23 @@ class H8ReferenceCombatBackend:
         if type(max_hp) is not int or max_hp < 1:
             raise ValueError("H8 public opening max HP missing")
         self._actions(status)
-        self._live[handle] = _LiveH8(status, nature_seed, max_hp, chance_rng)
+        self._live[handle] = _LiveH8(status, nature_seed, max_hp)
         return handle
 
     def begin_reference(self, nature_seed: int) -> str:
         if type(nature_seed) is not int or not 0 <= nature_seed < (1 << 63):
             raise ValueError("Reference Nature seed must be a signed 63-bit nonnegative int")
         args: dict[str, Any] = {**self._entry.wire()}
-        if not self._use_declared_chance_laws:
-            args["local_reference_seed"] = nature_seed
+        # Both modes sample inside the emulator. The declared-law mode
+        # uses a persistent ReferenceNatureV111 cursor owned by the live H8
+        # session; the faster local mode uses event-keyed H8 reference draws.
+        args["declared_reference_seed" if self._use_declared_chance_laws
+             else "local_reference_seed"] = nature_seed
         response = self._session.call("h8_begin_seeded", **args)
         status = response["result"]
         handle = status.get("h8Handle")
-        chance_rng = (
-            random.Random(nature_seed) if self._use_declared_chance_laws else None
-        )
         try:
-            if chance_rng is not None:
-                status = self._resolve_declared_laws(status, chance_rng)
-            return self._store(status, nature_seed, chance_rng)
+            return self._store(status, nature_seed)
         except BaseException:
             if isinstance(handle, str):
                 self._session.call("h8_release_many", h8_handles=[handle])
@@ -326,11 +260,9 @@ class H8ReferenceCombatBackend:
         args: dict[str, Any] = {
             **token, "action_id": action.action_id, "include_player_frame": True,
         }
-        if live.chance_rng is None:
+        if not self._use_declared_chance_laws:
             args["local_reference_seed"] = live.nature_seed
         nxt = self._session.call("h8_step", **args)["result"]
-        if live.chance_rng is not None:
-            nxt = self._resolve_declared_laws(nxt, live.chance_rng)
         if nxt.get("h8Handle") != state:
             raise ValueError("H8 changed an in-place session handle")
         if nxt.get("boundaryVersion", -1) <= live.status["boundaryVersion"]:
