@@ -115,6 +115,17 @@ class SyntheticNativeEntryBackend:
         self.sessions[handle] = (parity, result, v + 1)
         return frame(handle, result, v + 1, selected=selection)
 
+    def h15_experimental_reference_advance(
+        self, handle, version, *, max_nature_decisions,
+    ):
+        assert max_nature_decisions >= 1
+        # This fake routes through its existing single-step emulator stand-in.
+        # Production receives the entire batch from one atomic C# session.
+        result = self.h15_experimental_reference_choose(handle, version)
+        receipt = result.pop("referenceNatureSelection")
+        result["referenceNatureSelections"] = [receipt]
+        return result
+
     def h15_experimental_release_many(self, handles):
         for handle in handles:
             assert handle in self.sessions
