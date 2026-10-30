@@ -34,6 +34,22 @@ BOSS_DECKS = (
 DEFAULT_DECKS = ",".join(BOSS_DECKS)
 
 
+def validate_boss_sources(
+    scenarios: tuple[str, ...], decks: tuple[str, ...],
+) -> None:
+    """Reject H8 boss-entry / normal-room combinations before worker launch."""
+    if (not scenarios or not decks
+            or len(scenarios) != len(set(scenarios))
+            or len(decks) != len(set(decks))
+            or any(s not in SCENARIOS or SCENARIOS[s].ascension != 10
+                   or SCENARIOS[s].total_floor != 6 for s in scenarios)
+            or any(d not in DECK_PRESETS or d not in BOSS_DECKS for d in decks)):
+        raise ValueError(
+            "Only A10 boss encounters and boss-conditioned deck presets "
+            "are valid for the H8 fixed boss-room entry"
+        )
+
+
 def choose_closest_half(
     entries: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -146,16 +162,10 @@ def main() -> None:
 
     scenarios = tuple(x.strip() for x in args.scenarios.split(","))
     decks = tuple(x.strip() for x in args.decks.split(","))
-    if (not scenarios or not decks
-            or len(scenarios) != len(set(scenarios))
-            or len(decks) != len(set(decks))
-            or any(s not in SCENARIOS or SCENARIOS[s].ascension != 10
-                   or SCENARIOS[s].total_floor != 6 for s in scenarios)
-            or any(d not in DECK_PRESETS or d not in BOSS_DECKS for d in decks)):
-        parser.error(
-            "Only A10 boss encounters and boss-conditioned deck presets "
-            "are valid for the H8 fixed boss-room entry"
-        )
+    try:
+        validate_boss_sources(scenarios, decks)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     original = args.source_run.resolve()
     if args.round < 1:
