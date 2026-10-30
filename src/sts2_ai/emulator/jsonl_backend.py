@@ -409,9 +409,14 @@ class JsonlEmulatorBackend:
                 or response["version"] < 0
                 or response.get("boundaryKind") not in (
                     "player", "enemy_action", "enemy_intent",
-                    "draw_card", "random_target", "unsupported", "terminal",
+                    "draw_card", "random_target", "unsupported", "combat_exit",
                 )
-                or response.get("combatExit") not in (True, False)
+                or type(response.get("combatExit")) is not bool
+                or response.get("combatOutcome") not in (None, "victory", "defeat")
+                or ((response.get("boundaryKind") == "combat_exit") !=
+                    response["combatExit"])
+                or ((response.get("combatOutcome") is None) ==
+                    response["combatExit"])
                 or (expected_handle is not None
                     and response["h15Handle"] != expected_handle)):
             raise JsonlBridgeError(
