@@ -216,15 +216,18 @@ def collect_live_combat_search(
                     range(len(menu)),
                     key=lambda i: (logits[i], menu[i].action_id),
                 )
-                scaled = [math.exp(logit - max(logits)) for logit in logits]
-                total = math.fsum(scaled)
-                neural_priors = [weight / total for weight in scaled]
+                # Work in log-space: tiny logits may underflow when
+                # exponentiated, although a PUCT edge can still be visited.
+                peak = max(logits)
+                log_z = peak + math.log(math.fsum(
+                    math.exp(logit - peak) for logit in logits
+                ))
                 visit_sum = sum(stats.visits)
                 if visit_sum <= 0:
                     raise ValueError("H15 search root returned no visits")
                 prior_kl = math.fsum(
-                    (n / visit_sum) * math.log(
-                        (n / visit_sum) / neural_priors[i]
+                    (n / visit_sum) * (
+                        math.log(n / visit_sum) - (logits[i] - log_z)
                     )
                     for i, n in enumerate(stats.visits) if n > 0
                 )
