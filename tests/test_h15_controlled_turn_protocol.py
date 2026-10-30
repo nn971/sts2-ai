@@ -11,7 +11,7 @@ SCHEMA = "sts2-h15-controlled-prototype-combat-endturn-experimental-v1"
 
 def response(**overrides):
     raw = {
-        "combatExitPublicObservationJson": None,
+        "combatExitH9Reward": None,
         "schemaId": SCHEMA,
         "fairContinuationCapability": "unavailable",
         "candidateModelId": MODEL,
@@ -121,7 +121,11 @@ def test_combat_exit_retains_explicit_result(outcome):
     bridge, _ = backend(response(
         boundaryKind="combat_exit", combatExit=True,
         combatOutcome=outcome, legalActions=None,
-        combatExitPublicObservationJson='{"hp":20,"max_hp":70,"combat":null}',
+        combatExitH9Reward={
+            "hp":20, "maxHp":70,
+            "defeatTotalNonMinionEnemyHp":None,
+            "defeatRemainingNonMinionEnemyHp":None,
+        },
     ))
     result = bridge.h15_experimental_status("h15-1")
     assert result["combatOutcome"] == outcome
@@ -160,7 +164,7 @@ def test_player_action_invalid_request_never_reaches_bridge(version, action):
 
 def test_experimental_bridge_rejects_terminal_reward_leak_into_combat():
     obj, _ = backend(response(
-        combatExitPublicObservationJson='{"hp":20,"max_hp":70}',
+        combatExitH9Reward={"hp":20,"maxHp":70},
     ))
     with pytest.raises(JsonlBridgeError, match="leaked terminal"):
         obj.h15_experimental_status("h15-1")
