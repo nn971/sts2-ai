@@ -31,12 +31,13 @@ history-conditioned nor certified to match native combat RNG. Consequently:
 ## Implementation
 
 The emulator's `h15_experimental_status` now supplies a
-`combatExitPublicObservationJson` **only after** a genuine combat exit,
-using the same fair public projection that existing native PPO uses.
-The actor does not see this terminal accounting during combat. It gives
-the research evaluator the actual H9 total-nonminion-HP defeat fields,
-so `encounter_total_hp_score(...)/2` can be computed with no invented
-terminal reward. Censored results have no score.
+compact `combatExitH9Reward` with public `hp`, `maxHp`, and the
+authoritative source `defeatTotalNonMinionEnemyHp` and
+`defeatRemainingNonMinionEnemyHp` fields **only after** a genuine
+combat exit. The actor does not see this accounting during combat.
+Using the source-owned scalars avoids serializing an entire deck/map/
+reward observation at each terminal state, while preserving the H9
+`encounter_total_hp_score(...)/2` target. Censored results have no score.
 
 `run_policy_combat` accepts a `forced_root_action_id` and an exact
 expected public root hash/menu:
