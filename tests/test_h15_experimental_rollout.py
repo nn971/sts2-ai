@@ -147,6 +147,6 @@ def test_limits_do_not_masquerade_as_terminal_outcomes():
     )
     assert result["status"] == "censored"
     assert result["reason"] == "player_action_budget"
-    assert result["outcome"] if "outcome" in result else True
+    assert "outcome" not in result
     assert result["fair_search_roots"] == 0
     assert backend.released == ["h15-test"]
