@@ -15,9 +15,13 @@ from sts2_ai.training.h15_native_search_collector import (  # noqa: E402
     summarize_final_player_turn,
 )
 from tools.probe_h15_final_turn import (  # noqa: E402
+    BOSS_DECKS,
+    DEFAULT_DECKS,
+    DEFAULT_SCENARIOS,
     case_ids_for_pair,
     choose_closest_half,
     summarize_final_turns,
+    validate_boss_sources,
     wilson_interval,
 )
 
@@ -145,3 +149,15 @@ def test_reference_worker_errors_are_sent_as_plain_text(monkeypatch):
     assert output["mode"] == "greedy"
     assert "PrivateTransportError" in output["worker_error"]
     assert "unknown boss action / source boundary" in output["worker_error"]
+
+
+def test_finalturn_study_rejects_non_boss_room_deck_presets():
+    scenarios = tuple(DEFAULT_SCENARIOS.split(","))
+    assert tuple(DEFAULT_DECKS.split(",")) == BOSS_DECKS
+    validate_boss_sources(scenarios, BOSS_DECKS)
+    with pytest.raises(ValueError, match="boss-conditioned deck"):
+        validate_boss_sources(scenarios, ("silent-starter-v1",))
+    with pytest.raises(ValueError, match="boss-conditioned deck"):
+        validate_boss_sources(scenarios, ("silent-poison-kit-v1",))
+    with pytest.raises(ValueError, match="A10 boss encounters"):
+        validate_boss_sources(("mawler-a10",), BOSS_DECKS)
