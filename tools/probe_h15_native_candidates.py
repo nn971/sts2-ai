@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Probe authentic native combat entries against the independent-root builder.
+"""Probe native-structure combat entries against the independent-root builder.
 
 This diagnostic has no fair PUCT continuation capability. Its returned
 candidate never leaves the emulator; no search targets can be generated.
+The original native-overgrowth corpus has native map/room structure but
+prototype combat RNG. Distinguish that from opt-in native-combat RNG.
 
 The corpus was captured on a pinned emulator ancestor. Cross-revision replay
 is allowed ONLY with an explicitly named source revision, and every entry
@@ -24,7 +26,12 @@ from sts2_ai.evaluation.combat_snapshots import (
 )
 
 PROBE_SCHEMA = "sts2-h15-native-combat-candidate-probe-v1"
-CANDIDATE_MODEL = "h15-native-combat-entry-independent-candidate-unverified-v1"
+CANDIDATE_MODELS = {
+    "prototype-combat-rng":
+        "h15-native-structure-prototype-rng-candidate-unverified-v1",
+    "native-combat-rng":
+        "h15-native-combat-entry-independent-candidate-unverified-v1",
+}
 
 
 def is_ancestor(root: Path, ancestor: str, head: str) -> bool:
@@ -78,8 +85,8 @@ def probe(
         result = backend.probe_h15_native_combat_candidate(
             handle, independent_seed=search_seed,
         )
-        if (result["candidate_model"] != CANDIDATE_MODEL or
-                result["observation_hash"] != original.observation_hash):
+        if (result["candidate_model"] != CANDIDATE_MODELS.get(result["provider_class"])
+                or result["observation_hash"] != original.observation_hash):
             raise ValueError("Native candidate altered the public entry observation")
         return {
             "source_seed": recipe.seed,
@@ -121,6 +128,7 @@ def main() -> None:
     if args.output.exists():
         raise FileExistsError("H15 diagnostic report already exists")
     attempted = passed = 0
+    provider_counts = {key: 0 for key in CANDIDATE_MODELS}
     with JsonlEmulatorBackend(
         emulator_root=args.emulator_root,
         expected_emulator_revision=args.emulator_revision,
@@ -137,6 +145,7 @@ def main() -> None:
                 try:
                     outcome = probe(backend, recipe, search_seed=search_seed)
                     passed += 1
+                    provider_counts[outcome["provider_class"]] += 1
                     record: dict[str, Any] = {
                         "schema": PROBE_SCHEMA,
                         "status": "candidate_constructed",
@@ -158,6 +167,7 @@ def main() -> None:
     print("[h15-native-root-summary] " + json.dumps({
         "attempted": attempted, "candidate_constructed": passed,
         "rejected": attempted - passed, "fair_search_roots": 0,
+        "candidate_provider_classes": provider_counts,
         "source_revision": args.source_revision,
         "emulator_revision": args.emulator_revision,
         "output": str(args.output),
