@@ -548,6 +548,48 @@ class JsonlEmulatorBackend:
             )
         return response
 
+    def h15_experimental_reference_advance(
+        self, handle: str, version: int, *, max_nature_decisions: int = 1200,
+    ) -> dict[str, Any]:
+        """One atomic emulator transaction until the next public decision.
+
+        Every underlying law/outcome is still sampled by the shared
+        ReferenceNatureV111 provider and returned as a replayable receipt.
+        """
+        if (not handle or type(version) is not int or version < 0
+                or type(max_nature_decisions) is not int
+                or max_nature_decisions < 1):
+            raise ValueError("Invalid H15 ReferenceNature continuation request")
+        response = self._h15_experimental_response(self._request(
+            "h15_experimental_reference_advance",
+            h15_handle=handle, version=version,
+            max_nature_decisions=max_nature_decisions,
+        ), expected_handle=handle)
+        receipts = response.get("referenceNatureSelections")
+        if (not isinstance(receipts, list)
+                or not 1 <= len(receipts) <= max_nature_decisions
+                or response.get("referenceNatureSelection") is not None
+                or response["version"] != version + len(receipts)
+                or response["boundaryKind"] not in ("player", "combat_exit")
+                or type(response.get("referenceNatureSampleCount")) is not int
+                or response["referenceNatureSampleCount"] < len(receipts)):
+            raise JsonlBridgeError(
+                "H15 ReferenceNature batch omitted its atomic event receipts"
+            )
+        for receipt in receipts:
+            if (not isinstance(receipt, dict)
+                    or not all(isinstance(receipt.get(key), str)
+                               and receipt[key] for key in (
+                                   "lawId", "eventId", "outcomeId"))
+                    or receipt.get("providerId") !=
+                        "reference-nature-splitmix64-v1"
+                    or type(receipt.get("outcomeIndex")) is not int
+                    or receipt["outcomeIndex"] < 0):
+                raise JsonlBridgeError(
+                    "H15 ReferenceNature batch contains an invalid selection"
+                )
+        return response
+
     def h15_experimental_release_many(self, handles: Sequence[str]) -> int:
         result = self._request(
             "h15_experimental_release_many", h15_handles=list(handles),
