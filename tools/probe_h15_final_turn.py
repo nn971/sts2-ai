@@ -168,8 +168,6 @@ def main() -> None:
         "workers": args.workers, "max_searches": 0,
         "search_schedule": "first", "record_final_turn": True,
     })
-    from pathlib import Path as _Path
-
     manifest = {
         "schema": SCHEMA, "frozen_model_sha256": model_hash,
         "source_config_sha256": sha256(source_cfg),
@@ -181,7 +179,7 @@ def main() -> None:
         "validate_combats": args.validate_combats, "workers": args.workers,
         "near_half_tolerance": args.near_half_tolerance,
         "code_sha256": {
-            name: sha256(_Path(__file__).resolve().parents[1] / name)
+            name: sha256(Path(__file__).resolve().parents[1] / name)
             for name in (
                 "tools/probe_h15_final_turn.py",
                 "tools/train_h15_reference_rounds.py",
