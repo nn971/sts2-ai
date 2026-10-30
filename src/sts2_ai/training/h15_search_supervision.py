@@ -159,6 +159,15 @@ def search_policy_value_loss(
     targets = counts / counts.sum(dim=1, keepdim=True)
     logp = F.log_softmax(logits, dim=1).masked_fill(~mask, 0.0)
     policy_loss = -(targets * logp).sum(dim=1).mean()
+    # Entropy is the irreducible CE floor for the search visit target.
+    # KL measures the learned policy's *remaining* disagreement with search;
+    # a low initial KL reveals a near-self-distillation target.
+    log_targets = torch.where(
+        targets > 0, torch.log(targets.clamp_min(1e-30)),
+        torch.zeros_like(targets),
+    )
+    policy_entropy = -(targets * log_targets).sum(dim=1).mean()
+    policy_kl = (targets * (log_targets - logp)).sum(dim=1).mean()
     real_returns = torch.tensor(
         [sample.realized_reward / 2.0 for sample in samples],
         device=values.device, dtype=values.dtype,
@@ -167,5 +176,7 @@ def search_policy_value_loss(
     loss = policy_loss + value_weight * value_loss
     return loss, {
         "policy_loss": float(policy_loss.detach().cpu()),
+        "policy_target_entropy": float(policy_entropy.detach().cpu()),
+        "policy_kl_to_search": float(policy_kl.detach().cpu()),
         "value_loss": float(value_loss.detach().cpu()),
     }
