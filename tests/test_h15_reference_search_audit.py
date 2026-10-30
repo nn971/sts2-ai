@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 
 import pytest
 
@@ -49,9 +50,7 @@ def test_audit_root_finds_search_override_without_hidden_state():
     assert audit["greedy_action_id"] == "a"
     assert audit["search_action_id"] == "b"
     assert audit["search_overrode_greedy"] is True
-    assert audit["visit_policy_kl_from_prior"] == pytest.approx(
-        -__import__("math").log(1 / (1 + __import__("math").exp(1.0))),
-    )
+    assert audit["visit_policy_kl_from_prior"] == pytest.approx(math.log1p(math.e))
 
 
 def test_paired_evaluation_detects_equal_aggregates_with_different_cases():
