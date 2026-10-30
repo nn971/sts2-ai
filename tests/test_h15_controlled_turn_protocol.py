@@ -113,3 +113,21 @@ def test_unverified_choice_is_required_client_side():
             "choice_index:0",
         )
     assert not calls
+
+
+@pytest.mark.parametrize("outcome", ["victory", "defeat"])
+def test_combat_exit_retains_explicit_result(outcome):
+    bridge, _ = backend(response(
+        boundaryKind="combat_exit", combatExit=True,
+        combatOutcome=outcome, legalActions=None,
+    ))
+    result = bridge.h15_experimental_status("h15-1")
+    assert result["combatOutcome"] == outcome
+
+
+def test_experimental_boundary_refuses_unannounced_combat_result():
+    bridge, _ = backend(response(
+        boundaryKind="combat_exit", combatExit=True, legalActions=None,
+    ))
+    with pytest.raises(JsonlBridgeError, match="provenance"):
+        bridge.h15_experimental_status("h15-1")
