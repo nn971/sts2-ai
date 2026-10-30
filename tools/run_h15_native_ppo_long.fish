@@ -158,11 +158,12 @@ if not test -f $final_model
     exit 1
 end
 for checkpoint in baseline final
+    set -l candidate
     switch $checkpoint
         case baseline
-            set -l candidate $model
+            set candidate $model
         case final
-            set -l candidate $final_model
+            set candidate $final_model
     end
     set -l report $output/heldout-$checkpoint.json
     if not test -f $report
