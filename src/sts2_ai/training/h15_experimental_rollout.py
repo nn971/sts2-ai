@@ -103,6 +103,8 @@ def run_policy_combat(
     teacher: H15CombatEvaluator, rng: random.Random,
     limits: RolloutLimits = RolloutLimits(),
     forced_root_action_id: str | None = None,
+    expected_root_observation_hash: str | None = None,
+    expected_root_action_ids: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     """Own a temporary H15 session until combat exit or an explicit limit.
 
@@ -126,6 +128,17 @@ def run_policy_combat(
             source, independent_seed=independent_seed,
         )
         handle = frame["h15Handle"]
+        if expected_root_observation_hash is not None:
+            if frame.get("observationHash") != expected_root_observation_hash:
+                raise ValueError(
+                    "Independent candidate changed its public root observation"
+                )
+        if expected_root_action_ids is not None:
+            _, observed_actions = _policy_input(frame)
+            if tuple(a.action_id for a in observed_actions) != expected_root_action_ids:
+                raise ValueError(
+                    "Independent candidate changed the public root legal menu"
+                )
         while True:
             kind = frame["boundaryKind"]
             if kind == "combat_exit":
