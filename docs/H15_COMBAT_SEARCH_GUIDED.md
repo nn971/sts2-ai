@@ -457,36 +457,42 @@ a resumable multi-worker PUCT collector/optimizer that consumes the
 planned cohort without dropping most supervision samples.
 
 
-## M6 — authentic native entry candidate construction (diagnostic only)
+## M6 — native-structure combat entry candidates (diagnostic only)
 
-Emulator branch `research/h15-native-chance-law-20261030` now has
-`H15NativeCombatEntryCandidateV1.Build(source, independentSeed)`, operating
-on the genuine run-owned native combat state rather than a manufactured H8
-research fixture. The candidate keeps the committed combat mechanics and
-already-visible enemy intent, replaces the six prototype and fifteen native
-run/player RNG stream cursors, replaces encounter and monster-local streams,
-and changes the remaining hidden physical draw order into an unresolved
-`SemanticDeckEngineV111.BeginNature` pool. It validates state invariants and
-requires that the public observation and legal action menu are identical
-before and after construction. The source is forked and unchanged.
+**Important correction following the 12-entry corpus probe.** The
+`reset_native_overgrowth` environment has authentic 16-floor map and
+Neow/room structure, but it is built by
+`PrototypeNativeOvergrowthRunFactory.Create` and **does not attach
+native combat RNG**. Therefore the original H15 native-entry candidate
+constructor rejected all 12 exact-replayed corpus entries on the
+native-RNG-ownership precondition. The corpus remains valid for its
+declared native-structure **prototype-RNG simulator**; it is not a
+native-RNG combat corpus.
 
-**Strict research limitation:** The candidate is *unverified*.
-Retained full-run provenance and unmodeled hidden correlations, revealed
-top-card constraints, card/relic hooks and additional stochastic sites
-still require auditing and integration into a native controlled
-continuation engine. Its constant `FairSearchCapabilityId` is
-`unavailable`. The JSONL operation
-`h15_native_combat_candidate_probe` discards the candidate immediately
-and returns no simulation handle. H15 cannot use this as a
-`FairContinuationSampler` and must not label native PUCT targets from it.
+The candidate constructor now recognizes two modes and reports them
+separately: `prototype-combat-rng` (the existing native-structure corpus)
+and `native-combat-rng` (source-audited, explicitly enabled v111 combat
+RNG). It independently initializes available provider state and
+unresolved draw order, preserves combat mechanics, and checks identical
+public observation and legal action menus. It does not invent absent
+native RNG owners or label prototype source entries as native RNG.
 
-The Python binding `probe_h15_native_combat_candidate` verifies the
-non-fair provenance. The corpus probe tool
-`tools/probe_h15_native_candidates.py` replays real native
-`CombatSnapshotRecipe` entries on the descendant emulator and requires
-the original source *exact state hash* plus observation fingerprint to
-match before probing a candidate. This supports safe coverage discovery
-without admitting mismatched source revisions.
+**Strict limitation:** Both modes remain *unverified experimental
+candidates*, not a posterior conditioned on the full public history.
+The CLI operation `h15_native_combat_candidate_probe` discards the
+candidate and returns no state handle. `FairSearchCapabilityId` is
+always `unavailable`; no native or prototype fair PUCT supervision can
+be collected from this endpoint.
+
+The Python binding verifies that the advertised candidate model ID
+agrees with `providerClass`. The corpus tool
+`tools/probe_h15_native_candidates.py` requires exact hash and public
+observation replay on the descendant emulator before each probe, and
+reports candidate counts by RNG ownership. The next milestone should
+attach controlled Chance Law continuation to the **existing prototype
+combat training simulator**, audit required chance sites, and establish
+public-history conditional sampling. Native-RNG combat fidelity can
+remain an independent line of work.
 
 Fish validation commands:
 
@@ -511,12 +517,12 @@ python -u tools/probe_h15_native_candidates.py \
     --emulator-revision (git -C $emu rev-parse HEAD) \
     --source-revision 2c46c703a30875d6ef84fcbe0a0511fec9c74dcd \
     --train-corpus results/h15-native-source-long/train.jsonl \
-    --output results/h15-native-source-long/root-candidate-probe.jsonl \
+    --output results/h15-native-source-long/root-candidate-probe-v2.jsonl \
     --limit 12
 ```
 
-Interpretation: a successful probe verifies that an exact native entry
-can be structurally reconstructed under an explicitly independent
+Interpretation: a successful probe verifies that an exact native-structure
+simulator entry can be structurally reconstructed under an explicitly independent
 experimental chance prior without changing the current public choice.
 It does NOT certify subsequent stochastic transitions or their joint
 conditional probabilities. The next milestone is to attach controlled
