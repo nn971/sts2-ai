@@ -290,7 +290,7 @@ def test_nested_choice_search_rollout_reaches_terminal_outcome():
 
 
 def test_h9_nested_choice_uses_explicit_uniform_fallback():
-    torch = pytest.importorskip("torch")
+    pytest.importorskip("torch")
     from sts2_ai.models.h15_policy_value import H15CombatEvaluator
     from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
 
