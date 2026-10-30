@@ -24,10 +24,14 @@ from sts2_ai.nature.combat_scenarios import (
 
 SCHEMA = "sts2-h15-reference-final-turn-probe-v1"
 DEFAULT_SCENARIOS = "ceremonial-beast-boss-a10,vantom-boss-a10"
-DEFAULT_DECKS = (
-    "silent-starter-v1,silent-poison-kit-v1,"
-    "silent-boss-cycle-20-v1,silent-boss-poison-20-v1"
+# The fixed H8 boss encounter requires a source-eligible Boss room.
+# The emulator gives that room identity only to boss-conditioned decks
+# (or to a separate explicit ResearchCombatFixture, unused here).
+BOSS_DECKS = (
+    "silent-boss-cycle-20-v1",
+    "silent-boss-poison-20-v1",
 )
+DEFAULT_DECKS = ",".join(BOSS_DECKS)
 
 
 def choose_closest_half(
@@ -146,9 +150,12 @@ def main() -> None:
             or len(scenarios) != len(set(scenarios))
             or len(decks) != len(set(decks))
             or any(s not in SCENARIOS or SCENARIOS[s].ascension != 10
-                   for s in scenarios)
-            or any(d not in DECK_PRESETS for d in decks)):
-        parser.error("Specify unique supported A10 scenarios and deck presets")
+                   or SCENARIOS[s].total_floor != 6 for s in scenarios)
+            or any(d not in DECK_PRESETS or d not in BOSS_DECKS for d in decks)):
+        parser.error(
+            "Only A10 boss encounters and boss-conditioned deck presets "
+            "are valid for the H8 fixed boss-room entry"
+        )
 
     original = args.source_run.resolve()
     if args.round < 1:
