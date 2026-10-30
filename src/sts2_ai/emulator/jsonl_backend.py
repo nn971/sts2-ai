@@ -426,23 +426,24 @@ class JsonlEmulatorBackend:
         # The H9 terminal HP accounting must be visible only when combat
         # has genuinely exited. Requiring it here prevents a research
         # comparator from silently using a made-up defeat score.
-        terminal_public = response.get("combatExitPublicObservationJson")
+        terminal_public = response.get("combatExitH9Reward")
         if kind == "combat_exit":
-            if not isinstance(terminal_public, str):
+            if (not isinstance(terminal_public, dict)
+                    or type(terminal_public.get("hp")) is not int
+                    or type(terminal_public.get("maxHp")) is not int
+                    or terminal_public["maxHp"] <= 0
+                    or not 0 <= terminal_public["hp"] <= terminal_public["maxHp"]):
                 raise JsonlBridgeError(
-                    "H15 combat exit lacks source public H9 terminal state"
+                    "H15 combat exit lacks valid source H9 terminal reward"
                 )
-            try:
-                observed_exit = json.loads(terminal_public)
-            except json.JSONDecodeError as exc:
-                raise JsonlBridgeError(
-                    "H15 combat exit contains invalid public terminal JSON"
-                ) from exc
-            if (not isinstance(observed_exit, dict)
-                    or isinstance(observed_exit.get("combat"), dict)):
-                raise JsonlBridgeError(
-                    "H15 combat exit has malformed terminal combat projection"
-                )
+            if response["combatOutcome"] == "defeat":
+                total = terminal_public.get("defeatTotalNonMinionEnemyHp")
+                remaining = terminal_public.get("defeatRemainingNonMinionEnemyHp")
+                if (type(total) is not int or type(remaining) is not int
+                        or total <= 0 or not 0 <= remaining <= total):
+                    raise JsonlBridgeError(
+                        "H15 defeat lacks authoritative nonminion HP accounting"
+                    )
         elif terminal_public is not None:
             raise JsonlBridgeError(
                 "H15 active combat leaked terminal reward observation")
