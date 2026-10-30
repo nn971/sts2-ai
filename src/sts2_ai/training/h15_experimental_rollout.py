@@ -69,7 +69,7 @@ class RolloutLimits:
 def run_policy_combat(
     backend: Any, source: str, *, independent_seed: str,
     teacher: H15CombatEvaluator,
-    limits: RolloutLimits = RolloutLimits(),
+    limits: RolloutLimits | None = None,
     forced_root_action_id: str | None = None,
     expected_root_observation_hash: str | None = None,
     expected_root_action_ids: tuple[str, ...] | None = None,
@@ -80,6 +80,7 @@ def run_policy_combat(
     the next-highest policy action is tried. This is a coverage diagnostic,
     not a valid on-policy RL trajectory. No private state reaches the actor.
     """
+    limits = limits if limits is not None else RolloutLimits()
     limits.validate()
     if forced_root_action_id is not None and not forced_root_action_id:
         raise ValueError("Forced root action ID must be nonempty")
