@@ -15,6 +15,7 @@ import os
 import subprocess
 import sys
 import time
+import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -96,8 +97,8 @@ def _collect_worker(
                 backend, max_candidates=cfg["max_candidates"],
             )
             source_seed = seed63(case_id + ":nature")
-            source = backend.begin_reference(source_seed)
             try:
+                source = backend.begin_reference(source_seed)
                 obs = backend.observe(source, POLICY)
                 history = (PublicHistoryStep(
                     obs, None, backend.legal_actions(source),
@@ -154,8 +155,15 @@ def _collect_worker(
                       f"encounter={scenario.scenario_id} deck={deck} "
                       f"outcome={report.outcome} hp={report.exit_hp} "
                       f"roots={len(targets)}", flush=True)
-            except BaseException as exc:
-                backend.close()
+            except Exception as exc:
+                try:
+                    backend.close()
+                except Exception as cleanup_error:
+                    print(
+                        f"[h15-reference-cleanup-error] case={case_id} "
+                        f"{type(cleanup_error).__name__}: {cleanup_error}",
+                        flush=True,
+                    )
                 raise RuntimeError(
                     f"H15 ReferenceNature case={case_id} "
                     f"scenario={scenario.scenario_id} deck={deck} "
@@ -168,6 +176,26 @@ def _collect_worker(
     }
 
 
+def _collect_worker_safe(
+    cfg: dict[str, Any], checkpoint: str, case_ids: list[str],
+    mode: str,
+) -> dict[str, Any]:
+    """Send tracebacks as plain text across the worker boundary.
+
+    Emulator-binding exceptions may be defined in a module imported only by
+    the worker. Pickling those exceptions can otherwise fail in the parent
+    and replace the actionable emulator error with BrokenProcessPool.
+    """
+    try:
+        return _collect_worker(cfg, checkpoint, case_ids, mode)
+    except Exception:
+        return {
+            "worker_error": traceback.format_exc(),
+            "cases": case_ids,
+            "mode": mode,
+        }
+
+
 def collect_cases(
     cfg: dict[str, Any], teacher: Path, case_ids: list[str],
     mode: str, destination: Path,
@@ -175,6 +203,11 @@ def collect_cases(
     """Persist complete chunks so an interrupted round can resume collection."""
     if not case_ids:
         raise ValueError("Collection requires explicit source cases")
+    # Worker-only binding exceptions are still sometimes returned by the
+    # emulator transport; make their definitions importable by the parent.
+    bindings = str(Path(cfg["emulator_root"]) / "bindings/python")
+    if bindings not in sys.path:
+        sys.path.insert(0, bindings)
     destination.mkdir(parents=True, exist_ok=True)
     groups = [case_ids[i::cfg["workers"]]
               for i in range(min(cfg["workers"], len(case_ids)))]
@@ -196,12 +229,17 @@ def collect_cases(
                       f"cases={len(group)}", flush=True)
             else:
                 pending.append((
-                    pool.submit(_collect_worker, cfg, str(teacher), group, mode),
+                    pool.submit(_collect_worker_safe, cfg, str(teacher), group, mode),
                     output,
                 ))
         for future in as_completed([f for f, _ in pending]):
             output = next(path for f, path in pending if f is future)
             result = future.result()
+            if "worker_error" in result:
+                raise RuntimeError(
+                    f"H15 {mode} worker {output.name} "
+                    f"cases={result['cases']} failed:\n{result['worker_error']}"
+                )
             if result["teacher_sha256"] != model_hash:
                 raise ValueError("Worker returned a different teacher identity")
             atomic_json(output, result)
