@@ -310,3 +310,71 @@ research branch, focused Python CI added, full workstation multi-encounter
 smoke and long search training have **not yet run**. This stays a draft
 until genuine collection and holdout evidence exist. The original native
 game law calibration is independent of this emulator-reference training.
+
+
+## M15 one-round multi-encounter workstation evidence (2026-10-30)
+
+The user-provided `progress(20261030-143225).json` confirms the M15
+**15-combat collection and 15-combat heldout cohort succeeded** under the
+existing fixed H8 declared ReferenceNature prior. A new model checkpoint was
+produced, with `15` actual searched training roots. The heldout mixture
+comprised `cubex-a10:7`, `mawler-a10:4`, and
+`vine-shambler-a10:4` combats.
+
+| Heldout diagnostic | frozen H9 greedy | H15 raw greedy | H15 PUCT |
+| --- | ---: | ---: | ---: |
+| Victories | 15/15 | 15/15 | 15/15 |
+| Mean exit HP | 36.4 | 35.4667 | 35.4667 |
+| Mean encounter reward | 1.52 | 1.50667 | 1.50667 |
+| Mean actions | 36.7333 | 32.9333 | 32.9333 |
+| Search roots | 0 | 0 | 15 |
+
+The new learner's in-sample policy KL to its search visit targets was
+`0.0306663`. These values show pipeline functionality only. All 15
+heldout fights were won, so win rate is saturated; 15 combats are too few
+to infer tactical superiority. The **identical raw-H15 / PUCT aggregates**
+are particularly important: the existing `progress.json` cannot
+distinguish PUCT making the **same opening choice** from different choices
+with offsetting final outcomes. The current evaluation searches only
+**one** decision per combat; search at that root may simply reinforce
+its own network prior.
+
+**Offline audit added, no new emulator rollouts:** run
+
+```fish
+cd ~/projects/sts2-ai
+git pull --ff-only
+source .venv/bin/activate.fish
+python -u tools/audit_h15_reference_search.py \
+    --output-root results/h15-reference-m15-cohort-smoke-v1 \
+    --round 1 \
+    --report-path results/h15-reference-m15-cohort-smoke-v1/search-audit-round-0001.json
+```
+
+The audit reads the original updated checkpoint and heldout `eval-raw`
+and `eval-search` worker files. It recomputes the **raw policy's legal
+logits on exactly each searched public root**, compares selected actions
+with PUCT visit argmax (same tie-breaking), computes visit-vs-prior KL,
+and pairs outcome/HP/reward changes by exact case ID. It fails if checkpoint
+hash, worker case set, encounter/deck/seed identities or target checkpoint
+drift. It writes a **separate** JSON sidecar and leaves the completed
+round immutable. This is the preferred next diagnostic; it avoids
+re-running 15 reference combats.
+
+For **new** M15 runs, `NativeSearchCollection.searched_root_diagnostics`
+and `aggregate().search_override_rate` now report interventions and
+visit-vs-prior KL directly. This is a changed code identity; the
+completed smoke remains a valid immutable historical experiment. Use a
+new output directory for any further runtime training, and keep the
+previous completed-round files untouched.
+
+After the audit, decide how to increase useful search signal: deeper
+roots beyond the opening, sufficiently substantial search budgets,
+and explicit search-vs-raw policy intervention measurements. Deep
+public-history conditioning with H8's existing rejection sampler can
+exhaust; test supported coverage rather than assuming many later
+search roots always work. A 15-case smoke cannot justify a statement
+that PUCT helps or hurts. The 80-round plan is retained as an
+**initial experimental configuration**, with decisions about actual
+budget informed by throughput, search interventions and genuine
+heldout reference-law outcomes.
