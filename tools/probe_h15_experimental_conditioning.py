@@ -15,6 +15,8 @@ import random
 from collections import Counter
 from pathlib import Path
 
+from probe_h15_native_candidates import is_ancestor, reenter
+
 from sts2_ai.emulator import JsonlEmulatorBackend
 from sts2_ai.emulator.h15_experimental_posterior import (
     ExperimentalConditioningUnavailable,
@@ -22,7 +24,6 @@ from sts2_ai.emulator.h15_experimental_posterior import (
     capture_source_public_history,
 )
 from sts2_ai.evaluation.combat_snapshots import load_recipes
-from probe_h15_native_candidates import is_ancestor, reenter
 
 SCHEMA = "sts2-h15-real-entry-experimental-reference-conditioning-v1"
 
