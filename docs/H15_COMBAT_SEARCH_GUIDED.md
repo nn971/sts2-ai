@@ -984,8 +984,16 @@ instead of an incomplete sample. Encountering an unsupported mechanics site
 emulator implementation happened to be complete.
 
 The shared `h15_public_protocol` helper now owns the player-frame encoder
-and ReferenceNature selection-receipt validation used by both multi-turn
-rollouts and posterior conditioning. No extra Python law sampler was added.
+and ReferenceNature selection-receipt validation used by multi-turn
+rollouts. Posterior conditioning uses the additional
+`h15_experimental_reference_advance` operation, which resolves all
+consecutive Nature events in one atomic emulator transaction until the
+next player/combat-exit decision. Every event has an ordered
+law/event/outcome/provider receipt. The engine retains the cursor; Python
+verifies the version, receipt count, provider and sample-count increments.
+Unsupported sites and budget exhaustion discard the entire pending
+transaction. This avoids one JSONL round trip per small stochastic trigger
+while adding no duplicate Python law sampler.
 
 **Important statistical provenance:** this computes a rejection posterior
 under the **explicit independent experimental candidate prior**. It does
