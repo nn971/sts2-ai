@@ -516,6 +516,38 @@ class JsonlEmulatorBackend:
             chance_law=dict(law), outcome_id=outcome_id,
         ), expected_handle=handle)
 
+    def h15_experimental_reference_choose(
+        self, handle: str, version: int,
+    ) -> dict[str, Any]:
+        """Atomically sample the current UNVERIFIED Chance Law in emulator.
+
+        Delegates to ReferenceNatureV111.SampleValidated; the result and
+        private sampler cursor are committed together with the mechanics.
+        No Python-side chance RNG or hidden cursor is kept.
+        """
+        if type(version) is not int or version < 0 or not handle:
+            raise ValueError("Invalid H15 ReferenceNature request")
+        response = self._h15_experimental_response(self._request(
+            "h15_experimental_reference_choose",
+            h15_handle=handle, version=version,
+        ), expected_handle=handle)
+        selection = response.get("referenceNatureSelection")
+        if (not isinstance(selection, dict)
+                or not all(isinstance(selection.get(k), str)
+                           and selection[k] for k in (
+                               "lawId", "eventId", "outcomeId", "providerId"))
+                or selection["providerId"] !=
+                    "reference-nature-splitmix64-v1"
+                or type(selection.get("outcomeIndex")) is not int
+                or selection["outcomeIndex"] < 0
+                or type(response.get("referenceNatureSampleCount")) is not int
+                or response["referenceNatureSampleCount"] < 1
+                or response["version"] != version + 1):
+            raise JsonlBridgeError(
+                "H15 ReferenceNature did not publish an atomic choice receipt"
+            )
+        return response
+
     def h15_experimental_release_many(self, handles: Sequence[str]) -> int:
         result = self._request(
             "h15_experimental_release_many", h15_handles=list(handles),
