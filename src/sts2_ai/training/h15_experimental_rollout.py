@@ -10,7 +10,6 @@ must never be used as fair PUCT or policy/value training labels.
 """
 from __future__ import annotations
 
-import json
 import random
 from collections import Counter
 from collections.abc import Mapping
@@ -145,16 +144,13 @@ def run_policy_combat(
                 # The H9 tactical value target is the source terminal
                 # total-nonminion-HP reward divided by two. No invented
                 # reward, survival-only proxy, or censored value is saved.
-                raw_exit = frame.get("combatExitPublicObservationJson")
-                if not isinstance(raw_exit, str):
-                    raise ValueError(
-                        "Combat exit omitted authoritative public H9 reward state"
-                    )
-                public_exit = json.loads(raw_exit)
+                public_exit = frame.get("combatExitH9Reward")
                 if not isinstance(public_exit, dict):
-                    raise ValueError("Invalid H9 terminal public observation")
+                    raise ValueError(
+                        "Combat exit omitted authoritative H9 reward fields"
+                    )
                 hp = public_exit.get("hp")
-                max_hp = public_exit.get("max_hp")
+                max_hp = public_exit.get("maxHp")
                 if type(hp) is not int or type(max_hp) is not int:
                     raise ValueError("Combat exit omitted public HP/max_hp")
                 outcome = frame["combatOutcome"]
@@ -164,10 +160,10 @@ def run_policy_combat(
                     outcome,
                     player_exit_hp=hp, player_max_hp=max_hp,
                     total_enemy_hp=public_exit.get(
-                        "defeat_total_non_minion_enemy_hp"
+                        "defeatTotalNonMinionEnemyHp"
                     ),
                     remaining_enemy_hp=public_exit.get(
-                        "defeat_remaining_non_minion_enemy_hp"
+                        "defeatRemainingNonMinionEnemyHp"
                     ),
                 )
                 final = {
