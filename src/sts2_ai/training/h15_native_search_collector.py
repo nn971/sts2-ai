@@ -1,13 +1,12 @@
-"""Search-guided native A10 combat data, with full public-history provenance.
+"""H15 combat search training from public decisions and real terminal rewards.
 
-The source run is replayed *only* to recover an authentic combat entry and its
-public action/menu/observation transcript. Search uses a separately supplied
-certified fair continuation sampler, never the source run's exact combat fork.
-All search roots are aligned to the SAME realized fight, and all value labels
-come from its actual terminal H9 total-nonminion-HP reward.
-
-The sampler is an explicit dependency: H8's current native snapshot fork
-alone cannot satisfy it. Missing conditioning fails before any target is saved.
+Default fair-posterior PUCT independently samples declared-law hidden states
+conditioned on the complete public combat history. The opt-in H8 root-
+conditioned experiment instead forks the engine's exact mechanics AND
+ReferenceNature cursor; its PUCT policy targets are deliberately labeled as
+privileged/approximate. Both infer player actions only from public frames.
+Bounded late-combat critic labels use actual public decisions plus the
+realized complete encounter reward, without inventing policy visit targets.
 """
 from __future__ import annotations
 
@@ -258,8 +257,9 @@ def collect_native_combat_search(
     With the current H9 teacher, root visit counts guide policy improvements;
     the REAL completed fight supplies the common critic target. Remaining
     decisions use the frozen network's greedy legal action. A capped fight
-    contributes no data. The fair sampler is mandatory and independent from
-    the actor's actual native state handle.
+    contributes no data. Fair-posterior mode demands independent conditioning;
+    root-conditioned mode reuses the existing engine fork with explicit
+    privileged-search provenance.
     """
     if (min(simulations, max_decisions, tree_depth, rollout_depth) < 1
             or max_searches < 0 or seed < 0
