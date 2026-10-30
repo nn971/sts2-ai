@@ -455,3 +455,71 @@ Next engineering gates: native combat-root reconstruction; stochastic-site
 coverage and public-history conditioning; batched GPU evaluation; and
 a resumable multi-worker PUCT collector/optimizer that consumes the
 planned cohort without dropping most supervision samples.
+
+
+## M6 — authentic native entry candidate construction (diagnostic only)
+
+Emulator branch `research/h15-native-chance-law-20261030` now has
+`H15NativeCombatEntryCandidateV1.Build(source, independentSeed)`, operating
+on the genuine run-owned native combat state rather than a manufactured H8
+research fixture. The candidate keeps the committed combat mechanics and
+already-visible enemy intent, replaces the six prototype and fifteen native
+run/player RNG stream cursors, replaces encounter and monster-local streams,
+and changes the remaining hidden physical draw order into an unresolved
+`SemanticDeckEngineV111.BeginNature` pool. It validates state invariants and
+requires that the public observation and legal action menu are identical
+before and after construction. The source is forked and unchanged.
+
+**Strict research limitation:** The candidate is *unverified*.
+Retained full-run provenance and unmodeled hidden correlations, revealed
+top-card constraints, card/relic hooks and additional stochastic sites
+still require auditing and integration into a native controlled
+continuation engine. Its constant `FairSearchCapabilityId` is
+`unavailable`. The JSONL operation
+`h15_native_combat_candidate_probe` discards the candidate immediately
+and returns no simulation handle. H15 cannot use this as a
+`FairContinuationSampler` and must not label native PUCT targets from it.
+
+The Python binding `probe_h15_native_combat_candidate` verifies the
+non-fair provenance. The corpus probe tool
+`tools/probe_h15_native_candidates.py` replays real native
+`CombatSnapshotRecipe` entries on the descendant emulator and requires
+the original source *exact state hash* plus observation fingerprint to
+match before probing a candidate. This supports safe coverage discovery
+without admitting mismatched source revisions.
+
+Fish validation commands:
+
+```fish
+set emu ~/projects/sts2-emulator
+set ai ~/projects/sts2-ai
+git -C $emu fetch origin
+git -C $emu switch research/h15-native-chance-law-20261030
+dotnet build $emu/src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj -c Release
+dotnet test $emu/tests/Sts2Emulator.Core.Tests -c Release \
+    --filter 'FullyQualifiedName~H15NativeCombatEntryCandidateV1Tests|FullyQualifiedName~H15ChanceLawBoundaryTests'
+cd $ai
+git fetch origin
+git switch research/h15-combat-search-guided-20261029
+source .venv/bin/activate.fish
+python -m pytest -q \
+    tests/test_h15_h8_reference.py \
+    tests/test_h15_native_candidate_probe.py \
+    tests/test_h15_native_adaptive_round_plan.py
+python -u tools/probe_h15_native_candidates.py \
+    --emulator-root $emu \
+    --emulator-revision (git -C $emu rev-parse HEAD) \
+    --source-revision 2c46c703a30875d6ef84fcbe0a0511fec9c74dcd \
+    --train-corpus results/h15-native-source-long/train.jsonl \
+    --output results/h15-native-source-long/root-candidate-probe.jsonl \
+    --limit 12
+```
+
+Interpretation: a successful probe verifies that an exact native entry
+can be structurally reconstructed under an explicitly independent
+experimental chance prior without changing the current public choice.
+It does NOT certify subsequent stochastic transitions or their joint
+conditional probabilities. The next milestone is to attach controlled
+Chance Law continuation to this entry-state representation, audit
+every remaining stochastic site, and establish full public-history
+conditional sampling before generating long-run H15 PUCT targets.
