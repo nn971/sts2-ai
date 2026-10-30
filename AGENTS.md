@@ -32,6 +32,38 @@ Related: [emulator #143](https://github.com/nn971/sts2-emulator/issues/143),
 [AI Nature PR #82](https://github.com/nn971/sts2-ai/pull/82),
 [emulator #122](https://github.com/nn971/sts2-emulator/issues/122).
 
+## Mandatory stochastic architecture reuse (H15 retrospective)
+
+**Read the emulator's canonical**
+[`UNIFIED_STOCHASTIC_ARCHITECTURE.md`](https://github.com/nn971/sts2-emulator/blob/research/h15-experimental-search-20261030/docs/UNIFIED_STOCHASTIC_ARCHITECTURE.md)
+**and**
+[`ADR 0005`](https://github.com/nn971/sts2-emulator/blob/research/h15-experimental-search-20261030/docs/adr/0005-h15-reference-nature-reuse-retrospective.md)
+**before proposing or coding ANY new RNG, Nature, Chance Law, stochastic
+continuation, or H15 fair-search feature.** The previous implementation
+mistake was reasoning from recent H15 milestones alone, overlooking
+`ReferenceNatureV111`, atomic reference sessions and the already-written
+fixed-fixture `H8ReferenceNaturePosterior`; it produced a redundant
+Python chance sampler and incorrect descriptions of what was missing.
+
+- First inspect `StochasticSiteRegistryV111`, `ChanceLawV111`,
+  `ReferenceNatureV111`, `H8LocalReferenceNatureV1`, existing
+  `ReferenceNature*SessionV111` owners, and
+  `sts2_ai.emulator.h15_h8_reference`.
+- Reuse the emulator's reference sampler and mechanics continuation.
+  Python may implement **learned proposal** sampling but must not
+  reimplement reference-law roulette under an H15-only name.
+- Always distinguish source legality, `SOURCE_VERIFIED` local
+  probabilities, a posterior under a **declared fixture prior**, and a
+  native full-run posterior. Do not refer to native-structure
+  **prototype-combat-RNG** corpora as native-RNG calibrated.
+- For research branches, keep H15's `UNVERIFIED` / no-PUCT-target
+  provenance and the running PPO revisions untouched. Require
+  provider/cursor/event tests when changing the boundary.
+- Before adding a new system, explicitly identify why the existing
+  provider or session API cannot own the operation and document that
+  gap. Append new capabilities to the current-state crosswalk rather
+  than copying historical progress text into new architecture.
+
 ## Mandatory research evidence discipline
 
 Read [docs/EXPERIMENT_EVIDENCE_STANDARD.md](docs/EXPERIMENT_EVIDENCE_STANDARD.md)
