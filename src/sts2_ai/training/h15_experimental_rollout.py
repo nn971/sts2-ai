@@ -10,6 +10,7 @@ must never be used as fair PUCT or policy/value training labels.
 """
 from __future__ import annotations
 
+import json
 import random
 from collections import Counter
 from collections.abc import Mapping
@@ -18,6 +19,7 @@ from typing import Any
 
 from sts2_ai.emulator import FAIR_POLICY_ID, LegalAction, Observation
 from sts2_ai.models.h15_policy_value import H15CombatEvaluator
+from sts2_ai.nature.h4_reward import encounter_total_hp_score
 
 NATURE_KINDS = frozenset({
     "enemy_action", "enemy_intent", "draw_card", "random_target",
@@ -100,6 +102,7 @@ def run_policy_combat(
     backend: Any, source: str, *, independent_seed: str,
     teacher: H15CombatEvaluator, rng: random.Random,
     limits: RolloutLimits = RolloutLimits(),
+    forced_root_action_id: str | None = None,
 ) -> dict[str, Any]:
     """Own a temporary H15 session until combat exit or an explicit limit.
 
@@ -108,6 +111,9 @@ def run_policy_combat(
     not a valid on-policy RL trajectory. No private state reaches the actor.
     """
     limits.validate()
+    if forced_root_action_id is not None and not forced_root_action_id:
+        raise ValueError("Forced root action ID must be nonempty")
+    root_selected = False
     handle: str | None = None
     chosen: list[dict[str, Any]] = []
     history: list[dict[str, Any]] = []
@@ -123,10 +129,40 @@ def run_policy_combat(
         while True:
             kind = frame["boundaryKind"]
             if kind == "combat_exit":
+                # The H9 tactical value target is the source terminal
+                # total-nonminion-HP reward divided by two. No invented
+                # reward, survival-only proxy, or censored value is saved.
+                raw_exit = frame.get("combatExitPublicObservationJson")
+                if not isinstance(raw_exit, str):
+                    raise ValueError(
+                        "Combat exit omitted authoritative public H9 reward state"
+                    )
+                public_exit = json.loads(raw_exit)
+                if not isinstance(public_exit, dict):
+                    raise ValueError("Invalid H9 terminal public observation")
+                hp = public_exit.get("hp")
+                max_hp = public_exit.get("max_hp")
+                if type(hp) is not int or type(max_hp) is not int:
+                    raise ValueError("Combat exit omitted public HP/max_hp")
+                outcome = frame["combatOutcome"]
+                if outcome not in ("victory", "defeat"):
+                    raise ValueError("Combat exit has no genuine outcome")
+                measured_reward = encounter_total_hp_score(
+                    outcome,
+                    player_exit_hp=hp, player_max_hp=max_hp,
+                    total_enemy_hp=public_exit.get(
+                        "defeat_total_non_minion_enemy_hp"
+                    ),
+                    remaining_enemy_hp=public_exit.get(
+                        "defeat_remaining_non_minion_enemy_hp"
+                    ),
+                )
                 final = {
                     "status": "combat_exit",
-                    "outcome": frame["combatOutcome"],
-                    "exit_hp": frame.get("exitHp"),
+                    "outcome": outcome,
+                    "exit_hp": hp,
+                    "terminal_reward": measured_reward,
+                    "terminal_value": measured_reward / 2,
                 }
                 break
             if kind in NATURE_KINDS:
@@ -171,11 +207,33 @@ def run_policy_combat(
                 range(len(menu)),
                 key=lambda i: (-prediction.logits[i], i),
             )
+            # A candidate's first move is fixed for counterfactual
+            # evaluation. Unsupported roots are censored; silently
+            # falling back would evaluate a DIFFERENT action instead.
+            if forced_root_action_id is not None and not root_selected:
+                candidates = [
+                    i for i in ranks
+                    if menu[i].action_id == forced_root_action_id
+                ]
+                if len(candidates) != 1:
+                    raise ValueError(
+                        "Forced root action absent from public legal menu"
+                    )
+                ranked_indices = candidates
+            else:
+                ranked_indices = ranks
             accepted = False
-            for rank, index in enumerate(ranks):
+            for index in ranked_indices:
+                rank = ranks.index(index)
                 action = menu[index]
                 if action.kind not in ("play_card", "use_potion", "end_turn"):
                     rejection_counts["unsupported_action_kind:" + action.kind] += 1
+                    if forced_root_action_id is not None and not root_selected:
+                        final = {
+                            "status": "unsupported_root_action",
+                            "reason": "unsupported_action_kind:" + action.kind,
+                        }
+                        break
                     continue
                 try:
                     if action.kind == "end_turn":
@@ -206,6 +264,12 @@ def run_policy_combat(
                     msg = str(exc)
                     prefix = msg.split(" : ", 1)[0][:220]
                     rejection_counts[prefix] += 1
+                    if forced_root_action_id is not None and not root_selected:
+                        final = {
+                            "status": "unsupported_root_action",
+                            "reason": prefix,
+                        }
+                        break
                     continue
                 chosen.append({
                     "kind": action.kind,
@@ -224,6 +288,7 @@ def run_policy_combat(
                     "policy_rank": rank,
                 })
                 counts["player"] += 1
+                root_selected = True
                 if action.kind == "end_turn":
                     counts["end_turn"] += 1
                 else:
@@ -233,10 +298,11 @@ def run_policy_combat(
                 accepted = True
                 break
             if not accepted:
-                final = {
-                    "status": "unsupported_player_menu",
-                    "reason": "no executable action in policy-ranked menu",
-                }
+                if final is None:
+                    final = {
+                        "status": "unsupported_player_menu",
+                        "reason": "no executable action in policy-ranked menu",
+                    }
                 break
     except Exception as exc:
         final = {
@@ -262,4 +328,5 @@ def run_policy_combat(
         "rejections": dict(rejection_counts),
         "policy_choices": chosen,
         "decision_history": history,
+        "forced_root_action_id": forced_root_action_id,
     }
