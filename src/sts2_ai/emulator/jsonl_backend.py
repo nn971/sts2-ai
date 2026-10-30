@@ -350,6 +350,157 @@ class JsonlEmulatorBackend:
         response = self._request("reset", seed=seed, ascension=ascension)
         return self._require_string(response, "stateHandle")
 
+    def probe_h15_native_combat_candidate(
+        self, state: StateHandle, *, independent_seed: str,
+    ) -> dict[str, Any]:
+        """Construct a diagnostic-only entry candidate with explicit RNG provenance.
+
+        The native-structure Overgrowth source corpus uses prototype combat
+        RNG, not opt-in native-combat RNG. Both modes remain unverified and
+        cannot supply a fair PUCT continuation handle.
+        """
+        if not independent_seed:
+            raise ValueError("H15 candidate needs a nonempty independent seed")
+        response = self._request(
+            "h15_native_combat_candidate_probe",
+            state_handle=state, independent_seed=independent_seed,
+        )
+        models = {
+            "prototype-combat-rng":
+                "h15-native-structure-prototype-rng-candidate-unverified-v1",
+            "native-combat-rng":
+                "h15-native-combat-entry-independent-candidate-unverified-v1",
+        }
+        provider = response.get("providerClass")
+        if (not isinstance(provider, str)
+                or response.get("schemaId") != models.get(provider)
+                or response.get("fairContinuationCapability") != "unavailable"
+                or response.get("stateHandleReturned") is not False
+                or type(response.get("unknownDrawPositions")) is not int
+                or response["unknownDrawPositions"] < 0
+                or type(response.get("legalActionCount")) is not int
+                or response["legalActionCount"] < 1
+                or not isinstance(response.get("observationHash"), str)):
+            raise JsonlBridgeError(
+                "H15 native candidate response lacks explicit non-fair provenance"
+            )
+        return {
+            "candidate_model": response["schemaId"],
+            "provider_class": provider,
+            "fair_continuation_capability": "unavailable",
+            "observation_hash": response["observationHash"],
+            "legal_action_count": response["legalActionCount"],
+            "unknown_draw_positions": response["unknownDrawPositions"],
+        }
+
+    @staticmethod
+    def _h15_experimental_response(
+        response: dict[str, Any], *, expected_handle: str | None = None,
+    ) -> dict[str, Any]:
+        """Fail closed: experimental Nature decisions are never fair PUCT roots."""
+        if (response.get("schemaId") !=
+                "sts2-h15-controlled-prototype-combat-endturn-experimental-v1"
+                or response.get("fairContinuationCapability") != "unavailable"
+                or response.get("candidateModelId") !=
+                "h15-native-structure-prototype-rng-candidate-unverified-v1"
+                or not isinstance(response.get("h15Handle"), str)
+                or not response["h15Handle"].startswith("h15-")
+                or type(response.get("version")) is not int
+                or response["version"] < 0
+                or response.get("boundaryKind") not in (
+                    "player", "enemy_action", "enemy_intent",
+                    "draw_card", "random_target", "unsupported", "combat_exit",
+                )
+                or type(response.get("combatExit")) is not bool
+                or response.get("combatOutcome") not in (None, "victory", "defeat")
+                or ((response.get("boundaryKind") == "combat_exit") !=
+                    response["combatExit"])
+                or ((response.get("combatOutcome") is None) ==
+                    response["combatExit"])
+                or (expected_handle is not None
+                    and response["h15Handle"] != expected_handle)):
+            raise JsonlBridgeError(
+                "H15 controlled turn response lacks experimental-only provenance"
+            )
+        kind = response["boundaryKind"]
+        law = response.get("chanceLaw")
+        if kind in ("enemy_action", "enemy_intent", "draw_card", "random_target"):
+            if (not isinstance(law, dict)
+                    or law.get("probabilityStatus") != "UNVERIFIED"
+                    or not isinstance(law.get("outcomes"), list)
+                    or not law["outcomes"]):
+                raise JsonlBridgeError(
+                    "H15 Nature boundary lacks an explicitly unverified Chance Law"
+                )
+        elif law is not None:
+            raise JsonlBridgeError("H15 non-Nature boundary advertised a Chance Law")
+        return response
+
+    def h15_experimental_begin(
+        self, source: StateHandle, *, independent_seed: str,
+    ) -> dict[str, Any]:
+        """Begin a REAL-run but UNVERIFIED end-turn Nature session."""
+        if not independent_seed:
+            raise ValueError("H15 independent seed must be nonempty")
+        return self._h15_experimental_response(self._request(
+            "h15_experimental_begin",
+            state_handle=source, independent_seed=independent_seed,
+        ))
+
+    def h15_experimental_status(self, handle: str) -> dict[str, Any]:
+        return self._h15_experimental_response(self._request(
+            "h15_experimental_status", h15_handle=handle,
+        ), expected_handle=handle)
+
+    def h15_experimental_player_action(
+        self, handle: str, version: int, action_id: str,
+    ) -> dict[str, Any]:
+        """Execute one guarded, audited card/potion action in live mechanics.
+
+        The emulator owns the action semantics and rejects unmodeled hidden
+        chance sites or deck mutations. An unverified H15 session is never a
+        certified fair search root.
+        """
+        if type(version) is not int or version < 0 or not action_id:
+            raise ValueError("Invalid H15 player-action request")
+        return self._h15_experimental_response(self._request(
+            "h15_experimental_player_action",
+            h15_handle=handle, version=version, action_id=action_id,
+        ), expected_handle=handle)
+
+    def h15_experimental_end_turn(
+        self, handle: str, version: int, action_id: str,
+    ) -> dict[str, Any]:
+        if type(version) is not int or version < 0 or not action_id:
+            raise ValueError("Invalid H15 end-turn request")
+        return self._h15_experimental_response(self._request(
+            "h15_experimental_end_turn",
+            h15_handle=handle, version=version, action_id=action_id,
+        ), expected_handle=handle)
+
+    def h15_experimental_choose(
+        self, handle: str, version: int, law: Mapping[str, Any],
+        outcome_id: str,
+    ) -> dict[str, Any]:
+        if (type(version) is not int or version < 0 or not outcome_id
+                or not isinstance(law, Mapping)
+                or law.get("probabilityStatus") != "UNVERIFIED"):
+            raise ValueError("H15 choice requires an unverified declared law")
+        return self._h15_experimental_response(self._request(
+            "h15_experimental_choose",
+            h15_handle=handle, version=version,
+            chance_law=dict(law), outcome_id=outcome_id,
+        ), expected_handle=handle)
+
+    def h15_experimental_release_many(self, handles: Sequence[str]) -> int:
+        result = self._request(
+            "h15_experimental_release_many", h15_handles=list(handles),
+        )
+        count = result.get("released")
+        if type(count) is not int or count < 0 or count > len(handles):
+            raise JsonlBridgeError("Malformed H15 release response")
+        return count
+
     @property
     def hypothetical_draw_order_schema(self) -> str | None:
         """Experimental structural operation; NOT a fair chance sampler."""

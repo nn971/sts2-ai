@@ -6,7 +6,8 @@ from collections.abc import Callable, Sequence
 
 from sts2_ai.agents.base import Decision
 from sts2_ai.emulator import LegalAction, Observation, StateHandle
-from sts2_ai.search import SearchBudget, SearchResult, UctMcts
+from sts2_ai.search.base import SearchBudget, SearchResult
+from sts2_ai.search.mcts import UctMcts
 
 SearchResultSink = Callable[[SearchResult, LegalAction], None]
 
