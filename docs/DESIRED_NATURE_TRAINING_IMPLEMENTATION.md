@@ -1,5 +1,18 @@
 # Desired Nature Training Implementation
 
+**Current reading note (2026-10-30):** This is a preserved
+historical *design/training proposal*. Its initial claims that playable
+Nature, reference sampling, and PPO integration remain future work have
+been superseded by H7/H8/H9/H10 training, the emulator's
+`ReferenceNatureV111` and atomic sessions, and the restricted
+`H8ReferenceNaturePosterior` for fixed-fixture combat-local histories.
+The accepted responsibility split remains valid. Native full-run
+public-history posterior certification and general mechanics coverage
+remain open; consult the emulator
+[canonical architecture](https://github.com/nn971/sts2-emulator/blob/research/h15-experimental-search-20261030/docs/UNIFIED_STOCHASTIC_ARCHITECTURE.md)
+and [H15 status](H15_COMBAT_SEARCH_GUIDED.md) instead of treating
+the N0–N8 proposal as the current implementation checklist.
+
 **Implementation note (2026-10-14):** The original document below is the
 long-range design, and its introductory status describes its 2026-10-12
 proposal state. Work on [AI PR #71](https://github.com/nn971/sts2-ai/pull/71)
