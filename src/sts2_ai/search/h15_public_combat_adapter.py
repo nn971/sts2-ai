@@ -155,3 +155,40 @@ class H15PublicCombatAdapter:
         self._active_key = None
         if handle is not None:
             self._backend.release_many([handle])
+
+
+class H15RootConditionedCombatAdapter(H15PublicCombatAdapter):
+    """PUCT with the fixed source's hidden realization, labelled as biased.
+
+    Branch mechanics and ReferenceNature cursor are both cloned by H8's
+    existing h8_fork operation. Only public frames reach policy/value
+    inference. These counterfactuals are *not* independently sampled from
+    the public-history posterior and must never be exported as fair targets.
+    """
+    fair_combat_capability_id = "h15-h8-root-conditioned-combat-v1"
+
+    def __init__(self, backend: EmulatorBackend, root_handle: str):
+        self._backend = backend
+        self._sampler = None
+        self._histories = {}
+        self._active_handle = None
+        self._active_key = None
+        self._root_handle = root_handle
+
+    def begin_simulation(self, root: CombatFrame, search_rng: random.Random) -> None:
+        del search_rng
+        if self._active_handle is not None:
+            raise RuntimeError("Previous H8 root-conditioned fork was not released")
+        if root.information_key not in self._histories:
+            raise ValueError("Unregistered public root-conditioned decision")
+        public = self._backend.observe(
+            self._root_handle, InformationPolicy(root.observation.policy_id),
+        )
+        if (public.payload_json != root.observation.payload_json
+                or tuple(self._backend.legal_actions(self._root_handle))
+                != root.legal_actions):
+            raise ValueError("H8 root-conditioned public frame changed")
+        child = self._backend.fork_reference(self._root_handle)
+        self._active_handle = child
+        self._active_key = root.information_key
+
