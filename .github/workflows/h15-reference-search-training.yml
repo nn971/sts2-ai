@@ -17,6 +17,7 @@ on:
       - 'tests/test_h15_reference_search_audit.py'
       - 'tests/test_h15_reference_search_budget.py'
       - 'tests/test_h15_final_turn_probe.py'
+      - 'tests/test_h15_late_value_training.py'
       - '.github/workflows/h15-reference-search-training.yml'
   pull_request:
   workflow_dispatch:
@@ -60,4 +61,5 @@ jobs:
             tests/test_h15_reference_search_audit.py \
             tests/test_h15_reference_search_budget.py \
             tests/test_h15_final_turn_probe.py \
+            tests/test_h15_late_value_training.py \
             tests/test_h15_combat_search.py
