@@ -46,6 +46,80 @@ class NativeSearchCollection:
     searched_decisions: int
     targets: tuple[dict[str, Any], ...]
     searched_root_diagnostics: tuple[dict[str, Any], ...] = ()
+    final_player_turn: dict[str, Any] | None = None
+
+
+def summarize_final_player_turn(
+    history: list[PublicHistoryStep], teacher: H15CombatEvaluator,
+) -> dict[str, Any]:
+    """Explain the last *actually played* public turn using public-only logits.
+
+    The turn is selected retrospectively, after the terminal combat result
+    exists. This is an observational diagnostic, not a causal search root:
+    the final outcome and future actions are never fed into predict().
+    """
+    actions: list[tuple[int, int, PublicHistoryStep, dict[str, Any]]] = []
+    for i, step in enumerate(history):
+        if step.chosen_action is None:
+            continue
+        public = json.loads(step.observation.payload_json)
+        combat = public.get("combat") if isinstance(public, dict) else None
+        if not isinstance(combat, dict):
+            continue
+        turn = combat.get("turn")
+        if type(turn) is not int or turn < 1:
+            raise ValueError("Missing public turn number in H15 final-turn trace")
+        actions.append((i, turn, step, public))
+    if not actions:
+        raise ValueError("Completed H15 fight has no player decisions")
+    final_turn = actions[-1][1]
+    indices = [(i, st, state) for i, turn, st, state in actions if turn == final_turn]
+
+    records: list[dict[str, Any]] = []
+    for decision_index, step, state in indices:
+        menu = step.legal_actions
+        selected = step.chosen_action
+        if not menu or selected not in menu:
+            raise ValueError("Final-turn decision lacks a valid public action")
+        prediction = teacher.predict(step.observation, menu)
+        if len(prediction.logits) != len(menu):
+            raise ValueError("Final-turn policy logits do not align with public menu")
+        peak = max(prediction.logits)
+        normalizer = math.fsum(math.exp(x - peak) for x in prediction.logits)
+        index = menu.index(selected)
+        selected_probability = math.exp(prediction.logits[index] - peak) / normalizer
+        greedy = max(
+            range(len(menu)),
+            key=lambda j: (prediction.logits[j], menu[j].action_id),
+        )
+        combat = state["combat"]
+        enemies = combat.get("enemies", [])
+        records.append({
+            "decision_index": decision_index,
+            "turn": final_turn,
+            "player_hp": state.get("hp"),
+            "player_block": combat.get("player_block"),
+            "energy": combat.get("energy"),
+            "enemy_hp": [
+                {"instance_id": enemy.get("instance_id"),
+                 "hp": enemy.get("hp")}
+                for enemy in enemies if isinstance(enemy, dict)
+            ],
+            "selected_action": {
+                "action_id": selected.action_id,
+                "kind": selected.kind,
+                "payload_json": selected.payload_json,
+            },
+            "greedy_action_id": menu[greedy].action_id,
+            "legal_action_count": len(menu),
+            "selected_policy_probability": selected_probability,
+            "predicted_value_normalized": prediction.value,
+            "predicted_encounter_reward": 2.0 * prediction.value,
+            "neural_selection_fallback": (
+                "h15_player_choice_kind" in state
+            ),
+        })
+    return {"turn": final_turn, "actions": records}
 
 
 def replay_native_public_history(
@@ -181,6 +255,7 @@ def collect_live_combat_search(
                     combat_decisions=count,
                     searched_decisions=len(saved),
                     searched_root_diagnostics=tuple(search_diagnostics),
+                    final_player_turn=summarize_final_player_turn(history, teacher),
                     targets=tuple(target_record(
                         root, stats, terminal_reward=score,
                         search_model_sha256=teacher.checkpoint_sha256,
