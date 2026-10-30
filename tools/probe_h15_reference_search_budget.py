@@ -15,14 +15,6 @@ from typing import Any
 
 from sts2_ai.training.h15_search_supervision import decode_target
 
-from audit_h15_reference_search import compare_saved_evaluations, read_cases
-from train_h15_reference_rounds import (
-    aggregate,
-    atomic_json,
-    collect_cases,
-    sha256,
-)
-
 SCHEMA = "sts2-h15-reference-puct-budget-probe-v1"
 
 
@@ -78,6 +70,17 @@ def validate_budgets(raw: str) -> tuple[int, ...]:
 
 
 def main() -> None:
+    # The executable lives alongside the existing M15 helpers under tools/.
+    # Import at CLI entry so static telemetry tests remain importable as
+    # tools.probe_h15_reference_search_budget from the project root.
+    from audit_h15_reference_search import compare_saved_evaluations, read_cases
+    from train_h15_reference_rounds import (
+        aggregate,
+        atomic_json,
+        collect_cases,
+        sha256,
+    )
+
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--source-run", type=Path, required=True,
                    help="Existing completed M15 training output (immutable)")
