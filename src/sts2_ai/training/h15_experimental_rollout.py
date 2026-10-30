@@ -15,43 +15,18 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from sts2_ai.emulator import FAIR_POLICY_ID, LegalAction, Observation
+from sts2_ai.emulator.h15_public_protocol import (
+    NATURE_KINDS,
+    choose_reference_at_pending,
+    public_player_frame,
+)
 from sts2_ai.models.h15_policy_value import H15CombatEvaluator
 from sts2_ai.nature.h4_reward import encounter_total_hp_score
 
-NATURE_KINDS = frozenset({
-    "enemy_action", "enemy_intent", "draw_card", "random_target",
-})
 H15_ROLLOUT_SCHEMA = "sts2-h15-unverified-policy-multiturn-rollout-v1"
 
 
-def _policy_input(frame: Mapping[str, Any]) -> tuple[Observation, tuple[LegalAction, ...]]:
-    if frame.get("boundaryKind") != "player":
-        raise ValueError("H15 tactical inference requires a player boundary")
-    if frame.get("observationPolicyId") != FAIR_POLICY_ID:
-        raise ValueError("H15 status omitted the fair public observation policy")
-    payload = frame.get("observationPayloadJson")
-    digest = frame.get("observationHash")
-    menu = frame.get("legalActions")
-    if not isinstance(payload, str) or not isinstance(digest, str):
-        raise ValueError("H15 status omitted the public observation")
-    if not isinstance(menu, list) or not menu:
-        raise ValueError("H15 player boundary has no legal actions")
-    observation = Observation(FAIR_POLICY_ID, payload, digest)
-    actions: list[LegalAction] = []
-    seen: set[str] = set()
-    for raw in menu:
-        if (not isinstance(raw, dict)
-                or not isinstance(raw.get("actionId"), str)
-                or raw["actionId"] in seen
-                or not isinstance(raw.get("kind"), str)
-                or not isinstance(raw.get("payloadJson"), str)):
-            raise ValueError("Invalid H15 public action menu")
-        seen.add(raw["actionId"])
-        actions.append(LegalAction(
-            raw["actionId"], raw["kind"], raw["payloadJson"],
-        ))
-    return observation, tuple(actions)
+_policy_input = public_player_frame
 
 
 @dataclass(frozen=True)
@@ -148,23 +123,10 @@ def run_policy_combat(
                 if counts["nature"] >= limits.max_nature_decisions:
                     final = {"status": "censored", "reason": "nature_budget"}
                     break
-                law = frame["chanceLaw"]
-                if (not isinstance(law, dict)
-                        or law.get("probabilityStatus") != "UNVERIFIED"):
-                    raise ValueError("H15 requires an unverified declared Nature law")
                 at_version = frame["version"]
-                frame = backend.h15_experimental_reference_choose(
-                    handle, at_version,
+                frame, sampled = choose_reference_at_pending(
+                    backend, handle, frame,
                 )
-                sampled = frame["referenceNatureSelection"]
-                if (sampled["lawId"] != law["lawId"]
-                        or sampled["eventId"] != law["eventId"]
-                        or sampled["outcomeId"] not in {
-                            item["outcomeId"] for item in law["outcomes"]
-                        }):
-                    raise ValueError(
-                        "ReferenceNature receipt mismatches the advertised law"
-                    )
                 history.append({
                     "type": "nature",
                     "version": at_version,
