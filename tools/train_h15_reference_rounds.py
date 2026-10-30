@@ -106,8 +106,9 @@ def _collect_worker(
                     ),
                     simulations=cfg["simulations"],
                     max_decisions=cfg["max_decisions"],
-                    max_searches=(cfg["max_searches"] if mode == "train"
-                                  else 1 if mode == "search" else 0),
+                    max_searches=(
+                        cfg["max_searches"] if mode in ("train", "search") else 0
+                    ),
                     seed=seed63(case_id + ":search"),
                     tree_depth=cfg["tree_depth"],
                     rollout_depth=cfg["rollout_depth"], leaf_mode="value",
