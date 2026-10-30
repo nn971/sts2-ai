@@ -104,6 +104,12 @@ def test_native_collector_terminal_at_exact_decision_budget(monkeypatch):
     )
     assert batch.combat_decisions == 1
     assert batch.searched_decisions == 1
+    assert len(batch.searched_root_diagnostics) == 1
+    diag = batch.searched_root_diagnostics[0]
+    assert diag["search_action_id"] == "safe"
+    assert diag["greedy_action_id"] == "risk"
+    assert diag["search_overrode_greedy"] is True
+    assert diag["visit_policy_kl_from_prior"] >= 0
     assert batch.outcome == "victory"
     assert batch.reward == pytest.approx(1.5)
     assert len(batch.targets) == 1
@@ -156,4 +162,5 @@ def test_no_search_reference_baseline_keeps_actual_reward_and_no_targets():
     assert batch.reward == pytest.approx(1.5)
     assert batch.searched_decisions == 0
     assert batch.targets == ()
+    assert batch.searched_root_diagnostics == ()
     assert sampler.calls == 0
