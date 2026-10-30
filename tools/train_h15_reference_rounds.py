@@ -288,6 +288,21 @@ def aggregate(records: list[dict[str, Any]]) -> dict[str, Any]:
     n = len(records)
     if not n:
         raise ValueError("Empty reference evaluation")
+    diagnostics = [
+        d for record in records
+        for d in record["searched_root_diagnostics"]
+    ]
+    q_spreads = []
+    for d in diagnostics:
+        q = d.get("root_mean_action_values")
+        visits = d.get("root_visits")
+        if q is not None and visits is not None:
+            visited = [
+                float(value) for value, count in zip(q, visits, strict=True)
+                if count > 0 and value is not None
+            ]
+            if visited:
+                q_spreads.append(max(visited) - min(visited))
     return {
         "combats": n,
         "victories": sum(r["outcome"] == "victory" for r in records),
@@ -303,6 +318,15 @@ def aggregate(records: list[dict[str, Any]]) -> dict[str, Any]:
             not r.get("targets") for r in records
         ),
         "search_overrides": sum(r["search_overrides"] for r in records),
+        "search_terminal_evaluations": sum(
+            d["search_terminal_evaluations"] for d in diagnostics
+        ),
+        "search_neural_cutoffs": sum(
+            d["search_neural_cutoffs"] for d in diagnostics
+        ),
+        "mean_visited_action_q_spread": (
+            sum(q_spreads) / len(q_spreads) if q_spreads else None
+        ),
         "search_override_rate": (
             sum(r["search_overrides"] for r in records) /
             sum(r["searched_roots"] for r in records)
