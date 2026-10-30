@@ -98,6 +98,7 @@ def collect_native_combat_search(
     simulations: int = 32, max_decisions: int = 512, max_searches: int = 8,
     seed: int = 20261029, tree_depth: int = 16,
     rollout_depth: int = 512, leaf_mode: str = "terminal",
+    search_schedule: str = "first",
 ) -> NativeSearchCollection:
     """Search only selected moves; label all saved roots after actual combat.
 
@@ -109,7 +110,8 @@ def collect_native_combat_search(
     """
     if (min(simulations, max_decisions, tree_depth, rollout_depth) < 1
             or max_searches < 0 or seed < 0
-            or leaf_mode not in ("terminal", "value")):
+            or leaf_mode not in ("terminal", "value")
+            or search_schedule not in ("first", "turn_start")):
         raise ValueError("Invalid native combat-search budget")
     # Reject unsupported samplers BEFORE replaying or owning a live native
     # state, so a missing capability cannot leak the source combat handle.
@@ -122,6 +124,7 @@ def collect_native_combat_search(
         simulations=simulations, max_decisions=max_decisions,
         max_searches=max_searches, seed=seed, tree_depth=tree_depth,
         rollout_depth=rollout_depth, leaf_mode=leaf_mode,
+        search_schedule=search_schedule,
     )
 
 
@@ -133,6 +136,7 @@ def collect_live_combat_search(
     simulations: int = 32, max_decisions: int = 512, max_searches: int = 8,
     seed: int = 20261029, tree_depth: int = 16,
     rollout_depth: int = 512, leaf_mode: str = "terminal",
+    search_schedule: str = "first",
 ) -> NativeSearchCollection:
     """Consume a verified public combat entry and own/release its handle.
 
@@ -141,7 +145,8 @@ def collect_live_combat_search(
     """
     if (min(simulations, max_decisions, tree_depth, rollout_depth) < 1
             or max_searches < 0 or seed < 0
-            or leaf_mode not in ("terminal", "value")):
+            or leaf_mode not in ("terminal", "value")
+            or search_schedule not in ("first", "turn_start")):
         raise ValueError("Invalid H15 combat collection/evaluation budget")
     history = list(initial_history)
     adapter = H15PublicCombatAdapter(backend, sampler=fair_sampler)
@@ -151,6 +156,7 @@ def collect_live_combat_search(
     )
     saved: list[tuple[CombatFrame, Any]] = []
     search_diagnostics: list[dict[str, Any]] = []
+    last_searched_turn: int | None = None
     count = 0
     try:
         while True:
@@ -194,7 +200,17 @@ def collect_live_combat_search(
             # neutral priors, but they are not direct H15 training roots until
             # the selection-action codec is versioned and implemented.
             is_nested_choice = "h15_player_choice_kind" in public
-            if len(saved) < max_searches and not is_nested_choice:
+            turn: int | None = None
+            if search_schedule == "turn_start" and not is_nested_choice:
+                turn = public["combat"].get("turn")
+                if type(turn) is not int or turn < 1:
+                    raise ValueError("H15 turn-start search needs public combat turn")
+            search_here = (
+                len(saved) < max_searches
+                and not is_nested_choice
+                and (search_schedule == "first" or turn != last_searched_turn)
+            )
+            if search_here:
                 root = adapter.root(history)
                 stats = search.search(root, simulations=simulations)
                 if (leaf_mode == "terminal" and
@@ -248,6 +264,8 @@ def collect_live_combat_search(
                     "search_transitions": stats.transitions,
                 })
                 saved.append((root, stats))
+                if search_schedule == "turn_start":
+                    last_searched_turn = turn
             else:
                 logits = teacher.predict(observation, menu).logits
                 index = max(
