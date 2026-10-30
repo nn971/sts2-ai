@@ -10,10 +10,9 @@ must never be used as fair PUCT or policy/value training labels.
 """
 from __future__ import annotations
 
-import json
 import random
 from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -179,6 +178,12 @@ def run_policy_combat(
                             handle, frame["version"], action.action_id,
                         )
                 except Exception as exc:
+                    # Skip only an explicitly unsupported effect/site. Other
+                    # bridge failures can indicate broken mechanics or stale
+                    # provenance; report them rather than masking the bug by
+                    # selecting a different action.
+                    if "UNSUPPORTED_" not in str(exc):
+                        raise
                     # The bridge promises transactional rejection. Check its
                     # public fingerprint and version before attempting an
                     # alternative in the same decision state.
