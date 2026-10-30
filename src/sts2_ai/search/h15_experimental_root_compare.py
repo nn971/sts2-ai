@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import random
 from collections import Counter
 from typing import Any
 
@@ -73,16 +72,16 @@ def compare_root_actions(
             (seed_prefix + "\nreplica:" + str(sample_index))
             .encode("utf-8")
         ).digest()
-        replicas.append((material.hex(), int.from_bytes(material, "big")))
+        replicas.append(material.hex())
 
     candidates: list[dict[str, Any]] = []
     for index in indices:
         action = menu[index]
         rows = []
-        for sample_index, (nature_seed, python_seed) in enumerate(replicas):
+        for sample_index, nature_seed in enumerate(replicas):
             result = run_policy_combat(
                 backend, source, independent_seed=nature_seed,
-                teacher=teacher, rng=random.Random(python_seed),
+                teacher=teacher,
                 limits=limits, forced_root_action_id=action.action_id,
                 expected_root_observation_hash=root_hash,
                 expected_root_action_ids=root_menu_ids,
