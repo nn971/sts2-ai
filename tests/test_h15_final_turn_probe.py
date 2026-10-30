@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import pickle
 from types import SimpleNamespace
 
 import pytest
@@ -120,3 +121,27 @@ def test_pair_cohort_does_not_cherry_pick_outcomes():
     assert all(scenario_for_seed(x, scenarios).scenario_id == scenarios[0]
                for x in ids)
     assert all(deck_for_seed(x, decks) == decks[1] for x in ids)
+
+
+def test_reference_worker_errors_are_sent_as_plain_text(monkeypatch):
+    """The parent need not import worker-only emulator exception classes."""
+    from tools import train_h15_reference_rounds as trainer
+
+    class PrivateTransportError(RuntimeError):
+        pass
+
+    def fail_worker(*args):
+        raise PrivateTransportError("unknown boss action / source boundary")
+
+    monkeypatch.setattr(trainer, "_collect_worker", fail_worker)
+    output = trainer._collect_worker_safe(
+        {"emulator_root": "/unused"}, "/unused.pt", ["boss-seed-1"], "greedy",
+    )
+    # JSON- and pickle-safe: no exception object or custom type crosses
+    # the process boundary, even when the originating module is unavailable.
+    assert pickle.loads(pickle.dumps(output)) == output
+    assert json.loads(json.dumps(output)) == output
+    assert output["cases"] == ["boss-seed-1"]
+    assert output["mode"] == "greedy"
+    assert "PrivateTransportError" in output["worker_error"]
+    assert "unknown boss action / source boundary" in output["worker_error"]
