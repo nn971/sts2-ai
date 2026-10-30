@@ -94,6 +94,16 @@ def summarize_final_player_turn(
         )
         combat = state["combat"]
         enemies = combat.get("enemies", [])
+        payload = json.loads(selected.payload_json)
+        if not isinstance(payload, dict):
+            raise ValueError("Invalid selected public action payload")
+        instance_id = payload.get("CardInstanceId")
+        hand = combat.get("hand", [])
+        visible_card = next(
+            (card for card in hand
+             if isinstance(card, dict) and card.get("instance_id") == instance_id),
+            None,
+        ) if instance_id is not None and isinstance(hand, list) else None
         records.append({
             "decision_index": decision_index,
             "turn": final_turn,
@@ -109,6 +119,11 @@ def summarize_final_player_turn(
                 "action_id": selected.action_id,
                 "kind": selected.kind,
                 "payload_json": selected.payload_json,
+                "card_id": (
+                    visible_card.get("card_id") if visible_card else None
+                ),
+                "card_instance_id": instance_id,
+                "target_enemy_id": payload.get("TargetEnemyId"),
             },
             "greedy_action_id": menu[greedy].action_id,
             "legal_action_count": len(menu),
