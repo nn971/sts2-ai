@@ -163,7 +163,10 @@ def verify_distillation_receipt(
     values: dict[str, Any] = {}
     for key in ("in_sample_fit_before", "in_sample_fit_after"):
         row = provenance.get(key)
-        if not isinstance(row, dict) or set(row) != {"policy_loss", "value_loss"}:
+        required = {"policy_loss", "value_loss"}
+        diagnostics = {"policy_target_entropy", "policy_kl_to_search"}
+        if (not isinstance(row, dict) or not required.issubset(row)
+                or not set(row).issubset(required | diagnostics)):
             raise ValueError("H15 student checkpoint lacks pre/post fit metrics")
         if any(type(v) not in (float, int) or not math.isfinite(v) for v in row.values()):
             raise ValueError("Nonfinite H15 student fit metric")
