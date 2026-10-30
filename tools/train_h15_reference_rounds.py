@@ -143,8 +143,16 @@ def _collect_worker(
                             teacher.checkpoint_sha256):
                         raise ValueError("H15 teacher target checkpoint drift")
                     targets.append(row)
+                # A publicly selected late danger root need not occur in
+                # every completed combat. Keep that combat in throughput and
+                # outcome accounting; the cohort must still contain real PUCT
+                # targets (enforced by write_training_targets).
                 if mode == "train" and not targets:
-                    raise RuntimeError("Training combat completed without searched roots")
+                    print(
+                        f"[h15-reference-no-eligible-root] case={case_id} "
+                        f"encounter={scenario.scenario_id} deck={deck}",
+                        flush=True,
+                    )
                 records.append({
                     "case_id": case_id, "encounter": scenario.scenario_id,
                     "deck": deck, "source_nature_seed": source_seed,
@@ -290,6 +298,9 @@ def aggregate(records: list[dict[str, Any]]) -> dict[str, Any]:
         "searched_roots": sum(r["searched_roots"] for r in records),
         "late_value_targets": sum(
             r.get("late_value_targets", 0) for r in records
+        ),
+        "combats_without_training_targets": sum(
+            not r.get("targets") for r in records
         ),
         "search_overrides": sum(r["search_overrides"] for r in records),
         "search_override_rate": (
