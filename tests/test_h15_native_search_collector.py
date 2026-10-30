@@ -139,3 +139,21 @@ def test_native_collector_value_leaf_search_keeps_realized_reward(monkeypatch):
     assert row["search_rollout_mode"] == "value"
     assert row["realized_reward"] == pytest.approx(1.5)
     assert sum(decode_target(row).visits) == 12
+
+
+def test_no_search_reference_baseline_keeps_actual_reward_and_no_targets():
+    backend = ToyBackend()
+    root = backend.observe("source:root", POLICY)
+    sampler = IndependentSampler()
+    batch = collector.collect_live_combat_search(
+        backend, "source:root", (PublicHistoryStep(root, None, ACTIONS),),
+        fair_sampler=sampler, teacher=ToyTeacher(),
+        source_seed="heldout-1", entry_hash="verified-entry",
+        encounter_tier="normal", simulations=8, max_searches=0,
+        max_decisions=1, leaf_mode="value",
+    )
+    assert batch.outcome == "victory"
+    assert batch.reward == pytest.approx(1.5)
+    assert batch.searched_decisions == 0
+    assert batch.targets == ()
+    assert sampler.calls == 0
