@@ -687,3 +687,122 @@ Four screening pairs × 12 fights = **48 screening fights**, followed by
 experiment directories remain untouched. Observations are under the
 existing declared-law H8 ReferenceNature distribution, and this study
 does **not** gate substantive search-guided training.
+
+
+## H15 M16 — substantive hard-A10 late-combat search/value training (2026-10-30)
+
+The completed difficult-combat probe on 32 *independent* declared-law
+ReferenceNature cases selected **Ceremonial Beast A10 + Silent 20-card
+boss-cycle** (14 wins / 32; 43.75%, Wilson 95% interval
+28.17–60.67%). The first last-turn critic prediction was systematically
+optimistic on defeats: approximately +0.185 realized H9 reward error
+on 18 losses, compared with +0.051 on 14 wins. This is a *diagnostic*
+on one frozen H15 student and a supported synthetic boss research
+fixture, not a search-improvement claim.
+
+**M16 implementation, now committed:**
+
+1. Add `--search-schedule danger`: consider first ordinary legal player
+   decision on a new combat turn meeting *only current visible*
+   turn / player HP / enemy HP thresholds. The `max-searches` limit bounds
+   PUCT roots per actual completed fight. No terminal outcome or future
+   information participates in root selection. A fight that ends without
+   an eligible danger root is fully counted; it supplies no fictitious
+   PUCT sample. Entire all-empty PUCT cohorts still fail closed.
+2. Add **value-only** source rows (new separate
+   `sts2-h15-combat-realized-value-target-v1` schema) for at most
+   `--late-value-max` public decisions, sampled at later distinct turns
+   and once more on visible near-lethal enemy HP. These observations are
+   labelled by the *realized* completed-fight H9 encounter reward and
+   are never given synthetic PUCT visits. Repeated same-decision labels
+   at searched roots are omitted. Mixed minibatches compute policy
+   cross-entropy **only on genuine PUCT targets**, and critic MSE on
+   *all* actual completed-combat targets, including critic-only batches.
+3. For a 20-card, ~60-decision boss, the existing **fair posterior**
+   rejects candidate Nature seeds unless they reproduce the full public
+   history, including opening draws. That is still a supported, default,
+   explicitly scoped *fair* mode, but it is computationally unsuitable
+   for repeated deep boss-turn PUCT. The opt-in
+   `--search-provider root_conditioned` reuses the **existing emulator
+   H8 `h8_fork`**, which atomically clones the complete mechanics and
+   declared ReferenceNature cursor. Every player policy/value prediction
+   still receives only public observations, but the *search teacher*
+   conditions on the source's hidden realization. The search visit
+   targets are tagged with
+   `h15-h8-root-conditioned-combat-v1`, and distillation refuses a
+   mislabeled fair-vs-root-conditioned search corpus. This mode is a
+   **possibly privileged, approximate search teacher**; it does not
+   support a certified fair-posterior or native-game-unbiased claim.
+4. Optionally use `--search-leaf-mode terminal`, continuing each H8
+   fork to a true combat-terminal reward under its engine-owned
+   ReferenceNature cursor. Censored/unsupported mechanics fail explicitly.
+   Per-round metrics now report actual terminal evaluations, neural
+   cutoffs, root action overrides, visit-policy KL, visited Q spreads,
+   late value target counts and completed fights without eligible roots.
+5. Preserve repeated 15-worker training, CUDA optimization and
+   matched source-run-disjoint reference-law evaluations. The frozen
+   baseline in a new M16 run is the **H15 checkpoint supplied through
+   `--initialize-from-model`**, not automatically an old H9 checkpoint.
+   Both raw and root-conditioned-PUCT heldout performance are reported
+   under fresh ReferenceNature source seeds.
+
+**Aggressive substantive run, selected after user's request to proceed:**
+
+```fish
+cd ~/projects/sts2-ai
+git pull --ff-only
+source .venv/bin/activate.fish
+set emu ~/projects/sts2-emulator
+set rev a411a19491a93b58ae4fdbc6d1f3345c9fca67cf
+set dll $emu/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll
+
+python -m pytest -q tests/test_h15_late_value_training.py \
+    tests/test_h15_root_conditioned_search.py \
+    tests/test_h15_native_search_collector.py \
+    tests/test_h15_combat_search.py
+and python -u tools/train_h15_reference_rounds.py \
+    --emulator-root $emu --emulator-revision $rev \
+    --emulator-dll $dll \
+    --initialize-from-model results/h15-reference-m15-cohort-smoke-v1/round-0001/student.pt \
+    --output-root results/h15-m16-ceremonial-boss-search-r80-v1 \
+    --rounds 80 --train-combats 128 --eval-combats 64 \
+    --eval-every 10 --workers 15 \
+    --scenarios ceremonial-beast-boss-a10 \
+    --decks silent-boss-cycle-20-v1 \
+    --fixture-seed h15-reference-m15-fixture-v1 \
+    --seed-prefix h15-m16-ceremonial-boss-v1 \
+    --search-provider root_conditioned \
+    --search-schedule danger --search-leaf-mode terminal \
+    --simulations 32 --max-searches 2 \
+    --tree-depth 8 --rollout-depth 256 \
+    --late-value-max 6 --late-value-min-turn 7 \
+    --late-value-player-hp 25 --late-value-enemy-hp 40 \
+    --epochs 1 --batch-size 32 --lr 0.000003 \
+    --value-weight 1.0 --learner-device cuda --execute
+```
+
+This is 80 × 128 = **10,240 training combats**, up to 20,480
+selected PUCT roots × 32 = **655,360 possible terminal-rollout
+simulations**, plus independent heldout source fights at every tenth
+round. The actual number of searched roots is observed, not assumed.
+Full-combat terminal rollouts may be expensive; persist every round
+and worker chunk and record the actual throughput and stop/failure
+provenance. Do not interpret the single run as decision-grade model
+improvement; later replicate independent training seeds with a matched
+compute comparator and untouched holdout following
+`docs/EXPERIMENT_EVIDENCE_STANDARD.md`.
+
+**Conservative alternative** for later controlled comparison:
+run the same 80-round cohort with
+`--search-provider fair_posterior --search-schedule first
+--search-leaf-mode value --max-searches 1`, while keeping
+`--late-value-max 6`. It uses the validated bounded opening
+fair-search teacher plus the same dense late critic supervision,
+avoids privileged state in PUCT policy labels, and leaves the
+late-stage PUCT question to the explicitly biased experimental mode.
+
+**Execution state:** Code and focused tests committed to existing
+H15 draft PR #146. GitHub CI and user's workstation emulator/GPU
+execution are not yet verified. The documented fish command begins
+the full requested run immediately after its short correctness tests
+pass; no further exploratory pilot is a prerequisite.
