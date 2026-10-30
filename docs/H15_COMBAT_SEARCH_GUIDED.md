@@ -1,5 +1,24 @@
 # H15 M1 — fair stochastic combat PUCT and policy/value distillation
 
+**Current integration note (2026-10-30):** The statements below
+are chronological H15 milestone records. We already have
+`ReferenceNatureV111`, `H8LocalReferenceNatureV1`, the atomic
+`ReferenceNatureSessionV111` family, and the AI's
+`H8ReferenceNaturePosterior` conditioning independent Nature seeds
+on complete *fixed-fixture combat-local* public history. The missing
+component is a certified posterior for authentic native-entry histories,
+**not** a generic sampler from scratch. H15's M7–M9
+`H15ControlledCombatSessionV1` plus Python `_sample_law` is an
+experimental narrow branch that duplicates some shared stochastic
+provider logic; its independent candidate is not conditioned on the
+source public history and all its laws remain `UNVERIFIED`. It should
+be migrated to shared ReferenceNature ownership before becoming a new
+search backend. The H10-based 120-round A10 PPO launch belongs to the
+existing native-*structure*, **prototype-combat-RNG** training
+distribution; its eventual outcomes do not prove native-game parity.
+See the emulator
+[canonical stochastic architecture](https://github.com/nn971/sts2-emulator/blob/research/h15-experimental-search-20261030/docs/UNIFIED_STOCHASTIC_ARCHITECTURE.md).
+
 **Implementation status:** search kernel, public move-aware codec, strict sample
 schema, and offline trainer. **No native H8 fair-combat adapter or native
 training result yet.** This branch is based on H10's native-state combat stack
