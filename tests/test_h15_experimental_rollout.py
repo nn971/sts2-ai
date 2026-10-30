@@ -8,7 +8,9 @@ import pytest
 from sts2_ai.emulator import FAIR_POLICY_ID
 from sts2_ai.search.h15_experimental_root_compare import compare_root_actions
 from sts2_ai.training.h15_experimental_rollout import (
-    RolloutLimits, _policy_input, run_policy_combat,
+    RolloutLimits,
+    _policy_input,
+    run_policy_combat,
 )
 
 
