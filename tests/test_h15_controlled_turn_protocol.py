@@ -122,9 +122,10 @@ def test_combat_exit_retains_explicit_result(outcome):
         boundaryKind="combat_exit", combatExit=True,
         combatOutcome=outcome, legalActions=None,
         combatExitH9Reward={
-            "hp":20, "maxHp":70,
-            "defeatTotalNonMinionEnemyHp":None,
-            "defeatRemainingNonMinionEnemyHp":None,
+            "hp": 20 if outcome == "victory" else 0,
+            "maxHp": 70,
+            "defeatTotalNonMinionEnemyHp": 30 if outcome == "defeat" else None,
+            "defeatRemainingNonMinionEnemyHp": 12 if outcome == "defeat" else None,
         },
     ))
     result = bridge.h15_experimental_status("h15-1")
