@@ -163,6 +163,8 @@ def main() -> None:
         raise ValueError("Source H15 checkpoint does not match completed round")
 
     cfg = dict(source_config)
+    if sha256(Path(cfg["emulator_dll"])) != cfg["emulator_dll_sha256"]:
+        raise ValueError("Pinned H15 source emulator DLL has changed")
     cfg.update({
         "scenarios": list(scenarios), "decks": list(decks),
         "workers": args.workers, "max_searches": 0,
