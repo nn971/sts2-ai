@@ -135,6 +135,11 @@ def _collect_worker(
                     "outcome": report.outcome, "reward": report.reward,
                     "exit_hp": report.exit_hp, "decisions": report.combat_decisions,
                     "searched_roots": report.searched_decisions,
+                    "searched_root_diagnostics": list(report.searched_root_diagnostics),
+                    "search_overrides": sum(
+                        bool(d["search_overrode_greedy"])
+                        for d in report.searched_root_diagnostics
+                    ),
                     "targets": targets,
                 })
                 print(f"[h15-reference-{mode}] case={case_id} "
@@ -224,6 +229,19 @@ def aggregate(records: list[dict[str, Any]]) -> dict[str, Any]:
         "mean_reward": sum(r["reward"] for r in records) / n,
         "mean_decisions": sum(r["decisions"] for r in records) / n,
         "searched_roots": sum(r["searched_roots"] for r in records),
+        "search_overrides": sum(r["search_overrides"] for r in records),
+        "search_override_rate": (
+            sum(r["search_overrides"] for r in records) /
+            sum(r["searched_roots"] for r in records)
+            if sum(r["searched_roots"] for r in records) else None
+        ),
+        "mean_search_visit_kl_to_prior": (
+            sum(
+                d["visit_policy_kl_from_prior"] for r in records
+                for d in r["searched_root_diagnostics"]
+            ) / sum(r["searched_roots"] for r in records)
+            if sum(r["searched_roots"] for r in records) else None
+        ),
         "encounter_counts": {
             name: sum(r["encounter"] == name for r in records)
             for name in sorted({r["encounter"] for r in records})
