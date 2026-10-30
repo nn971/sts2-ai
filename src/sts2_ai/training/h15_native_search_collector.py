@@ -241,6 +241,11 @@ def collect_live_combat_search(
                     "search_simulations": stats.simulations,
                     "search_neural_cutoffs": stats.neural_cutoffs,
                     "search_terminal_evaluations": stats.terminal_evaluations,
+                    "root_visits": list(stats.visits),
+                    "root_mean_action_values": list(stats.mean_action_values),
+                    "root_mean_value": stats.root_mean_value,
+                    "search_expanded_information_sets": stats.expanded_information_sets,
+                    "search_transitions": stats.transitions,
                 })
                 saved.append((root, stats))
             else:
