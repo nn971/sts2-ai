@@ -108,7 +108,7 @@ def test_multiturn_uses_public_policy_and_tracks_unsupported_fallback():
         backend, "source", independent_seed="independent",
         teacher=DemoTeacher(), rng=random.Random(10),
     )
-    assert result["status"] == "combat_exit"
+    assert result["status"] == "combat_exit", result.get("reason")
     assert result["outcome"] == "victory"
     assert result["exit_hp"] == 32
     assert result["player_actions"] == 3
