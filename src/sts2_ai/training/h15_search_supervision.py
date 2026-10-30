@@ -22,6 +22,7 @@ from sts2_ai.models.h15_combat_codec import (
 from sts2_ai.models.shared_game_objects import EncodedDecision
 from sts2_ai.search.combat_puct import (
     FAIR_COMBAT_CAPABILITY,
+    ROOT_CONDITIONED_COMBAT_CAPABILITY,
     H15_SEARCH_VERSION,
     CombatFrame,
     CombatSearchResult,
@@ -119,6 +120,9 @@ def target_record(
 ) -> dict[str, Any]:
     """Serialize a completed ACTUAL trajectory's return, not a search estimate."""
     if (result.search_version != H15_SEARCH_VERSION
+            or result.chance_capability not in (
+                FAIR_COMBAT_CAPABILITY, ROOT_CONDITIONED_COMBAT_CAPABILITY,
+            )
             or result.information_key != root.information_key
             or result.action_ids != tuple(a.action_id for a in root.legal_actions)
             or not emulator_revision):
@@ -126,7 +130,7 @@ def target_record(
     row = {
         "schema": SAMPLE_SCHEMA,
         "combat_reward_version": REWARD_VERSION,
-        "chance_capability": FAIR_COMBAT_CAPABILITY,
+        "chance_capability": result.chance_capability,
         "search_version": H15_SEARCH_VERSION,
         "search_model_sha256": search_model_sha256,
         "source_seed": source_seed,
@@ -150,7 +154,9 @@ def target_record(
 def decode_target(row: dict[str, Any]) -> SearchTrainingSample | RealizedValueSample:
     if (row.get("schema") not in (SAMPLE_SCHEMA, VALUE_SAMPLE_SCHEMA)
             or row.get("combat_reward_version") != REWARD_VERSION
-            or row.get("chance_capability") != FAIR_COMBAT_CAPABILITY
+            or row.get("chance_capability") not in (
+                FAIR_COMBAT_CAPABILITY, ROOT_CONDITIONED_COMBAT_CAPABILITY,
+            )
             or row.get("search_version") != H15_SEARCH_VERSION
             or not isinstance(row.get("emulator_revision"), str)
             or not row["emulator_revision"]):
@@ -175,7 +181,8 @@ def decode_target(row: dict[str, Any]) -> SearchTrainingSample | RealizedValueSa
             or len({a.action_id for a in actions}) != len(actions)):
         raise ValueError("Invalid public legal menu")
     if row["schema"] == VALUE_SAMPLE_SCHEMA:
-        if (row.get("sample_kind") != "realized_value"
+        if (row["chance_capability"] != FAIR_COMBAT_CAPABILITY
+                or row.get("sample_kind") != "realized_value"
                 or type(row.get("source_decision_index")) is not int
                 or row["source_decision_index"] < 0
                 or any(k in row for k in (
