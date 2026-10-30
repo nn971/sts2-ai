@@ -18,6 +18,7 @@ def response(**overrides):
         "version": 0,
         "boundaryKind": "player",
         "combatExit": False,
+        "combatOutcome": None,
         "chanceLaw": None,
         "legalActions": [{
             "actionId": "legal-end-turn",
