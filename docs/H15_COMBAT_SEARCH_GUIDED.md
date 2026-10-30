@@ -529,3 +529,74 @@ conditional probabilities. The next milestone is to attach controlled
 Chance Law continuation to this entry-state representation, audit
 every remaining stochastic site, and establish full public-history
 conditional sampling before generating long-run H15 PUCT targets.
+
+
+## M7 — experimental real-run controlled end-turn continuations
+
+The emulator research branch provides `H15ControlledCombatSessionV1`,
+constructed from an **exact-replayed real Act 1 native-structure/prototype-RNG
+combat entry** via `H15NativeCombatEntryCandidateV1.Build`. It preserves
+the original combat mechanics and independently initializes private
+prototype-RNG and unresolved draw-order state. The pinned Act 1
+weak/normal/elite/boss encounter mappings are reused for the semantic
+intent selector; unidentified encounters fail closed.
+
+This is the first *executable* real-run continuation slice, using the
+existing `SemanticEndTurnEngineV111.BeginFromPlayerActionOrTerminal`
+and `Resolve` mechanics under the controlled chance guard. It accepts
+a real legal `end_turn` action and exposes typed `ChanceLawV111`
+outcomes for: automatic enemy-action index, next-turn enemy intent,
+draw-card identity, and random target. The selected outcome is checked
+against the exact current law and converted to the source mechanics
+ticket/index; mismatched laws or unsupported sites are rejected.
+Source-verified primitive Native grids are deliberately **downgraded**
+to `UNVERIFIED` and, where necessary, to raw/uniform experimental
+weights because the origin uses prototype combat RNG.
+
+The separate JSONL namespace has:
+`h15_experimental_begin` (original `state_handle` and independent
+seed), `h15_experimental_status`,
+`h15_experimental_end_turn` (legal `action_id` and exact version),
+`h15_experimental_choose` (the full current declared `chance_law`,
+selected `outcome_id`, and version), and
+`h15_experimental_release_many`. The session has no implicit RNG
+fallback and updates its handle only after a complete successful
+transition. It is independent of generic state, H8, and certified
+search handles.
+
+**Limitations:** This slice supports end-turn player actions only.
+Card/potion plays, other automatic nested chance types, exact full
+public-history conditional distributions, and broader encounter
+source coverage still need migration. It is **not** a fair
+`FairContinuationSampler`; the session and bridge advertise
+`fairContinuationCapability: unavailable`. No native fair PUCT
+targets are generated.
+
+Run the focused validation on the current branches:
+
+```fish
+set emu ~/projects/sts2-emulator
+set ai ~/projects/sts2-ai
+git -C $emu pull --ff-only
+dotnet test $emu/tests/Sts2Emulator.Core.Tests -c Release \
+    --filter 'FullyQualifiedName~H15ControlledCombatSessionV1Tests|FullyQualifiedName~H15NativeCombatEntryCandidateV1Tests|FullyQualifiedName~H15ChanceLawBoundaryTests'
+cd $ai
+git pull --ff-only
+python -m pytest -q \
+    tests/test_h15_controlled_turn_protocol.py \
+    tests/test_h15_native_candidate_probe.py
+python -u tools/probe_h15_controlled_turns.py \
+    --emulator-root $emu \
+    --emulator-revision (git -C $emu rev-parse HEAD) \
+    --source-revision 2c46c703a30875d6ef84fcbe0a0511fec9c74dcd \
+    --train-corpus results/h15-native-source-long/train.jsonl \
+    --output results/h15-native-source-long/controlled-turn-coverage-v1.jsonl \
+    --limit 12
+```
+
+The coverage report distinguishes successful next-player/exit
+transitions, explicitly unsupported boundaries, and rejected
+continuations; any `UNSUPPORTED_CONTROLLED_CHANCE` errors identify
+unowned source RNG sites requiring migration. Only proceed to fair
+PUCT training when an independent public-history-conditioned Nature
+model has been implemented and validated.
