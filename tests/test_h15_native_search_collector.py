@@ -113,3 +113,29 @@ def test_native_collector_terminal_at_exact_decision_budget(monkeypatch):
     assert batch.targets[0]["search_rollout_mode"] == "terminal"
     assert sampler.calls == 32
     assert len(backend.released) == 66
+
+
+def test_native_collector_value_leaf_search_keeps_realized_reward(monkeypatch):
+    """Value leaves guide search; the actual played fight still labels critic."""
+    backend = ToyBackend()
+    root = backend.observe("source:root", POLICY)
+    monkeypatch.setattr(
+        collector, "replay_native_public_history",
+        lambda _backend, _recipe: (
+            "source:root", (PublicHistoryStep(root, None, ACTIONS),),
+        ),
+    )
+    recipe = SimpleNamespace(seed="source-seed", exact_hash="verified-entry",
+                             tier="weak")
+    batch = collector.collect_native_combat_search(
+        backend, recipe, fair_sampler=IndependentSampler(),
+        teacher=ToyTeacher(), simulations=12, max_searches=1,
+        max_decisions=1, seed=5, leaf_mode="value",
+    )
+    assert batch.outcome == "victory"
+    assert batch.reward == pytest.approx(1.5)
+    assert len(batch.targets) == 1
+    row = batch.targets[0]
+    assert row["search_rollout_mode"] == "value"
+    assert row["realized_reward"] == pytest.approx(1.5)
+    assert sum(decode_target(row).visits) == 12
