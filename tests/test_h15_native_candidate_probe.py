@@ -1,8 +1,6 @@
 """Diagnostic native candidate bridge must never claim fair search access."""
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 
 from sts2_ai.emulator.jsonl_backend import JsonlBridgeError, JsonlEmulatorBackend
@@ -20,7 +18,8 @@ def diagnostic_backend(result):
 
 def valid_response():
     return {
-        "schemaId": "h15-native-combat-entry-independent-candidate-unverified-v1",
+        "schemaId": "h15-native-structure-prototype-rng-candidate-unverified-v1",
+        "providerClass": "prototype-combat-rng",
         "fairContinuationCapability": "unavailable",
         "stateHandleReturned": False,
         "observationHash": "source-visible-frame-hash",
@@ -39,6 +38,7 @@ def test_probe_returns_diagnostic_only_and_passes_independent_seed():
         "independent_seed": "independent-candidate-seed",
     })]
     assert result["fair_continuation_capability"] == "unavailable"
+    assert result["provider_class"] == "prototype-combat-rng"
     assert result["unknown_draw_positions"] == 7
     assert "state_handle" not in result
     assert result["observation_hash"] == "source-visible-frame-hash"
@@ -48,6 +48,7 @@ def test_probe_returns_diagnostic_only_and_passes_independent_seed():
     {"fairContinuationCapability": "history-conditioned-fair-v1"},
     {"stateHandleReturned": True},
     {"schemaId": "native-fair-root-v1"},
+    {"providerClass": "native-combat-rng"},
     {"unknownDrawPositions": -1},
     {"legalActionCount": 0},
 ])
@@ -66,3 +67,16 @@ def test_probe_rejects_empty_seed_without_call():
             "s47", independent_seed="",
         )
     assert calls == []
+
+
+def test_native_combat_rng_candidate_has_distinct_provenance():
+    backend, _ = diagnostic_backend({
+        **valid_response(),
+        "providerClass": "native-combat-rng",
+        "schemaId": "h15-native-combat-entry-independent-candidate-unverified-v1",
+    })
+    result = backend.probe_h15_native_combat_candidate(
+        "s47", independent_seed="independent",
+    )
+    assert result["provider_class"] == "native-combat-rng"
+    assert result["fair_continuation_capability"] == "unavailable"
