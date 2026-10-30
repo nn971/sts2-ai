@@ -880,6 +880,8 @@ from two different reward versions are not directly comparable.
 ### Recommended new full run (fish)
 
 ```fish
+# First stop the running M16 process at a completed-round boundary;
+# do not switch a checkout while its training job still uses these files.
 cd ~/projects/sts2-ai
 git fetch origin
 git switch research/h15-m17-victory-margin-puct-20261031
