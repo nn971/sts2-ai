@@ -95,7 +95,7 @@ def collect_native_combat_search(
     fair_sampler: FairContinuationSampler, teacher: H15CombatEvaluator,
     simulations: int = 32, max_decisions: int = 512, max_searches: int = 8,
     seed: int = 20261029, tree_depth: int = 16,
-    rollout_depth: int = 512,
+    rollout_depth: int = 512, leaf_mode: str = "terminal",
 ) -> NativeSearchCollection:
     """Search only selected moves; label all saved roots after actual combat.
 
@@ -106,7 +106,7 @@ def collect_native_combat_search(
     the actor's actual native state handle.
     """
     if (min(simulations, max_decisions, max_searches, tree_depth, rollout_depth) < 1
-            or seed < 0):
+            or seed < 0 or leaf_mode not in ("terminal", "value")):
         raise ValueError("Invalid native combat-search budget")
     # Reject unsupported samplers BEFORE replaying or owning a live native
     # state, so a missing capability cannot leak the source combat handle.
@@ -118,7 +118,7 @@ def collect_native_combat_search(
         entry_hash=recipe.exact_hash, encounter_tier=recipe.tier,
         simulations=simulations, max_decisions=max_decisions,
         max_searches=max_searches, seed=seed, tree_depth=tree_depth,
-        rollout_depth=rollout_depth,
+        rollout_depth=rollout_depth, leaf_mode=leaf_mode,
     )
 
 
@@ -129,7 +129,7 @@ def collect_live_combat_search(
     source_seed: str, entry_hash: str, encounter_tier: str,
     simulations: int = 32, max_decisions: int = 512, max_searches: int = 8,
     seed: int = 20261029, tree_depth: int = 16,
-    rollout_depth: int = 512,
+    rollout_depth: int = 512, leaf_mode: str = "terminal",
 ) -> NativeSearchCollection:
     """Consume a verified public combat entry and own/release its handle.
 
@@ -140,7 +140,7 @@ def collect_live_combat_search(
     adapter = H15PublicCombatAdapter(backend, sampler=fair_sampler)
     search = CombatPuct(
         adapter, teacher, seed=seed, max_depth=tree_depth,
-        rollout_depth=rollout_depth, leaf_mode="terminal",
+        rollout_depth=rollout_depth, leaf_mode=leaf_mode,
     )
     saved: list[tuple[CombatFrame, Any]] = []
     count = 0
@@ -188,8 +188,9 @@ def collect_live_combat_search(
             if len(saved) < max_searches and not is_nested_choice:
                 root = adapter.root(history)
                 stats = search.search(root, simulations=simulations)
-                if (stats.neural_cutoffs != 0
-                        or stats.terminal_evaluations != simulations):
+                if (leaf_mode == "terminal" and
+                        (stats.neural_cutoffs != 0 or
+                         stats.terminal_evaluations != simulations)):
                     raise ValueError("H15 search did not finish every sampled combat")
                 index = max(
                     range(len(menu)),
