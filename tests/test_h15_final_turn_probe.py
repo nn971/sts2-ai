@@ -30,6 +30,7 @@ def state(turn: int, hp: int, enemy_hp: int) -> Observation:
     return Observation("fair", json.dumps({
         "hp": hp, "max_hp": 70, "combat": {
             "turn": turn, "energy": 2, "player_block": 3,
+            "hand": [{"instance_id": 4, "card_id": "proto.silent.strike"}],
             "enemies": [{"instance_id": 1, "hp": enemy_hp}],
         },
     }), f"public-{turn}-{hp}-{enemy_hp}")
@@ -66,6 +67,11 @@ def test_final_turn_records_all_actions_but_no_future_public_information():
     assert all(a["predicted_encounter_reward"] == 1.5
                for a in final_turn["actions"])
     assert all(a["player_hp"] == 45 for a in final_turn["actions"])
+    assert final_turn["actions"][0]["selected_action"]["card_id"] == (
+        "proto.silent.strike"
+    )
+    assert final_turn["actions"][0]["selected_action"]["target_enemy_id"] == 1
+    assert final_turn["actions"][1]["selected_action"]["card_id"] is None
     assert len(teacher.calls) == 2  # only final-turn public observations
 
 
