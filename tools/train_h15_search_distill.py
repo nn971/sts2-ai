@@ -96,7 +96,10 @@ def main() -> None:
     def evaluate_training_fit() -> dict[str, float]:
         """Diagnostic in-sample fit; never use this as a held-out strength claim."""
         model.eval()
-        total = {"policy_loss": 0.0, "value_loss": 0.0}
+        total = {
+            "policy_loss": 0.0, "policy_target_entropy": 0.0,
+            "policy_kl_to_search": 0.0, "value_loss": 0.0,
+        }
         with torch.no_grad():
             for start in range(0, len(rows), args.batch_size):
                 batch = rows[start:start + args.batch_size]
