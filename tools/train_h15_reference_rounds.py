@@ -126,8 +126,9 @@ def _collect_worker(
                         "tree_expansion_mode", "one_leaf",
                     ),
                     defeat_margin_beta=cfg.get("defeat_margin_beta", 0.0),
-                    reserved_lethal_searches=cfg.get(
-                        "reserved_lethal_searches", 0,
+                    reserved_lethal_searches=(
+                        cfg.get("reserved_lethal_searches", 0)
+                        if mode != "greedy" else 0
                     ),
                     lethal_enemy_hp=cfg.get("lethal_enemy_hp", 20),
                     record_final_turn=cfg.get("record_final_turn", False),
