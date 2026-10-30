@@ -55,3 +55,84 @@ A **root-conditioned** search that forks an exact hidden simulator state is perm
 4. Amend this canonical plan and the relevant repository instructions **together** whenever the decision actually changes. Mark superseded guidance as historical or remove it. Do not quietly change the priority because a test or older document expects a different architecture.
 
 The next named milestone must remain **H15 search-guided combat learning**, until the user explicitly changes it.
+
+
+## First integrated feedback-cycle implementation (M14; awaiting workstation smoke)
+
+The experimental H15 AI branch now contains
+`tools/run_h15_h8_feedback_cycle.py`, a direct composition of the
+existing H8 declared-law ReferenceNature collector, H15 policy/value
+distillation and renewed H15 PUCT. It implements the **first ordered
+training deliverable on a fixed A10 fixture** without changing the pinned
+H10 PPO experiment or adding a stochastic provider.
+
+The runner performs, in order:
+
+1. Open the same A10 H8 fixture under **emulator-owned**
+   `ReferenceNatureV111.SampleValidated` Chance Laws and collect value-leaf
+   PUCT visits. The search uses bounded simulations/tree depth; the
+   *actually executed* full fight supplies the terminal H9 HP reward.
+2. Decode and verify all saved target rows and the exact declared chance-prior
+   ID and source-model SHA. Distill visits via policy cross-entropy and
+   realized encounter reward via value regression into a **new** H15 model.
+   Compare initial and updated model tensors, rejecting a metadata-only
+   checkpoint with zero parameter change.
+3. Reconstruct the **identical opening public decision and Nature seed**,
+   collect PUCT visits with the updated H15 teacher, check the root's
+   observation and legal actions still match, and report both visit policies,
+   teacher/checkpoint hashes and actual combat outcomes. The same seed is for
+   controlled comparison, not a claim that changed actions share identical
+   subsequent hidden outcomes.
+
+This is deliberately scoped to the **fixed-fixture declared-prior model**
+(`H8_DECLARED_LAW_MODEL`), with terminal rewards from the real reference
+combat, not model-generated pseudo-labels. `UNVERIFIED` probability
+calibration against the original game remains a separate project. The
+updated value head can guide bounded leaves; the existing
+`--leaf-mode terminal` path remains available for older terminal-only
+comparisons. A short single-fixture cycle is an **integration smoke**,
+not evidence that H15 outperforms H9 or works across arbitrary native entries.
+
+Run on the existing local workstation **after the pinned PPO checkout is
+free**, without making another worktree:
+
+```fish
+set ai ~/projects/sts2-ai
+set emu ~/projects/sts2-emulator
+git -C $emu switch research/h15-experimental-search-20261030
+git -C $emu pull --ff-only
+git -C $ai switch research/h15-experimental-search-20261030
+git -C $ai pull --ff-only
+
+dotnet build $emu/src/Sts2Emulator.Cli -c Release
+cd $ai
+source .venv/bin/activate.fish
+python -m pytest -q tests/test_h15_feedback_cycle.py \
+    tests/test_h15_native_search_collector.py \
+    tests/test_h15_combat_search.py \
+    tests/test_h15_h8_reference.py
+
+python -u tools/run_h15_h8_feedback_cycle.py \
+    --emulator-root $emu \
+    --emulator-revision (git -C $emu rev-parse HEAD) \
+    --emulator-dll $emu/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+    --initialize-from-model results/h9-adaptive-totalhp-r40-r250/models/player-r0250.pt \
+    --output-root results/h15-reference-feedback/mawler-a10-seed113-v1 \
+    --scenario mawler-a10 --deck silent-starter-v1 \
+    --source-nature-seed 113 --simulations 16 \
+    --tree-depth 8 --max-searches 1 \
+    --epochs 1 --device cuda --execute
+```
+
+The runner refuses to overwrite an existing output directory and saves
+`before/targets.jsonl`, `before/report.json`, `student.pt`,
+`after/targets.jsonl`, `after/report.json`, and
+`feedback-cycle.json`. Remove `--execute` to preview the exact commands.
+
+**Status and next step:** remote code is committed; no .NET/CUDA-backed
+feedback-cycle result has been generated in the repository environment.
+Run the integration smoke first. Repair actual source mechanics/codec
+failures if they occur; once this completes, scale to a source-supported
+A10 Nature combat curriculum and repeated search-training updates under
+disjoint reference seeds. For comparative strength claims, follow the
+experiment evidence standard and multiple independent training seeds.
