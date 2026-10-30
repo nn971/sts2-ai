@@ -17,6 +17,9 @@ from pathlib import Path
 import torch
 
 from sts2_ai.models.h15_combat_codec import H15_COMBAT_SCHEMA
+from sts2_ai.search.combat_puct import (
+    FAIR_COMBAT_CAPABILITY, ROOT_CONDITIONED_COMBAT_CAPABILITY,
+)
 from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
 from sts2_ai.training.h15_search_supervision import (
     REWARD_VERSION,
@@ -43,6 +46,11 @@ def main() -> None:
         "--accepted-chance-prior", required=True,
         help="Exact versioned chance-prior ID of the complete search corpus",
     )
+    p.add_argument(
+        "--accepted-search-provider",
+        choices=("fair_posterior", "root_conditioned"),
+        default="fair_posterior",
+    )
     p.add_argument("--output", required=True, type=Path)
     p.add_argument("--epochs", type=int, default=8)
     p.add_argument("--batch-size", type=int, default=32)
@@ -67,6 +75,16 @@ def main() -> None:
             if not isinstance(row, dict):
                 raise ValueError(f"Row {index} is not an object")
             sample = decode_target(row)
+            if row.get("schema") == SAMPLE_SCHEMA:
+                required_capability = (
+                    FAIR_COMBAT_CAPABILITY
+                    if args.accepted_search_provider == "fair_posterior"
+                    else ROOT_CONDITIONED_COMBAT_CAPABILITY
+                )
+                if row.get("chance_capability") != required_capability:
+                    raise ValueError(
+                        f"Row {index}: search provider mismatches declared experiment"
+                    )
             if row.get("chance_prior_id") != args.accepted_chance_prior:
                 raise ValueError(
                     f"Row {index}: search chance prior mismatch or missing provenance"
@@ -85,7 +103,8 @@ def main() -> None:
           f"policy_roots={policy_samples} value_only={value_only_samples} "
           f"source_seeds={len(fingerprints)} "
           f"teacher_sha256={model_sha} reward={REWARD_VERSION} schema={SAMPLE_SCHEMA} "
-          f"chance_prior={args.accepted_chance_prior}",
+          f"chance_prior={args.accepted_chance_prior} "
+          f"search_provider={args.accepted_search_provider}",
           flush=True)
     if not args.execute:
         print("[h15-preflight] no optimizer run (pass --execute)", flush=True)
@@ -178,6 +197,7 @@ def main() -> None:
             "policy_roots": policy_samples,
             "value_only_samples": value_only_samples,
             "chance_prior": args.accepted_chance_prior,
+            "search_provider": args.accepted_search_provider,
             "epochs": args.epochs,
             "seed": args.seed,
             "optimizer_steps": optimizer_steps,
