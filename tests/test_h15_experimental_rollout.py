@@ -31,8 +31,10 @@ def frame(kind: str, version: int, *, menu=(), law=None, exit_hp=None):
         "chanceLaw": law,
         "combatOutcome": "victory" if kind == "combat_exit" else None,
         "exitHp": exit_hp,
-        "combatExitPublicObservationJson": (
-            f'{{"hp":{exit_hp},"max_hp":70}}'
+        "combatExitH9Reward": (
+            {"hp": exit_hp, "maxHp": 70,
+             "defeatTotalNonMinionEnemyHp": None,
+             "defeatRemainingNonMinionEnemyHp": None}
             if kind == "combat_exit" else None
         ),
         "combatTurn": 1,
