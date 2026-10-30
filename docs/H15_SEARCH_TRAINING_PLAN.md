@@ -526,3 +526,70 @@ counterfactual signal; then run extended search-guided learning on
 A10/reference-law source runs. Preserve the original user preference
 for 15 workers and full-length training once the learning signal has
 actually been characterized.
+
+
+## M15 user-requested difficult-combat final-turn study (2026-10-30)
+
+**Motivation (user request):** opening-root PUCT agreement may conceal
+useful late-combat decisions; lethal choices, imminent defeat and other
+near-terminal states offer clearer value supervision. Investigate a
+difficult A10 combat with roughly 50% observed **frozen H15 raw-policy**
+wins, and record **every actual player action on its final turn**,
+including losing trajectories.
+
+**One diagnostic runner:** `tools/probe_h15_final_turn.py`.
+It holds the **existing M15 round-1 H15 checkpoint** frozen, uses the
+existing emulator-owned declared-law `H8ReferenceCombatBackend`
+with `ReferenceNatureV111`, and executes baseline fights without PUCT
+or optimizer changes. A single 15-worker screening cohort covers
+**both source-supported A10 boss fixtures** (Ceremonial Beast and Vantom)
+paired with starter, poison-kit, 20-card boss-cycle and 20-card boss-poison
+decks (8 combinations, 12 independent combats per combination by
+default). Source IDs and boss/deck allocation are fixed *before* the
+outcomes. The candidate whose measured win rate is closest to 50%
+is validated on **32 independent fresh combats**; the result explicitly
+reports both rates, Wilson intervals and whether the chosen candidate
+actually falls within `0.50 ± 0.20`. No win-rate claim is made before
+emulator evidence exists, and no case is selected by the favorable
+outcome.
+
+The final-turn extractor stores ordered *actual* actions including
+kind, action ID and public payload, turn/decision index, visible player
+HP/block/energy, enemy HP, number of legal choices, the policy
+probability assigned to the executed action, and critic values at each
+decision. It records the last player turn for **victories and defeats**
+and compares the first final-turn critic estimate with the true
+completed-fight H9 encounter return. All critic inputs are the public
+decision observation only; retrospective selection of the final turn
+is strictly **analysis provenance**, never a search-policy input. The
+initial result is an observational endgame/value diagnostic, not a
+claim that PUCT has improved the final turn. Full public-history
+conditioning for late-turn PUCT remains a distinct experiment, if
+warranted by this study.
+
+The executable command (fish) is:
+
+```fish
+cd ~/projects/sts2-ai
+git pull --ff-only
+source .venv/bin/activate.fish
+
+python -m pytest -q tests/test_h15_final_turn_probe.py \
+    tests/test_h15_native_search_collector.py
+
+python -u tools/probe_h15_final_turn.py \
+    --source-run results/h15-reference-m15-cohort-smoke-v1 \
+    --round 1 \
+    --output-root results/h15-a10-boss-final-turn-v1 \
+    --screen-per-pair 12 --validate-combats 32 \
+    --workers 15 --execute
+```
+
+The single run writes `progress.json` containing all screened
+scenario/deck win rates and the independently validated selected
+baseline, plus `final-turn-actions.json` with ordered last-turn
+action and value-head traces for every validation case. Saved worker
+chunks permit safe resume; a pinned SHA manifest rejects changed
+code/DLL/model/data configurations. **No new training gate is added.**
+The established search-guided trainer remains independently runnable,
+and the H15 learning agenda is unchanged.
