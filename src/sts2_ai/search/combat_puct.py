@@ -22,6 +22,7 @@ from sts2_ai.emulator.protocol import LegalAction, Observation
 FAIR_COMBAT_CAPABILITY = "h15-public-history-combat-chance-v1"
 ROOT_CONDITIONED_COMBAT_CAPABILITY = "h15-h8-root-conditioned-combat-v1"
 H15_SEARCH_VERSION = "h15-combat-puct-v2"
+H15_DEEP_SEARCH_VERSION = "h15-combat-puct-v3-depth-expansion"
 
 
 @dataclass(frozen=True)
@@ -104,6 +105,8 @@ class CombatSearchResult:
     rollout_mode: str = "value"
     expanded_information_sets: int = 0
     chance_capability: str = FAIR_COMBAT_CAPABILITY
+    tree_expansion_mode: str = "one_leaf"
+    maximum_expanded_depth: int = 0
 
     @property
     def policy(self) -> tuple[float, ...]:
@@ -118,14 +121,16 @@ class CombatPuct:
 
     def __init__(self, sampler: FairCombatSampler, evaluator: CombatEvaluator, *,
                  c_puct: float = 1.5, max_depth: int = 256, seed: int = 0,
-                 leaf_mode: str = "value", rollout_depth: int = 512):
+                 leaf_mode: str = "value", rollout_depth: int = 512,
+                 tree_expansion_mode: str = "one_leaf"):
         if (not isinstance(sampler, FairCombatSampler) or
                 sampler.fair_combat_capability_id not in (
                     FAIR_COMBAT_CAPABILITY, ROOT_CONDITIONED_COMBAT_CAPABILITY,
                 )):
             raise ValueError("H15 requires an explicitly certified combat sampler")
         if (not math.isfinite(c_puct) or c_puct <= 0 or max_depth <= 0
-                or leaf_mode not in ("value", "terminal") or rollout_depth <= 0):
+                or leaf_mode not in ("value", "terminal") or rollout_depth <= 0
+                or tree_expansion_mode not in ("one_leaf", "full_depth")):
             raise ValueError("Invalid combat search configuration")
         self._sampler = sampler
         self._evaluator = evaluator
@@ -133,6 +138,7 @@ class CombatPuct:
         self._depth = max_depth
         self._leaf_mode = leaf_mode
         self._rollout_depth = rollout_depth
+        self._tree_expansion_mode = tree_expansion_mode
         self._rng = random.Random(seed)
 
     def _expand(self, frame: CombatFrame) -> _Node:
@@ -197,6 +203,7 @@ class CombatPuct:
         table: dict[str, _Node] = {root.information_key: self._expand(root)}
         transitions = terminals = cutoffs = 0
         root_value_sum = 0.0
+        max_expanded_depth = 0
         for _ in range(simulations):
             path: list[_Edge] = []
             frame = root
@@ -211,21 +218,24 @@ class CombatPuct:
                         break
                     node = table.get(frame.information_key)
                     if node is None:
-                        # Expand the newly encountered information set even
-                        # when terminal rollouts supervise the leaf. Subsequent
-                        # simulations can then descend and improve its policy.
+                        # Full-depth mode expands newly encountered legal
+                        # public decisions and continues PUCT immediately.
+                        # The original one-leaf mode preserves H15 M16 data.
                         node = self._expand(frame)
                         table[frame.information_key] = node
-                        if self._leaf_mode == "terminal":
-                            result, extra = self._terminal_rollout(
-                                frame, seen, root_policy_id=root.observation.policy_id,
-                            )
-                            transitions += extra
-                            terminals += 1
-                        else:
-                            result = node.prior_value
-                            cutoffs += 1
-                        break
+                        max_expanded_depth = max(max_expanded_depth, depth)
+                        if self._tree_expansion_mode == "one_leaf":
+                            if self._leaf_mode == "terminal":
+                                result, extra = self._terminal_rollout(
+                                    frame, seen,
+                                    root_policy_id=root.observation.policy_id,
+                                )
+                                transitions += extra
+                                terminals += 1
+                            else:
+                                result = node.prior_value
+                                cutoffs += 1
+                            break
                     if node.frame != frame:
                         raise ValueError("Same public-history key has contradictory observations")
                     if depth == self._depth:
@@ -261,11 +271,14 @@ class CombatPuct:
                 self._sampler.end_simulation()
         edges = table[root.information_key].edges
         return CombatSearchResult(
-            H15_SEARCH_VERSION, root.information_key,
+            (H15_DEEP_SEARCH_VERSION
+             if self._tree_expansion_mode == "full_depth"
+             else H15_SEARCH_VERSION), root.information_key,
             tuple(a.action_id for a in root.legal_actions),
             tuple(e.visits for e in edges),
             tuple(e.q if e.visits else None for e in edges),
             root_value_sum / simulations, simulations, terminals, cutoffs,
             transitions, self._leaf_mode, len(table),
             self._sampler.fair_combat_capability_id,
+            self._tree_expansion_mode, max_expanded_depth,
         )

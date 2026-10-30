@@ -1,5 +1,28 @@
 # sts2-ai — repository instructions for development agents
 
+## Current H15 M17 execution decision (2026-10-31)
+
+The user approved a **new** training experiment following M16's
+unimproved round-20 evaluation: beta=0.5 applied on the **defeat**
+branch of the terminal H9 objective (victory HP preservation unchanged),
+and **more frequent/deeper PUCT expansion**. See the M17 section in
+`docs/H15_SEARCH_TRAINING_PLAN.md`. Keep earlier M16 artifacts,
+reward-version identities, frozen source checkpoints, and already
+running experiments untouched. M17 lives on the separate
+`research/h15-m17-victory-margin-puct-20261031` research branch.
+
+All new M17 data must carry explicit terminal reward version and
+deep-search version/provenance. Full-depth root-conditioned H8 PUCT
+is an **approximate privileged teacher**, not a fair posterior;
+network observations remain public. No new Chance Law or stochastic
+provider is authorized. Evaluation should compare win rates and
+surviving HP on matched fresh ReferenceNature holdouts, since mean
+rewards under different beta versions are not directly comparable.
+This M17 decision updates the research configuration without changing
+the accepted overall goal of a complete search-guided policy/value
+feedback cycle, the no-fidelity-gate rule, or evidence standards.
+
+
 This file is project policy for AI assistants, coding agents and reviewers.
 
 ## Mandatory H15 implementation priority and conflict disclosure (2026-10-30)

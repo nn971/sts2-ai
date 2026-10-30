@@ -27,7 +27,9 @@ from sts2_ai.nature.combat_scenarios import (
     deck_for_seed,
     scenario_for_seed,
 )
-from sts2_ai.training.h15_search_supervision import decode_target
+from sts2_ai.training.h15_search_supervision import (
+    REWARD_VERSION, DEFEAT_MARGIN_REWARD_VERSION, decode_target,
+)
 
 REGIME = "fixed-h8-fixture-declared-chance-law"
 SCHEMA = "sts2-h15-reference-round-training-v1"
@@ -120,6 +122,15 @@ def _collect_worker(
                     leaf_mode=cfg["search_leaf_mode"],
                     search_schedule=cfg["search_schedule"],
                     search_provider=cfg["search_provider"],
+                    tree_expansion_mode=cfg.get(
+                        "tree_expansion_mode", "one_leaf",
+                    ),
+                    defeat_margin_beta=cfg.get("defeat_margin_beta", 0.0),
+                    reserved_lethal_searches=(
+                        cfg.get("reserved_lethal_searches", 0)
+                        if mode != "greedy" else 0
+                    ),
+                    lethal_enemy_hp=cfg.get("lethal_enemy_hp", 20),
                     record_final_turn=cfg.get("record_final_turn", False),
                     late_value_max=(
                         cfg.get("late_value_max", 0) if mode == "train" else 0
@@ -327,6 +338,15 @@ def aggregate(records: list[dict[str, Any]]) -> dict[str, Any]:
         "mean_visited_action_q_spread": (
             sum(q_spreads) / len(q_spreads) if q_spreads else None
         ),
+        "near_lethal_search_roots": sum(
+            d.get("search_trigger") == "near_lethal"
+            for d in diagnostics
+        ),
+        "mean_maximum_expanded_depth": (
+            sum(d.get("search_maximum_expanded_depth", 0)
+                for d in diagnostics) / len(diagnostics)
+            if diagnostics else None
+        ),
         "search_override_rate": (
             sum(r["search_overrides"] for r in records) /
             sum(r["searched_roots"] for r in records)
@@ -354,6 +374,7 @@ def run_optimizer(cfg: dict[str, Any], teacher: Path, data: Path,
         "--search-data", str(data),
         "--accepted-chance-prior", H8_DECLARED_LAW_MODEL,
         "--accepted-search-provider", cfg["search_provider"],
+        "--accepted-reward-version", cfg["reward_version"],
         "--output", str(output), "--epochs", str(cfg["epochs"]),
         "--batch-size", str(cfg["batch_size"]),
         "--lr", str(cfg["lr"]),
@@ -387,13 +408,22 @@ def main() -> None:
     p.add_argument("--seed", type=int, default=20261030)
     p.add_argument("--simulations", type=int, default=32)
     p.add_argument("--max-searches", type=int, default=1)
+    p.add_argument(
+        "--defeat-margin-beta", type=float, choices=(0.0, 0.5), default=0.0,
+    )
+    p.add_argument("--reserved-lethal-searches", type=int, default=0)
+    p.add_argument("--lethal-enemy-hp", type=int, default=20)
+    p.add_argument(
+        "--tree-expansion-mode",
+        choices=("one_leaf", "full_depth"), default="one_leaf",
+    )
     p.add_argument("--late-value-max", type=int, default=0)
     p.add_argument("--late-value-min-turn", type=int, default=7)
     p.add_argument("--late-value-player-hp", type=int, default=25)
     p.add_argument("--late-value-enemy-hp", type=int, default=40)
     p.add_argument(
         "--search-schedule",
-        choices=("first", "turn_start", "danger"), default="first",
+        choices=("first", "turn_start", "danger", "tactical"), default="first",
     )
     p.add_argument(
         "--search-provider",
@@ -421,7 +451,10 @@ def main() -> None:
             args.max_candidates, args.max_decisions, args.epochs,
             args.batch_size, args.late_value_min_turn) <= 0
             or min(args.late_value_max, args.late_value_player_hp,
-                   args.late_value_enemy_hp) < 0 or args.seed < 0
+                   args.late_value_enemy_hp, args.lethal_enemy_hp,
+                   args.reserved_lethal_searches) < 0
+            or args.reserved_lethal_searches > args.max_searches
+            or args.seed < 0
             or not math.isfinite(args.lr) or args.lr <= 0
             or not math.isfinite(args.value_weight) or args.value_weight < 0
             or not args.fixture_seed or not args.seed_prefix
@@ -465,6 +498,14 @@ def main() -> None:
         "fixture_seed": args.fixture_seed, "seed_prefix": args.seed_prefix,
         "workers": args.workers, "simulations": args.simulations,
         "max_searches": args.max_searches,
+        "defeat_margin_beta": args.defeat_margin_beta,
+        "reward_version": (
+            DEFEAT_MARGIN_REWARD_VERSION
+            if args.defeat_margin_beta == 0.5 else REWARD_VERSION
+        ),
+        "reserved_lethal_searches": args.reserved_lethal_searches,
+        "lethal_enemy_hp": args.lethal_enemy_hp,
+        "tree_expansion_mode": args.tree_expansion_mode,
         "late_value_max": args.late_value_max,
         "late_value_min_turn": args.late_value_min_turn,
         "late_value_player_hp": args.late_value_player_hp,
@@ -489,6 +530,7 @@ def main() -> None:
                 "src/sts2_ai/search/combat_puct.py",
                 "src/sts2_ai/search/h15_public_combat_adapter.py",
                 "src/sts2_ai/training/h15_search_supervision.py",
+                "src/sts2_ai/nature/h4_reward.py",
                 "src/sts2_ai/emulator/h15_h8_reference.py",
                 "src/sts2_ai/models/h15_combat_codec.py",
             )
@@ -498,7 +540,9 @@ def main() -> None:
         **{k: config[k] for k in ("schema", "emulator_revision", "scenarios",
             "decks", "workers", "train_combats", "eval_combats", "simulations",
             "late_value_max", "late_value_min_turn",
-            "search_provider", "search_leaf_mode")},
+            "search_provider", "search_leaf_mode",
+            "defeat_margin_beta", "tree_expansion_mode",
+            "reserved_lethal_searches")},
         "rounds": args.rounds, "output_root": str(args.output_root),
         "execute": args.execute,
     }, sort_keys=True), flush=True)

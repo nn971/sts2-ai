@@ -24,6 +24,7 @@ from sts2_ai.search.combat_puct import (
     FAIR_COMBAT_CAPABILITY,
     ROOT_CONDITIONED_COMBAT_CAPABILITY,
     H15_SEARCH_VERSION,
+    H15_DEEP_SEARCH_VERSION,
     CombatFrame,
     CombatSearchResult,
 )
@@ -31,6 +32,8 @@ from sts2_ai.search.combat_puct import (
 SAMPLE_SCHEMA = "sts2-h15-combat-search-target-v1"
 VALUE_SAMPLE_SCHEMA = "sts2-h15-combat-realized-value-target-v1"
 REWARD_VERSION = "encounter_nonminion_total_hp_v1"
+DEFEAT_MARGIN_REWARD_VERSION = "encounter_nonminion_total_hp_defeat_margin_beta050_v1"
+SUPPORTED_REWARD_VERSIONS = (REWARD_VERSION, DEFEAT_MARGIN_REWARD_VERSION)
 
 
 @dataclass(frozen=True)
@@ -85,16 +88,18 @@ def value_target_record(
     observation: Any, legal_actions: tuple[LegalAction, ...], *,
     terminal_reward: float, search_model_sha256: str,
     source_seed: str, emulator_revision: str, decision_index: int,
+    reward_version: str = REWARD_VERSION,
 ) -> dict[str, Any]:
     """Build value-only supervision from an actually played public decision."""
-    if (not legal_actions or observation.policy_id != FAIR_POLICY_ID
+    if (reward_version not in SUPPORTED_REWARD_VERSIONS
+            or not legal_actions or observation.policy_id != FAIR_POLICY_ID
             or not emulator_revision or type(decision_index) is not int
             or decision_index < 0):
         raise ValueError("H15 value sample needs a fair, live public decision")
     row = {
         "schema": VALUE_SAMPLE_SCHEMA,
         "sample_kind": "realized_value",
-        "combat_reward_version": REWARD_VERSION,
+        "combat_reward_version": reward_version,
         "chance_capability": FAIR_COMBAT_CAPABILITY,
         "search_version": H15_SEARCH_VERSION,
         "search_model_sha256": search_model_sha256,
@@ -117,9 +122,14 @@ def target_record(
     root: CombatFrame, result: CombatSearchResult, *,
     terminal_reward: float, search_model_sha256: str,
     source_seed: str, emulator_revision: str,
+    reward_version: str = REWARD_VERSION,
 ) -> dict[str, Any]:
     """Serialize a completed ACTUAL trajectory's return, not a search estimate."""
-    if (result.search_version != H15_SEARCH_VERSION
+    if (result.search_version not in (
+                H15_SEARCH_VERSION, H15_DEEP_SEARCH_VERSION,
+            ) or reward_version not in SUPPORTED_REWARD_VERSIONS
+            or (result.search_version == H15_DEEP_SEARCH_VERSION) !=
+               (result.tree_expansion_mode == "full_depth")
             or result.chance_capability not in (
                 FAIR_COMBAT_CAPABILITY, ROOT_CONDITIONED_COMBAT_CAPABILITY,
             )
@@ -129,9 +139,11 @@ def target_record(
         raise ValueError("Search result is not aligned with public combat root")
     row = {
         "schema": SAMPLE_SCHEMA,
-        "combat_reward_version": REWARD_VERSION,
+        "combat_reward_version": reward_version,
         "chance_capability": result.chance_capability,
-        "search_version": H15_SEARCH_VERSION,
+        "search_version": result.search_version,
+        "search_tree_expansion_mode": result.tree_expansion_mode,
+        "search_maximum_expanded_depth": result.maximum_expanded_depth,
         "search_model_sha256": search_model_sha256,
         "source_seed": source_seed,
         "emulator_revision": emulator_revision,
@@ -153,11 +165,13 @@ def target_record(
 
 def decode_target(row: dict[str, Any]) -> SearchTrainingSample | RealizedValueSample:
     if (row.get("schema") not in (SAMPLE_SCHEMA, VALUE_SAMPLE_SCHEMA)
-            or row.get("combat_reward_version") != REWARD_VERSION
+            or row.get("combat_reward_version") not in SUPPORTED_REWARD_VERSIONS
             or row.get("chance_capability") not in (
                 FAIR_COMBAT_CAPABILITY, ROOT_CONDITIONED_COMBAT_CAPABILITY,
             )
-            or row.get("search_version") != H15_SEARCH_VERSION
+            or row.get("search_version") not in (
+                H15_SEARCH_VERSION, H15_DEEP_SEARCH_VERSION,
+            )
             or not isinstance(row.get("emulator_revision"), str)
             or not row["emulator_revision"]):
         raise ValueError("Incompatible or uncertified H15 search target")
@@ -196,6 +210,13 @@ def decode_target(row: dict[str, Any]) -> SearchTrainingSample | RealizedValueSa
             search_model_sha256=row.get("search_model_sha256"),
             source_seed=row.get("source_seed"),
         )
+    if row["search_version"] == H15_DEEP_SEARCH_VERSION:
+        if (row.get("search_tree_expansion_mode") != "full_depth"
+                or type(row.get("search_maximum_expanded_depth")) is not int
+                or row["search_maximum_expanded_depth"] < 0):
+            raise ValueError("M17 deep PUCT target lacks expansion provenance")
+    elif row.get("search_tree_expansion_mode", "one_leaf") != "one_leaf":
+        raise ValueError("H15 v2 target cannot claim deep expansion")
     sample = SearchTrainingSample(
         decision=encode_h15_combat(state, actions),
         visits=tuple(visits),

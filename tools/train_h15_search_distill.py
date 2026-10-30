@@ -23,6 +23,7 @@ from sts2_ai.search.combat_puct import (
 from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
 from sts2_ai.training.h15_search_supervision import (
     REWARD_VERSION,
+    DEFEAT_MARGIN_REWARD_VERSION,
     SAMPLE_SCHEMA,
     VALUE_SAMPLE_SCHEMA,
     SearchTrainingSample,
@@ -51,6 +52,11 @@ def main() -> None:
         choices=("fair_posterior", "root_conditioned"),
         default="fair_posterior",
     )
+    p.add_argument(
+        "--accepted-reward-version",
+        choices=(REWARD_VERSION, DEFEAT_MARGIN_REWARD_VERSION),
+        default=REWARD_VERSION,
+    )
     p.add_argument("--output", required=True, type=Path)
     p.add_argument("--epochs", type=int, default=8)
     p.add_argument("--batch-size", type=int, default=32)
@@ -75,6 +81,10 @@ def main() -> None:
             if not isinstance(row, dict):
                 raise ValueError(f"Row {index} is not an object")
             sample = decode_target(row)
+            if row.get("combat_reward_version") != args.accepted_reward_version:
+                raise ValueError(
+                    f"Row {index}: reward-version mismatch with experiment"
+                )
             if row.get("schema") == SAMPLE_SCHEMA:
                 required_capability = (
                     FAIR_COMBAT_CAPABILITY
@@ -102,7 +112,8 @@ def main() -> None:
     print(f"[h15-preflight] samples={len(rows)} "
           f"policy_roots={policy_samples} value_only={value_only_samples} "
           f"source_seeds={len(fingerprints)} "
-          f"teacher_sha256={model_sha} reward={REWARD_VERSION} schema={SAMPLE_SCHEMA} "
+          f"teacher_sha256={model_sha} reward={args.accepted_reward_version} "
+          f"schema={SAMPLE_SCHEMA} "
           f"chance_prior={args.accepted_chance_prior} "
           f"search_provider={args.accepted_search_provider}",
           flush=True)
@@ -189,7 +200,7 @@ def main() -> None:
         "provenance": {
             "base_checkpoint_sha256": model_sha,
             "search_data_sha256": sha256(args.search_data),
-            "reward_version": REWARD_VERSION,
+            "reward_version": args.accepted_reward_version,
             "target_schema": SAMPLE_SCHEMA,
             "additional_value_schema": (
                 VALUE_SAMPLE_SCHEMA if value_only_samples else None

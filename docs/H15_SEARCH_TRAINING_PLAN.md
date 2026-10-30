@@ -806,3 +806,136 @@ H15 draft PR #146. GitHub CI and user's workstation emulator/GPU
 execution are not yet verified. The documented fish command begins
 the full requested run immediately after its short correctness tests
 pass; no further exploratory pilot is a prerequisite.
+
+
+## H15 M17 — victory-margin reward and deeper tactical PUCT (2026-10-31)
+
+**Latest user decision (supersedes M16 for *new* training):**
+M16's round-20 held-out comparison was again reported as having no
+meaningful raw-network improvement. The user explicitly requested both
+the defeat-side `beta` reward and **more frequent, deeper tree
+expansion**. M16's already-running 80-round artifacts and branch remain
+unaltered. Implementation lives on a **new**
+`research/h15-m17-victory-margin-puct-20261031` branch based on M16.
+
+### Reward definition and provenance
+
+The historical H9 terminal objective remains unchanged in
+`encounter_total_hp_score`. M17 adds a *new*, separately versioned
+`encounter_nonminion_total_hp_defeat_margin_beta050_v1` objective:
+
+- Victory: `R = 1 + player_exit_hp / player_max_hp`
+- Defeat: `R = (1 - 0.5) * (1 - remaining_nonminion_hp / total_nonminion_hp)`
+
+It preserves a full 0–1 HP-preservation increment on wins and makes
+the strongest loss worth at most 0.5; minimum victory reward is 1.0.
+The common H15 normalization `V = R / 2` remains valid. All M17
+**actual episode targets**, value-only labels, **PUCT terminal
+backups**, frozen-baseline and trained-model evaluation rewards use this
+same formula. The loader rejects any mixed reward-version rows.
+Comparisons to M16 should use **win rate / exit HP**, or explicitly
+recompute both reward summaries under a shared objective; raw means
+from two different reward versions are not directly comparable.
+
+### Search algorithm and source-visible trigger
+
+- M16 `--search-schedule danger` searches at most one decision
+  per qualifying turn and exhausts `--max-searches 2` quickly.
+  M17 adds **`--search-schedule tactical`**. Once turn >= 7 and
+  public player HP <= 25 **or** any visible living enemy HP <= 40,
+  any ordinary legal player decision with at least 2 legal actions
+  may receive its own PUCT search, *including multiple decisions
+  within a single turn*. Nested player-choice fallback decisions
+  remain excluded from training roots.
+- `--max-searches 6 --reserved-lethal-searches 3
+  --lethal-enemy-hp 20` reserves three of the six root budgets for
+  states with a visible enemy at or below 20 HP. A fight may use at
+  most three early danger searches, preserving searches for late
+  combinations. The trigger inspects only **current public data**.
+- `--tree-expansion-mode full_depth` extends each simulation beyond
+  its first unvisited node: the newly expanded node's policy is used
+  immediately for another PUCT selection, continuing until the
+  configured tree depth or a true terminal state. All visited edges
+  receive the corresponding backed-up value. In M16 `one_leaf`,
+  search stopped expanding after *one new node* each simulation
+  and used a policy-sampled terminal rollout.
+- `--tree-depth 16` (was 8), `--simulations 64` (was 32),
+  `--search-leaf-mode terminal`. At the chosen depth limit, complete
+  a real ReferenceNature-emulator continuation rather than faking
+  terminal labels or cutting at the imperfect critic.
+  `--rollout-depth 256` is unchanged. New v3 deep-tree target
+  provenance distinguishes it from the prior v2 PUCT visit teacher.
+- As in M16, `root_conditioned` forks the **existing emulator
+  `h8_fork`**, including its ReferenceNature cursor. This is a
+  **possibly privileged, approximate teacher**: only public
+  observations enter the neural network, while PUCT rollout outcomes
+  retain source-root hidden-state conditioning. The default
+  `fair_posterior` remains selectable and is separately labeled.
+  No new chance sampler or emulator mechanics was introduced.
+- Round reports retain original M16 metrics and add
+  `near_lethal_search_roots` and
+  `mean_maximum_expanded_depth`. Recorded target rows include
+  reward version, PUCT v2/v3 identity and tree-expansion mode.
+
+### Recommended new full run (fish)
+
+```fish
+# First stop the running M16 process at a completed-round boundary;
+# do not switch a checkout while its training job still uses these files.
+cd ~/projects/sts2-ai
+git fetch origin
+git switch research/h15-m17-victory-margin-puct-20261031
+git pull --ff-only
+source .venv/bin/activate.fish
+
+set emu ~/projects/sts2-emulator
+set rev a411a19491a93b58ae4fdbc6d1f3345c9fca67cf
+set dll $emu/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll
+
+python -m pytest -q \
+    tests/test_h15_m17_reward_search.py \
+    tests/test_h15_native_search_collector.py \
+    tests/test_h15_root_conditioned_search.py \
+    tests/test_h15_late_value_training.py \
+    tests/test_h15_combat_search.py
+and python -u tools/train_h15_reference_rounds.py \
+    --emulator-root $emu --emulator-revision $rev --emulator-dll $dll \
+    --initialize-from-model results/h15-reference-m15-cohort-smoke-v1/round-0001/student.pt \
+    --output-root results/h15-m17-ceremonial-boss-beta05-deep-r80-v1 \
+    --rounds 80 --train-combats 128 --eval-combats 64 \
+    --eval-every 10 --workers 15 \
+    --scenarios ceremonial-beast-boss-a10 \
+    --decks silent-boss-cycle-20-v1 \
+    --fixture-seed h15-reference-m15-fixture-v1 \
+    --seed-prefix h15-m16-ceremonial-boss-v1 \
+    --search-provider root_conditioned \
+    --search-schedule tactical \
+    --defeat-margin-beta 0.5 \
+    --tree-expansion-mode full_depth \
+    --search-leaf-mode terminal \
+    --simulations 64 --max-searches 6 \
+    --reserved-lethal-searches 3 --lethal-enemy-hp 20 \
+    --tree-depth 16 --rollout-depth 256 \
+    --late-value-max 6 --late-value-min-turn 7 \
+    --late-value-player-hp 25 --late-value-enemy-hp 40 \
+    --epochs 1 --batch-size 32 --lr 0.000003 \
+    --value-weight 1.0 --learner-device cuda --execute
+```
+
+The separate output path and model/revision/code hashes preserve M16
+artifacts; the same seed prefix intentionally supplies matched
+independent heldout source cases for the M16/M17 comparison. This is
+**80 × 128 = 10,240 training combats** and **up to
+80 × 128 × 6 × 64 = 3,932,160** root simulation trajectories,
+versus M16's upper bound of 655,360. Search is thus potentially
+~6 times as intensive before accounting for extra depth and longer
+terminal rollouts; actual compute must be measured rather than assumed.
+Only completed fights produce labels. Source-run-disjoint engine
+reference holdouts remain at every tenth round. Interpretation follows
+`docs/EXPERIMENT_EVIDENCE_STANDARD.md`: this is a substantive
+single-training-seed comparison, **not** a decision-grade five-seed
+promotion claim.
+
+**Validation status:** focused source-level regression tests and CI
+integration added. Workstation emulator and GPU training require a
+separate execution; no completed M17 results are yet claimed.

@@ -33,7 +33,10 @@ from sts2_ai.search.h15_public_combat_adapter import (
     H15PublicCombatAdapter,
     H15RootConditionedCombatAdapter,
 )
-from sts2_ai.training.h15_search_supervision import target_record, value_target_record
+from sts2_ai.training.h15_search_supervision import (
+    REWARD_VERSION, DEFEAT_MARGIN_REWARD_VERSION,
+    target_record, value_target_record,
+)
 
 
 @dataclass(frozen=True)
@@ -248,6 +251,10 @@ def collect_native_combat_search(
     rollout_depth: int = 512, leaf_mode: str = "terminal",
     search_schedule: str = "first",
     search_provider: str = "fair_posterior",
+    tree_expansion_mode: str = "one_leaf",
+    defeat_margin_beta: float = 0.0,
+    reserved_lethal_searches: int = 0,
+    lethal_enemy_hp: int = 20,
     record_final_turn: bool = False,
     late_value_max: int = 0, late_value_min_turn: int = 7,
     late_value_player_hp: int = 25, late_value_enemy_hp: int = 40,
@@ -264,8 +271,15 @@ def collect_native_combat_search(
     if (min(simulations, max_decisions, tree_depth, rollout_depth) < 1
             or max_searches < 0 or seed < 0
             or leaf_mode not in ("terminal", "value")
-            or search_schedule not in ("first", "turn_start", "danger")
+            or search_schedule not in (
+                "first", "turn_start", "danger", "tactical",
+            )
             or search_provider not in ("fair_posterior", "root_conditioned")
+            or tree_expansion_mode not in ("one_leaf", "full_depth")
+            or defeat_margin_beta not in (0.0, 0.5)
+            or reserved_lethal_searches < 0
+            or reserved_lethal_searches > max_searches
+            or lethal_enemy_hp < 0
             or late_value_max < 0 or late_value_min_turn < 1
             or late_value_player_hp < 0 or late_value_enemy_hp < 0):
         raise ValueError("Invalid native combat-search budget")
@@ -283,6 +297,10 @@ def collect_native_combat_search(
         rollout_depth=rollout_depth, leaf_mode=leaf_mode,
         search_schedule=search_schedule,
         search_provider=search_provider,
+        tree_expansion_mode=tree_expansion_mode,
+        defeat_margin_beta=defeat_margin_beta,
+        reserved_lethal_searches=reserved_lethal_searches,
+        lethal_enemy_hp=lethal_enemy_hp,
         record_final_turn=record_final_turn,
         late_value_max=late_value_max,
         late_value_min_turn=late_value_min_turn,
@@ -301,6 +319,10 @@ def collect_live_combat_search(
     rollout_depth: int = 512, leaf_mode: str = "terminal",
     search_schedule: str = "first",
     search_provider: str = "fair_posterior",
+    tree_expansion_mode: str = "one_leaf",
+    defeat_margin_beta: float = 0.0,
+    reserved_lethal_searches: int = 0,
+    lethal_enemy_hp: int = 20,
     record_final_turn: bool = False,
     late_value_max: int = 0, late_value_min_turn: int = 7,
     late_value_player_hp: int = 25, late_value_enemy_hp: int = 40,
@@ -313,24 +335,42 @@ def collect_live_combat_search(
     if (min(simulations, max_decisions, tree_depth, rollout_depth) < 1
             or max_searches < 0 or seed < 0
             or leaf_mode not in ("terminal", "value")
-            or search_schedule not in ("first", "turn_start", "danger")
+            or search_schedule not in (
+                "first", "turn_start", "danger", "tactical",
+            )
             or search_provider not in ("fair_posterior", "root_conditioned")
+            or tree_expansion_mode not in ("one_leaf", "full_depth")
+            or defeat_margin_beta not in (0.0, 0.5)
+            or reserved_lethal_searches < 0
+            or reserved_lethal_searches > max_searches
+            or lethal_enemy_hp < 0
             or late_value_max < 0 or late_value_min_turn < 1
             or late_value_player_hp < 0 or late_value_enemy_hp < 0):
         raise ValueError("Invalid H15 combat collection/evaluation budget")
     history = list(initial_history)
     adapter = (
-        H15PublicCombatAdapter(backend, sampler=fair_sampler)
+        H15PublicCombatAdapter(
+            backend, sampler=fair_sampler,
+            defeat_margin_beta=defeat_margin_beta,
+        )
         if search_provider == "fair_posterior"
-        else H15RootConditionedCombatAdapter(backend, current)
+        else H15RootConditionedCombatAdapter(
+            backend, current, defeat_margin_beta=defeat_margin_beta,
+        )
     )
     search = CombatPuct(
         adapter, teacher, seed=seed, max_depth=tree_depth,
         rollout_depth=rollout_depth, leaf_mode=leaf_mode,
+        tree_expansion_mode=tree_expansion_mode,
     )
     saved: list[tuple[CombatFrame, Any]] = []
     search_diagnostics: list[dict[str, Any]] = []
     last_searched_turn: int | None = None
+    nonlethal_searches = 0
+    reward_version = (
+        DEFEAT_MARGIN_REWARD_VERSION if defeat_margin_beta == 0.5
+        else REWARD_VERSION
+    )
     count = 0
     try:
         while True:
@@ -339,7 +379,9 @@ def collect_live_combat_search(
             if not isinstance(public, dict):
                 raise ValueError("Invalid native public combat frame")
             if not isinstance(public.get("combat"), dict):
-                score = H15PublicCombatAdapter._combat_result(public)
+                score = H15PublicCombatAdapter._combat_result(
+                    public, defeat_margin_beta=defeat_margin_beta,
+                )
                 if score is None:
                     raise RuntimeError("Combat exited without terminal score")
                 outcome = "defeat" if public.get("terminal_outcome") == "defeat" or (
@@ -365,6 +407,7 @@ def collect_live_combat_search(
                             search_model_sha256=teacher.checkpoint_sha256,
                             source_seed=source_seed,
                             emulator_revision=backend.emulator_revision,
+                            reward_version=reward_version,
                         ) for root, stats in saved)
                         + tuple(value_target_record(
                             history[i].observation, history[i].legal_actions,
@@ -373,6 +416,7 @@ def collect_live_combat_search(
                             source_seed=source_seed,
                             emulator_revision=backend.emulator_revision,
                             decision_index=i,
+                            reward_version=reward_version,
                         ) for i in select_late_value_indices(
                             history,
                             min_turn=late_value_min_turn,
@@ -398,12 +442,14 @@ def collect_live_combat_search(
             # the selection-action codec is versioned and implemented.
             is_nested_choice = "h15_player_choice_kind" in public
             turn: int | None = None
-            if search_schedule in ("turn_start", "danger") and not is_nested_choice:
+            if search_schedule in (
+                "turn_start", "danger", "tactical",
+            ) and not is_nested_choice:
                 turn = public["combat"].get("turn")
                 if type(turn) is not int or turn < 1:
                     raise ValueError("H15 turn-start search needs public combat turn")
             eligible_danger = False
-            if search_schedule == "danger" and not is_nested_choice:
+            if search_schedule in ("danger", "tactical") and not is_nested_choice:
                 enemies = public["combat"].get("enemies", [])
                 hp = public.get("hp")
                 live_enemy_hp = [
@@ -418,13 +464,28 @@ def collect_live_combat_search(
                     and (hp <= late_value_player_hp
                          or min(live_enemy_hp) <= late_value_enemy_hp)
                 )
+            lethal_now = (
+                eligible_danger
+                and min(live_enemy_hp) <= lethal_enemy_hp
+            ) if search_schedule == "tactical" else False
+            tactical_eligible = (
+                eligible_danger and len(menu) >= 2
+                and (lethal_now or nonlethal_searches <
+                     max_searches - reserved_lethal_searches)
+            )
             search_here = (
                 len(saved) < max_searches
                 and not is_nested_choice
-                and (search_schedule == "first"
-                     or (turn != last_searched_turn and
-                         (search_schedule == "turn_start"
-                          or eligible_danger)))
+                and ((
+                    search_schedule == "tactical" and tactical_eligible
+                ) or (
+                    search_schedule == "first"
+                ) or (
+                    search_schedule != "tactical"
+                    and turn != last_searched_turn
+                    and (search_schedule == "turn_start"
+                         or eligible_danger)
+                ))
             )
             if search_here:
                 root = adapter.root(history)
@@ -465,6 +526,14 @@ def collect_live_combat_search(
                 )
                 search_diagnostics.append({
                     "decision_index": count,
+                    "search_trigger": (
+                        "near_lethal" if lethal_now else
+                        "public_danger" if search_schedule == "tactical"
+                        else search_schedule
+                    ),
+                    "search_tree_expansion_mode": stats.tree_expansion_mode,
+                    "search_maximum_expanded_depth":
+                        stats.maximum_expanded_depth,
                     "public_observation_hash": observation.observation_hash,
                     "greedy_action_id": menu[greedy_index].action_id,
                     "search_action_id": menu[index].action_id,
@@ -480,6 +549,8 @@ def collect_live_combat_search(
                     "search_transitions": stats.transitions,
                 })
                 saved.append((root, stats))
+                if search_schedule == "tactical" and not lethal_now:
+                    nonlethal_searches += 1
                 if search_schedule in ("turn_start", "danger"):
                     last_searched_turn = turn
             else:
