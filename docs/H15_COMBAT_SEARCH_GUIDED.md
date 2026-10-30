@@ -689,3 +689,75 @@ python -u tools/probe_h15_player_actions.py \
 Every candidate remains experimental and the session explicitly
 advertises `fairContinuationCapability: unavailable`. No fair
 PUCT labels or long-run search supervision are produced by M8.
+
+
+## M9 — frozen-policy multi-action, multi-turn experimental combat
+
+The M8 `player-action-coverage-v1.jsonl` report accepted one
+real card play and an end turn in **12/12** exact-replayed
+A10 native-structure combat entries. It resolved **60 draws**
+and **5 enemy intents**, and returned to the next player
+boundary every time. One entry rejected its initial card-action
+candidate and then succeeded on another. This probe did **not**
+exercise potions, repeated card plays, or multiple turns.
+
+M9 extends the experimental H15 status response with
+`observationPolicyId`, `observationPayloadJson` (the **public**
+fair-policy projection), `combatTurn`, and `exitHp`. Private
+provider RNG and hidden state stay inside the emulator.
+
+The new `sts2_ai.training.h15_experimental_rollout` module runs
+the actual frozen H9/H15 combat policy on **only** that public
+observation and legal action menu. It ranks legal actions by
+neural logits and invokes version-checked H15 real player-action
+or end-turn endpoints. Unsupported actions are recorded, and
+the next ranked candidate is tried at the **same unchanged**
+state, checked by session version and public hash. Such a
+fallback is an explicit coverage diagnostic, **not** an
+on-policy RL sample.
+
+At each declared Nature boundary the diagnostic sampler uses
+the integer `ChanceLawV111.Outcomes` weights, rejecting
+non-`UNVERIFIED` laws and inconsistent support totals.
+Every experiment saves counts of real card plays, potions,
+ended turns, sampled Nature sites, policy decision ranks,
+rejected actions, and final combat outcome/exit HP when
+available. Limits on player actions, turns and Nature
+decisions yield **censored** reports, never invented wins
+or losses. Unmodeled continuation boundaries end with
+explicit unsupported status. There are **no fair search
+roots and no training targets** from this workflow.
+
+Fish commands on the H15 research branches:
+
+```fish
+set emu ~/projects/sts2-emulator
+set ai ~/projects/sts2-ai
+git -C $emu pull --ff-only
+dotnet build $emu/src/Sts2Emulator.Cli -c Release
+cd $ai
+git pull --ff-only
+python -m pytest -q \
+    tests/test_h15_controlled_turn_protocol.py \
+    tests/test_h15_experimental_rollout.py
+
+python -u tools/run_h15_experimental_policy_rollouts.py \
+    --emulator-root $emu \
+    --emulator-revision (git -C $emu rev-parse HEAD) \
+    --source-revision 2c46c703a30875d6ef84fcbe0a0511fec9c74dcd \
+    --train-corpus results/h15-native-source-long/train.jsonl \
+    --teacher results/h9-adaptive-totalhp-r40-r250/models/player-r0250.pt \
+    --device cuda \
+    --output results/h15-native-source-long/multiturn-policy-64-v1.jsonl \
+    --limit 64 \
+    --max-player-actions 256 \
+    --max-turns 32 \
+    --max-nature 1024
+```
+
+This is a substantive transition toward H15 combat-search support,
+but its stochastic model remains independent/unverified. The
+next step after this rollout is to repair the *highest-coverage
+blocking combat effect or Nature site* reported by real policy
+decisions, and ultimately establish a history-conditioned fair
+continuation sampler before launching PUCT supervision.
