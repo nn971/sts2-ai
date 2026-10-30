@@ -10,7 +10,6 @@ must never be used as fair PUCT or policy/value training labels.
 """
 from __future__ import annotations
 
-import random
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -55,36 +54,6 @@ def _policy_input(frame: Mapping[str, Any]) -> tuple[Observation, tuple[LegalAct
     return observation, tuple(actions)
 
 
-def _sample_law(law: Mapping[str, Any], rng: random.Random) -> str:
-    if law.get("probabilityStatus") != "UNVERIFIED":
-        raise ValueError("Only unverified experimental Nature is supported")
-    outcomes = law.get("outcomes")
-    if not isinstance(outcomes, list) or not outcomes:
-        raise ValueError("Pending Nature boundary has no declared outcomes")
-    total = 0
-    pairs: list[tuple[str, int]] = []
-    seen: set[str] = set()
-    for entry in outcomes:
-        if not isinstance(entry, dict):
-            raise ValueError("Invalid Nature outcome")
-        outcome_id = entry.get("outcomeId")
-        weight = entry.get("weight")
-        if (not isinstance(outcome_id, str) or not outcome_id
-                or outcome_id in seen or type(weight) is not int
-                or weight <= 0):
-            raise ValueError("Malformed or duplicated Nature support")
-        seen.add(outcome_id)
-        total += weight
-        pairs.append((outcome_id, total))
-    if type(law.get("totalWeight")) is not int or law["totalWeight"] != total:
-        raise ValueError("Nature law weight total is inconsistent")
-    ticket = rng.randrange(total)
-    for outcome_id, boundary in pairs:
-        if ticket < boundary:
-            return outcome_id
-    raise AssertionError("Nature ticket outside declared support")
-
-
 @dataclass(frozen=True)
 class RolloutLimits:
     max_player_actions: int = 256
@@ -99,7 +68,7 @@ class RolloutLimits:
 
 def run_policy_combat(
     backend: Any, source: str, *, independent_seed: str,
-    teacher: H15CombatEvaluator, rng: random.Random,
+    teacher: H15CombatEvaluator,
     limits: RolloutLimits = RolloutLimits(),
     forced_root_action_id: str | None = None,
     expected_root_observation_hash: str | None = None,
@@ -179,17 +148,30 @@ def run_policy_combat(
                     final = {"status": "censored", "reason": "nature_budget"}
                     break
                 law = frame["chanceLaw"]
-                outcome_id = _sample_law(law, rng)
+                if (not isinstance(law, dict)
+                        or law.get("probabilityStatus") != "UNVERIFIED"):
+                    raise ValueError("H15 requires an unverified declared Nature law")
                 at_version = frame["version"]
-                frame = backend.h15_experimental_choose(
-                    handle, at_version, law, outcome_id,
+                frame = backend.h15_experimental_reference_choose(
+                    handle, at_version,
                 )
+                sampled = frame["referenceNatureSelection"]
+                if (sampled["lawId"] != law["lawId"]
+                        or sampled["eventId"] != law["eventId"]
+                        or sampled["outcomeId"] not in {
+                            item["outcomeId"] for item in law["outcomes"]
+                        }):
+                    raise ValueError(
+                        "ReferenceNature receipt mismatches the advertised law"
+                    )
                 history.append({
                     "type": "nature",
                     "version": at_version,
                     "boundary_kind": kind,
-                    "law_id": law["lawId"],
-                    "outcome_id": outcome_id,
+                    "law_id": sampled["lawId"],
+                    "event_id": sampled["eventId"],
+                    "outcome_id": sampled["outcomeId"],
+                    "provider_id": sampled["providerId"],
                 })
                 counts["nature"] += 1
                 chance_counts[kind] += 1
