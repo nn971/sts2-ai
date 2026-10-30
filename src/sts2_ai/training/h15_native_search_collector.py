@@ -105,8 +105,9 @@ def collect_native_combat_search(
     contributes no data. The fair sampler is mandatory and independent from
     the actor's actual native state handle.
     """
-    if (min(simulations, max_decisions, max_searches, tree_depth, rollout_depth) < 1
-            or seed < 0 or leaf_mode not in ("terminal", "value")):
+    if (min(simulations, max_decisions, tree_depth, rollout_depth) < 1
+            or max_searches < 0 or seed < 0
+            or leaf_mode not in ("terminal", "value")):
         raise ValueError("Invalid native combat-search budget")
     # Reject unsupported samplers BEFORE replaying or owning a live native
     # state, so a missing capability cannot leak the source combat handle.
@@ -136,6 +137,10 @@ def collect_live_combat_search(
     Native A10 source recipes and independently initialized H8 reference
     fixtures both use this loop; the fair sampler is supplied explicitly.
     """
+    if (min(simulations, max_decisions, tree_depth, rollout_depth) < 1
+            or max_searches < 0 or seed < 0
+            or leaf_mode not in ("terminal", "value")):
+        raise ValueError("Invalid H15 combat collection/evaluation budget")
     history = list(initial_history)
     adapter = H15PublicCombatAdapter(backend, sampler=fair_sampler)
     search = CombatPuct(
