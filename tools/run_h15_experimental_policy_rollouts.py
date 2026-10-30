@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import random
 from collections import Counter
 from pathlib import Path
 
@@ -73,7 +72,6 @@ def main() -> None:
                 report = run_policy_combat(
                     backend, source,
                     independent_seed=entropy.hex(),
-                    rng=random.Random(int.from_bytes(entropy, "big")),
                     teacher=teacher, limits=limits,
                 )
             finally:
