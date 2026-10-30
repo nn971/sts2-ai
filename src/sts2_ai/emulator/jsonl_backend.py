@@ -452,6 +452,22 @@ class JsonlEmulatorBackend:
             "h15_experimental_status", h15_handle=handle,
         ), expected_handle=handle)
 
+    def h15_experimental_player_action(
+        self, handle: str, version: int, action_id: str,
+    ) -> dict[str, Any]:
+        """Execute one guarded, audited card/potion action in live mechanics.
+
+        The emulator owns the action semantics and rejects unmodeled hidden
+        chance sites or deck mutations. An unverified H15 session is never a
+        certified fair search root.
+        """
+        if type(version) is not int or version < 0 or not action_id:
+            raise ValueError("Invalid H15 player-action request")
+        return self._h15_experimental_response(self._request(
+            "h15_experimental_player_action",
+            h15_handle=handle, version=version, action_id=action_id,
+        ), expected_handle=handle)
+
     def h15_experimental_end_turn(
         self, handle: str, version: int, action_id: str,
     ) -> dict[str, Any]:
