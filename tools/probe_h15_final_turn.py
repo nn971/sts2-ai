@@ -207,27 +207,37 @@ def main() -> None:
     else:
         atomic_json(manifest_file, manifest)
 
-    screened: list[dict[str, Any]] = []
+    # Run the whole screening grid in a *single* 15-worker emulator cohort.
+    # All fixtures are chosen by source IDs before any outcome is observed.
+    ids_by_pair: dict[tuple[str, str], list[str]] = {}
     for scenario in scenarios:
         for deck in decks:
-            ids = case_ids_for_pair(
+            ids_by_pair[(scenario, deck)] = case_ids_for_pair(
                 f"h15-finalturn-screen-v1:{scenario}:{deck}",
                 scenario, deck, args.screen_per_pair, scenarios, decks,
             )
-            records = collect_cases(
-                cfg, checkpoint, ids, "greedy",
-                out / "screen" / scenario / deck,
-            )
-            wins = sum(r["outcome"] == "victory" for r in records)
-            screened.append({
-                "scenario": scenario, "deck": deck, "wins": wins,
-                "combats": len(records), "win_rate": wins / len(records),
-                "wilson_95": wilson_interval(wins, len(records)),
-                "mean_exit_hp": aggregate(records)["mean_exit_hp"],
-            })
-            atomic_json(out / "progress.json", {
-                "schema": SCHEMA, "phase": "screening", "screening": screened,
-            })
+    screen_ids = [
+        case for pair_ids in ids_by_pair.values() for case in pair_ids
+    ]
+    screen_records = collect_cases(
+        cfg, checkpoint, screen_ids, "greedy", out / "screen",
+    )
+    by_case = {r["case_id"]: r for r in screen_records}
+    screened: list[dict[str, Any]] = []
+    for (scenario, deck), ids in ids_by_pair.items():
+        records = [by_case[case] for case in ids]
+        if any(r["encounter"] != scenario or r["deck"] != deck for r in records):
+            raise ValueError("Screening case differs from selected A10 fixture")
+        wins = sum(r["outcome"] == "victory" for r in records)
+        screened.append({
+            "scenario": scenario, "deck": deck, "wins": wins,
+            "combats": len(records), "win_rate": wins / len(records),
+            "wilson_95": wilson_interval(wins, len(records)),
+            "mean_exit_hp": aggregate(records)["mean_exit_hp"],
+        })
+    atomic_json(out / "progress.json", {
+        "schema": SCHEMA, "phase": "screened", "screening": screened,
+    })
     selected = choose_closest_half(screened)
     closest_distance = abs(selected["win_rate"] - 0.5)
     if closest_distance > args.near_half_tolerance:
