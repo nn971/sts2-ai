@@ -119,6 +119,10 @@ def test_multiturn_uses_public_policy_and_tracks_unsupported_fallback():
     assert result["policy_choices"][0]["policy_rank"] == 1
     assert result["fair_search_roots"] == 0
     assert result["probability_status"] == "UNVERIFIED"
+    assert [event["type"] for event in result["decision_history"]] == [
+        "player", "player", "nature", "player",
+    ]
+    assert result["decision_history"][2]["law_id"] is not None
     assert backend.released == ["h15-test"]
 
 
@@ -149,4 +153,20 @@ def test_limits_do_not_masquerade_as_terminal_outcomes():
     assert result["reason"] == "player_action_budget"
     assert "outcome" not in result
     assert result["fair_search_roots"] == 0
+    assert backend.released == ["h15-test"]
+
+
+def test_unexpected_bridge_error_is_reported_not_hidden_by_policy_fallback():
+    class BrokenBackend(DemoBackend):
+        def h15_experimental_player_action(self, handle, version, action_id):
+            raise RuntimeError("InvalidOperationException: mechanics invariant broke")
+
+    backend = BrokenBackend()
+    result = run_policy_combat(
+        backend, "source", independent_seed="independent",
+        teacher=DemoTeacher(), rng=random.Random(4),
+    )
+    assert result["status"] == "rejected"
+    assert "mechanics invariant broke" in result["reason"]
+    assert result["player_actions"] == 0
     assert backend.released == ["h15-test"]
