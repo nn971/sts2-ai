@@ -640,6 +640,27 @@ def make_report(
         "improved_cases_count": len(improvements),
         "regressed_case_ids": regressions,
         "improved_case_ids": improvements,
+        "per_case_policy_changes": [
+            {
+                "case_id": case["case_id"],
+                "r10_outcome": case["trajectories"]["r10"]["outcome"],
+                "r30_outcome": case["trajectories"]["r30"]["outcome"],
+                "r10_exit_hp": case["trajectories"]["r10"]["exit_hp"],
+                "r30_exit_hp": case["trajectories"]["r30"]["exit_hp"],
+                "first_raw_disagreement_index": next((
+                    row["decision_index"]
+                    for row in case["trajectories"]["r10"]["decisions"]
+                    if row["raw_disagreement"] and not row["nested_choice"]
+                ), None),
+                "largest_public_policy_js_nats": max((
+                    row["policy_js_nats"]
+                    for name in MODEL_NAMES
+                    for row in case["trajectories"][name]["decisions"]
+                    if not row["nested_choice"]
+                ), default=0.0),
+            }
+            for case in trace_cases
+        ],
         "public_decisions_paired": len(rows),
         "raw_action_disagreement_fraction": avg([
             float(x["raw_disagreement"]) for x in rows
@@ -665,6 +686,15 @@ def make_report(
             r["search_r30"]["root_mean_value"] for r in roots
         ]),
         "paired_fixed_r10_rollout_roots": len(forced),
+        "paired_fixed_r10_rollout_fraction_favoring_r10_action": avg([
+            float(
+                r["forced_action_fixed_r10_continuations"]["r10_raw_action"][
+                    "mean_reward"
+                ] > r["forced_action_fixed_r10_continuations"]["r30_raw_action"][
+                    "mean_reward"
+                ]
+            ) for r in forced
+        ]),
         "paired_fixed_r10_rollout_mean_reward_advantage_of_r10_action": avg([
             r["forced_action_fixed_r10_continuations"]["r10_raw_action"][
                 "mean_reward"
@@ -724,6 +754,8 @@ def main() -> None:
     for file in ("emulator_root", "emulator_dll"):
         if not Path(cfg[file]).exists():
             p.error(f"Missing {file}: {cfg[file]}")
+    if digest(Path(cfg["emulator_dll"])) != cfg.get("emulator_dll_sha256"):
+        p.error("M17 emulator DLL checksum differs from original training run")
     checkpoints = {
         name: run / f"round-{r:04d}" / "student.pt"
         for name, r in (("r10", 10), ("r30", 30))
@@ -753,6 +785,7 @@ def main() -> None:
         "emulator_dll_sha256": digest(Path(cfg["emulator_dll"])),
         "checkpoint_hashes": hashes,
         "source_configuration_sha256": digest(run / "config.json"),
+        "diagnostic_code_sha256": digest(Path(__file__)),
         "cases": args.cases,
         "search_cases": args.search_cases,
         "roots_per_case": args.roots_per_case,
