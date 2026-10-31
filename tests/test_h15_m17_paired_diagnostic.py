@@ -87,8 +87,10 @@ def make_decision(index, turn=7, hp=25, enemy=30, *,
 
 def case(case_id, a, b, decisions):
     return {"case_id": case_id, "trajectories": {
-        "r10": {"outcome": a, "decisions": list(decisions)},
-        "r30": {"outcome": b, "decisions": list(decisions)},
+        "r10": {"outcome": a, "exit_hp": 10 if a == "victory" else 0,
+                "decisions": list(decisions)},
+        "r30": {"outcome": b, "exit_hp": 10 if b == "victory" else 0,
+                "decisions": list(decisions)},
     }}
 
 
