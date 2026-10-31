@@ -28,7 +28,9 @@ from sts2_ai.nature.combat_scenarios import (
     scenario_for_seed,
 )
 from sts2_ai.training.h15_search_supervision import (
-    REWARD_VERSION, DEFEAT_MARGIN_REWARD_VERSION, decode_target,
+    DEFEAT_MARGIN_REWARD_VERSION,
+    REWARD_VERSION,
+    decode_target,
 )
 
 REGIME = "fixed-h8-fixture-declared-chance-law"
@@ -49,10 +51,17 @@ def atomic_json(path: Path, record: Any) -> None:
     tmp.replace(path)
 
 
-def searches_for_mode(mode: str, max_searches: int) -> int:
+def searches_for_mode(
+    mode: str, max_searches: int, search_schedule: str = "first",
+) -> int | None:
     if mode not in ("train", "search", "greedy") or max_searches < 0:
         raise ValueError("Invalid H15 collection mode or search budget")
-    return max_searches if mode in ("train", "search") else 0
+    if mode == "greedy":
+        return 0
+    if search_schedule == "every_decision":
+        # The only cap is max_decisions, the existing combat safety limit.
+        return None
+    return max_searches
 
 
 def _collect_worker(
@@ -115,7 +124,9 @@ def _collect_worker(
                     ),
                     simulations=cfg["simulations"],
                     max_decisions=cfg["max_decisions"],
-                    max_searches=searches_for_mode(mode, cfg["max_searches"]),
+                    max_searches=searches_for_mode(
+                        mode, cfg["max_searches"], cfg["search_schedule"],
+                    ),
                     seed=seed63(case_id + ":search"),
                     tree_depth=cfg["tree_depth"],
                     rollout_depth=cfg["rollout_depth"],
@@ -322,6 +333,22 @@ def aggregate(records: list[dict[str, Any]]) -> dict[str, Any]:
         "mean_reward": sum(r["reward"] for r in records) / n,
         "mean_decisions": sum(r["decisions"] for r in records) / n,
         "searched_roots": sum(r["searched_roots"] for r in records),
+        "mean_searched_roots_per_combat": (
+            sum(r["searched_roots"] for r in records) / n
+        ),
+        "searched_roots_by_turn": {
+            str(turn): sum(d.get("search_turn") == turn for d in diagnostics)
+            for turn in sorted({
+                d.get("search_turn") for d in diagnostics
+                if type(d.get("search_turn")) is int
+            })
+        },
+        "search_transitions": sum(
+            d["search_transitions"] for d in diagnostics
+        ),
+        "mean_search_transitions_per_combat": (
+            sum(d["search_transitions"] for d in diagnostics) / n
+        ),
         "late_value_targets": sum(
             r.get("late_value_targets", 0) for r in records
         ),
@@ -407,7 +434,10 @@ def main() -> None:
     p.add_argument("--seed-prefix", default="h15-reference-m15-v1")
     p.add_argument("--seed", type=int, default=20261030)
     p.add_argument("--simulations", type=int, default=32)
-    p.add_argument("--max-searches", type=int, default=1)
+    p.add_argument(
+        "--max-searches", type=int, default=1,
+        help="Legacy root cap; ignored for --search-schedule every_decision",
+    )
     p.add_argument(
         "--defeat-margin-beta", type=float, choices=(0.0, 0.5), default=0.0,
     )
@@ -423,7 +453,8 @@ def main() -> None:
     p.add_argument("--late-value-enemy-hp", type=int, default=40)
     p.add_argument(
         "--search-schedule",
-        choices=("first", "turn_start", "danger", "tactical"), default="first",
+        choices=("first", "turn_start", "danger", "tactical", "every_decision"),
+        default="first",
     )
     p.add_argument(
         "--search-provider",
@@ -442,6 +473,10 @@ def main() -> None:
     p.add_argument("--lr", type=float, default=0.000003)
     p.add_argument("--value-weight", type=float, default=1.0)
     p.add_argument("--learner-device", default="cuda")
+    p.add_argument(
+        "--skip-evaluation", action="store_true",
+        help="One-round throughput smoke only; skip final and periodic holdouts",
+    )
     p.add_argument("--execute", action="store_true")
     args = p.parse_args()
 
@@ -454,6 +489,8 @@ def main() -> None:
                    args.late_value_enemy_hp, args.lethal_enemy_hp,
                    args.reserved_lethal_searches) < 0
             or args.reserved_lethal_searches > args.max_searches
+            or (args.search_schedule == "every_decision"
+                and args.reserved_lethal_searches != 0)
             or args.seed < 0
             or not math.isfinite(args.lr) or args.lr <= 0
             or not math.isfinite(args.value_weight) or args.value_weight < 0
@@ -498,6 +535,11 @@ def main() -> None:
         "fixture_seed": args.fixture_seed, "seed_prefix": args.seed_prefix,
         "workers": args.workers, "simulations": args.simulations,
         "max_searches": args.max_searches,
+        "effective_root_cap": (
+            None if args.search_schedule == "every_decision"
+            else args.max_searches
+        ),
+        "skip_evaluation": args.skip_evaluation,
         "defeat_margin_beta": args.defeat_margin_beta,
         "reward_version": (
             DEFEAT_MARGIN_REWARD_VERSION
@@ -540,7 +582,8 @@ def main() -> None:
         **{k: config[k] for k in ("schema", "emulator_revision", "scenarios",
             "decks", "workers", "train_combats", "eval_combats", "simulations",
             "late_value_max", "late_value_min_turn",
-            "search_provider", "search_leaf_mode",
+            "search_provider", "search_leaf_mode", "search_schedule",
+            "effective_root_cap", "skip_evaluation",
             "defeat_margin_beta", "tree_expansion_mode",
             "reserved_lethal_searches")},
         "rounds": args.rounds, "output_root": str(args.output_root),
@@ -611,7 +654,9 @@ def main() -> None:
         )
         delta = verify_parameter_update(teacher, updated)
         evaluation: dict[str, Any] = {}
-        if round_number % args.eval_every == 0 or round_number == args.rounds:
+        if not args.skip_evaluation and (
+            round_number % args.eval_every == 0 or round_number == args.rounds
+        ):
             holdout_ids = [
                 f"{args.seed_prefix}:heldout:i{i:05d}"
                 for i in range(args.eval_combats)

@@ -1,5 +1,34 @@
 # sts2-ai — repository instructions for development agents
 
+## Current H15 M18 throughput decision (2026-10-31)
+
+The user rejected manual search-root allocation and approved PUCT
+at EVERY encodable multi-action public combat decision, initially
+32 simulations, full-depth expansion with strict depth 8 and neural
+value leaves. This is a new M18 research branch
+`research/h15-m18-every-decision-value-puct-20261031`,
+superseding M17's **search schedule** while preserving M17 historical
+training/checkpoints, beta=0.5 defeat-margin reward, existing
+root-conditioned approximate teacher, emulator-owned ReferenceNature,
+and policy/value architecture. See the M18 section of the canonical
+`docs/H15_SEARCH_TRAINING_PLAN.md`.
+
+The one-round 15-worker throughput smoke completed (15 combats, 643
+searched roots, 500.43 seconds, no heldout evaluation). The user
+subsequently approved an 80-round M18 run initialized from the
+unchanged M17 R10 checkpoint, with 128 combats/round, 64-case heldout
+evaluations every 10 rounds, 15 workers, 32 PUCT simulations per root,
+depth 8, value leaves and beta=0.5 defeat reward. Use the separate
+M18 long-run seed prefix/output root in the canonical plan. Treat the
+single training run as research evidence; do not claim model promotion
+without replicated evaluations. Actual R10
+checkpoint and pinned H8 emulator binaries are available on the
+user's machine, not in GitHub CI; do not claim they were executed
+without a local run receipt. Nested player-selection menus remain
+unsupported for direct search distillation under the current action
+codec. Avoid additional replay/optimizer revisions until after the
+throughput experiment to keep the M18 search-coverage variable isolated.
+
 ## Current H15 M17 execution decision (2026-10-31)
 
 The user approved a **new** training experiment following M16's
