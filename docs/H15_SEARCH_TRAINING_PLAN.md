@@ -1009,3 +1009,61 @@ not attached to this conversation or checked into GitHub. Numerical
 same-state probabilities, visits and Q values require running this
 diagnostic on those files. Do not infer them from the progress summary.
 This is a *diagnostic*, not decision-grade model validation.
+
+### M17 paired diagnostic performance and cached-trace recovery
+
+The original diagnostic first completes all 64 greedy paired traces, then
+runs up to 16 cases × 3 roots/case × 2 checkpoints × 64 simulations
+= **6,144 terminal PUCT simulations**. Each search may consume many
+H8 emulator transitions and CPU model inferences, particularly when
+the chosen first-disagreement root occurs early in a fight.
+The original diagnostic printed a line only **after each complete
+search worker's cases**, so after all 15 trace workers the log could
+remain silent for a long time despite active CPU computations.
+
+The current branch adds per-case/per-root/per-checkpoint PUCT start
+and finish log lines with elapsed seconds. These require restarting
+the diagnostic process because an already-running Python process
+cannot load the new source. The complete greedy traces remain safely
+saved in the old output directory's traces/worker-*.json.
+
+After interrupting the search and pulling the latest diagnostic branch,
+extract the useful **already-completed raw policy comparison**
+without re-running any H8 session:
+
+~~~fish
+python -u tools/summarize_h15_paired_traces.py \
+    --run-root results/h15-m17-ceremonial-boss-beta05-deep-r80-v1 \
+    --paired-root results/h15-m17-r10-vs-r30-paired-v1
+~~~
+
+This creates trace-only-report.json (first raw disagreement per case,
+R10→R30 outcome reversals and all-state policy divergence; no PUCT
+claim). The cached 64-case traces are hash-verified.
+
+For a **lightweight separate paired PUCT check**, reuse complete
+trace worker chunks and change the heavy budget with a *new*
+output-root to preserve the original run's immutable config and
+analysis-code hash:
+
+~~~fish
+set old results/h15-m17-r10-vs-r30-paired-v1
+set quick results/h15-m17-r10-vs-r30-quick-v1
+mkdir -p $quick
+cp -a $old/traces $quick/
+
+python -u tools/diagnose_h15_m17_r10_r30.py \
+    --run-root results/h15-m17-ceremonial-boss-beta05-deep-r80-v1 \
+    --output-root $quick \
+    --cases 64 --search-cases 3 --roots-per-case 1 \
+    --simulations 8 --tree-depth 8 --rollout-depth 256 \
+    --counterfactual-rollouts 0 --workers 15 --execute
+~~~
+
+This reuses all 64 matching trace cache chunks and runs at most
+3 × 1 × 2 × 8 = 48 PUCT simulations. The result is a **diagnostic
+smoke** for a few highly changed cases, not a stable estimate of
+optimal actions. Logs should show each PUCT root and model start/done.
+Only increase the budget after measuring a representative root's
+wall time. Running both the original heavy job and the quick job
+concurrently risks memory/CPU saturation.
