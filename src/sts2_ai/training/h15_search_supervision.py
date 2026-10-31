@@ -22,9 +22,9 @@ from sts2_ai.models.h15_combat_codec import (
 from sts2_ai.models.shared_game_objects import EncodedDecision
 from sts2_ai.search.combat_puct import (
     FAIR_COMBAT_CAPABILITY,
-    ROOT_CONDITIONED_COMBAT_CAPABILITY,
-    H15_SEARCH_VERSION,
     H15_DEEP_SEARCH_VERSION,
+    H15_SEARCH_VERSION,
+    ROOT_CONDITIONED_COMBAT_CAPABILITY,
     CombatFrame,
     CombatSearchResult,
 )
