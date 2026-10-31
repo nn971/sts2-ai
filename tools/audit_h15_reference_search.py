@@ -14,7 +14,6 @@ import math
 from pathlib import Path
 from typing import Any
 
-
 SCHEMA = "sts2-h15-reference-round-search-audit-v1"
 
 
@@ -135,9 +134,9 @@ def main() -> None:
     search = read_cases(folder / "eval-search", mode="search", model_sha256=model_hash)
     comparison = compare_saved_evaluations(raw, search)
 
+    from sts2_ai.emulator.jsonl_backend import FAIR_POLICY_ID
     from sts2_ai.emulator.protocol import LegalAction, Observation
     from sts2_ai.models.h15_policy_value import H15CombatEvaluator
-    from sts2_ai.emulator.jsonl_backend import FAIR_POLICY_ID
 
     evaluator = H15CombatEvaluator.load(checkpoint, device="cpu")
     roots = []

@@ -4,6 +4,8 @@ on:
   push:
     paths:
       - 'tools/train_h15_reference_rounds.py'
+      - 'tools/diagnose_h15_m17_r10_r30.py'
+      - 'tools/summarize_h15_paired_traces.py'
       - 'tools/audit_h15_reference_search.py'
       - 'tools/probe_h15_reference_search_budget.py'
       - 'tools/probe_h15_final_turn.py'
@@ -20,6 +22,7 @@ on:
       - 'tests/test_h15_late_value_training.py'
       - 'tests/test_h15_root_conditioned_search.py'
       - 'tests/test_h15_m17_reward_search.py'
+      - 'tests/test_h15_m17_paired_diagnostic.py'
       - 'src/sts2_ai/nature/h4_reward.py'
       - 'src/sts2_ai/search/combat_puct.py'
       - 'src/sts2_ai/search/h15_public_combat_adapter.py'
@@ -43,6 +46,10 @@ jobs:
       - name: Check the new search-training entry point and contracts
         run: |
           python -m compileall -q tools/train_h15_reference_rounds.py
+          python -m compileall -q tools/diagnose_h15_m17_r10_r30.py
+          python -m compileall -q tools/summarize_h15_paired_traces.py
+          python tools/summarize_h15_paired_traces.py --help > /dev/null
+          python tools/diagnose_h15_m17_r10_r30.py --help > /dev/null
           python -m compileall -q tools/run_h15_h8_feedback_cycle.py
           python -m compileall -q tools/audit_h15_reference_search.py
           python -m compileall -q tools/probe_h15_reference_search_budget.py
@@ -52,6 +59,8 @@ jobs:
           python tools/audit_h15_reference_search.py --help > /dev/null
           python -m ruff check \
             tools/train_h15_reference_rounds.py \
+            tools/diagnose_h15_m17_r10_r30.py \
+            tools/summarize_h15_paired_traces.py \
             tools/audit_h15_reference_search.py \
             tools/probe_h15_reference_search_budget.py \
             tools/probe_h15_final_turn.py \
@@ -69,4 +78,5 @@ jobs:
             tests/test_h15_late_value_training.py \
             tests/test_h15_root_conditioned_search.py \
             tests/test_h15_m17_reward_search.py \
+            tests/test_h15_m17_paired_diagnostic.py \
             tests/test_h15_combat_search.py
