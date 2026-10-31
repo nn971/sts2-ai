@@ -485,7 +485,8 @@ def collect_live_combat_search(
                 and min(live_enemy_hp) <= lethal_enemy_hp
             ) if search_schedule == "tactical" else False
             tactical_eligible = (
-                eligible_danger and len(menu) >= 2
+                search_schedule == "tactical" and eligible_danger
+                and len(menu) >= 2
                 and (lethal_now or nonlethal_searches <
                      max_searches - reserved_lethal_searches)
             )
