@@ -939,3 +939,110 @@ promotion claim.
 **Validation status:** focused source-level regression tests and CI
 integration added. Workstation emulator and GPU training require a
 separate execution; no completed M17 results are yet claimed.
+
+## M18: search every encodable combat decision, strict neural-value leaves (2026-10-31)
+
+**User decision:** Remove the manual allocation of search roots by
+combat turn, danger, enemy HP and near-lethal budget. Search **every**
+ordinary public combat decision with at least two legal choices. Start
+with 32 PUCT simulations, strict depth 8, and the existing neural
+value head at nonterminal cutoff leaves. Run a one-round throughput
+smoke before considering a long training run.
+
+Motivation: R10/R30 M17 fixed-holdout action analysis identified
+early policy drift (the turn-2 Strike vs Backflip decision) in a
+state with no late-only PUCT policy supervision. Current M17
+root-conditioned training is an approximate privileged teacher.
+This M18 experiment keeps the existing Chance Law / ReferenceNature
+provider and emulator mechanics, beta=0.5 defeat-margin reward,
+actual terminal critic labels, and existing PUCT/distillation
+interface. No new stochastic provider or native-fidelity gate.
+
+**Implementation contract**
+
+- New `--search-schedule every_decision` dispatches a PUCT search
+  for every public combat player choice with at least **two** legal
+  actions. No maximum per-combat search-root budget applies;
+  `effective_root_cap=null` in run provenance. The legacy
+  `--max-searches` CLI argument is ignored in this mode and remains
+  for backward compatibility only.
+- Nested H15 player-choice menus are currently excluded from
+  direct training roots because the action codec uses a uniform
+  fallback there. Forced single-action menus also produce no
+  useful root visit targets. Both remain playable and are
+  accounted for in the decision count.
+- `--tree-expansion-mode full_depth --search-leaf-mode value
+  --tree-depth 8 --simulations 32` bounds each simulation to at
+  most 8 H8 player transitions; terminal states within that
+  horizon use actual terminal reward, while nonterminal cutoff
+  states use the existing neural value head.
+- Search supervises the player with actual PUCT root visit
+  distributions; only the completed real combat provides the
+  terminal reward target for the critic. Retain reward/model/
+  stochastic-provenance compatibility.
+- Aggregate report includes mean roots/combat, roots by public
+  combat turn, total H8 search transitions and mean transitions/
+  combat, as well as neural cutoff counts and wall-clock time.
+- No cross-round replay buffer is added in this first benchmark.
+  Replay and optimizer-state continuity are separate variables
+  for a follow-up controlled training-stability experiment.
+- `--skip-evaluation` runs collection/optimizer and records
+  time without triggering the normally mandatory final-round
+  holdout, for **throughput smoke only**. It is not a quality
+  benchmark.
+
+### First runnable throughput smoke (fish shell)
+
+The R10 M17 checkpoint is a fixed initialization for isolating
+search coverage. Preserve existing M17 artifacts and do not
+overwrite or resume them as an M18 run. The source is the same
+pinned A10 Ceremonial Beast fixture and H8 emulator revision.
+
+~~~fish
+cd ~/projects/sts2-ai
+git fetch origin
+git switch research/h15-m18-every-decision-value-puct-20261031
+git pull --ff-only
+source .venv/bin/activate.fish
+set emu ~/projects/sts2-emulator
+set rev a411a19491a93b58ae4fdbc6d1f3345c9fca67cf
+set dll $emu/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll
+
+python -m pytest -q tests/test_h15_m18_every_decision.py
+and python -u tools/train_h15_reference_rounds.py \
+    --emulator-root $emu --emulator-revision $rev --emulator-dll $dll \
+    --initialize-from-model results/h15-m17-ceremonial-boss-beta05-deep-r80-v1/round-0010/student.pt \
+    --output-root results/h15-m18-every-decision-value-d8-s32-bench-r1 \
+    --rounds 1 --train-combats 15 --eval-combats 16 --eval-every 10 \
+    --skip-evaluation --workers 15 \
+    --scenarios ceremonial-beast-boss-a10 \
+    --decks silent-boss-cycle-20-v1 \
+    --fixture-seed h15-reference-m15-fixture-v1 \
+    --seed-prefix h15-m18-every-decision-bench-v1 \
+    --search-provider root_conditioned --search-schedule every_decision \
+    --tree-expansion-mode full_depth --search-leaf-mode value \
+    --defeat-margin-beta 0.5 --simulations 32 \
+    --tree-depth 8 --rollout-depth 256 --max-decisions 512 \
+    --late-value-max 0 \
+    --epochs 1 --batch-size 32 --lr 0.000003 \
+    --value-weight 1.0 --learner-device cuda --execute
+~~~
+
+Inspect `results/h15-m18-every-decision-value-d8-s32-bench-r1/
+round-0001/round.json` and `progress.json` for real measured
+`elapsed_seconds`, `collection.searched_roots`,
+`collection.mean_searched_roots_per_combat`,
+`collection.search_transitions`,
+`collection.mean_search_transitions_per_combat`,
+`collection.searched_roots_by_turn`,
+`collection.search_neural_cutoffs` and optimizer counts.
+
+**Promotion rule:** A 15-combat smoke is only an integration and
+performance measurement. Do not extrapolate quality improvement
+from the smoke. Compare deep-terminal rollouts against short
+value leaves on a fixed, identical public decision cohort if
+the neural cutoff critic is unreliable; use longer replicated
+reference-law evaluations only after throughput feasibility.
+
+**No code has been executed against the user's actual emulator or
+checkpoint in the GitHub-only implementation environment.**
