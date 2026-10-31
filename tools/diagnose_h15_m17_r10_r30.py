@@ -110,6 +110,7 @@ def paired_prediction(models: dict[str, Any], observation: Any,
         "min_enemy_hp": min(enemy_hp) if enemy_hp else None,
         "total_enemy_hp_visible": sum(enemy_hp),
         "legal_action_count": len(menu),
+        "legal_action_ids": [a.action_id for a in menu],
         "nested_choice": "h15_player_choice_kind" in state,
         "r10_raw": action_descriptor(menu[chosen["r10"]], state),
         "r30_raw": action_descriptor(menu[chosen["r30"]], state),
@@ -271,9 +272,11 @@ def replay_selected_root(backend: Any, nature_seed: int,
         for i in range(decision_index + 1):
             observed = backend.observe(handle, policy)
             menu = backend.legal_actions(handle)
-            if observed.observation_hash != path[i]["observation_hash"]:
+            if (observed.observation_hash != path[i]["observation_hash"]
+                    or [a.action_id for a in menu] !=
+                    path[i]["legal_action_ids"]):
                 raise RuntimeError(
-                    f"Replay public observation mismatched at decision {i}"
+                    f"Replay public observation/menu mismatched at decision {i}"
                 )
             if i == decision_index:
                 return handle, observed, menu
@@ -492,7 +495,10 @@ def process_cases(
                     roots = [
                         analyze_root(
                             backend, nature_seed, case, selection, evaluators,
-                            **kwargs,
+                            simulations=kwargs["simulations"],
+                            tree_depth=kwargs["tree_depth"],
+                            rollout_depth=kwargs["rollout_depth"],
+                            counterfactual_rollouts=kwargs["counterfactual_rollouts"],
                         )
                         for selection in choose_roots(
                             case, max_roots=kwargs["roots_per_case"],
