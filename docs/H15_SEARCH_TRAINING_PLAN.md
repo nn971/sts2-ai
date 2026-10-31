@@ -939,3 +939,73 @@ promotion claim.
 **Validation status:** focused source-level regression tests and CI
 integration added. Workstation emulator and GPU training require a
 separate execution; no completed M17 results are yet claimed.
+
+## M17 R10/R30 fixed-public-state diagnosis (2026-10-31)
+
+Motivation: On the same 64-case Ceremonial Beast A10 holdout, the raw R10
+checkpoint wins 29 fights and the raw R30 checkpoint wins 16. The uploaded
+progress report contains aggregate results but neither checkpoint weights
+nor per-decision records. The goal is to identify where their action
+distributions first change and whether PUCT prefers different actions
+at the exact same public state.
+
+New diagnostic tool: tools/diagnose_h15_m17_r10_r30.py.
+
+Method:
+1. Load the existing R10 and R30 student.pt checkpoints and versioned
+   M17 config. Replay all 64 original heldout Nature seeds under each
+   raw greedy policy, evaluating BOTH checkpoints at EVERY encountered
+   public state and legal menu. Verify 29 and 16 wins against the original
+   evaluated round.json receipts, failing on a mismatch.
+2. Rank cases where R10 won / R30 lost first. Select first raw-policy
+   disagreement, largest policy divergence and late near-lethal roots,
+   including controls. Replay the action prefix to reconstruct the exact
+   original emulator state. Check every public observation hash AND
+   legal menu before proceeding.
+3. Run both root-conditioned PUCT evaluators at that same state, with
+   the same 64 simulations, depth 16 and RNG seed. Record per-action
+   neural priors, values, PUCT visits, Q estimates and search actions.
+   These are *paired on the same hidden realization*, not posterior
+   unbiased action values.
+4. Optionally compare forcing the two different raw actions followed by
+   the same frozen R10 continuation policy, sampling paired RNG seeds.
+   Report conditional rollout win rates and rewards; these are noisy,
+   root-conditioned diagnostics rather than proofs of action optimality.
+
+Fish command (stop active M17 training at a completed-round boundary
+before switching the checkout):
+
+~~~fish
+cd ~/projects/sts2-ai
+git fetch origin
+git switch research/h15-m17-r10-r30-paired-diagnostic-20261031
+git pull --ff-only
+source .venv/bin/activate.fish
+
+python -m pytest -q tests/test_h15_m17_paired_diagnostic.py
+
+and python -u tools/diagnose_h15_m17_r10_r30.py \
+    --run-root results/h15-m17-ceremonial-boss-beta05-deep-r80-v1 \
+    --output-root results/h15-m17-r10-vs-r30-paired-v1 \
+    --cases 64 --search-cases 16 --roots-per-case 3 \
+    --simulations 64 --tree-depth 16 --rollout-depth 256 \
+    --counterfactual-rollouts 8 --max-decisions 512 \
+    --workers 15 --execute
+~~~
+
+Output: paired-report.json contains exact regressed/improved case IDs,
+all-public-state prediction divergence, matched search-action differences
+and optional common-continuation differences. public-decisions.jsonl
+contains per-decision predictions; paired-roots.jsonl contains
+per-action PUCT/Q comparisons at verified identical states. Worker
+chunks are resumable and hash-provenanced.
+
+All 64 cases are greedily replayed; up to 16 × 3 = 48 selected
+decision roots receive two 64-simulation PUCT searches each (up to
+6,144 search simulations), plus optional forced-action continuations.
+
+The checkpoints and live H8 simulator are on the user's workstation,
+not attached to this conversation or checked into GitHub. Numerical
+same-state probabilities, visits and Q values require running this
+diagnostic on those files. Do not infer them from the progress summary.
+This is a *diagnostic*, not decision-grade model validation.
