@@ -152,7 +152,7 @@ def test_searches_all_multi_action_public_choices_without_turn_or_hp_filter(monk
                and x["tree_expansion_mode"] == "full_depth"
                for x in construction)
     assert result.reward == pytest.approx(0.2)
-    assert len(backend.released) == 5
+    assert len(backend.released) == 6  # Five parents plus the terminal child
 
     with pytest.raises(ValueError, match="budget"):
         collector.collect_live_combat_search(
