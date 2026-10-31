@@ -147,8 +147,8 @@ def fixture_entry(cfg: dict[str, Any], case_id: str) -> Any:
 def trace_raw_trajectory(backend: Any, nature_seed: int,
                          models: dict[str, Any], source_name: str, *,
                          max_decisions: int) -> dict[str, Any]:
-    from sts2_ai.emulator.protocol import InformationPolicy
     from sts2_ai.emulator.jsonl_backend import FAIR_POLICY_ID
+    from sts2_ai.emulator.protocol import InformationPolicy
     from sts2_ai.search.h15_public_combat_adapter import H15PublicCombatAdapter
 
     handle = backend.begin_reference(nature_seed)
@@ -260,8 +260,8 @@ def choose_roots(case: dict[str, Any], *, max_roots: int) -> list[dict[str, Any]
 def replay_selected_root(backend: Any, nature_seed: int,
                          trajectory: dict[str, Any],
                          decision_index: int) -> tuple[str, Any, tuple[Any, ...]]:
-    from sts2_ai.emulator.protocol import InformationPolicy
     from sts2_ai.emulator.jsonl_backend import FAIR_POLICY_ID
+    from sts2_ai.emulator.protocol import InformationPolicy
 
     path = trajectory["decisions"]
     if not 0 <= decision_index < len(path):
