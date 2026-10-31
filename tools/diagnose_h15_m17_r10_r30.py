@@ -456,6 +456,7 @@ def process_cases(
 ) -> dict[str, Any]:
     """One worker owns one engine JSONL session and two frozen CPU models."""
     import torch
+
     from sts2_ai.emulator.h15_h8_reference import H8ReferenceCombatBackend
     from sts2_ai.models.h15_policy_value import H15CombatEvaluator
 
