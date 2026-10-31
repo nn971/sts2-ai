@@ -17,13 +17,14 @@ from pathlib import Path
 import torch
 
 from sts2_ai.models.h15_combat_codec import H15_COMBAT_SCHEMA
-from sts2_ai.search.combat_puct import (
-    FAIR_COMBAT_CAPABILITY, ROOT_CONDITIONED_COMBAT_CAPABILITY,
-)
 from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
+from sts2_ai.search.combat_puct import (
+    FAIR_COMBAT_CAPABILITY,
+    ROOT_CONDITIONED_COMBAT_CAPABILITY,
+)
 from sts2_ai.training.h15_search_supervision import (
-    REWARD_VERSION,
     DEFEAT_MARGIN_REWARD_VERSION,
+    REWARD_VERSION,
     SAMPLE_SCHEMA,
     VALUE_SAMPLE_SCHEMA,
     SearchTrainingSample,
