@@ -13,8 +13,15 @@ root-conditioned approximate teacher, emulator-owned ReferenceNature,
 and policy/value architecture. See the M18 section of the canonical
 `docs/H15_SEARCH_TRAINING_PLAN.md`.
 
-Run an opt-in, one-round 15-worker performance smoke first; label it
-an integration measurement, not an efficacy verdict. Actual R10
+The one-round 15-worker throughput smoke completed (15 combats, 643
+searched roots, 500.43 seconds, no heldout evaluation). The user
+subsequently approved an 80-round M18 run initialized from the
+unchanged M17 R10 checkpoint, with 128 combats/round, 64-case heldout
+evaluations every 10 rounds, 15 workers, 32 PUCT simulations per root,
+depth 8, value leaves and beta=0.5 defeat reward. Use the separate
+M18 long-run seed prefix/output root in the canonical plan. Treat the
+single training run as research evidence; do not claim model promotion
+without replicated evaluations. Actual R10
 checkpoint and pinned H8 emulator binaries are available on the
 user's machine, not in GitHub CI; do not claim they were executed
 without a local run receipt. Nested player-selection menus remain
