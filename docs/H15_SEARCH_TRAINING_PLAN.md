@@ -1046,3 +1046,66 @@ reference-law evaluations only after throughput feasibility.
 
 **No code has been executed against the user's actual emulator or
 checkpoint in the GitHub-only implementation environment.**
+
+### M18 long-run configuration (approved 2026-10-31)
+
+After the 15-combat one-round throughput smoke, the user approved
+starting a substantive 80-round M18 search-guided training run. The
+recorded smoke: 500.43 seconds including one optimizer update,
+643 search roots across 15 combats, 156,511 H8 transitions and
+42.87 roots/combat, with 32 simulations per root, depth 8 and value
+leaves. This smoke establishes that the code path executes, not
+that the neural leaf teacher improves strength.
+
+Keep all M18 settings fixed and use a NEW output directory and
+seed prefix for the long training; initialize from the original
+M17 R10 student checkpoint. Enable heldout raw-versus-search
+reference evaluation every 10 rounds, same 64 fixed heldout
+source seeds; compare raw wins/exit HP to the frozen source.
+
+~~~fish
+cd ~/projects/sts2-ai
+git fetch origin
+git switch research/h15-m18-every-decision-value-puct-20261031
+git pull --ff-only
+source .venv/bin/activate.fish
+
+set emu ~/projects/sts2-emulator
+set rev a411a19491a93b58ae4fdbc6d1f3345c9fca67cf
+set dll $emu/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll
+
+python -m pytest -q tests/test_h15_m18_every_decision.py tests/test_h15_m17_reward_search.py
+
+and python -u tools/train_h15_reference_rounds.py \
+    --emulator-root $emu --emulator-revision $rev --emulator-dll $dll \
+    --initialize-from-model results/h15-m17-ceremonial-boss-beta05-deep-r80-v1/round-0010/student.pt \
+    --output-root results/h15-m18-every-decision-value-d8-s32-long-r80-v1 \
+    --rounds 80 --train-combats 128 --eval-combats 64 --eval-every 10 \
+    --workers 15 \
+    --scenarios ceremonial-beast-boss-a10 \
+    --decks silent-boss-cycle-20-v1 \
+    --fixture-seed h15-reference-m15-fixture-v1 \
+    --seed-prefix h15-m18-every-decision-value-long-v1 \
+    --search-provider root_conditioned --search-schedule every_decision \
+    --tree-expansion-mode full_depth --search-leaf-mode value \
+    --defeat-margin-beta 0.5 --simulations 32 \
+    --tree-depth 8 --rollout-depth 256 --max-decisions 512 \
+    --late-value-max 0 --epochs 1 --batch-size 32 --lr 0.000003 \
+    --value-weight 1.0 --learner-device cuda --execute \
+    2>&1 | tee results/h15-m18-every-decision-value-d8-s32-long-r80-v1.log
+~~~
+
+This program resumes completed rounds from the same configuration
+when rerun, and its output directory should remain unchanged. It
+writes per-round `round.json`, `student.pt` and top-level
+`progress.json`. Periodic holdout evaluation is enabled (unlike
+the earlier `--skip-evaluation` throughput smoke). Output is an
+explicitly labelled **single-seed research training curve**;
+replication and independent holdout requirements still apply
+before concluding any policy improvement.
+
+**Scheduling caution:** Full-corpus time is estimated from a
+15-combat smoke (about 71 minutes per 128 combats plus
+evaluation overhead), not from a full-round benchmark.
+The source engine/provider is pinned, and the experimental
+teacher remains root-conditioned/privileged approximate.
