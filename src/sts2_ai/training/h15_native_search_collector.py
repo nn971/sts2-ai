@@ -246,7 +246,8 @@ def replay_native_public_history(
 def collect_native_combat_search(
     backend: EmulatorBackend, recipe: CombatSnapshotRecipe, *,
     fair_sampler: FairContinuationSampler, teacher: H15CombatEvaluator,
-    simulations: int = 32, max_decisions: int = 512, max_searches: int = 8,
+    simulations: int = 32, max_decisions: int = 512,
+    max_searches: int | None = 8,
     seed: int = 20261029, tree_depth: int = 16,
     rollout_depth: int = 512, leaf_mode: str = "terminal",
     search_schedule: str = "first",
@@ -259,26 +260,34 @@ def collect_native_combat_search(
     late_value_max: int = 0, late_value_min_turn: int = 7,
     late_value_player_hp: int = 25, late_value_enemy_hp: int = 40,
 ) -> NativeSearchCollection:
-    """Search only selected moves; label all saved roots after actual combat.
+    """Collect search targets at configured public player decisions.
 
-    With the current H9 teacher, root visit counts guide policy improvements;
-    the REAL completed fight supplies the common critic target. Remaining
-    decisions use the frozen network's greedy legal action. A capped fight
+    The "every_decision" schedule searches all encodable public choices with
+    at least two legal actions and has no manually allocated search-root cap.
+    Root visit counts supervise the actor; the REAL completed fight supplies
+    the critic target. One-action/nested-choice decisions use the frozen
+    network's greedy legal action. A capped fight
     contributes no data. Fair-posterior mode demands independent conditioning;
     root-conditioned mode reuses the existing engine fork with explicit
     privileged-search provenance.
     """
     if (min(simulations, max_decisions, tree_depth, rollout_depth) < 1
-            or max_searches < 0 or seed < 0
+            or (max_searches is not None and max_searches < 0)
+            or (max_searches is None and search_schedule != "every_decision")
+            or seed < 0
             or leaf_mode not in ("terminal", "value")
             or search_schedule not in (
                 "first", "turn_start", "danger", "tactical",
+                "every_decision",
             )
             or search_provider not in ("fair_posterior", "root_conditioned")
             or tree_expansion_mode not in ("one_leaf", "full_depth")
             or defeat_margin_beta not in (0.0, 0.5)
             or reserved_lethal_searches < 0
-            or reserved_lethal_searches > max_searches
+            or (max_searches is not None
+                and reserved_lethal_searches > max_searches)
+            or (search_schedule == "every_decision"
+                and reserved_lethal_searches != 0)
             or lethal_enemy_hp < 0
             or late_value_max < 0 or late_value_min_turn < 1
             or late_value_player_hp < 0 or late_value_enemy_hp < 0):
@@ -314,7 +323,8 @@ def collect_live_combat_search(
     initial_history: tuple[PublicHistoryStep, ...], *,
     fair_sampler: FairContinuationSampler, teacher: H15CombatEvaluator,
     source_seed: str, entry_hash: str, encounter_tier: str,
-    simulations: int = 32, max_decisions: int = 512, max_searches: int = 8,
+    simulations: int = 32, max_decisions: int = 512,
+    max_searches: int | None = 8,
     seed: int = 20261029, tree_depth: int = 16,
     rollout_depth: int = 512, leaf_mode: str = "terminal",
     search_schedule: str = "first",
@@ -333,16 +343,22 @@ def collect_live_combat_search(
     fixtures both use this loop; the fair sampler is supplied explicitly.
     """
     if (min(simulations, max_decisions, tree_depth, rollout_depth) < 1
-            or max_searches < 0 or seed < 0
+            or (max_searches is not None and max_searches < 0)
+            or (max_searches is None and search_schedule != "every_decision")
+            or seed < 0
             or leaf_mode not in ("terminal", "value")
             or search_schedule not in (
                 "first", "turn_start", "danger", "tactical",
+                "every_decision",
             )
             or search_provider not in ("fair_posterior", "root_conditioned")
             or tree_expansion_mode not in ("one_leaf", "full_depth")
             or defeat_margin_beta not in (0.0, 0.5)
             or reserved_lethal_searches < 0
-            or reserved_lethal_searches > max_searches
+            or (max_searches is not None
+                and reserved_lethal_searches > max_searches)
+            or (search_schedule == "every_decision"
+                and reserved_lethal_searches != 0)
             or lethal_enemy_hp < 0
             or late_value_max < 0 or late_value_min_turn < 1
             or late_value_player_hp < 0 or late_value_enemy_hp < 0):
@@ -474,14 +490,16 @@ def collect_live_combat_search(
                      max_searches - reserved_lethal_searches)
             )
             search_here = (
-                len(saved) < max_searches
+                (max_searches is None or len(saved) < max_searches)
                 and not is_nested_choice
                 and ((
+                    search_schedule == "every_decision" and len(menu) >= 2
+                ) or (
                     search_schedule == "tactical" and tactical_eligible
                 ) or (
                     search_schedule == "first"
                 ) or (
-                    search_schedule != "tactical"
+                    search_schedule in ("turn_start", "danger")
                     and turn != last_searched_turn
                     and (search_schedule == "turn_start"
                          or eligible_danger)
@@ -526,6 +544,7 @@ def collect_live_combat_search(
                 )
                 search_diagnostics.append({
                     "decision_index": count,
+                    "search_turn": public["combat"].get("turn"),
                     "search_trigger": (
                         "near_lethal" if lethal_now else
                         "public_danger" if search_schedule == "tactical"
