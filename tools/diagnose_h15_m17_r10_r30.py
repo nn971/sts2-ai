@@ -16,6 +16,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import random
 import sys
 import time
@@ -339,6 +340,14 @@ def analyze_root(backend: Any, nature_seed: int, case: dict[str, Any],
         H15RootConditionedCombatAdapter,
     )
 
+    root_started = time.monotonic()
+    print(
+        f"[h15-paired-search-root-start] pid={os.getpid()} "
+        f"case={case['case_id']} src={selection['source_trajectory']} "
+        f"decision={selection['decision_index']} "
+        f"reason={selection['reason']} sims_per_model={simulations}",
+        flush=True,
+    )
     handle, observed, menu = replay_selected_root(
         backend, nature_seed,
         case["trajectories"][selection["source_trajectory"]],
@@ -354,6 +363,13 @@ def analyze_root(backend: Any, nature_seed: int, case: dict[str, Any],
         diagnostics = {}
         public = json.loads(observed.payload_json)
         for name in MODEL_NAMES:
+            model_started = time.monotonic()
+            print(
+                f"[h15-paired-search-model-start] pid={os.getpid()} "
+                f"case={case['case_id']} decision={selection['decision_index']} "
+                f"model={name} sims={simulations}",
+                flush=True,
+            )
             search_seed = seed63(
                 f"{case['case_id']}:{selection['source_trajectory']}:"
                 f"{selection['decision_index']}:paired-search"
@@ -370,6 +386,14 @@ def analyze_root(backend: Any, nature_seed: int, case: dict[str, Any],
                     or result.neural_cutoffs):
                 raise RuntimeError("Paired terminal PUCT did not terminate")
             search_results[name] = result
+            print(
+                f"[h15-paired-search-model-done] pid={os.getpid()} "
+                f"case={case['case_id']} decision={selection['decision_index']} "
+                f"model={name} elapsed_s={time.monotonic() - model_started:.1f} "
+                f"transitions={result.transitions} "
+                f"max_expanded_depth={result.maximum_expanded_depth}",
+                flush=True,
+            )
             best = max(range(len(menu)), key=lambda i: (
                 result.visits[i], menu[i].action_id,
             ))
@@ -444,6 +468,12 @@ def analyze_root(backend: Any, nature_seed: int, case: dict[str, Any],
                     seed=common_seed, max_decisions=rollout_depth,
                 ),
             }
+        print(
+            f"[h15-paired-search-root-done] pid={os.getpid()} "
+            f"case={case['case_id']} decision={selection['decision_index']} "
+            f"elapsed_s={time.monotonic() - root_started:.1f}",
+            flush=True,
+        )
         return row
     finally:
         backend.release_many((handle,))
@@ -493,6 +523,14 @@ def process_cases(
                     if trace_cases is None or case_id not in trace_cases:
                         raise ValueError("Missing recorded source trajectory")
                     case = trace_cases[case_id]
+                    selections = choose_roots(
+                        case, max_roots=kwargs["roots_per_case"],
+                    )
+                    print(
+                        f"[h15-paired-search-case-start] pid={os.getpid()} "
+                        f"case={case_id} roots={len(selections)}",
+                        flush=True,
+                    )
                     roots = [
                         analyze_root(
                             backend, nature_seed, case, selection, evaluators,
@@ -501,9 +539,7 @@ def process_cases(
                             rollout_depth=kwargs["rollout_depth"],
                             counterfactual_rollouts=kwargs["counterfactual_rollouts"],
                         )
-                        for selection in choose_roots(
-                            case, max_roots=kwargs["roots_per_case"],
-                        )
+                        for selection in selections
                     ]
                     cases.append({"case_id": case_id, "roots": roots})
             finally:
