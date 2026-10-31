@@ -28,7 +28,9 @@ from sts2_ai.nature.combat_scenarios import (
     scenario_for_seed,
 )
 from sts2_ai.training.h15_search_supervision import (
-    REWARD_VERSION, DEFEAT_MARGIN_REWARD_VERSION, decode_target,
+    DEFEAT_MARGIN_REWARD_VERSION,
+    REWARD_VERSION,
+    decode_target,
 )
 
 REGIME = "fixed-h8-fixture-declared-chance-law"
