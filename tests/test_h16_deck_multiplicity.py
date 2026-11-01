@@ -65,3 +65,36 @@ def test_no_silent_truncation_for_many_distinct_cards():
     ]
     with pytest.raises(ValueError, match="Public object cap"):
         encode_h16_decision(make_state(deck), ACTIONS)
+
+
+def test_thousand_identical_selectable_cards_use_one_pooled_card_object():
+    deck = [{"instance_id": i, "card_id": "demo.strike"} for i in range(1000)]
+    public = make_state(deck)
+    public["combat"] = {
+        "turn": 1, "hand": [], "discard_pile": deck,
+        "exhaust_pile": [], "selection_candidates": deck,
+        "enemies": [], "player_powers": [],
+    }
+    selections = (
+        LegalAction("finish", "select_cards", '{"CardInstanceIds":[]}'),
+        LegalAction("choose-one", "select_cards", '{"CardInstanceIds":[0]}'),
+    )
+    encoded = encode_h16_decision(public, selections)
+    assert len(encoded.objects) == 4  # global/player, discard class, deck class
+    assert len(set(encoded.actions)) == 2
+    assert encoded.actions[1].members == (2,)
+
+
+def test_different_instance_actions_in_one_group_require_emulator_dedup():
+    deck = [{"instance_id": i, "card_id": "demo.strike"} for i in range(2)]
+    public = make_state(deck)
+    public["combat"] = {
+        "turn": 1, "hand": [], "discard_pile": deck,
+        "exhaust_pile": [], "selection_candidates": deck, "enemies": [],
+    }
+    choices = tuple(
+        LegalAction(str(i), "select_cards", '{"CardInstanceIds":[' + str(i) + ']}')
+        for i in range(2)
+    )
+    with pytest.raises(ValueError, match="representation collision"):
+        encode_h16_decision(public, choices)
