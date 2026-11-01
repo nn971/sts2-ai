@@ -42,7 +42,7 @@ from sts2_ai.search.combat_puct import (
 )
 from sts2_ai.training.h16_public_codec import H16_CODEC, encode_h16_decision
 
-SCHEMA = "sts2-h16-act1-joint-hp-potential-pilot-v1"
+SCHEMA = "sts2-h16-act1-geometric-horizon-every-combat-puct-v2"
 PUBLIC_POLICY = InformationPolicy(FAIR_POLICY_ID)
 
 
@@ -123,6 +123,58 @@ def hp_after_current_room(
     return 0.0
 
 
+def completed_room_hp(frames: Sequence[dict[str, Any]]) -> dict[int, float]:
+    """First observed post-completion HP for each Act-1 floor.
+
+    Take the first observable boundary at which the room is completed;
+    subsequent healing, rewards or room travel must not overwrite it.
+    """
+    completed: dict[int, float] = {}
+    for state in frames:
+        visits = state.get("completed_rooms")
+        if not isinstance(visits, list):
+            continue
+        for room in visits:
+            if not isinstance(room, dict) or room.get("act") != 1:
+                continue
+            floor = room.get("floor")
+            if type(floor) is int and 1 <= floor <= 16 and floor not in completed:
+                completed[floor] = hp_fraction(state)
+    return completed
+
+
+def remaining_room_hp(
+    state: dict[str, Any], completions: dict[int, float],
+) -> tuple[float, ...]:
+    """HP after each room strictly following the player's present decision."""
+    floor = state.get("floor")
+    if type(floor) is not int or not 0 <= floor <= 16:
+        raise ValueError("Invalid observed floor for geometric HP target")
+    first = floor + 1 if floor == 0 or floor_completed(state, floor) else floor
+    return tuple(completions.get(next_floor, 0.0) for next_floor in range(first, 17))
+
+
+def geometric_hp_return(
+    room_hp: Sequence[float], act_clear: float, horizon_lambda: float,
+) -> float:
+    """Smooth post-room HP -> Act-clear target on a finite Act.
+
+    (1-lambda) * sum_{k=0}^{R-1} lambda**k * hp[k]
+        + lambda**R * act_clear, with R remaining room completions.
+    lambda=0 gives next post-room HP; lambda=1 gives Act clear.
+    Every missing future room on a defeated trajectory has HP zero.
+    """
+    if (not 0.0 <= horizon_lambda <= 1.0
+            or not math.isfinite(horizon_lambda)
+            or act_clear not in (0.0, 1.0)
+            or any(not math.isfinite(x) or not 0 <= x <= 1 for x in room_hp)):
+        raise ValueError("Invalid geometric-horizon target inputs")
+    result = act_clear
+    for hp in reversed(room_hp):
+        result = (1 - horizon_lambda) * hp + horizon_lambda * result
+    return result
+
+
 def _softmax(logits: Sequence[float], temperature: float) -> tuple[float, ...]:
     if temperature <= 0 or not logits or not all(math.isfinite(x) for x in logits):
         raise ValueError("Invalid action logits or temperature")
@@ -146,19 +198,51 @@ class JointActPilotNet(nn.Module):
     def __init__(self, backbone: SharedObjectTransformer) -> None:
         super().__init__()
         self.backbone = backbone
-        self.act_clear = nn.Linear(backbone.config.width, 1)
-        self.future_hp = nn.Linear(backbone.config.width, 1)
+        dim = backbone.config.width
+        self.act_clear = nn.Linear(dim, 1)
+        # The same public state has different values at different horizons.
+        # Conditioning on lambda and lambda**2 allows the head to learn
+        # interactions between horizon and state, not merely a scalar offset.
+        self.horizon_head = nn.Sequential(
+            nn.Linear(dim + 2, dim), nn.GELU(), nn.Linear(dim, 1),
+        )
         nn.init.zeros_(self.act_clear.weight)
         nn.init.constant_(self.act_clear.bias, -1.5)
-        nn.init.zeros_(self.future_hp.weight)
-        nn.init.zeros_(self.future_hp.bias)
+        nn.init.zeros_(self.horizon_head[-1].weight)
+        nn.init.zeros_(self.horizon_head[-1].bias)
+
+    def _horizon_logits(
+        self, context: Tensor, horizon_lambda: float | Tensor,
+    ) -> Tensor:
+        if isinstance(horizon_lambda, Tensor):
+            if horizon_lambda.shape != (context.shape[0],):
+                raise ValueError("Horizon lambda tensor must have shape [batch]")
+            lam = horizon_lambda.to(device=context.device, dtype=context.dtype)
+            if not bool((torch.isfinite(lam) & (lam >= 0) & (lam <= 1)).all()):
+                raise ValueError("Invalid per-state geometric horizon")
+            lam = lam.unsqueeze(-1)
+        else:
+            if not math.isfinite(horizon_lambda) or not 0 <= horizon_lambda <= 1:
+                raise ValueError("Geometric horizon must belong to [0,1]")
+            lam = context.new_full((context.shape[0], 1), horizon_lambda)
+        return self.horizon_head(
+            torch.cat([context, lam, lam.square()], dim=-1),
+        ).squeeze(-1)
 
     def forward(
         self, batch: Any, *, value_logits: bool = False,
-    ) -> tuple[Tensor, Tensor, Tensor]:
+        horizon_lambda: float | Tensor = 0.0,
+        auxiliary_lambda: Tensor | None = None,
+    ) -> tuple[Tensor, Tensor, Tensor] | tuple[Tensor, Tensor, Tensor, Tensor]:
         logits, _, context = self.backbone(batch, return_context=True)
         act = self.act_clear(context).squeeze(-1)
-        hp = self.future_hp(context).squeeze(-1)
+        hp = self._horizon_logits(context, horizon_lambda)
+        if auxiliary_lambda is not None:
+            aux_hp = self._horizon_logits(context, auxiliary_lambda)
+            if value_logits:
+                return logits, act, hp, aux_hp
+            return (logits, torch.sigmoid(act), torch.sigmoid(hp),
+                    torch.sigmoid(aux_hp))
         if value_logits:
             return logits, act, hp
         return logits, torch.sigmoid(act), torch.sigmoid(hp)
@@ -230,14 +314,14 @@ class PilotPolicy:
 
     def __init__(
         self, model: JointActPilotNet, *, temperature: float,
-        alpha: float, macro_teacher: PhaseSplitNeuralModel | None = None,
+        horizon_lambda: float, macro_teacher: PhaseSplitNeuralModel | None = None,
         macro_prior_weight: float = 0.5,
     ) -> None:
-        if not 0 <= alpha <= 1 or temperature <= 0 or macro_prior_weight < 0:
+        if not 0 <= horizon_lambda <= 1 or temperature <= 0 or macro_prior_weight < 0:
             raise ValueError("Invalid pilot continuation/policy weighting")
         self.model = model.eval()
         self.temperature = temperature
-        self.alpha = alpha
+        self.horizon_lambda = horizon_lambda
         self.macro_teacher = macro_teacher
         self.macro_prior_weight = macro_prior_weight
 
@@ -262,13 +346,15 @@ class PilotPolicy:
         encoded = encode_h16_decision(public_state(observation), actions)
         batch = collate_h7([encoded]).to(next(self.model.parameters()).device)
         with torch.inference_mode():
-            logits, act, hp = self.model(batch)
+            logits, act, hp = self.model(
+                batch, horizon_lambda=self.horizon_lambda,
+            )
         offsets = self._offsets(observation, actions)
         scores = tuple(
             float(logits[0, i]) + offset
             for i, offset in enumerate(offsets)
         )
-        value = self.alpha * float(act[0]) + (1.0 - self.alpha) * float(hp[0])
+        value = float(hp[0])
         if not all(math.isfinite(x) for x in (*scores, value)):
             raise ValueError("Nonfinite joint inference")
         return scores, min(1.0, max(0.0, value)), offsets
@@ -410,9 +496,9 @@ def collect_act_episode(
             scores, _, offsets = policy.infer(observation, actions)
             search_policy = None
             should_search = (
-                searches < max_searches and len(actions) > 1
+                (max_searches == 0 or searches < max_searches) and len(actions) > 1
                 and isinstance(public.get("combat"), dict)
-                and rng.random() < search_probability
+                and (search_probability == 1 or rng.random() < search_probability)
             )
             if should_search:
                 search_policy, count = local_combat_puct(
