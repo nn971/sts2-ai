@@ -226,9 +226,17 @@ def summarize(episodes: list[PilotEpisode]) -> dict[str, Any]:
         episode_floor_record(ep.frames, ep.seed, ep.outcome, len(ep.decisions))
         for ep in episodes
     ]
-    combats = [result for ep in episodes if ep.complete
-               for result in combat_results(ep.frames, ep.outcome)]
-    defeated = [result.enemy_progress for result in combats if not result.won]
+    finished_combats = [
+        (ep.seed, result) for ep in episodes if ep.complete
+        for result in combat_results(ep.frames, ep.outcome)
+    ]
+    combats = [result for _, result in finished_combats]
+    lost_fights = [
+        {"seed": seed, "floor": result.floor,
+         "enemy_hp_removed_fraction": result.enemy_progress}
+        for seed, result in finished_combats if not result.won
+    ]
+    defeated = [item["enemy_hp_removed_fraction"] for item in lost_fights]
     return {
         "floor_progress": summarize_floor_progress(floor_records),
         "combat_progress": {
@@ -238,6 +246,7 @@ def summarize(episodes: list[PilotEpisode]) -> dict[str, Any]:
             "mean_enemy_progress_on_defeat": (
                 sum(defeated) / len(defeated) if defeated else None
             ),
+            "lost_fights": lost_fights,
         },
         "played": len(episodes),
         "completed": len(completed),
