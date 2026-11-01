@@ -148,23 +148,28 @@ python -u tools/train_h16_joint_act_pilot.py \
     --workers 15 --device cuda --execute
 ```
 
-**Matched immediate-HP control** (same seeds/budgets/map and initial
-model; different hypothesis, separate output):
+**Matched post-room HP control** (same seeds/budgets/map and initial
+model; short-horizon action-dependent HP target, separate output):
 
 ```fish
 python -u tools/train_h16_joint_act_pilot.py \
     --initial-h9 $h9 --macro-model $macro \
     --emulator-root $emu --emulator-revision $rev \
-    --output-root results/h16-fixedroute-immediatehp-control-v1 \
-    --hp-target immediate \
+    --output-root results/h16-fixedroute-postroomhp-control-v1 \
+    --hp-target post_room \
     --rounds 3 --runs-per-round 16 --heldout-runs 8 \
     --workers 15 --device cuda --execute
 ```
 
 Both arms train the Act binary target as a separate critic head. The
-only difference is the HP bootstrap target (future completed floor
-versus immediate HP). They retain the SAME neural architecture, local
-PUCT settings, temperature and macro prior.
+only difference is the HP bootstrap target (two floors later versus
+the next room-completion boundary). For decisions during combat or an
+unfinished room, the control uses HP after that room completes. At a map
+choice (where the preceding floor is already complete), it uses HP
+after the next room. Neow's floor-zero decisions use floor 1; death
+before the boundary gives zero. This replaces the invalid pre-decision
+"immediate" HP target from the initial pilot. Both arms retain the
+same architecture, local PUCT settings, temperature and macro prior.
 
 To resume an interrupted run, repeat the identical command and add
 `--resume`. Configuration and starting model fingerprints must match.
@@ -184,7 +189,7 @@ resource inventory diversity and potion actions. Resource diversity is
 a diagnostic of exploratory coverage, **not a direct success metric**.
 
 The strongest signal of delayed-credit learning would be a
-held-out advantage for future-HP over immediate-HP under matched
+held-out advantage for future-HP over post-room HP under matched
 resource-dependent states and independent Nature seeds. With 3 rounds
 and eight held-out runs this is only a feasibility pilot; retain the
 negative result if there is no evidence, then decide whether a larger
@@ -203,3 +208,14 @@ paired study is justified.
    ends at the certified full Act 1 boundary.
 5. A full run that cannot complete due to an unsupported emulator
    action fails visibly rather than being scored as a death.
+
+## Control-target correction
+
+The original `--hp-target immediate` option supervised the policy with
+HP at the pre-decision observation, which cannot distinguish alternative
+actions from the same state in expectation. The corrected arm is explicitly
+named `--hp-target post_room` and has a new output directory, preventing
+accidental comparison or resume against the invalid old control. The
+`--hp-target future` treatment and its definition are unchanged. Historical
+immediate-HP results remain preliminary debugging records, not a valid
+short-horizon control.
