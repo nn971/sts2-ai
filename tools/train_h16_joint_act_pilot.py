@@ -35,6 +35,11 @@ from sts2_ai.emulator.run_environment import EXPERIMENTAL_FIXED_ROUTE_PROFILE
 from sts2_ai.models.h16_batch_actor import RemoteH16Actor, SharedH16Service
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.models.shared_transformer import SharedObjectTransformer
+from sts2_ai.training.h16_episode_metrics import (
+    combat_results,
+    episode_floor_record,
+    summarize_floor_progress,
+)
 from sts2_ai.training.h16_joint_act_pilot import (
     SCHEMA,
     JointActPilotNet,
@@ -42,11 +47,6 @@ from sts2_ai.training.h16_joint_act_pilot import (
     PilotPolicy,
     collect_act_episode,
     train_joint_cohort,
-)
-from sts2_ai.training.h16_episode_metrics import (
-    combat_results,
-    episode_floor_record,
-    summarize_floor_progress,
 )
 from sts2_ai.training.h16_public_codec import set_h16_rollout_seed
 
