@@ -155,6 +155,22 @@ def encode_public_decision(
                     if key in lookup:
                         raise ValueError("Duplicate selectable public card instance")
                     lookup[key] = idx
+        # The emulator exposes public pending-choice candidates, including
+        # cards temporarily shown from the draw pile or generated choice pool.
+        # Reuse an existing zone object for cards already in hand/discard/
+        # exhaust to avoid introducing duplicate aliases.
+        if encode_card_subsets:
+            for candidate in _records(combat.get("selection_candidates")):
+                ref_id = candidate.get("instance_id")
+                if type(ref_id) is not int:
+                    raise ValueError("Malformed public choice candidate")
+                key = ("selection_card", ref_id)
+                if key not in lookup:
+                    idx = add(
+                        "card", _entry_id(candidate, "card_id"), "reward",
+                        candidate,
+                    )
+                    lookup[key] = idx
         for enemy in _records(combat.get("enemies")):
             ref_id = enemy.get("instance_id")
             idx = add("enemy", _entry_id(enemy, "enemy_id"), "enemy", enemy,
