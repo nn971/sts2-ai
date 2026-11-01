@@ -500,6 +500,7 @@ def local_combat_puct(
     result = CombatPuct(
         adapter, evaluator, max_depth=depth, c_puct=1.5,
         tree_expansion_mode="full_depth", leaf_mode="value", seed=seed,
+        free_card_selection_steps=True,
     ).search(root, simulations=simulations)
     return result.policy, result.transitions
 
