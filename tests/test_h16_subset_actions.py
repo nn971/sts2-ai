@@ -9,7 +9,9 @@ import torch
 from sts2_ai.emulator.protocol import LegalAction
 from sts2_ai.models.packed_actor_collation import collate_h7_actor_packed
 from sts2_ai.models.shared_transformer import (
-    H7Config, SharedObjectTransformer, collate_h7,
+    H7Config,
+    SharedObjectTransformer,
+    collate_h7,
 )
 from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet
 from sts2_ai.training.h16_public_codec import encode_h16_decision
