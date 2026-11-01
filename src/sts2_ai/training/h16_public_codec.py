@@ -97,6 +97,7 @@ def encode_h16_decision(
     base = encode_public_decision(
         state, codec_actions, max_actions=None,
         encode_card_subsets=not macro,
+        compress_deck=True,
     )
     objects = list(base.objects)
     extra = 0
