@@ -400,7 +400,7 @@ def train_joint_cohort(
     episodes: Sequence[PilotEpisode], *, alpha: float, horizon: int,
     temperature: float = 0.85, minibatch: int = 32,
     epochs: int = 1, entropy_weight: float = 0.001,
-    search_weight: float = 0.5,
+    search_weight: float = 0.5, hp_target: str = "future",
 ) -> dict[str, float | int]:
     """Joint macro/combat on-policy updates plus search distillation.
 
@@ -408,14 +408,17 @@ def train_joint_cohort(
     baseline for ordinary actions. Search-executed actions receive only the
     PUCT visit CE target. Act labels are always binary and full-Act terminal.
     """
-    if (not 0 <= alpha <= 1 or horizon <= 0 or temperature <= 0
+    if (hp_target not in ("future", "immediate")
+            or not 0 <= alpha <= 1 or horizon <= 0 or temperature <= 0
             or minibatch <= 0 or epochs <= 0 or search_weight < 0):
         raise ValueError("Invalid joint training configuration")
     entries: list[tuple[PilotDecision, float, float]] = []
     for episode in episodes:
-        for decision, (act, hp) in zip(
+        for i, (decision, (act, future_hp)) in enumerate(zip(
             episode.decisions, targets_for_episode(episode, horizon), strict=True,
-        ):
+        )):
+            hp = (future_hp if hp_target == "future"
+                  else hp_fraction(episode.frames[i]))
             entries.append((decision, act, hp))
     if not entries:
         raise ValueError("No complete Act decisions for joint learning")
