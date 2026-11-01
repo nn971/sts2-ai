@@ -30,8 +30,8 @@ def test_thousand_identical_clones_become_one_inventory_token():
     encoded = encode_h16_decision(make_state(deck), ACTIONS)
     assert len(encoded.objects) == 2  # global state + one deck multiset
     clone = encoded.objects[-1]
-    assert clone.observed[13] == 1  # count is represented, not discarded
-    assert clone.numeric[13] == pytest.approx(
+    assert clone.observed[14] == 1  # count is represented, not discarded
+    assert clone.numeric[14] == pytest.approx(
         math.tanh(math.log1p(1000) / 10), abs=1e-7,
     )
     # H7's legacy codec still rejects its old 256-object cap instead of
@@ -53,7 +53,7 @@ def test_public_modifications_are_part_of_group_identity():
     ]
     encoded = encode_h16_decision(make_state(deck), ACTIONS)
     assert len(encoded.objects) == 4  # global + three visibly distinct classes
-    assert encoded.objects[1].numeric[13] == pytest.approx(
+    assert encoded.objects[1].numeric[14] == pytest.approx(
         math.tanh(math.log1p(2) / 10), abs=1e-7,
     )
 
