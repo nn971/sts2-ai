@@ -295,6 +295,8 @@ class ForkBackend:
 
 
 class ValueStub:
+    temperature = 0.85
+
     def infer(self, observation, actions):
         return (tuple(0.0 for _ in actions), 0.5,
                 tuple(0.0 for _ in actions))
