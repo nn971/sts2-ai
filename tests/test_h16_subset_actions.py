@@ -88,3 +88,20 @@ def test_h16_rejects_distinct_actions_that_share_the_same_structural_token():
     b = LegalAction("other-2", "other_choice", '{"ChoiceId":2}')
     with pytest.raises(ValueError, match="action representation collision"):
         encode_h16_decision(state(), [a, b])
+
+
+def test_h16_choice_pool_candidates_are_visible_as_selected_objects():
+    public = state()
+    public["combat"]["discard_pile"] = []
+    public["combat"]["selection_candidates"] = [
+        {"instance_id": 11, "card_id": "demo.choose.one", "cost": 1},
+        {"instance_id": 12, "card_id": "demo.choose.two", "cost": 2},
+    ]
+    choices = (
+        LegalAction("none", "select_cards", '{"CardInstanceIds":[]}'),
+        LegalAction("first", "select_cards", '{"CardInstanceIds":[11]}'),
+        LegalAction("second", "select_cards", '{"CardInstanceIds":[12]}'),
+    )
+    encoded = encode_h16_decision(public, choices)
+    assert len(set(encoded.actions)) == 3
+    assert encoded.actions[1].members != encoded.actions[2].members
