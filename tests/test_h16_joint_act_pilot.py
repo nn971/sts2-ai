@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import random
 
 import pytest
 import torch
@@ -26,6 +27,7 @@ from sts2_ai.training.h16_joint_act_pilot import (
     hp_after_current_room,
     hp_at_future_floor,
     local_combat_puct,
+    should_search_combat,
     targets_for_episode,
     train_joint_cohort,
 )
@@ -290,6 +292,33 @@ class ValueStub:
         if terminal:
             return 0.0
         return json.loads(observation.payload_json)["hp"] / 70
+
+
+def test_every_combat_decision_is_search_root_without_requiring_a_cap():
+    rng = random.Random(3)
+    combat = frame(4, 40, combat=True)
+    macro = frame(4, 40)
+    for searched in (0, 1, 100, 10000):
+        assert should_search_combat(
+            combat, ACTIONS, searches=searched,
+            max_searches=0, search_probability=1.0, rng=rng,
+        )
+    assert not should_search_combat(
+        combat, ACTIONS, searches=0, max_searches=0,
+        search_probability=0.0, rng=rng,
+    )
+    assert not should_search_combat(
+        combat, ACTIONS, searches=4, max_searches=4,
+        search_probability=1.0, rng=rng,
+    )
+    assert not should_search_combat(
+        combat, ACTIONS[:1], searches=0, max_searches=0,
+        search_probability=1.0, rng=rng,
+    )
+    assert not should_search_combat(
+        macro, ACTIONS, searches=0, max_searches=0,
+        search_probability=1.0, rng=rng,
+    )
 
 
 def test_local_puct_is_short_root_conditioned_and_releases_all_forks():
