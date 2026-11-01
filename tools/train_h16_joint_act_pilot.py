@@ -129,6 +129,31 @@ def collect(
 def summarize(episodes: list[PilotEpisode]) -> dict[str, Any]:
     completed = [e for e in episodes if e.complete]
     cleared = sum(e.outcome == "act_clear" for e in completed)
+    resource_signatures = set()
+    potion_counts: list[int] = []
+    potion_actions = 0
+    for episode in episodes:
+        potion_actions += sum(
+            decision.legal_actions[decision.chosen_index].kind == "use_potion"
+            for decision in episode.decisions
+        )
+        last_completed = 0
+        for state in episode.frames:
+            visits = state.get("completed_rooms")
+            n = len(visits) if isinstance(visits, list) else 0
+            if n <= last_completed:
+                continue
+            last_completed = n
+            potions = state.get("potions")
+            relics = state.get("relics")
+            deck = state.get("deck")
+            if not all(isinstance(x, list) for x in (potions, relics, deck)):
+                continue
+            present = [p for p in potions if p is not None]
+            potion_counts.append(len(present))
+            resource_signatures.add(digest([
+                potions, relics, deck,
+            ]))
     return {
         "played": len(episodes),
         "completed": len(completed),
@@ -145,6 +170,11 @@ def summarize(episodes: list[PilotEpisode]) -> dict[str, Any]:
         "decisions": sum(len(e.decisions) for e in episodes),
         "searches": sum(e.searches for e in episodes),
         "search_transitions": sum(e.search_transitions for e in episodes),
+        "potion_actions": potion_actions,
+        "mean_potions_at_room_completion": (
+            sum(potion_counts) / len(potion_counts) if potion_counts else None
+        ),
+        "distinct_public_resource_signatures": len(resource_signatures),
     }
 
 
