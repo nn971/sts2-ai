@@ -116,13 +116,15 @@ class JointActPilotNet(nn.Module):
         nn.init.zeros_(self.future_hp.weight)
         nn.init.zeros_(self.future_hp.bias)
 
-    def forward(self, batch: Any) -> tuple[Tensor, Tensor, Tensor]:
+    def forward(
+        self, batch: Any, *, value_logits: bool = False,
+    ) -> tuple[Tensor, Tensor, Tensor]:
         logits, _, context = self.backbone(batch, return_context=True)
-        return (
-            logits,
-            torch.sigmoid(self.act_clear(context).squeeze(-1)),
-            torch.sigmoid(self.future_hp(context).squeeze(-1)),
-        )
+        act = self.act_clear(context).squeeze(-1)
+        hp = self.future_hp(context).squeeze(-1)
+        if value_logits:
+            return logits, act, hp
+        return logits, torch.sigmoid(act), torch.sigmoid(hp)
 
     def save(self, path: Path) -> None:
         from dataclasses import asdict
@@ -451,14 +453,41 @@ def train_joint_cohort(
                 ) for decision, _, _ in chunk
             ]
             batch = collate_h7(encoded).to(device)
-            logits, act_hat, hp_hat = model(batch)
+            logits, act_logit, hp_logit = model(batch, value_logits=True)
+            # Report non-finite values *before* launching CUDA BCE kernels;
+            # a failed CUDA device assertion invalidates the whole process.
+            if (not bool(torch.isfinite(logits[batch.action_mask]).all())
+                    or not bool(torch.isfinite(act_logit).all())
+                    or not bool(torch.isfinite(hp_logit).all())):
+                phases = [enc.phase for enc in encoded]
+                floors = [
+                    public_state(decision.observation).get("floor")
+                    for decision, _, _ in chunk
+                ]
+                raise FloatingPointError(
+                    "H16 nonfinite batched forward at "
+                    f"minibatch={start // minibatch}, phases={phases}, "
+                    f"floors={floors}, action_lengths="
+                    f"{[len(d.legal_actions) for d, _, _ in chunk]}"
+                )
+            act_hat = torch.sigmoid(act_logit)
+            hp_hat = torch.sigmoid(hp_logit)
             offsets = torch.zeros_like(logits)
             for i, (decision, _, _) in enumerate(chunk):
                 offsets[i, :len(decision.macro_offset)] = torch.tensor(
                     decision.macro_offset, device=device, dtype=logits.dtype,
                 )
-            logp = torch.log_softmax((logits + offsets) / temperature, dim=1)
-            entropy = -(logp.exp() * logp).masked_fill(
+            if not bool(torch.isfinite(offsets[batch.action_mask]).all()):
+                raise FloatingPointError("H16 nonfinite public macro prior offsets")
+            # The H7 backbone pads unused legal moves at float32's minimum.
+            # Replacing masked positions with a moderate finite constant
+            # prevents numerical overflow in log-probability entropy gradients.
+            policy_logits = ((logits + offsets) / temperature).masked_fill(
+                ~batch.action_mask, -1e4,
+            )
+            logp = torch.log_softmax(policy_logits, dim=1)
+            probabilities = logp.exp()
+            entropy = -(probabilities * logp).masked_fill(
                 ~batch.action_mask, 0.0,
             ).sum(dim=1).mean()
             targets = torch.tensor(
@@ -467,8 +496,10 @@ def train_joint_cohort(
             )
             target_act, target_hp = targets[:, 0], targets[:, 1]
             from torch.nn import functional as F
-            act_loss = F.binary_cross_entropy(
-                act_hat.clamp(1e-5, 1 - 1e-5), target_act,
+            # Logit-space BCE avoids the fragile CUDA probability-range
+            # assertion and retains gradients at saturated predictions.
+            act_loss = F.binary_cross_entropy_with_logits(
+                act_logit, target_act,
             )
             hp_loss = F.mse_loss(hp_hat, target_hp)
             mixed_target = alpha * target_act + (1 - alpha) * target_hp
@@ -496,15 +527,35 @@ def train_joint_cohort(
                 actor_terms.append(search_weight * torch.stack(search_ce).mean())
             policy_loss = sum(actor_terms) if actor_terms else logits.sum() * 0.0
             loss = policy_loss + act_loss + hp_loss - entropy_weight * entropy
+            if not bool(torch.isfinite(loss)):
+                raise FloatingPointError(
+                    f"H16 nonfinite training loss at minibatch={start // minibatch}"
+                )
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
+            # Crucial: the default clip_grad_norm_ silently multiplies all
+            # model gradients by NaN if even one gradient is non-finite.
+            try:
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), 1.0, error_if_nonfinite=True,
+                )
+            except RuntimeError as exc:
+                bad = [
+                    name for name, parameter in model.named_parameters()
+                    if parameter.grad is not None
+                    and not bool(torch.isfinite(parameter.grad).all())
+                ]
+                raise FloatingPointError(
+                    f"H16 nonfinite gradients before optimizer step: {bad[:16]}"
+                ) from exc
+            # Synchronize/log scalar losses before mutating parameters,
+            # so an asynchronous device error cannot corrupt a checkpoint.
             for key, value in (
                 ("loss", loss), ("policy", policy_loss),
                 ("act", act_loss), ("hp", hp_loss),
             ):
                 sums[key] += float(value.detach())
+            optimizer.step()
             updates += 1
     model.eval()
     return {
