@@ -20,6 +20,7 @@ from sts2_ai.training.h16_joint_act_pilot import (
     PilotDecision,
     PilotEpisode,
     floor_completed,
+    hp_after_current_room,
     hp_at_future_floor,
     local_combat_puct,
     targets_for_episode,
@@ -61,6 +62,49 @@ def test_hp_target_follows_future_completed_floor_not_current_hp():
     assert floor_completed(states[-1], 6)
 
 
+def test_post_room_hp_depends_on_room_actions_not_predecision_hp():
+    # Two possible outcomes from the same combat-start observation.
+    start = frame(4, 55, (1, 2, 3), combat=True)
+    for room_end_hp in (24, 48):
+        states = (
+            start,
+            frame(4, 51, (1, 2, 3), combat=True),
+            frame(4, room_end_hp, (1, 2, 3, 4)),
+            frame(5, room_end_hp, (1, 2, 3, 4)),
+        )
+        assert hp_after_current_room(states, 0) == pytest.approx(room_end_hp / 70)
+    # An already-completed room means the decision belongs to the next
+    # room's outcome; repeating its initial HP would be action-independent.
+    map_choice = (
+        frame(4, 55, (1, 2, 3, 4)),
+        frame(5, 55, (1, 2, 3, 4), combat=True),
+        frame(5, 32, (1, 2, 3, 4, 5)),
+    )
+    assert hp_after_current_room(map_choice, 0) == pytest.approx(32 / 70)
+    assert hp_after_current_room(map_choice, 1) == pytest.approx(32 / 70)
+
+
+def test_post_room_hp_handles_neow_death_and_act_boundary():
+    neow = (
+        frame(0, 70),
+        frame(0, 70),
+        frame(1, 60, (1,)),
+    )
+    assert hp_after_current_room(neow, 0) == pytest.approx(60 / 70)
+    died_before_room_end = (
+        frame(7, 51, tuple(range(1, 7)), combat=True),
+        frame(7, 0, tuple(range(1, 7))),
+    )
+    assert hp_after_current_room(died_before_room_end, 0) == 0.0
+    completed_boss = (
+        frame(16, 30, tuple(range(1, 17))),
+        frame(16, 30, tuple(range(1, 17))),
+    )
+    assert hp_after_current_room(completed_boss, 0) == pytest.approx(30 / 70)
+    with pytest.raises(ValueError, match="Invalid post-room HP"):
+        hp_after_current_room(neow, len(neow) - 1)
+
+
 def test_early_death_future_hp_is_zero_and_binary_label_is_act_level():
     d = PilotDecision(obs(frame(4, 55, combat=True)), ACTIONS, 0, (0., 0.))
     ep = PilotEpisode(
@@ -72,6 +116,19 @@ def test_early_death_future_hp_is_zero_and_binary_label_is_act_level():
         targets_for_episode(PilotEpisode(
             "censored", (d,), ep.frames, "censored", 0, 0,
         ), 2)
+
+
+def test_legacy_immediate_hp_option_is_rejected():
+    # Old "immediate" meant pre-decision HP, which provides no
+    # action-dependent policy-gradient signal.
+    model = JointActPilotNet(SharedObjectTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64),
+    ))
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+    with pytest.raises(ValueError, match="Invalid joint training configuration"):
+        train_joint_cohort(
+            model, optimizer, (), alpha=0, horizon=2, hp_target="immediate",
+        )
 
 
 def test_opt_in_fixed_map_does_not_weaken_native_default_validation():
@@ -120,6 +177,7 @@ def test_one_joint_optimizer_updates_both_phases_and_continuation_heads():
     result = train_joint_cohort(
         model, optimizer, [cleared, lost], alpha=0.35, horizon=2,
         temperature=1.0, minibatch=4, epochs=1,
+        hp_target="post_room",
     )
     assert result["optimizer_steps"] == 1
     assert result["combat_decisions"] == 2
