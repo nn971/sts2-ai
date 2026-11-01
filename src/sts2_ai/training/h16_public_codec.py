@@ -26,7 +26,8 @@ from sts2_ai.models.shared_game_objects import (
     encode_public_decision,
 )
 
-H16_CODEC = "h16-public-persistent-subset-actions-v2"
+H16_CODEC = "h16-public-persistent-subset-multiset-v3"
+PREVIOUS_H16_CODEC = "h16-public-persistent-subset-actions-v2"
 LEGACY_H16_CODEC = "h16-public-persistent-macro-actions-v1"
 MAX_EXTRA_TOKENS = 64
 # Once per process: expose unusual real/search menus without dumping states.
@@ -97,6 +98,7 @@ def encode_h16_decision(
     base = encode_public_decision(
         state, codec_actions, max_actions=None,
         encode_card_subsets=not macro,
+        compress_deck=True,
     )
     objects = list(base.objects)
     extra = 0
@@ -108,9 +110,22 @@ def encode_h16_decision(
         resources = state.get(field)
         if not isinstance(resources, list):
             continue
+        seen_deck_resources: set[str] = set()
         for resource in resources:
             if not isinstance(resource, dict):
                 continue
+            if field == "deck":
+                # Public deck cards are already encoded as multiset classes.
+                # Emit persistent-state leaves once per identical class,
+                # keeping the 64-token auxiliary cap independent of copies.
+                signature = json.dumps(
+                    {key: value for key, value in resource.items()
+                     if key != "instance_id"},
+                    sort_keys=True, separators=(",", ":"),
+                )
+                if signature in seen_deck_resources:
+                    continue
+                seen_deck_resources.add(signature)
             name = next(
                 (resource[key] for key in name_fields
                  if isinstance(resource.get(key), str)), "unknown",

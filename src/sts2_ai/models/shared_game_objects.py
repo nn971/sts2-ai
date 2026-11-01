@@ -100,6 +100,7 @@ def encode_public_decision(
     state: dict[str, Any], legal_actions: Sequence[Any], *,
     max_actions: int | None = MAX_ACTIONS,
     encode_card_subsets: bool = False,
+    compress_deck: bool = False,
 ) -> EncodedDecision:
     """Encode only published game fields and currently legal action payloads.
 
@@ -141,36 +142,94 @@ def encode_public_decision(
         if "player_block" in combat:
             player["block"] = combat["player_block"]
         player_idx = add("player", "player", "player", player)
+        def selection_signature(card: dict[str, Any]) -> str:
+            return json.dumps(
+                {key: value for key, value in card.items()
+                 if key != "instance_id"},
+                sort_keys=True, separators=(",", ":"),
+            )
+
         for zone, field in (
             ("hand", "hand"), ("discard", "discard_pile"),
             ("exhaust", "exhaust_pile"),
         ):
-            for card in _records(combat.get(field)):
+            pile = _records(combat.get(field))
+            grouped: dict[str, tuple[dict[str, Any], list[int]]] = {}
+            # Hand instances are always distinct: play-card actions refer to
+            # their exact public instances, and their count is at most 10.
+            if compress_deck and zone != "hand":
+                for card in pile:
+                    ref_id = card.get("instance_id")
+                    if type(ref_id) is not int:
+                        raise ValueError("Malformed public combat pile card")
+                    signature = selection_signature(card)
+                    if signature not in grouped:
+                        grouped[signature] = (card, [])
+                    grouped[signature][1].append(ref_id)
+                represented = list(grouped.values())
+            else:
+                represented = [(card, [card["instance_id"]]
+                                if type(card.get("instance_id")) is int else [])
+                               for card in pile]
+            for card, ids in represented:
                 ref_id = card.get("instance_id")
-                idx = add("card", _entry_id(card, "card_id"), zone, card,
+                record = dict(card)
+                if compress_deck and zone != "hand":
+                    record["count"] = math.log1p(len(ids))
+                idx = add("card", _entry_id(card, "card_id"), zone, record,
                           ref=("hand_card", ref_id) if zone == "hand" and
                           type(ref_id) is int else None)
-                if encode_card_subsets and type(ref_id) is int:
-                    key = ("selection_card", ref_id)
-                    if key in lookup:
-                        raise ValueError("Duplicate selectable public card instance")
-                    lookup[key] = idx
-        # The emulator exposes public pending-choice candidates, including
-        # cards temporarily shown from the draw pile or generated choice pool.
-        # Reuse an existing zone object for cards already in hand/discard/
-        # exhaust to avoid introducing duplicate aliases.
+                if encode_card_subsets:
+                    for selected_id in ids:
+                        key = ("selection_card", selected_id)
+                        if key in lookup:
+                            raise ValueError("Duplicate selectable public card instance")
+                        lookup[key] = idx
+        # Selection candidates can also originate from visible temporary
+        # choice pools and draw-pile selection dialogs. Use one token per
+        # identical *public* card class while preserving a pointer from every
+        # candidate ID; no hidden draw order is exposed.
         if encode_card_subsets:
+            unknown: dict[str, tuple[dict[str, Any], list[int]]] = {}
             for candidate in _records(combat.get("selection_candidates")):
                 ref_id = candidate.get("instance_id")
                 if type(ref_id) is not int:
                     raise ValueError("Malformed public choice candidate")
                 key = ("selection_card", ref_id)
-                if key not in lookup:
-                    idx = add(
-                        "card", _entry_id(candidate, "card_id"), "reward",
-                        candidate,
-                    )
-                    lookup[key] = idx
+                if key in lookup:
+                    continue
+                signature = selection_signature(candidate) if compress_deck else str(ref_id)
+                if signature not in unknown:
+                    unknown[signature] = (candidate, [])
+                unknown[signature][1].append(ref_id)
+            for candidate, ids in unknown.values():
+                record = dict(candidate)
+                if compress_deck:
+                    record["count"] = math.log1p(len(ids))
+                idx = add(
+                    "card", _entry_id(candidate, "card_id"), "reward", record,
+                )
+                for ref_id in ids:
+                    lookup[("selection_card", ref_id)] = idx
+        # Partial AI-only selection steps are public decisions. The already
+        # selected cards remain observable and must enter the context, or the
+        # policy would forget which card classes it has accumulated.
+        if encode_card_subsets:
+            previous = _records(combat.get("selection_selected_cards"))
+            selected_groups: dict[str, tuple[dict[str, Any], int]] = {}
+            for chosen in previous:
+                sig = selection_signature(chosen) if compress_deck else str(
+                    chosen.get("instance_id"))
+                if sig in selected_groups:
+                    card, count = selected_groups[sig]
+                    selected_groups[sig] = (card, count + 1)
+                else:
+                    selected_groups[sig] = (chosen, 1)
+            for chosen, count in selected_groups.values():
+                record = dict(chosen)
+                if compress_deck:
+                    record["count"] = math.log1p(count)
+                add("card", _entry_id(chosen, "card_id"), "event", record)
         for enemy in _records(combat.get("enemies")):
             ref_id = enemy.get("instance_id")
             idx = add("enemy", _entry_id(enemy, "enemy_id"), "enemy", enemy,
@@ -185,8 +244,32 @@ def encode_public_decision(
         for power in _records(combat.get("player_powers")):
             add("power", _entry_id(power, "power_id"), "player", power, owner=player_idx)
 
-    for card in _records(state.get("deck")):
-        add("card", _entry_id(card, "card_id"), "deck", card)
+    # H16 may treat identical inventory copies as one multiset class.
+    # Equality compares the entire public card record except the opaque
+    # instance reference: afflictions, enchantments, upgrades, persistent
+    # effects, and costs remain part of the signature. Preserve order of
+    # first appearance. H7's original per-instance encoding is unchanged.
+    deck = _records(state.get("deck"))
+    if compress_deck:
+        grouped: dict[str, tuple[dict[str, Any], int]] = {}
+        for card in deck:
+            public_card = {key: value for key, value in card.items()
+                           if key != "instance_id"}
+            signature = json.dumps(public_card, sort_keys=True, separators=(",", ":"))
+            if signature in grouped:
+                representative, n = grouped[signature]
+                grouped[signature] = (representative, n + 1)
+            else:
+                grouped[signature] = (public_card, 1)
+        for card, multiplicity in grouped.values():
+            # log1p keeps the count feature informative even for 1,000+
+            # clones rather than saturating tanh(count / 10).
+            record = dict(card)
+            record["count"] = math.log1p(multiplicity)
+            add("card", _entry_id(card, "card_id"), "deck", record)
+    else:
+        for card in deck:
+            add("card", _entry_id(card, "card_id"), "deck", card)
     for relic in state.get("relics", []) if isinstance(state.get("relics"), list) else []:
         record = {"relic_id": relic} if isinstance(relic, str) else relic
         if isinstance(record, dict):

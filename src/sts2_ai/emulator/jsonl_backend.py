@@ -343,6 +343,9 @@ class JsonlEmulatorBackend:
             if map_profile_id != "experimental-act1-fixed-route-credit-v2":
                 raise ValueError("Unsupported experimental native map profile")
             payload["map_profile_id"] = map_profile_id
+            # Explicitly opt in: original native/fidelity runs retain atomic
+            # combination enumeration and original decision-index semantics.
+            payload["compact_card_selection"] = True
         response = self._request("reset_native_overgrowth", **payload)
         if response.get("schemaId") != NATIVE_RESET_SCHEMA:
             state = response.get("stateHandle")
