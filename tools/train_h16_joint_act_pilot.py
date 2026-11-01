@@ -175,6 +175,7 @@ def main() -> None:
     p.add_argument("--workers", type=int, default=15)
     p.add_argument("--max-decisions", type=int, default=4096)
     p.add_argument("--future-hp-floors", type=int, default=2)
+    p.add_argument("--hp-target", choices=("future", "immediate"), default="future")
     p.add_argument("--alpha-final", type=float, default=0.25)
     p.add_argument("--alpha-ramp-rounds", type=int, default=4)
     p.add_argument("--macro-prior-weight", type=float, default=0.5)
@@ -293,6 +294,7 @@ def main() -> None:
         report = train_joint_cohort(
             model, optimizer, completed, alpha=alpha,
             horizon=args.future_hp_floors,
+            hp_target=args.hp_target,
             temperature=args.temperature, minibatch=args.minibatch,
             epochs=args.epochs,
         )
