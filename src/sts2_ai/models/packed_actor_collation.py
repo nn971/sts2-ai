@@ -95,7 +95,7 @@ def prepare_h7_actor_packed(decisions: list[EncodedDecision]) -> H7PackedHost:
 
     nobjects = max(len(d.objects) for d in decisions)
     nactions = max(len(d.actions) for d in decisions)
-    max_members = max(1, *(len(action.members) for d in decisions for action in d.actions))
+    max_members = max(1, max((len(action.members) for d in decisions for action in d.actions), default=0))
     nfeatures = len(NUMERIC_FIELDS)
     zero_features = (0.0,) * nfeatures
     zero_observed = (0,) * nfeatures
