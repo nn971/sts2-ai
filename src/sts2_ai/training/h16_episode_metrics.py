@@ -65,9 +65,13 @@ def enemy_hp_progress(combat_frames: Sequence[dict[str, Any]]) -> float:
             raw_max = enemy.get("max_hp")
             if type(ref) is not int or type(hp) is not int or not isinstance(enemy_id, str):
                 continue
-            maximum = raw_max if type(raw_max) is int and raw_max > 0 else max(1, hp)
-            present.add(ref)
             past = active.get(ref)
+            maximum = (
+                raw_max if type(raw_max) is int and raw_max > 0
+                else past[3] if past is not None and past[1] == enemy_id
+                else max(1, hp)
+            )
+            present.add(ref)
             # A changed public identity or maximum HP identifies a new stage.
             # Reappearance following absence is a new observable generation.
             if past is None or past[1] != enemy_id or past[3] != maximum:
