@@ -27,7 +27,7 @@ from sts2_ai.emulator.run_environment import (
     EXPERIMENTAL_FIXED_ROUTE_PROFILE, NATIVE_OVERGROWTH, reset_training_run,
 )
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
-from sts2_ai.models.shared_game_objects import encode_public_decision
+from sts2_ai.training.h16_public_codec import encode_h16_decision, H16_CODEC
 from sts2_ai.models.shared_transformer import (
     H7Config, SharedObjectTransformer, collate_h7,
 )
@@ -129,6 +129,7 @@ class JointActPilotNet(nn.Module):
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save({
             "schema": SCHEMA,
+            "codec": H16_CODEC,
             "config": asdict(self.backbone.config),
             "state_dict": self.state_dict(),
         }, path)
@@ -136,8 +137,9 @@ class JointActPilotNet(nn.Module):
     @classmethod
     def load(cls, path: Path, *, device: str = "cpu") -> JointActPilotNet:
         checkpoint = torch.load(path, map_location="cpu", weights_only=True)
-        if checkpoint.get("schema") != SCHEMA:
-            raise ValueError("Expected an H16 joint Act checkpoint")
+        if (checkpoint.get("schema") != SCHEMA or
+                checkpoint.get("codec") != H16_CODEC):
+            raise ValueError("Expected an H16 joint Act checkpoint/codec")
         model = cls(SharedObjectTransformer(H7Config(**checkpoint["config"])))
         model.load_state_dict(checkpoint["state_dict"], strict=True)
         return model.to(device)
@@ -217,7 +219,7 @@ class PilotPolicy:
     ) -> tuple[tuple[float, ...], float, tuple[float, ...]]:
         if not actions:
             raise ValueError("Nonterminal inference needs a legal menu")
-        encoded = encode_public_decision(public_state(observation), actions)
+        encoded = encode_h16_decision(public_state(observation), actions)
         batch = collate_h7([encoded]).to(next(self.model.parameters()).device)
         with torch.inference_mode():
             logits, act, hp = self.model(batch)
@@ -435,7 +437,7 @@ def train_joint_cohort(
         for start in range(0, len(entries), minibatch):
             chunk = entries[start:start + minibatch]
             encoded = [
-                encode_public_decision(
+                encode_h16_decision(
                     public_state(decision.observation), decision.legal_actions,
                 ) for decision, _, _ in chunk
             ]
