@@ -98,6 +98,31 @@ def test_multiphase_nonminion_progress_counts_completed_earlier_stage():
     assert progress == pytest.approx(0.8)
 
 
+def test_max_hp_change_within_one_identity_is_not_a_defeated_phase():
+    # Buffing max HP within the same phase must not retire the old health bar.
+    progress = enemy_hp_progress([
+        frame(8, 50, [enemy(1, 100, 100)]),
+        frame(8, 40, [enemy(1, 130, 150)]),
+    ])
+    assert progress == pytest.approx(20 / 150)
+    # A reduced maximum also does not certify a phase transition.
+    shrinking = enemy_hp_progress([
+        frame(8, 50, [enemy(1, 100, 100)]),
+        frame(8, 40, [enemy(1, 70, 80)]),
+    ])
+    assert shrinking == pytest.approx(0.3)
+
+
+def test_act_clear_with_terminal_combat_frame_counts_as_boss_victory():
+    result = combat_results([
+        frame(16, 30, [enemy(1, 50, 50)]),
+        frame(16, 20, [enemy(1, 0, 50)]),
+    ], "act_clear")
+    assert len(result) == 1
+    assert result[0].won
+    assert result[0].quality() == 1.0
+
+
 def test_floor_progress_is_written_per_seed_with_death_histogram_and_hp():
     first = episode_floor_record([
         frame(1, 50),
