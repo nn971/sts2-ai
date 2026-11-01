@@ -75,6 +75,12 @@ def enemy_hp_progress(combat_frames: Sequence[dict[str, Any]]) -> float:
             # A changed public identity or maximum HP identifies a new stage.
             # Reappearance following absence is a new observable generation.
             if past is None or past[1] != enemy_id or past[3] != maximum:
+                if past is not None:
+                    # A visible boss/monster phase transition retires the
+                    # preceding HP bar; it is not remaining enemy HP.
+                    prior_key = past[0]
+                    prior_max, _, prior_minion = stages[prior_key]
+                    stages[prior_key] = (prior_max, 0, prior_minion)
                 generation = generations.get(ref, -1) + 1
                 generations[ref] = generation
                 key = (ref, generation)
