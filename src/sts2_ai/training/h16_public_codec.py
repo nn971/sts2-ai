@@ -26,7 +26,8 @@ from sts2_ai.models.shared_game_objects import (
     encode_public_decision,
 )
 
-H16_CODEC = "h16-public-persistent-subset-actions-v2"
+H16_CODEC = "h16-public-persistent-subset-multiset-v3"
+PREVIOUS_H16_CODEC = "h16-public-persistent-subset-actions-v2"
 LEGACY_H16_CODEC = "h16-public-persistent-macro-actions-v1"
 MAX_EXTRA_TOKENS = 64
 # Once per process: expose unusual real/search menus without dumping states.
