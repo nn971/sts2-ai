@@ -92,6 +92,7 @@ set ai ~/projects/sts2-ai
 set emu ~/projects/sts2-emulator
 
 cd $emu
+git fetch origin
 git switch research/act1-fixed-route-credit-pilot-20261101
 git pull --ff-only
 dotnet test tests/Sts2Emulator.Core.Tests -c Release --filter FullyQualifiedName~ExperimentalFixedRouteOvergrowthMapV111Tests
@@ -100,6 +101,7 @@ dotnet build src/Sts2Emulator.Cli -c Release
 or exit 1
 
 cd $ai
+git fetch origin
 git switch research/h16-act1-joint-puct-hp-potential-20261101
 git pull --ff-only
 source .venv/bin/activate.fish
