@@ -26,7 +26,8 @@ from sts2_ai.models.shared_game_objects import (
     encode_public_decision,
 )
 
-H16_CODEC = "h16-public-persistent-macro-actions-v1"
+H16_CODEC = "h16-public-persistent-subset-actions-v2"
+LEGACY_H16_CODEC = "h16-public-persistent-macro-actions-v1"
 MAX_EXTRA_TOKENS = 64
 # Once per process: expose unusual real/search menus without dumping states.
 _LARGE_MENU_REPORTED = False
@@ -93,7 +94,10 @@ def encode_h16_decision(
     # target/choice menus exceeding H7's historical 128-action guard.
     # collate_h7 and the shared actor already allocate by actual menu length.
     _diagnose_large_menu(state, actions)
-    base = encode_public_decision(state, codec_actions, max_actions=None)
+    base = encode_public_decision(
+        state, codec_actions, max_actions=None,
+        encode_card_subsets=not macro,
+    )
     objects = list(base.objects)
     extra = 0
     for field, name_fields in (
@@ -143,6 +147,25 @@ def encode_h16_decision(
             old.kind, _bucket(label, IDENTITY_BUCKETS),
             old.source, old.target,
         ))
+    # Detect collisions in O(number of legal actions), before any expensive
+    # inference or search. Two different publicly selectable payloads must
+    # never silently become the same action token.
+    seen: dict[ActionToken, str] = {}
+    for action, token in zip(actions, encoded_actions, strict=True):
+        payload = json.loads(action.payload_json)
+        public_action = json.dumps(
+            {"kind": action.kind, "payload": payload},
+            sort_keys=True, separators=(",", ":"),
+        )
+        prior = seen.get(token)
+        if prior is not None and prior != public_action:
+            raise ValueError(
+                "H16 action representation collision: "
+                f"phase={base.phase}, floor={state.get('floor')}, "
+                f"kind={action.kind}, distinct_payloads={prior[:200]} "
+                f"and {public_action[:200]}"
+            )
+        seen[token] = public_action
     return EncodedDecision(
         base.schema, base.phase, tuple(objects), tuple(encoded_actions),
     )
