@@ -8,12 +8,12 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 import torch
 
+from sts2_ai.emulator import FAIR_POLICY_ID
 from sts2_ai.emulator.protocol import LegalAction, Observation
-from sts2_ai.models.h16_batch_actor import SharedH16Service, RemoteH16Actor
+from sts2_ai.models.h16_batch_actor import RemoteH16Actor, SharedH16Service
 from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
 from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet, PilotPolicy
 from sts2_ai.training.h16_public_codec import encode_h16_decision
-from sts2_ai.emulator import FAIR_POLICY_ID
 
 
 def public_frame(*, combat: bool) -> dict:
