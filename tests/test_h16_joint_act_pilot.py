@@ -11,14 +11,21 @@ import torch
 from sts2_ai.emulator.jsonl_backend import FAIR_POLICY_ID
 from sts2_ai.emulator.protocol import LegalAction, Observation, Transition
 from sts2_ai.emulator.run_environment import (
-    EXPERIMENTAL_FIXED_ROUTE_PROFILE, validate_native_start,
+    EXPERIMENTAL_FIXED_ROUTE_PROFILE,
+    validate_native_start,
 )
-from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
-from sts2_ai.training.h16_public_codec import encode_h16_decision
+from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer, collate_h7
 from sts2_ai.training.h16_joint_act_pilot import (
-    JointActPilotNet, PilotDecision, PilotEpisode, floor_completed,
-    hp_at_future_floor, local_combat_puct, targets_for_episode, train_joint_cohort,
+    JointActPilotNet,
+    PilotDecision,
+    PilotEpisode,
+    floor_completed,
+    hp_at_future_floor,
+    local_combat_puct,
+    targets_for_episode,
+    train_joint_cohort,
 )
+from sts2_ai.training.h16_public_codec import encode_h16_decision
 
 
 def obs(frame: dict) -> Observation:
@@ -227,8 +234,6 @@ def test_joint_model_checkpoint_preserves_codec_and_default_backbone_output(tmp_
     model = JointActPilotNet(SharedObjectTransformer(
         H7Config(width=32, layers=1, heads=4, feedforward=64),
     ))
-    from sts2_ai.training.h16_public_codec import encode_h16_decision
-    from sts2_ai.models.shared_transformer import collate_h7
     batch = collate_h7([
         encode_h16_decision(frame(1, 56, combat=True), ACTIONS),
     ])
@@ -302,7 +307,6 @@ def test_joint_head_logit_output_matches_inference_probabilities():
     model = JointActPilotNet(SharedObjectTransformer(
         H7Config(width=32, layers=1, heads=4, feedforward=64),
     )).eval()
-    from sts2_ai.models.shared_transformer import collate_h7
     batch = collate_h7([
         encode_h16_decision(frame(2, 50, combat=True), ACTIONS),
     ])
