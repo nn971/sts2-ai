@@ -459,6 +459,23 @@ def local_combat_puct(
     return result.policy, result.transitions
 
 
+def should_search_combat(
+    state: dict[str, Any], actions: Sequence[LegalAction], *,
+    searches: int, max_searches: int, search_probability: float,
+    rng: random.Random,
+) -> bool:
+    """Every ordinary combat decision with >=2 moves when cap=0, p=1.
+
+    A single legal action has no meaningful PUCT root distribution.
+    Zero probability disables search, including held-out evaluations.
+    """
+    if (max_searches != 0 and searches >= max_searches) or len(actions) < 2:
+        return False
+    if not isinstance(state.get("combat"), dict) or search_probability <= 0:
+        return False
+    return search_probability >= 1 or rng.random() < search_probability
+
+
 def collect_act_episode(
     backend: EmulatorBackend, policy: PilotPolicy, *,
     seed: str, ascension: int, max_decisions: int,
@@ -495,10 +512,10 @@ def collect_act_episode(
                 raise RuntimeError("Nonterminal run has no legal player actions")
             scores, _, offsets = policy.infer(observation, actions)
             search_policy = None
-            should_search = (
-                (max_searches == 0 or searches < max_searches) and len(actions) > 1
-                and isinstance(public.get("combat"), dict)
-                and (search_probability == 1 or rng.random() < search_probability)
+            should_search = should_search_combat(
+                public, actions, searches=searches,
+                max_searches=max_searches,
+                search_probability=search_probability, rng=rng,
             )
             if should_search:
                 search_policy, count = local_combat_puct(
@@ -718,5 +735,5 @@ def train_joint_cohort(
         "search_roots": search_roots,
         "horizon_lambda": current_lambda,
         "effective_horizon": (1.0 / (1.0 - current_lambda)
-                              if current_lambda < 1.0 else float("inf")),
+                              if current_lambda < 1.0 else None),
     }
