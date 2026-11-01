@@ -42,7 +42,10 @@ from sts2_ai.search.combat_puct import (
     CombatPuct,
 )
 from sts2_ai.training.h16_public_codec import (
-    H16_CODEC, PREVIOUS_H16_CODEC, LEGACY_H16_CODEC, encode_h16_decision,
+    H16_CODEC,
+    LEGACY_H16_CODEC,
+    PREVIOUS_H16_CODEC,
+    encode_h16_decision,
 )
 
 SCHEMA = "sts2-h16-act1-geometric-horizon-every-combat-puct-v4"
