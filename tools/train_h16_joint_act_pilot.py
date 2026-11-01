@@ -31,8 +31,12 @@ from sts2_ai.emulator.run_environment import EXPERIMENTAL_FIXED_ROUTE_PROFILE
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.models.shared_transformer import SharedObjectTransformer
 from sts2_ai.training.h16_joint_act_pilot import (
-    SCHEMA, JointActPilotNet, PilotEpisode, PilotPolicy,
-    collect_act_episode, train_joint_cohort,
+    SCHEMA,
+    JointActPilotNet,
+    PilotEpisode,
+    PilotPolicy,
+    collect_act_episode,
+    train_joint_cohort,
 )
 
 _WORKER: dict[str, Any] = {}
