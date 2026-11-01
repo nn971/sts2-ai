@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 
 import pytest
 import torch
@@ -239,3 +240,73 @@ def test_joint_model_checkpoint_preserves_codec_and_default_backbone_output(tmp_
     restored = JointActPilotNet.load(path).eval()
     for expected, actual in zip(original, restored(batch), strict=True):
         assert torch.allclose(expected, actual, atol=1e-6)
+
+
+
+def test_mixed_length_multibatch_update_remains_finite():
+    """Regression for CUDA BCE failures after one corrupted optimizer step.
+
+    The padded H7 action logits must not contaminate entropy gradients or
+    cause a subsequent minibatch's sigmoid heads to become NaN.
+    """
+    torch.manual_seed(1281)
+    torch.set_num_threads(1)
+    model = JointActPilotNet(SharedObjectTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64),
+    ))
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+    episodes = []
+    for i in range(96):
+        combat = i % 3 != 0
+        state = frame(1 + i % 5, 46 + i % 15, combat=combat)
+        state["deck"] = [
+            {"card_id": f"demo.card.{j}", "cost": j % 3}
+            for j in range(i % 11)
+        ]
+        state["relics"] = [
+            {"relic_id": "demo.counter",
+             "persistent_state": {"charges": i % 8}}
+        ] if i % 4 == 0 else []
+        legal = tuple(
+            LegalAction(f"action-{j}", f"do-{j}", "{}")
+            for j in range(1 + i % 7)
+        )
+        decision = PilotDecision(
+            obs(state), legal, i % len(legal), (0.0,) * len(legal),
+            search_policy=(
+                tuple(1.0 / len(legal) for _ in legal)
+                if i % 8 == 0 else None
+            ),
+        )
+        final = frame(state["floor"], 0)
+        episodes.append(PilotEpisode(
+            f"stress-{i}", (decision,), (state, final),
+            "defeat", 0, 0,
+        ))
+    metrics = train_joint_cohort(
+        model, optimizer, episodes, alpha=0.2, horizon=2,
+        minibatch=32, epochs=2, entropy_weight=0.001,
+    )
+    assert metrics["optimizer_steps"] == 6
+    assert metrics["macro_decisions"] == 32
+    assert metrics["combat_decisions"] == 64
+    assert all(torch.isfinite(value).all() for value in model.parameters())
+    assert all(
+        isinstance(metrics[name], float)
+        and math.isfinite(metrics[name])
+        for name in ("loss", "policy", "act", "hp")
+    )
+
+
+def test_joint_head_logit_output_matches_inference_probabilities():
+    model = JointActPilotNet(SharedObjectTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64),
+    )).eval()
+    from sts2_ai.models.shared_transformer import collate_h7
+    batch = collate_h7([
+        encode_h16_decision(frame(2, 50, combat=True), ACTIONS),
+    ])
+    _, act_prob, hp_prob = model(batch)
+    _, act_logit, hp_logit = model(batch, value_logits=True)
+    assert torch.allclose(act_prob, act_logit.sigmoid())
+    assert torch.allclose(hp_prob, hp_logit.sigmoid())
