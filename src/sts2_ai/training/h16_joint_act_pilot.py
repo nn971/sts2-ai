@@ -92,6 +92,37 @@ def hp_at_future_floor(
     return 0.0
 
 
+def hp_after_current_room(
+    frames: Sequence[dict[str, Any]], decision_index: int,
+) -> float:
+    """Normalized HP at the next room-completion boundary after a decision.
+
+    During an unfinished room, credit the HP on completing that room. At a
+    map-choice state the previous room is already completed; credit the
+    *next* room instead, so the target depends on the route/room decision.
+    Neow's floor-zero opening likewise targets the first completed room.
+    Death before the boundary contributes zero.
+    """
+    if not 0 <= decision_index < len(frames) - 1:
+        raise ValueError("Invalid post-room HP query")
+    starting = frames[decision_index]
+    floor = starting.get("floor")
+    if type(floor) is not int or not 0 <= floor <= 16:
+        raise ValueError("Invalid starting floor")
+
+    if floor == 16 and floor_completed(starting, floor):
+        # Any outstanding Act-transition decision is already beyond the
+        # final room. Preserve the actual terminal HP instead of assigning
+        # a nonexistent floor 17 a value of zero.
+        return hp_fraction(frames[-1])
+
+    target = floor + 1 if floor == 0 or floor_completed(starting, floor) else floor
+    for frame in frames[decision_index + 1:]:
+        if floor_completed(frame, target):
+            return hp_fraction(frame)
+    return 0.0
+
+
 def _softmax(logits: Sequence[float], temperature: float) -> tuple[float, ...]:
     if temperature <= 0 or not logits or not all(math.isfinite(x) for x in logits):
         raise ValueError("Invalid action logits or temperature")
@@ -426,7 +457,7 @@ def train_joint_cohort(
     baseline for ordinary actions. Search-executed actions receive only the
     PUCT visit CE target. Act labels are always binary and full-Act terminal.
     """
-    if (hp_target not in ("future", "immediate")
+    if (hp_target not in ("future", "post_room")
             or not 0 <= alpha <= 1 or horizon <= 0 or temperature <= 0
             or minibatch <= 0 or epochs <= 0 or search_weight < 0):
         raise ValueError("Invalid joint training configuration")
@@ -436,7 +467,7 @@ def train_joint_cohort(
             episode.decisions, targets_for_episode(episode, horizon), strict=True,
         )):
             hp = (future_hp if hp_target == "future"
-                  else hp_fraction(episode.frames[i]))
+                  else hp_after_current_room(episode.frames, i))
             entries.append((decision, act, hp))
     if not entries:
         raise ValueError("No complete Act decisions for joint learning")
