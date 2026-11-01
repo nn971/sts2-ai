@@ -498,15 +498,16 @@ class NativeRootConditionedSampler:
                 # In particular, a dead player is always valued below a
                 # combat victory regardless of the enemy HP removed.
                 fraction = enemy_hp_progress(self._combat_frames)
-                value = (self.policy.combat_credit_weight
-                         * self.policy.loss_progress_cap * fraction)
+                value = (getattr(self.policy, "combat_credit_weight", 0.25)
+                         * getattr(self.policy, "loss_progress_cap", 0.2)
+                         * fraction)
             elif not inside_combat:
                 # Winning the current fight always outranks dying after
                 # inflicting damage, even when future Act HP is very low.
                 continuation = self.policy.value_at(
                     observation, actions, terminal=terminal,
                 )
-                alpha = self.policy.combat_credit_weight
+                alpha = getattr(self.policy, "combat_credit_weight", 0.25)
                 value = alpha + (1 - alpha) * continuation
             else:
                 value = self.policy.value_at(
@@ -763,7 +764,7 @@ def train_joint_cohort(
             hp_hat = torch.sigmoid(hp_logit)
             aux_hp_hat = torch.sigmoid(aux_hp_logit)
             offsets = torch.zeros_like(logits)
-            for i, (decision, _, _) in enumerate(chunk):
+            for i, (decision, _, _, _) in enumerate(chunk):
                 offsets[i, :len(decision.macro_offset)] = torch.tensor(
                     decision.macro_offset, device=device, dtype=logits.dtype,
                 )
