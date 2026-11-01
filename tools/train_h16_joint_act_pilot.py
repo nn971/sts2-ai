@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import multiprocessing
 import os
 import random
@@ -71,7 +72,7 @@ def _worker_init(config: dict[str, Any]) -> None:
              if config["macro_model"] is not None else None)
     policy = PilotPolicy(
         model, temperature=config["temperature"],
-        alpha=config["alpha"], macro_teacher=macro,
+        horizon_lambda=config["horizon_lambda"], macro_teacher=macro,
         macro_prior_weight=config["macro_prior_weight"],
     )
     emulator = JsonlEmulatorBackend(
@@ -103,7 +104,7 @@ def _worker_run(seed: str) -> PilotEpisode:
 
 def collect(
     args: argparse.Namespace, checkpoint: Path, *,
-    seeds: list[str], alpha: float, search: bool,
+    seeds: list[str], horizon_lambda: float, search: bool,
 ) -> list[PilotEpisode]:
     cfg = {
         "checkpoint": str(checkpoint.resolve()),
@@ -114,7 +115,7 @@ def collect(
         "emulator_revision": args.emulator_revision,
         "temperature": args.temperature,
         "macro_prior_weight": args.macro_prior_weight,
-        "alpha": alpha,
+        "horizon_lambda": horizon_lambda,
         "max_decisions": args.max_decisions,
         "search_probability": args.search_probability if search else 0.0,
         "max_searches": args.max_searches if search else 0,
@@ -188,10 +189,11 @@ def summarize(episodes: list[PilotEpisode]) -> dict[str, Any]:
     }
 
 
-def alpha_for_round(index: int, ramp: int, final: float) -> float:
-    if ramp <= 0 or not 0 <= final <= 1 or index < 0:
-        raise ValueError("Invalid Act-weight schedule")
-    return final * min(1.0, index / ramp)
+def horizon_lambda_for_round(index: int, tau_rounds: float) -> float:
+    """Slow, smooth increase; 1/(1-lambda) is effective geometric horizon."""
+    if index < 0 or not math.isfinite(tau_rounds) or tau_rounds <= 0:
+        raise ValueError("Invalid geometric-horizon schedule")
+    return -math.expm1(-index / tau_rounds)
 
 
 def _checkpoint(path: Path, value: object) -> None:
@@ -214,18 +216,21 @@ def main() -> None:
     p.add_argument("--heldout-runs", type=int, default=8)
     p.add_argument("--workers", type=int, default=15)
     p.add_argument("--max-decisions", type=int, default=4096)
-    p.add_argument("--future-hp-floors", type=int, default=2)
-    p.add_argument("--hp-target", choices=("future", "post_room"), default="future",
-                   help="HP after a future floor or after the next room-completion boundary")
-    p.add_argument("--alpha-final", type=float, default=0.25)
-    p.add_argument("--alpha-ramp-rounds", type=int, default=4)
+    p.add_argument("--hp-target", choices=("geometric", "post_room"),
+                   default="geometric",
+                   help="Slow geometric HP-to-Act curriculum, or fixed post-room control")
+    p.add_argument("--horizon-tau-rounds", type=float, default=200.0,
+                   help="Exponential lambda ramp time constant in training rounds")
+    p.add_argument("--auxiliary-horizon-weight", type=float, default=0.5,
+                   help="Weight of extra random-lambda critic regression")
     p.add_argument("--macro-prior-weight", type=float, default=0.5)
     p.add_argument("--temperature", type=float, default=0.85)
-    p.add_argument("--search-start-round", type=int, default=2)
-    p.add_argument("--search-probability", type=float, default=0.06)
-    p.add_argument("--max-searches", type=int, default=4)
-    p.add_argument("--simulations", type=int, default=8)
-    p.add_argument("--search-depth", type=int, default=3)
+    p.add_argument("--search-start-round", type=int, default=1)
+    p.add_argument("--search-probability", type=float, default=1.0)
+    p.add_argument("--max-searches", type=int, default=0,
+                   help="Maximum combat PUCT roots/run; zero means every eligible decision")
+    p.add_argument("--simulations", type=int, default=16)
+    p.add_argument("--search-depth", type=int, default=8)
     p.add_argument("--minibatch", type=int, default=32)
     p.add_argument("--epochs", type=int, default=1)
     p.add_argument("--lr", type=float, default=0.00001)
@@ -235,10 +240,12 @@ def main() -> None:
     p.add_argument("--resume", action="store_true")
     args = p.parse_args()
     if (min(args.rounds, args.runs_per_round, args.heldout_runs, args.workers,
-            args.max_decisions, args.future_hp_floors, args.search_start_round,
+            args.max_decisions, args.search_start_round,
             args.simulations, args.search_depth, args.minibatch, args.epochs) <= 0
             or args.max_searches < 0 or args.study_seed < 0
-            or args.alpha_ramp_rounds <= 0 or not 0 <= args.alpha_final <= 1
+            or not math.isfinite(args.horizon_tau_rounds)
+            or args.horizon_tau_rounds <= 0
+            or args.auxiliary_horizon_weight < 0
             or not 0 <= args.search_probability <= 1
             or not 0 < args.temperature <= 5
             or args.macro_prior_weight < 0 or args.lr <= 0):
@@ -312,15 +319,18 @@ def main() -> None:
     ]
     if not history:
         model.save(actor_path)
-        baseline = collect(args, actor_path, seeds=heldout, alpha=0.0, search=False)
+        baseline = collect(
+            args, actor_path, seeds=heldout, horizon_lambda=0.0, search=False,
+        )
         write_json(root / "baseline.json", summarize(baseline))
     for round_index in range(len(history), args.rounds):
-        alpha = alpha_for_round(
-            round_index, args.alpha_ramp_rounds, args.alpha_final,
+        horizon_lambda = (
+            horizon_lambda_for_round(round_index, args.horizon_tau_rounds)
+            if args.hp_target == "geometric" else 0.0
         )
         model.save(actor_path)
         train = collect(
-            args, actor_path, alpha=alpha,
+            args, actor_path, horizon_lambda=horizon_lambda,
             seeds=[
                 f"h16-fixedroute-train-{args.study_seed}-r{round_index}-{i}"
                 for i in range(args.runs_per_round)
@@ -333,9 +343,10 @@ def main() -> None:
                 "All Act trajectories censored; no valid terminal labels"
             )
         report = train_joint_cohort(
-            model, optimizer, completed, alpha=alpha,
-            horizon=args.future_hp_floors,
+            model, optimizer, completed,
+            horizon_lambda=horizon_lambda,
             hp_target=args.hp_target,
+            auxiliary_horizon_weight=args.auxiliary_horizon_weight,
             temperature=args.temperature, minibatch=args.minibatch,
             epochs=args.epochs,
         )
@@ -343,10 +354,16 @@ def main() -> None:
         model.save(model_path)
         model.save(actor_path)
         evaluation = collect(
-            args, actor_path, seeds=heldout, alpha=alpha, search=False,
+            args, actor_path, seeds=heldout,
+            horizon_lambda=horizon_lambda, search=False,
         )
         row = {
-            "round": round_index + 1, "alpha": alpha,
+            "round": round_index + 1,
+            "horizon_lambda": horizon_lambda,
+            "effective_horizon": (
+                1.0 / (1.0 - horizon_lambda)
+                if horizon_lambda < 1.0 else None
+            ),
             "train": summarize(train), "update": report,
             "heldout": summarize(evaluation),
             "checkpoint": str(model_path),
