@@ -132,6 +132,9 @@ def encode_h16_decision(
                     ZONES.index("inventory"), numeric, observed,
                 ))
     encoded_actions: list[ActionToken] = []
+    # Hash-bucket collisions are possible in 4,096 dimensions. Resolve
+    # collisions among different macro choices within the current menu.
+    used_macro_semantics: dict[int, str] = {}
     for old, action in zip(base.actions, actions, strict=True):
         if base.phase == "combat" or old.source >= 0:
             encoded_actions.append(old)  # preserve H9 combat token behavior
@@ -143,29 +146,37 @@ def encode_h16_decision(
             {"kind": action.kind, "payload": payload},
             sort_keys=True, separators=(",", ":"),
         )
+        semantic = _bucket(label, IDENTITY_BUCKETS)
+        salt = 0
+        while (previous := used_macro_semantics.get(semantic)) is not None and previous != label:
+            salt += 1
+            if salt >= IDENTITY_BUCKETS:
+                raise ValueError("H16 macro menu exceeds unique semantic bucket capacity")
+            semantic = _bucket(f"{label}:collision={salt}", IDENTITY_BUCKETS)
+        used_macro_semantics[semantic] = label
         encoded_actions.append(ActionToken(
-            old.kind, _bucket(label, IDENTITY_BUCKETS),
-            old.source, old.target,
+            old.kind, semantic, old.source, old.target,
         ))
-    # Detect collisions in O(number of legal actions), before any expensive
-    # inference or search. Two different publicly selectable payloads must
-    # never silently become the same action token.
-    seen: dict[ActionToken, str] = {}
+    # O(actions), almost no allocations: compare payload JSON only when
+    # identical structural tokens appear. Inference sees exactly this token
+    # structure; distinct public choices must never be silently aliased.
+    seen: dict[ActionToken, Any] = {}
     for action, token in zip(actions, encoded_actions, strict=True):
-        payload = json.loads(action.payload_json)
-        public_action = json.dumps(
-            {"kind": action.kind, "payload": payload},
-            sort_keys=True, separators=(",", ":"),
-        )
         prior = seen.get(token)
-        if prior is not None and prior != public_action:
-            raise ValueError(
-                "H16 action representation collision: "
-                f"phase={base.phase}, floor={state.get('floor')}, "
-                f"kind={action.kind}, distinct_payloads={prior[:200]} "
-                f"and {public_action[:200]}"
-            )
-        seen[token] = public_action
+        if (prior is not None
+                and (prior.kind != action.kind
+                     or prior.payload_json != action.payload_json)):
+            left = json.loads(prior.payload_json)
+            right = json.loads(action.payload_json)
+            if prior.kind != action.kind or left != right:
+                raise ValueError(
+                    "H16 action representation collision: "
+                    f"phase={base.phase}, floor={state.get('floor')}, "
+                    f"kind={action.kind}, payloads="
+                    f"{str(prior.payload_json)[:200]} and "
+                    f"{str(action.payload_json)[:200]}"
+                )
+        seen[token] = action
     return EncodedDecision(
         base.schema, base.phase, tuple(objects), tuple(encoded_actions),
     )
