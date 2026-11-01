@@ -142,36 +142,75 @@ def encode_public_decision(
         if "player_block" in combat:
             player["block"] = combat["player_block"]
         player_idx = add("player", "player", "player", player)
+        def selection_signature(card: dict[str, Any]) -> str:
+            return json.dumps(
+                {key: value for key, value in card.items()
+                 if key != "instance_id"},
+                sort_keys=True, separators=(",", ":"),
+            )
+
         for zone, field in (
             ("hand", "hand"), ("discard", "discard_pile"),
             ("exhaust", "exhaust_pile"),
         ):
-            for card in _records(combat.get(field)):
+            pile = _records(combat.get(field))
+            grouped: dict[str, tuple[dict[str, Any], list[int]]] = {}
+            # Hand instances are always distinct: play-card actions refer to
+            # their exact public instances, and their count is at most 10.
+            if compress_deck and zone != "hand":
+                for card in pile:
+                    ref_id = card.get("instance_id")
+                    if type(ref_id) is not int:
+                        raise ValueError("Malformed public combat pile card")
+                    signature = selection_signature(card)
+                    if signature not in grouped:
+                        grouped[signature] = (card, [])
+                    grouped[signature][1].append(ref_id)
+                represented = list(grouped.values())
+            else:
+                represented = [(card, [card["instance_id"]]
+                                if type(card.get("instance_id")) is int else [])
+                               for card in pile]
+            for card, ids in represented:
                 ref_id = card.get("instance_id")
-                idx = add("card", _entry_id(card, "card_id"), zone, card,
+                record = dict(card)
+                if compress_deck and zone != "hand":
+                    record["count"] = math.log1p(len(ids))
+                idx = add("card", _entry_id(card, "card_id"), zone, record,
                           ref=("hand_card", ref_id) if zone == "hand" and
                           type(ref_id) is int else None)
-                if encode_card_subsets and type(ref_id) is int:
-                    key = ("selection_card", ref_id)
-                    if key in lookup:
-                        raise ValueError("Duplicate selectable public card instance")
-                    lookup[key] = idx
-        # The emulator exposes public pending-choice candidates, including
-        # cards temporarily shown from the draw pile or generated choice pool.
-        # Reuse an existing zone object for cards already in hand/discard/
-        # exhaust to avoid introducing duplicate aliases.
+                if encode_card_subsets:
+                    for selected_id in ids:
+                        key = ("selection_card", selected_id)
+                        if key in lookup:
+                            raise ValueError("Duplicate selectable public card instance")
+                        lookup[key] = idx
+        # Selection candidates can also originate from visible temporary
+        # choice pools and draw-pile selection dialogs. Use one token per
+        # identical *public* card class while preserving a pointer from every
+        # candidate ID; no hidden draw order is exposed.
         if encode_card_subsets:
+            unknown: dict[str, tuple[dict[str, Any], list[int]]] = {}
             for candidate in _records(combat.get("selection_candidates")):
                 ref_id = candidate.get("instance_id")
                 if type(ref_id) is not int:
                     raise ValueError("Malformed public choice candidate")
                 key = ("selection_card", ref_id)
-                if key not in lookup:
-                    idx = add(
-                        "card", _entry_id(candidate, "card_id"), "reward",
-                        candidate,
-                    )
-                    lookup[key] = idx
+                if key in lookup:
+                    continue
+                signature = selection_signature(candidate) if compress_deck else str(ref_id)
+                if signature not in unknown:
+                    unknown[signature] = (candidate, [])
+                unknown[signature][1].append(ref_id)
+            for candidate, ids in unknown.values():
+                record = dict(candidate)
+                if compress_deck:
+                    record["count"] = math.log1p(len(ids))
+                idx = add(
+                    "card", _entry_id(candidate, "card_id"), "reward", record,
+                )
+                for ref_id in ids:
+                    lookup[("selection_card", ref_id)] = idx
         for enemy in _records(combat.get("enemies")):
             ref_id = enemy.get("instance_id")
             idx = add("enemy", _entry_id(enemy, "enemy_id"), "enemy", enemy,
