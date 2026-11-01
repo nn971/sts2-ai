@@ -21,6 +21,7 @@ import multiprocessing
 import os
 import random
 import tempfile
+import time
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -329,6 +330,7 @@ def main() -> None:
             if args.hp_target == "geometric" else 0.0
         )
         model.save(actor_path)
+        collect_started = time.perf_counter()
         train = collect(
             args, actor_path, horizon_lambda=horizon_lambda,
             seeds=[
@@ -337,11 +339,13 @@ def main() -> None:
             ],
             search=round_index + 1 >= args.search_start_round,
         )
+        collect_seconds = time.perf_counter() - collect_started
         completed = [ep for ep in train if ep.complete]
         if not completed:
             raise RuntimeError(
                 "All Act trajectories censored; no valid terminal labels"
             )
+        update_started = time.perf_counter()
         report = train_joint_cohort(
             model, optimizer, completed,
             horizon_lambda=horizon_lambda,
@@ -350,16 +354,32 @@ def main() -> None:
             temperature=args.temperature, minibatch=args.minibatch,
             epochs=args.epochs,
         )
+        update_seconds = time.perf_counter() - update_started
         model_path = model_dir / f"joint-r{round_index + 1:04d}.pt"
         model.save(model_path)
         model.save(actor_path)
+        evaluation_started = time.perf_counter()
         evaluation = collect(
             args, actor_path, seeds=heldout,
             horizon_lambda=horizon_lambda, search=False,
         )
+        evaluation_seconds = time.perf_counter() - evaluation_started
+        simulated_transitions = sum(
+            len(episode.decisions) + episode.search_transitions
+            for episode in train
+        )
         row = {
             "round": round_index + 1,
             "horizon_lambda": horizon_lambda,
+            "timing": {
+                "collection_seconds": collect_seconds,
+                "update_seconds": update_seconds,
+                "evaluation_seconds": evaluation_seconds,
+                "approx_emulator_transitions_per_second": (
+                    simulated_transitions / collect_seconds
+                    if collect_seconds > 0 else None
+                ),
+            },
             "effective_horizon": (
                 1.0 / (1.0 - horizon_lambda)
                 if horizon_lambda < 1.0 else None
