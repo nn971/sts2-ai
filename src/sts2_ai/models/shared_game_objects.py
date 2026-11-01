@@ -211,6 +211,25 @@ def encode_public_decision(
                 )
                 for ref_id in ids:
                     lookup[("selection_card", ref_id)] = idx
+        # Partial AI-only selection steps are public decisions. The already
+        # selected cards remain observable and must enter the context, or the
+        # policy would forget which card classes it has accumulated.
+        if encode_card_subsets:
+            previous = _records(combat.get("selection_selected_cards"))
+            selected_groups: dict[str, tuple[dict[str, Any], int]] = {}
+            for chosen in previous:
+                sig = selection_signature(chosen) if compress_deck else str(
+                    chosen.get("instance_id"))
+                if sig in selected_groups:
+                    card, count = selected_groups[sig]
+                    selected_groups[sig] = (card, count + 1)
+                else:
+                    selected_groups[sig] = (chosen, 1)
+            for chosen, count in selected_groups.values():
+                record = dict(chosen)
+                if compress_deck:
+                    record["count"] = math.log1p(count)
+                add("card", _entry_id(chosen, "card_id"), "event", record)
         for enemy in _records(combat.get("enemies")):
             ref_id = enemy.get("instance_id")
             idx = add("enemy", _entry_id(enemy, "enemy_id"), "enemy", enemy,
