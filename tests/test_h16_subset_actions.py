@@ -105,3 +105,28 @@ def test_h16_choice_pool_candidates_are_visible_as_selected_objects():
     encoded = encode_h16_decision(public, choices)
     assert len(set(encoded.actions)) == 3
     assert encoded.actions[1].members != encoded.actions[2].members
+
+
+def test_h16_v2_checkpoint_migrates_without_changing_existing_weights(tmp_path):
+    from sts2_ai.training.h16_joint_act_pilot import LEGACY_SCHEMA
+    from sts2_ai.training.h16_public_codec import LEGACY_H16_CODEC
+    torch.manual_seed(101)
+    model = JointActPilotNet(SharedObjectTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64),
+    )).eval()
+    new_path = tmp_path / "v3.pt"
+    old_path = tmp_path / "v2.pt"
+    model.save(new_path)
+    contents = torch.load(new_path, map_location="cpu", weights_only=True)
+    contents["schema"] = LEGACY_SCHEMA
+    contents["codec"] = LEGACY_H16_CODEC
+    torch.save(contents, old_path)
+    recovered = JointActPilotNet.load(old_path).eval()
+    for name, tensor in model.state_dict().items():
+        assert torch.equal(tensor, recovered.state_dict()[name])
+    # The next checkpoint is written with the new representation schema.
+    migrated = tmp_path / "migrated.pt"
+    recovered.save(migrated)
+    written = torch.load(migrated, map_location="cpu", weights_only=True)
+    assert written["schema"] != LEGACY_SCHEMA
+    assert written["codec"] != LEGACY_H16_CODEC
