@@ -170,6 +170,12 @@ def summarize(episodes: list[PilotEpisode]) -> dict[str, Any]:
         "decisions": sum(len(e.decisions) for e in episodes),
         "searches": sum(e.searches for e in episodes),
         "search_transitions": sum(e.search_transitions for e in episodes),
+        "search_overrides": sum(e.search_overrides for e in episodes),
+        "search_override_rate": (
+            sum(e.search_overrides for e in episodes) /
+            sum(e.searches for e in episodes)
+            if any(e.searches for e in episodes) else None
+        ),
         "potion_actions": potion_actions,
         "mean_potions_at_room_completion": (
             sum(potion_counts) / len(potion_counts) if potion_counts else None
