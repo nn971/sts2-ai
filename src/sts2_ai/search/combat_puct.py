@@ -21,6 +21,8 @@ from sts2_ai.emulator.protocol import LegalAction, Observation
 
 FAIR_COMBAT_CAPABILITY = "h15-public-history-combat-chance-v1"
 ROOT_CONDITIONED_COMBAT_CAPABILITY = "h15-h8-root-conditioned-combat-v1"
+# Deliberately privileged native-run experiment: exact RNG forks, not fair history conditioning.
+H16_EXPERIMENTAL_ROOT_CONDITIONED_CAPABILITY = "h16-native-act1-root-conditioned-privileged-v1"
 H15_SEARCH_VERSION = "h15-combat-puct-v2"
 H15_DEEP_SEARCH_VERSION = "h15-combat-puct-v3-depth-expansion"
 
@@ -126,8 +128,9 @@ class CombatPuct:
         if (not isinstance(sampler, FairCombatSampler) or
                 sampler.fair_combat_capability_id not in (
                     FAIR_COMBAT_CAPABILITY, ROOT_CONDITIONED_COMBAT_CAPABILITY,
+                    H16_EXPERIMENTAL_ROOT_CONDITIONED_CAPABILITY,
                 )):
-            raise ValueError("H15 requires an explicitly certified combat sampler")
+            raise ValueError("PUCT requires an explicitly labeled combat sampling capability")
         if (not math.isfinite(c_puct) or c_puct <= 0 or max_depth <= 0
                 or leaf_mode not in ("value", "terminal") or rollout_depth <= 0
                 or tree_expansion_mode not in ("one_leaf", "full_depth")):
