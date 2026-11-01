@@ -4,7 +4,9 @@ from __future__ import annotations
 from sts2_ai.emulator import FAIR_POLICY_ID
 from sts2_ai.emulator.protocol import LegalAction, Observation
 from sts2_ai.search.combat_puct import (
-    CombatFrame, CombatPuct, H16_EXPERIMENTAL_ROOT_CONDITIONED_CAPABILITY,
+    H16_EXPERIMENTAL_ROOT_CONDITIONED_CAPABILITY,
+    CombatFrame,
+    CombatPuct,
 )
 
 
