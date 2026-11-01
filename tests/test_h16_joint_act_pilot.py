@@ -19,7 +19,10 @@ from sts2_ai.training.h16_joint_act_pilot import (
     JointActPilotNet,
     PilotDecision,
     PilotEpisode,
+    completed_room_hp,
     floor_completed,
+    geometric_hp_return,
+    remaining_room_hp,
     hp_after_current_room,
     hp_at_future_floor,
     local_combat_puct,
@@ -105,6 +108,59 @@ def test_post_room_hp_handles_neow_death_and_act_boundary():
         hp_after_current_room(neow, len(neow) - 1)
 
 
+def test_geometric_lambda_is_continuous_and_has_correct_limits():
+    hp = (0.80, 0.65, 0.52)
+    assert geometric_hp_return(hp, 1.0, 0.0) == pytest.approx(0.80)
+    assert geometric_hp_return(hp, 1.0, 1.0) == pytest.approx(1.0)
+    assert geometric_hp_return((), 1.0, 0.42) == pytest.approx(1.0)
+    # At lambda=1/2, weights are 1/2, 1/4, 1/8, 1/8.
+    expected = 0.5 * 0.80 + 0.25 * 0.65 + 0.125 * 0.52 + 0.125
+    assert geometric_hp_return(hp, 1.0, 0.5) == pytest.approx(expected)
+    assert geometric_hp_return(hp, 0.0, 0.5) == pytest.approx(expected - 0.125)
+    assert geometric_hp_return((0.65,), 0.0, 0.5) == pytest.approx(0.325)
+    for a, b in ((0.0, 0.001), (0.15, 0.151), (0.99, 0.991)):
+        assert (abs(geometric_hp_return(hp, 1.0, a)
+                    - geometric_hp_return(hp, 1.0, b)) < 0.01)
+    with pytest.raises(ValueError, match="Invalid geometric"):
+        geometric_hp_return(hp, 1.0, 1.01)
+
+
+def test_geometric_targets_use_first_room_completion_and_skip_current_completed():
+    states = (
+        frame(0, 70),
+        frame(1, 60, (), combat=True),
+        frame(1, 51, (1,)),
+        frame(1, 65, (1,)),  # Later healing must not overwrite floor-1 HP.
+        frame(2, 44, (1, 2)),
+        frame(3, 0, (1, 2)),  # Defeat before floor 3 completion.
+    )
+    completed = completed_room_hp(states)
+    assert completed[1] == pytest.approx(51 / 70)
+    assert completed[2] == pytest.approx(44 / 70)
+    opening = remaining_room_hp(states[0], completed)
+    in_first_room = remaining_room_hp(states[1], completed)
+    after_first_room = remaining_room_hp(states[2], completed)
+    assert opening[0] == pytest.approx(51 / 70)
+    assert in_first_room[0] == pytest.approx(51 / 70)
+    assert after_first_room[0] == pytest.approx(44 / 70)
+    assert after_first_room[1] == 0.0
+    assert geometric_hp_return(after_first_room, 0.0, 0.0) == pytest.approx(44 / 70)
+    assert geometric_hp_return(after_first_room, 0.0, 1.0) == 0.0
+
+
+def test_horizon_schedule_starts_at_one_room_and_increases_slowly():
+    # Importing the runner is intentional: enforce CLI schedule provenance.
+    from tools.train_h16_joint_act_pilot import horizon_lambda_for_round
+
+    assert horizon_lambda_for_round(0, 200) == 0.0
+    assert horizon_lambda_for_round(1, 200) < 0.01
+    assert horizon_lambda_for_round(39, 200) < 0.18
+    assert horizon_lambda_for_round(99, 200) < 0.40
+    assert horizon_lambda_for_round(499, 200) > 0.91
+    with pytest.raises(ValueError):
+        horizon_lambda_for_round(-1, 200)
+
+
 def test_early_death_future_hp_is_zero_and_binary_label_is_act_level():
     d = PilotDecision(obs(frame(4, 55, combat=True)), ACTIONS, 0, (0., 0.))
     ep = PilotEpisode(
@@ -127,7 +183,7 @@ def test_legacy_immediate_hp_option_is_rejected():
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
     with pytest.raises(ValueError, match="Invalid joint training configuration"):
         train_joint_cohort(
-            model, optimizer, (), alpha=0, horizon=2, hp_target="immediate",
+            model, optimizer, (), horizon_lambda=0.0, hp_target="immediate",
         )
 
 
@@ -175,7 +231,7 @@ def test_one_joint_optimizer_updates_both_phases_and_continuation_heads():
     )
     torch.set_num_threads(1)
     result = train_joint_cohort(
-        model, optimizer, [cleared, lost], alpha=0.35, horizon=2,
+        model, optimizer, [cleared, lost], horizon_lambda=0.35,
         temperature=1.0, minibatch=4, epochs=1,
         hp_target="post_room",
     )
@@ -194,7 +250,7 @@ def test_one_joint_optimizer_updates_both_phases_and_continuation_heads():
                if name.startswith("act_clear"))
     assert any(not torch.equal(original[name], value)
                for name, value in model.named_parameters()
-               if name.startswith("future_hp"))
+               if name.startswith("horizon_head"))
 
 
 class ForkBackend:
@@ -347,7 +403,7 @@ def test_mixed_length_multibatch_update_remains_finite():
             "defeat", 0, 0,
         ))
     metrics = train_joint_cohort(
-        model, optimizer, episodes, alpha=0.2, horizon=2,
+        model, optimizer, episodes, horizon_lambda=0.2,
         minibatch=32, epochs=2, entropy_weight=0.001,
     )
     assert metrics["optimizer_steps"] == 6
@@ -372,3 +428,25 @@ def test_joint_head_logit_output_matches_inference_probabilities():
     _, act_logit, hp_logit = model(batch, value_logits=True)
     assert torch.allclose(act_prob, act_logit.sigmoid())
     assert torch.allclose(hp_prob, hp_logit.sigmoid())
+
+
+def test_joint_critic_horizon_conditioning_uses_single_backbone_call():
+    model = JointActPilotNet(SharedObjectTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64),
+    )).eval()
+    batch = collate_h7([
+        encode_h16_decision(frame(2, 50, combat=True), ACTIONS),
+        encode_h16_decision(frame(2, 50), ACTIONS),
+    ])
+    lam = torch.tensor([0.0, 1.0])
+    logits, act, hp, aux = model(
+        batch, value_logits=True, horizon_lambda=0.3,
+        auxiliary_lambda=lam,
+    )
+    assert logits.shape[0] == 2
+    assert act.shape == hp.shape == aux.shape == (2,)
+    assert all(torch.isfinite(v).all() for v in (logits, act, hp, aux))
+    with pytest.raises(ValueError, match="shape"):
+        model(batch, horizon_lambda=torch.tensor([0.4]))
+
+
