@@ -41,9 +41,10 @@ from sts2_ai.search.combat_puct import (
     CombatFrame,
     CombatPuct,
 )
-from sts2_ai.training.h16_public_codec import H16_CODEC, encode_h16_decision
+from sts2_ai.training.h16_public_codec import H16_CODEC, LEGACY_H16_CODEC, encode_h16_decision
 
-SCHEMA = "sts2-h16-act1-geometric-horizon-every-combat-puct-v2"
+SCHEMA = "sts2-h16-act1-geometric-horizon-every-combat-puct-v3"
+LEGACY_SCHEMA = "sts2-h16-act1-geometric-horizon-every-combat-puct-v2"
 PUBLIC_POLICY = InformationPolicy(FAIR_POLICY_ID)
 
 
@@ -261,9 +262,11 @@ class JointActPilotNet(nn.Module):
     @classmethod
     def load(cls, path: Path, *, device: str = "cpu") -> JointActPilotNet:
         checkpoint = torch.load(path, map_location="cpu", weights_only=True)
-        if (checkpoint.get("schema") != SCHEMA or
-                checkpoint.get("codec") != H16_CODEC):
-            raise ValueError("Expected an H16 joint Act checkpoint/codec")
+        if (checkpoint.get("schema"), checkpoint.get("codec")) not in (
+            (SCHEMA, H16_CODEC),
+            (LEGACY_SCHEMA, LEGACY_H16_CODEC),
+        ):
+            raise ValueError("Expected a compatible H16 joint Act checkpoint/codec")
         model = cls(SharedObjectTransformer(H7Config(**checkpoint["config"])))
         model.load_state_dict(checkpoint["state_dict"], strict=True)
         return model.to(device)
