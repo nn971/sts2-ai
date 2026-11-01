@@ -190,3 +190,83 @@ on matched seeds. With only three rounds, lambda is approximately 0.01:
 this is mainly an integration pilot, not a test of long-range credit.
 A longer comparison is justified only if the first pilot demonstrates
 healthy throughput and stable updates.
+
+## H16 v2 rollout-transport throughput experiment
+
+The H16 transport optimization branch
+`research/h16-v2-fused-rollout-throughput-20261101` adds
+`--rollout-transport {legacy,fused}` (default: `fused`).
+
+- `legacy`: the original H16 path performs separate JSONL `step`,
+  `observe`, and `legal_actions` requests, plus per-decision
+  `is_terminal` checks.
+- `fused`: the existing emulator `batch_rollout_step_frame` protocol,
+  called with a one-element batch, returns the next observation, legal menu
+  and terminal status in one request. H16 reuses the result for the next
+  decision. PUCT uses the same path for each search edge. The emulator
+  performs the same ordinary `RolloutStepFrame` mechanics and retains
+  exact root-conditioned RNG forks, full PUCT depth and simulation budgets.
+
+Both modes use the *same neural weights, target definitions, seed construction,
+search budgets and optimizer*. The single-step frame path avoids canonical
+full-RunState hashing and redundant public-frame generation. No change to the
+emulator repository is necessary for this opt-in benchmark.
+
+The runner now reports `train.rollout_profile` and
+`heldout.rollout_profile`: total JSONL calls/seconds, operation-level
+counts/seconds, and CPU actor inference calls/seconds. Collection wall time
+and approximate transitions/sec remain in `rounds[].timing`. The
+`actor_inference_seconds` counter includes H16 public encoding and
+frozen H6 macro-prior evaluation.
+
+### Matched single-round A/B (fish)
+
+Use the same H9, H6 and emulator revision as in the H16 v2 run, and
+separate output directories. Start with four runs per arm to avoid a
+full-length pilot before establishing the transport gain:
+
+```fish
+set ai ~/projects/sts2-ai
+set emu ~/projects/sts2-emulator
+cd $ai
+git fetch origin
+git switch research/h16-v2-fused-rollout-throughput-20261101
+git pull --ff-only
+source .venv/bin/activate.fish
+python -m pytest -q tests/test_h16_joint_act_pilot.py
+or exit 1
+
+set rev (git -C $emu rev-parse HEAD)
+set h9 results/h9-adaptive-totalhp-r40-r250/models/player-r0250.pt
+set macro results/nature/h6c-macro-attention-r80.json
+
+for transport in legacy fused
+    python -u tools/train_h16_joint_act_pilot.py \
+        --initial-h9 $h9 --macro-model $macro \
+        --emulator-root $emu --emulator-revision $rev \
+        --output-root results/h16-v2-transport-$transport-r1 \
+        --rounds 1 --runs-per-round 4 --heldout-runs 1 \
+        --workers 4 --rollout-transport $transport \
+        --simulations 16 --search-depth 8 --search-probability 1 \
+        --device cuda --execute
+    or exit 1
+end
+```
+
+Compare `collection_seconds`, `search_transitions`,
+`approx_emulator_transitions_per_second`, `actor_inference_seconds`,
+and the per-operation JSONL costs. Identical root/action traces or
+matching episode-level outcomes/decision counts should be checked before
+attributing any speedup to the transport. Noise from worker scheduling and
+different combat lengths motivates at least two paired runs of each arm
+if the measured gain is small.
+
+The original v2 pilot measured approximately 273–310 aggregate emulator
+transitions/sec and 452–536 seconds collection per round, with
+138k–154k PUCT transitions. These are **legacy-path historical
+measurements**, not claimed fused-path performance.
+
+**Benchmark constraints:** the source pilot used emulator commit
+`67307146758b0235f8e0206e054664b19f8501a9`; use that exact emulator
+revision for strict reproducibility. Do not combine both modes in one
+output directory because the transport is fingerprinted.

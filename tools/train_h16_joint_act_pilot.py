@@ -23,6 +23,7 @@ import random
 import tempfile
 import time
 from concurrent.futures import ProcessPoolExecutor
+from dataclasses import replace as dataclass_replace
 from pathlib import Path
 from typing import Any
 
@@ -91,8 +92,13 @@ def _worker_run(seed: str) -> PilotEpisode:
     rng = random.Random(int(digest(
         [seed, cfg["study_seed"], cfg["checkpoint_sha256"], "h16-player"],
     )[:16], 16))
-    return collect_act_episode(
-        _WORKER["backend"], _WORKER["policy"],
+    backend = _WORKER["backend"]
+    policy = _WORKER["policy"]
+    backend.reset_operation_profile()
+    policy.inference_calls = 0
+    policy.inference_seconds = 0.0
+    episode = collect_act_episode(
+        backend, policy,
         seed=seed, ascension=10,
         max_decisions=cfg["max_decisions"],
         search_probability=cfg["search_probability"],
@@ -100,6 +106,16 @@ def _worker_run(seed: str) -> PilotEpisode:
         simulations=cfg["simulations"],
         search_depth=cfg["search_depth"],
         rng=rng,
+        rollout_transport=cfg["rollout_transport"],
+    )
+    return dataclass_replace(
+        episode,
+        bridge_profile={
+            op: (v.calls, v.total_seconds)
+            for op, v in backend.operation_profile().items()
+        },
+        actor_inference_calls=policy.inference_calls,
+        actor_inference_seconds=policy.inference_seconds,
     )
 
 
@@ -123,6 +139,7 @@ def collect(
         "simulations": args.simulations,
         "search_depth": args.search_depth,
         "study_seed": args.study_seed,
+        "rollout_transport": args.rollout_transport,
     }
     # Spawn avoids inheriting the learner's CUDA context into CPU workers.
     with ProcessPoolExecutor(
@@ -138,7 +155,12 @@ def summarize(episodes: list[PilotEpisode]) -> dict[str, Any]:
     resource_signatures = set()
     potion_counts: list[int] = []
     potion_actions = 0
+    operations: dict[str, dict[str, float | int]] = {}
     for episode in episodes:
+        for op, (calls, seconds) in (episode.bridge_profile or {}).items():
+            record = operations.setdefault(op, {"calls": 0, "seconds": 0.0})
+            record["calls"] += calls
+            record["seconds"] += seconds
         potion_actions += sum(
             decision.legal_actions[decision.chosen_index].kind == "use_potion"
             for decision in episode.decisions
@@ -183,6 +205,13 @@ def summarize(episodes: list[PilotEpisode]) -> dict[str, Any]:
             if any(e.searches for e in episodes) else None
         ),
         "potion_actions": potion_actions,
+        "rollout_profile": {
+            "bridge_calls": sum(v["calls"] for v in operations.values()),
+            "bridge_seconds": sum(v["seconds"] for v in operations.values()),
+            "operations": dict(sorted(operations.items())),
+            "actor_inference_calls": sum(e.actor_inference_calls for e in episodes),
+            "actor_inference_seconds": sum(e.actor_inference_seconds for e in episodes),
+        },
         "mean_potions_at_room_completion": (
             sum(potion_counts) / len(potion_counts) if potion_counts else None
         ),
@@ -216,6 +245,10 @@ def main() -> None:
     p.add_argument("--runs-per-round", type=int, default=16)
     p.add_argument("--heldout-runs", type=int, default=8)
     p.add_argument("--workers", type=int, default=15)
+    p.add_argument(
+        "--rollout-transport", choices=("legacy", "fused"), default="fused",
+        help="Compare original multi-request frames to fused rollout frames.",
+    )
     p.add_argument("--max-decisions", type=int, default=4096)
     p.add_argument("--hp-target", choices=("geometric", "post_room"),
                    default="geometric",
