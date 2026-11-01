@@ -177,7 +177,7 @@ directory and \`--workers 1\`.
 
 Review \`progress.json\` for Act clears vs censored runs, raw held-out
 Act-clear performance, joint optimizer steps for both heads, local PUCT
-intervention counts (from saved search records in later revisions),
+search counts, greedy-action override rate and search transitions,
 resource inventory diversity and potion actions. Resource diversity is
 a diagnostic of exploratory coverage, **not a direct success metric**.
 
