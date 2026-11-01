@@ -215,7 +215,8 @@ def main() -> None:
     p.add_argument("--workers", type=int, default=15)
     p.add_argument("--max-decisions", type=int, default=4096)
     p.add_argument("--future-hp-floors", type=int, default=2)
-    p.add_argument("--hp-target", choices=("future", "immediate"), default="future")
+    p.add_argument("--hp-target", choices=("future", "post_room"), default="future",
+                   help="HP after a future floor or after the next room-completion boundary")
     p.add_argument("--alpha-final", type=float, default=0.25)
     p.add_argument("--alpha-ramp-rounds", type=int, default=4)
     p.add_argument("--macro-prior-weight", type=float, default=0.5)
