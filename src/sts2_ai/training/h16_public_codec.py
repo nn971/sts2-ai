@@ -7,6 +7,8 @@ state. No resource-specific scalar prices or private RNG information enter.
 from __future__ import annotations
 
 import json
+import sys
+from collections import Counter
 from collections.abc import Sequence
 from types import SimpleNamespace
 from typing import Any
@@ -26,6 +28,41 @@ from sts2_ai.models.shared_game_objects import (
 
 H16_CODEC = "h16-public-persistent-macro-actions-v1"
 MAX_EXTRA_TOKENS = 64
+# Once per process: expose unusual real/search menus without dumping states.
+_LARGE_MENU_REPORTED = False
+_CURRENT_EPISODE_SEED: str | None = None
+
+
+def set_h16_rollout_seed(seed: str | None) -> None:
+    global _CURRENT_EPISODE_SEED
+    _CURRENT_EPISODE_SEED = seed
+
+
+def _diagnose_large_menu(state: dict[str, Any], actions: Sequence[Any]) -> None:
+    global _LARGE_MENU_REPORTED
+    if len(actions) <= 128 or _LARGE_MENU_REPORTED:
+        return
+    _LARGE_MENU_REPORTED = True
+    examples: dict[str, list[dict[str, str]]] = {}
+    for action in actions:
+        sample = examples.setdefault(action.kind, [])
+        if len(sample) < 3:
+            sample.append({
+                "action_id": str(action.action_id),
+                "payload": str(action.payload_json)[:240],
+            })
+    combat = state.get("combat")
+    detail = {
+        "seed": _CURRENT_EPISODE_SEED,
+        "floor": state.get("floor"),
+        "phase": "combat" if isinstance(combat, dict) else "macro",
+        "turn": combat.get("turn") if isinstance(combat, dict) else None,
+        "num_legal_actions": len(actions),
+        "action_kinds": dict(sorted(Counter(a.kind for a in actions).items())),
+        "samples": examples,
+    }
+    print("[h16-action-overflow] " + json.dumps(detail, sort_keys=True),
+          file=sys.stderr, flush=True)
 
 
 def _leaves(value: object, path: str):
@@ -55,6 +92,7 @@ def encode_h16_decision(
     # H16/PUCT must preserve every legal action, including combinatorial
     # target/choice menus exceeding H7's historical 128-action guard.
     # collate_h7 and the shared actor already allocate by actual menu length.
+    _diagnose_large_menu(state, actions)
     base = encode_public_decision(state, codec_actions, max_actions=None)
     objects = list(base.objects)
     extra = 0
