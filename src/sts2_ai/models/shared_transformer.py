@@ -164,7 +164,8 @@ class SharedObjectTransformer(nn.Module):
 
     def forward(
         self, batch: H7Batch, *, known_phase: int | None = None,
-    ) -> tuple[Tensor, Tensor]:
+        return_context: bool = False,
+    ) -> tuple[Tensor, Tensor] | tuple[Tensor, Tensor, Tensor]:
         """Evaluate shared objects/actions, optionally with a trusted uniform phase.
 
         known_phase is only for the actor service after CPU-side validation of
@@ -212,6 +213,8 @@ class SharedObjectTransformer(nn.Module):
             values = torch.tanh(
                 self.value_heads[known_phase](context[:, 0]).squeeze(-1))
         logits = logits.masked_fill(~batch.action_mask, torch.finfo(logits.dtype).min)
+        if return_context:
+            return logits, values, context[:, 0]
         return logits, values
 
     def save_checkpoint(self, path: Path) -> None:
