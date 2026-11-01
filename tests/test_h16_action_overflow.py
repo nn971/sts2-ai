@@ -1,19 +1,16 @@
-"""H16 regression: complete large action menus survive encoding and batching."""
+"""H16 regression: all legal choices survive large combat/macro menus."""
 from __future__ import annotations
+
+from itertools import combinations
 
 import pytest
 import torch
 
 from sts2_ai.emulator.protocol import LegalAction
 from sts2_ai.models.packed_actor_collation import collate_h7_actor_packed
-from sts2_ai.models.shared_game_objects import (
-    MAX_ACTIONS,
-    encode_public_decision,
-)
+from sts2_ai.models.shared_game_objects import MAX_ACTIONS, encode_public_decision
 from sts2_ai.models.shared_transformer import (
-    H7Config,
-    SharedObjectTransformer,
-    collate_h7,
+    H7Config, SharedObjectTransformer, collate_h7,
 )
 from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet
 from sts2_ai.training.h16_public_codec import encode_h16_decision
@@ -23,32 +20,44 @@ def state(*, combat: bool) -> dict:
     return {
         "act": 1, "floor": 7, "hp": 42, "max_hp": 70,
         "completed_rooms": [],
-        "combat": {"turn": 1, "enemies": []} if combat else None,
+        "combat": {
+            "turn": 1, "enemies": [], "hand": [],
+            "discard_pile": [
+                {"instance_id": j, "card_id": f"demo.card.{j}"}
+                for j in range(23)
+            ],
+            "exhaust_pile": [],
+        } if combat else None,
         "deck": [], "relics": [], "potions": [], "map": [],
     }
 
 
 @pytest.mark.parametrize("size", [MAX_ACTIONS + 1, 257])
 @pytest.mark.parametrize("combat", [False, True])
-def test_h16_action_overflow_preserves_all_actions_and_model_logits(
-    size: int, combat: bool,
-):
+def test_large_menu_preserves_all_choices_and_logits(size: int, combat: bool):
     public = state(combat=combat)
-    actions = tuple(
-        LegalAction(f"menu-{i}", "choice" if not combat else f"move-{i}",
-                    f'{{"ChoiceId":{i}}}')
-        for i in range(size)
-    )
-    # H7's existing input contract remains intact.
+    if combat:
+        subsets = (
+            subset for count in (0, 1, 2)
+            for subset in combinations(range(23), count)
+        )
+        actions = tuple(
+            LegalAction(f"select-{i}", "select_cards",
+                        '{"CardInstanceIds":[' + ",".join(map(str, selected)) + "]}")
+            for i, selected in zip(range(size), subsets)
+        )
+    else:
+        actions = tuple(
+            LegalAction(f"menu-{i}", "event_choice", f'{{"ChoiceId":{i}}}')
+            for i in range(size)
+        )
+    assert len(actions) == size
     with pytest.raises(ValueError, match="Legal action cap exceeded"):
         encode_public_decision(public, actions)
 
     encoded = encode_h16_decision(public, actions)
     assert len(encoded.actions) == size
-    # In H16, independently offered macro choices retain distinct semantics.
-    if not combat:
-        assert len(set(token.semantic for token in encoded.actions)) == size
-
+    assert len(set(encoded.actions)) == size
     control = encode_h16_decision(public, actions[:3])
     full = collate_h7([encoded, control])
     packed = collate_h7_actor_packed([encoded, control])
