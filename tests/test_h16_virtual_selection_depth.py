@@ -41,7 +41,8 @@ class VirtualSelectionChain:
 def test_compact_select_five_uses_one_real_game_action_depth():
     sampler = VirtualSelectionChain(selections=5)
     root = sampler.frame(0)
-    evaluator = lambda state, actions: ((0.0,) * len(actions), 0.25)
+    def evaluator(state, actions):
+        return ((0.0,) * len(actions), 0.25)
     compact = CombatPuct(
         sampler, evaluator, max_depth=1, tree_expansion_mode="full_depth",
         free_card_selection_steps=True,
