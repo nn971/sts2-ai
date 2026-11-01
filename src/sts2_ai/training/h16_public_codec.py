@@ -12,8 +12,16 @@ from types import SimpleNamespace
 from typing import Any
 
 from sts2_ai.models.shared_game_objects import (
-    IDENTITY_BUCKETS, KINDS, MAX_OBJECTS, ZONES, ActionToken,
-    EncodedDecision, ObjectToken, _bucket, _numbers, encode_public_decision,
+    IDENTITY_BUCKETS,
+    KINDS,
+    MAX_OBJECTS,
+    ZONES,
+    ActionToken,
+    EncodedDecision,
+    ObjectToken,
+    _bucket,
+    _numbers,
+    encode_public_decision,
 )
 
 H16_CODEC = "h16-public-persistent-macro-actions-v1"
