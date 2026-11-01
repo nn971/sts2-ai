@@ -198,6 +198,13 @@ def test_h16_macro_options_and_relic_counters_are_visible_without_prices():
     encoded = encode_h16_decision(state, choices)
     assert encoded.phase == "macro"
     assert encoded.actions[0].semantic != encoded.actions[1].semantic
+    # Macro reward card IDs are public, but they are not hand-card pointers.
+    rewards = (
+        LegalAction("reward-left", "choose_card", '{"CardInstanceId":401}'),
+        LegalAction("reward-right", "choose_card", '{"CardInstanceId":402}'),
+    )
+    reward_codec = encode_h16_decision(state, rewards)
+    assert reward_codec.actions[0].semantic != reward_codec.actions[1].semantic
     assert len(encoded.objects) > len(
         encode_h16_decision({**state, "relics": []}, choices).objects
     )
