@@ -242,7 +242,7 @@ def summarize(episodes: list[PilotEpisode]) -> dict[str, Any]:
         "combat_progress": {
             "completed_fights": len(combats),
             "won_fights": sum(result.won for result in combats),
-            "lost_fights": len(defeated),
+            "lost_fight_count": len(defeated),
             "mean_enemy_progress_on_defeat": (
                 sum(defeated) / len(defeated) if defeated else None
             ),
