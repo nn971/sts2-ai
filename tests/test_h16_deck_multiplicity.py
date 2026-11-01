@@ -28,8 +28,8 @@ def test_thousand_identical_clones_become_one_inventory_token():
         for i in range(1000)
     ]
     encoded = encode_h16_decision(make_state(deck), ACTIONS)
-    assert len(encoded.objects) == 2  # global state + one deck multiset
-    clone = encoded.objects[-1]
+    assert len(encoded.objects) == 3  # global + deck class + one persistent leaf
+    clone = encoded.objects[1]
     assert clone.observed[14] == 1  # count is represented, not discarded
     assert clone.numeric[14] == pytest.approx(
         math.tanh(math.log1p(1000) / 10), abs=1e-7,
@@ -52,7 +52,7 @@ def test_public_modifications_are_part_of_group_identity():
          "persistent_state": {"counter": 1}},
     ]
     encoded = encode_h16_decision(make_state(deck), ACTIONS)
-    assert len(encoded.objects) == 4  # global + three visibly distinct classes
+    assert len(encoded.objects) == 7  # global + 3 deck classes + 3 persistent leaves
     assert encoded.objects[1].numeric[14] == pytest.approx(
         math.tanh(math.log1p(2) / 10), abs=1e-7,
     )
