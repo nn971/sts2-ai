@@ -30,10 +30,6 @@ from sts2_ai.emulator.run_environment import (
     NATIVE_OVERGROWTH,
     reset_training_run,
 )
-from sts2_ai.training.h16_episode_metrics import (
-    combat_results,
-    enemy_hp_progress,
-)
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.models.shared_transformer import (
     H7Config,
@@ -44,6 +40,10 @@ from sts2_ai.search.combat_puct import (
     H16_EXPERIMENTAL_ROOT_CONDITIONED_CAPABILITY,
     CombatFrame,
     CombatPuct,
+)
+from sts2_ai.training.h16_episode_metrics import (
+    combat_results,
+    enemy_hp_progress,
 )
 from sts2_ai.training.h16_public_codec import (
     H16_CODEC,
