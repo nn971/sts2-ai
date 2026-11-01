@@ -23,6 +23,7 @@ import random
 import tempfile
 import time
 from concurrent.futures import ProcessPoolExecutor
+from contextlib import nullcontext
 from dataclasses import replace as dataclass_replace
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,7 @@ import torch
 
 from sts2_ai.emulator.jsonl_backend import JsonlEmulatorBackend
 from sts2_ai.emulator.run_environment import EXPERIMENTAL_FIXED_ROUTE_PROFILE
+from sts2_ai.models.h16_batch_actor import RemoteH16Actor, SharedH16Service
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.models.shared_transformer import SharedObjectTransformer
 from sts2_ai.training.h16_joint_act_pilot import (
@@ -69,13 +71,17 @@ def write_json(path: Path, value: object) -> None:
 
 def _worker_init(config: dict[str, Any]) -> None:
     torch.set_num_threads(1)
-    model = JointActPilotNet.load(Path(config["checkpoint"]), device="cpu")
+    remote = (RemoteH16Actor(config["actor_transport_handle"])
+              if config["actor_inference"] == "shared" else None)
+    model = (None if remote is not None
+             else JointActPilotNet.load(Path(config["checkpoint"]), device="cpu"))
     macro = (PhaseSplitNeuralModel.load(Path(config["macro_model"]))
              if config["macro_model"] is not None else None)
     policy = PilotPolicy(
         model, temperature=config["temperature"],
         horizon_lambda=config["horizon_lambda"], macro_teacher=macro,
         macro_prior_weight=config["macro_prior_weight"],
+        remote_actor=remote,
     )
     emulator = JsonlEmulatorBackend(
         repo_root=Path(config["ai_root"]),
@@ -89,8 +95,9 @@ def _worker_init(config: dict[str, Any]) -> None:
 
 def _worker_run(seed: str) -> PilotEpisode:
     cfg = _WORKER["config"]
+    # Common random numbers across actor transports and checkpoint encodings.
     rng = random.Random(int(digest(
-        [seed, cfg["study_seed"], cfg["checkpoint_sha256"], "h16-player"],
+        [seed, cfg["study_seed"], "h16-player-v2"],
     )[:16], 16))
     backend = _WORKER["backend"]
     policy = _WORKER["policy"]
@@ -140,13 +147,35 @@ def collect(
         "search_depth": args.search_depth,
         "study_seed": args.study_seed,
         "rollout_transport": args.rollout_transport,
+        "actor_inference": args.actor_inference,
     }
-    # Spawn avoids inheriting the learner's CUDA context into CPU workers.
-    with ProcessPoolExecutor(
-        max_workers=args.workers, mp_context=multiprocessing.get_context("spawn"),
-        initializer=_worker_init, initargs=(cfg,),
-    ) as pool:
-        return list(pool.map(_worker_run, seeds, chunksize=1))
+    actor = (
+        SharedH16Service(
+            checkpoint=checkpoint.resolve(), digest=cfg["checkpoint_sha256"],
+            workers=args.workers, device=args.actor_device,
+            horizon_lambda=horizon_lambda,
+            max_batch=args.actor_max_batch,
+            max_delay_ms=args.actor_max_delay_ms,
+        )
+        if args.actor_inference == "shared" else nullcontext(None)
+    )
+    # Spawn isolates worker emulators from the learner's CUDA context.
+    # Only the shared actor owns CUDA inference; workers keep public codecs/H6.
+    with actor as shared:
+        cfg["actor_transport_handle"] = (
+            shared.transport if shared is not None else None
+        )
+        with ProcessPoolExecutor(
+            max_workers=args.workers,
+            mp_context=multiprocessing.get_context("spawn"),
+            initializer=_worker_init, initargs=(cfg,),
+        ) as pool:
+            episodes = list(pool.map(_worker_run, seeds, chunksize=1))
+    if shared is not None and episodes:
+        episodes[0] = dataclass_replace(
+            episodes[0], actor_service_profile=shared.metrics,
+        )
+    return episodes
 
 
 def summarize(episodes: list[PilotEpisode]) -> dict[str, Any]:
@@ -211,6 +240,10 @@ def summarize(episodes: list[PilotEpisode]) -> dict[str, Any]:
             "operations": dict(sorted(operations.items())),
             "actor_inference_calls": sum(e.actor_inference_calls for e in episodes),
             "actor_inference_seconds": sum(e.actor_inference_seconds for e in episodes),
+            "actor_service": next(
+                (e.actor_service_profile for e in episodes
+                 if e.actor_service_profile is not None), None,
+            ),
         },
         "mean_potions_at_room_completion": (
             sum(potion_counts) / len(potion_counts) if potion_counts else None
@@ -249,6 +282,15 @@ def main() -> None:
         "--rollout-transport", choices=("legacy", "fused"), default="fused",
         help="Compare original multi-request frames to fused rollout frames.",
     )
+    p.add_argument(
+        "--actor-inference", choices=("cpu-worker", "shared"),
+        default="cpu-worker",
+        help="Per-worker CPU inference or a cohort-shared batched actor.",
+    )
+    p.add_argument("--actor-device", default="cuda",
+                   help="Device for the shared inference actor only.")
+    p.add_argument("--actor-max-batch", type=int, default=16)
+    p.add_argument("--actor-max-delay-ms", type=float, default=2.0)
     p.add_argument("--max-decisions", type=int, default=4096)
     p.add_argument("--hp-target", choices=("geometric", "post_room"),
                    default="geometric",
@@ -275,8 +317,13 @@ def main() -> None:
     args = p.parse_args()
     if (min(args.rounds, args.runs_per_round, args.heldout_runs, args.workers,
             args.max_decisions, args.search_start_round,
-            args.simulations, args.search_depth, args.minibatch, args.epochs) <= 0
+            args.simulations, args.search_depth, args.minibatch, args.epochs,
+            args.actor_max_batch) <= 0
             or args.max_searches < 0 or args.study_seed < 0
+            or not math.isfinite(args.actor_max_delay_ms)
+            or args.actor_max_delay_ms < 0
+            or not (args.actor_device == "cpu"
+                    or args.actor_device.startswith("cuda"))
             or not math.isfinite(args.horizon_tau_rounds)
             or args.horizon_tau_rounds <= 0
             or args.auxiliary_horizon_weight < 0
@@ -312,6 +359,10 @@ def main() -> None:
         return
     if args.device.startswith("cuda") and not torch.cuda.is_available():
         p.error("CUDA unavailable; use --device cpu for a small smoke")
+    if (args.actor_inference == "shared"
+            and args.actor_device.startswith("cuda")
+            and not torch.cuda.is_available()):
+        p.error("Actor CUDA unavailable; use --actor-device cpu for a smoke")
     torch.set_num_threads(1)
     torch.manual_seed(args.study_seed)
     root = args.output_root
