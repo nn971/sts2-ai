@@ -111,9 +111,10 @@ def collate_h7(decisions: list[EncodedDecision]) -> H7Batch:
             for member in action.members:
                 if member < 0 or member >= len(decision.objects):
                     raise ValueError("Dangling selected-card pointer")
-            action_members[row, pos, :len(action.members)] = torch.tensor(
-                action.members, dtype=torch.long,
-            )
+            if action.members:
+                action_members[row, pos, :len(action.members)] = torch.tensor(
+                    action.members, dtype=torch.long,
+                )
             action_kinds[row, pos] = action.kind
             action_semantics[row, pos] = action.semantic
             sources[row, pos] = action.source
