@@ -72,9 +72,11 @@ def enemy_hp_progress(combat_frames: Sequence[dict[str, Any]]) -> float:
                 else max(1, hp)
             )
             present.add(ref)
-            # A changed public identity or maximum HP identifies a new stage.
+            # A changed public identity identifies a new phase. Max HP can
+            # change within an ordinary phase (buffs/debuffs); treating that
+            # as a kill would fabricate defeat-progress credit.
             # Reappearance following absence is a new observable generation.
-            if past is None or past[1] != enemy_id or past[3] != maximum:
+            if past is None or past[1] != enemy_id:
                 if past is not None:
                     # A visible boss/monster phase transition retires the
                     # preceding HP bar; it is not remaining enemy HP.
@@ -134,9 +136,12 @@ def combat_results(frames: Sequence[dict[str, Any]], outcome: str) -> tuple[Comb
                     and following["hp"] > 0)
         # An Act-level defeat can follow a won earlier combat, but never
         # promotes the final unfinished battle into a victory.
-        won = survived and not (j == len(frames) - 1 and
-                                outcome == "defeat" and
-                                following.get("hp", 0) <= 0)
+        # The terminal Act-clear snapshot can still retain combat state.
+        # An explicitly certified Act clear includes a won boss fight.
+        won = ((j == len(frames) and outcome == "act_clear")
+               or (survived and not (j == len(frames) - 1
+                                     and outcome == "defeat"
+                                     and following.get("hp", 0) <= 0)))
         results.append(CombatResult(
             i, end,
             frames[i].get("floor") if type(frames[i].get("floor")) is int else None,
