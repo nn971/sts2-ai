@@ -270,7 +270,10 @@ def _checkpoint(path: Path, value: object) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--initial-h9", type=Path, required=True)
+    start = p.add_mutually_exclusive_group(required=True)
+    start.add_argument("--initial-h9", type=Path)
+    start.add_argument("--initial-h16", type=Path,
+                       help="Warm-start from a saved H16 v2/v3 policy/value checkpoint")
     p.add_argument("--macro-model", type=Path, default=None)
     p.add_argument("--emulator-root", type=Path, required=True)
     p.add_argument("--emulator-revision", required=True)
@@ -333,7 +336,7 @@ def main() -> None:
             or not 0 < args.temperature <= 5
             or args.macro_prior_weight < 0 or args.lr <= 0):
         p.error("Invalid H16 pilot configuration")
-    for path in (args.initial_h9, args.macro_model):
+    for path in (args.initial_h9, args.initial_h16, args.macro_model):
         if path is not None and not path.is_file():
             p.error(f"Missing checkpoint: {path}")
     source = {
@@ -341,13 +344,15 @@ def main() -> None:
         "map_profile": EXPERIMENTAL_FIXED_ROUTE_PROFILE,
         "chance_provenance": "emulator-native-structure-ordinary-prototype-rng",
         "puct_provenance": "h16-native-act1-root-conditioned-privileged-v1",
-        "initial_h9_sha256": sha256(args.initial_h9),
+        "initial_h9_sha256": sha256(args.initial_h9) if args.initial_h9 else None,
+        "initial_h16_sha256": sha256(args.initial_h16) if args.initial_h16 else None,
         "macro_sha256": sha256(args.macro_model) if args.macro_model else None,
         "emulator_revision": args.emulator_revision,
         "options": {
             key: value for key, value in vars(args).items()
             if key not in (
                 "execute", "resume", "output_root", "initial_h9",
+                "initial_h16",
                 "macro_model", "emulator_root", "ai_root", "device",
             )
         },
@@ -387,9 +392,12 @@ def main() -> None:
     else:
         if progress_path.exists() or optimizer_path.exists():
             p.error("Output contains an existing run; use --resume or a new directory")
-        model = JointActPilotNet(
-            SharedObjectTransformer.load_checkpoint(args.initial_h9),
-        ).to(args.device)
+        model = (
+            JointActPilotNet.load(args.initial_h16, device=args.device)
+            if args.initial_h16 is not None else JointActPilotNet(
+                SharedObjectTransformer.load_checkpoint(args.initial_h9),
+            ).to(args.device)
+        )
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
     if args.resume:
         saved = torch.load(optimizer_path, map_location="cpu", weights_only=True)
