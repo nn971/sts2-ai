@@ -13,9 +13,10 @@ from __future__ import annotations
 import json
 import math
 import random
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import torch
 from torch import Tensor, nn
@@ -24,17 +25,22 @@ from sts2_ai.emulator import FAIR_POLICY_ID, InformationPolicy, LegalAction, Obs
 from sts2_ai.emulator.episode_goal import certified_native_act1_clear
 from sts2_ai.emulator.protocol import EmulatorBackend, StateHandle
 from sts2_ai.emulator.run_environment import (
-    EXPERIMENTAL_FIXED_ROUTE_PROFILE, NATIVE_OVERGROWTH, reset_training_run,
+    EXPERIMENTAL_FIXED_ROUTE_PROFILE,
+    NATIVE_OVERGROWTH,
+    reset_training_run,
 )
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
-from sts2_ai.training.h16_public_codec import encode_h16_decision, H16_CODEC
 from sts2_ai.models.shared_transformer import (
-    H7Config, SharedObjectTransformer, collate_h7,
+    H7Config,
+    SharedObjectTransformer,
+    collate_h7,
 )
 from sts2_ai.search.combat_puct import (
     H16_EXPERIMENTAL_ROOT_CONDITIONED_CAPABILITY,
-    CombatFrame, CombatPuct,
+    CombatFrame,
+    CombatPuct,
 )
+from sts2_ai.training.h16_public_codec import H16_CODEC, encode_h16_decision
 
 SCHEMA = "sts2-h16-act1-joint-hp-potential-pilot-v1"
 PUBLIC_POLICY = InformationPolicy(FAIR_POLICY_ID)
@@ -324,7 +330,11 @@ def local_combat_puct(
         observation=observation, legal_actions=actions,
     )
     adapter = NativeRootConditionedSampler(backend, state, policy)
-    evaluator = lambda obs, menu: policy.infer(obs, menu)[:2]
+    def evaluator(
+        obs: Observation, menu: tuple[LegalAction, ...],
+    ) -> tuple[tuple[float, ...], float]:
+        scores, value, _ = policy.infer(obs, menu)
+        return scores, value
     result = CombatPuct(
         adapter, evaluator, max_depth=depth, c_puct=1.5,
         tree_expansion_mode="full_depth", leaf_mode="value", seed=seed,
