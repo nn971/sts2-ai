@@ -162,6 +162,7 @@ class PilotEpisode:
     outcome: str
     searches: int
     search_transitions: int
+    search_overrides: int = 0
 
     def __post_init__(self) -> None:
         if (self.outcome not in ("act_clear", "defeat", "censored")
@@ -345,7 +346,7 @@ def collect_act_episode(
     )
     decisions: list[PilotDecision] = []
     frames: list[dict[str, Any]] = []
-    searches = search_transitions = 0
+    searches = search_transitions = search_overrides = 0
     try:
         while True:
             observation = backend.observe(state, PUBLIC_POLICY)
@@ -378,6 +379,11 @@ def collect_act_episode(
                 )
                 search_transitions += count
                 searches += 1
+                greedy = max(range(len(scores)), key=lambda i: scores[i])
+                searched_greedy = max(
+                    range(len(search_policy)), key=lambda i: search_policy[i],
+                )
+                search_overrides += int(searched_greedy != greedy)
                 chosen = _sample(search_policy, rng)
             else:
                 chosen = _sample(_softmax(scores, policy.temperature), rng)
@@ -389,7 +395,7 @@ def collect_act_episode(
             state = transition.child
         return PilotEpisode(
             seed, tuple(decisions), tuple(frames),
-            outcome, searches, search_transitions,
+            outcome, searches, search_transitions, search_overrides,
         )
     finally:
         backend.release_many([state])
