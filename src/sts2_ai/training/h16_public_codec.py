@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from types import SimpleNamespace
 from typing import Any
 
 from sts2_ai.models.shared_game_objects import (
@@ -34,7 +35,16 @@ def _leaves(value: object, path: str):
 def encode_h16_decision(
     state: dict[str, Any], actions: Sequence[Any],
 ) -> EncodedDecision:
-    base = encode_public_decision(state, actions)
+    # H7's CardInstanceId pointer validator assumes every selected card is
+    # in the combat hand. Macro rewards/shops have different public card
+    # references; their full offered choice is encoded in the action semantic
+    # below instead. Keep the original strict combat pointer validation.
+    macro = not isinstance(state.get("combat"), dict)
+    codec_actions = (
+        [SimpleNamespace(kind=a.kind, payload_json="{}") for a in actions]
+        if macro else actions
+    )
+    base = encode_public_decision(state, codec_actions)
     objects = list(base.objects)
     extra = 0
     for field, name_fields in (
