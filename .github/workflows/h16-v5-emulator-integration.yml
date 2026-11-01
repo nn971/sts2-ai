@@ -1,0 +1,99 @@
+name: h16-v5-emulator-integration
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/h16-v5-emulator-integration.yml'
+      - 'tools/train_h16_joint_act_pilot.py'
+      - 'src/sts2_ai/training/h16_joint_act_pilot.py'
+      - 'src/sts2_ai/training/h16_episode_metrics.py'
+      - 'src/sts2_ai/training/h16_public_codec.py'
+      - 'src/sts2_ai/emulator/jsonl_backend.py'
+  workflow_dispatch:
+
+jobs:
+  cpu-cross-repository-training-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout paired experimental emulator revision
+        uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: e265c0f8133d0deb2b2152fc152bb8ee8e20c364
+          path: emulator
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Install CPU training runtime
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e '.[dev]'
+      - name: Build the exact paired emulator
+        run: dotnet build emulator/src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj -c Release --nologo -v quiet -m:1
+      - name: Create small random H16 v5 checkpoint for protocol verification
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
+          from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet
+          import torch
+          torch.manual_seed(20261102)
+          JointActPilotNet(
+              SharedObjectTransformer(
+                  H7Config(width=32, layers=1, heads=4, feedforward=64)
+              )
+          ).save(Path('/tmp/h16-v5-integration-initial.pt'))
+          PY
+      - name: Execute one round with shared CPU actor and real emulator forks
+        run: |
+          python tools/train_h16_joint_act_pilot.py \
+            --initial-h16 /tmp/h16-v5-integration-initial.pt \
+            --emulator-root "$GITHUB_WORKSPACE/emulator" \
+            --emulator-revision "$(git -C emulator rev-parse HEAD)" \
+            --output-root "$RUNNER_TEMP/h16-v5-integrated-smoke" \
+            --rounds 1 --runs-per-round 2 --heldout-runs 2 --workers 2 \
+            --actor-inference shared --actor-device cpu --device cpu \
+            --actor-max-batch 16 --max-decisions 1024 \
+            --simulations 16 --search-depth 8 --search-probability 1 \
+            --max-searches 2 --minibatch 32 --epochs 1 --lr 1e-5 \
+            --hp-target geometric --horizon-tau-rounds 200 \
+            --combat-credit-weight 0.25 --loss-progress-cap 0.2 \
+            --study-seed 20261102 --execute
+      - name: Inspect integrated targets, metrics and optimizer checkpoint
+        run: |
+          python - <<'PY'
+          import json, math, os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP']) / 'h16-v5-integrated-smoke'
+          progress = json.loads((root / 'progress.json').read_text())
+          row, = progress['rounds']
+          assert row['update']['optimizer_steps'] > 0
+          assert row['update']['search_roots'] > 0
+          for key in ('loss', 'policy', 'act', 'hp'):
+              assert math.isfinite(row['update'][key]), key
+          assert (root / 'optimizer-state.pt').is_file()
+          assert (root / 'models/joint-r0001.pt').is_file()
+          for phase in ('train', 'heldout'):
+              data = row[phase]
+              assert 'floor_progress' in data and 'combat_progress' in data
+              assert len(data['floor_progress']['runs']) == 2
+              assert all(
+                  0 <= f['enemy_hp_removed_fraction'] <= 1
+                  for f in data['combat_progress']['lost_fights']
+              )
+          print('H16 v5 CPU integrated emulator smoke passed')
+          PY
+      - name: Upload diagnostics if integration fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: h16-v5-integration-diagnostics
+          path: |
+            ${{ runner.temp }}/h16-v5-integrated-smoke/progress.json
+            ${{ runner.temp }}/h16-v5-integrated-smoke/baseline.json
+          if-no-files-found: ignore
