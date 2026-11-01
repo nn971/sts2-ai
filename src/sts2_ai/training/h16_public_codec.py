@@ -52,7 +52,10 @@ def encode_h16_decision(
         [SimpleNamespace(kind=a.kind, payload_json="{}") for a in actions]
         if macro else actions
     )
-    base = encode_public_decision(state, codec_actions)
+    # H16/PUCT must preserve every legal action, including combinatorial
+    # target/choice menus exceeding H7's historical 128-action guard.
+    # collate_h7 and the shared actor already allocate by actual menu length.
+    base = encode_public_decision(state, codec_actions, max_actions=None)
     objects = list(base.objects)
     extra = 0
     for field, name_fields in (
