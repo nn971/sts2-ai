@@ -95,12 +95,15 @@ class EncodedDecision:
 
 
 def encode_public_decision(
-    state: dict[str, Any], legal_actions: Sequence[Any],
+    state: dict[str, Any], legal_actions: Sequence[Any], *,
+    max_actions: int | None = MAX_ACTIONS,
 ) -> EncodedDecision:
     """Encode only published game fields and currently legal action payloads.
 
     Missing public target pointers fail explicitly. This prevents an invisible
     target or alias from silently getting the same action logit.
+    The historical H7 menu guard is retained by default; H16 may pass
+    max_actions=None because its action tensors are dynamically sized.
     """
     if not isinstance(state, dict) or not legal_actions:
         raise ValueError("Need a public state and a nonempty legal action menu")
@@ -177,7 +180,7 @@ def encode_public_decision(
         add("room", _entry_id(room, "room_type"), "map", room)
 
     action_tokens: list[ActionToken] = []
-    if len(legal_actions) > MAX_ACTIONS:
+    if max_actions is not None and len(legal_actions) > max_actions:
         raise ValueError("Legal action cap exceeded: all legal actions must remain present")
     for action in legal_actions:
         kind = action.kind
