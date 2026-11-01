@@ -124,7 +124,8 @@ class CombatPuct:
     def __init__(self, sampler: FairCombatSampler, evaluator: CombatEvaluator, *,
                  c_puct: float = 1.5, max_depth: int = 256, seed: int = 0,
                  leaf_mode: str = "value", rollout_depth: int = 512,
-                 tree_expansion_mode: str = "one_leaf"):
+                 tree_expansion_mode: str = "one_leaf",
+                 free_card_selection_steps: bool = False):
         if (not isinstance(sampler, FairCombatSampler) or
                 sampler.fair_combat_capability_id not in (
                     FAIR_COMBAT_CAPABILITY, ROOT_CONDITIONED_COMBAT_CAPABILITY,
@@ -142,6 +143,7 @@ class CombatPuct:
         self._leaf_mode = leaf_mode
         self._rollout_depth = rollout_depth
         self._tree_expansion_mode = tree_expansion_mode
+        self._free_card_selection_steps = free_card_selection_steps
         self._rng = random.Random(seed)
 
     def _expand(self, frame: CombatFrame) -> _Node:
@@ -214,7 +216,9 @@ class CombatPuct:
             try:
                 self._sampler.begin_simulation(root, self._rng)
                 result: float | None = None
-                for depth in range(self._depth + 1):
+                depth = 0
+                virtual_steps = 0
+                while True:
                     if frame.terminal_reward is not None:
                         result = frame.terminal_reward / 2.0
                         terminals += 1
@@ -257,6 +261,15 @@ class CombatPuct:
                     action = frame.legal_actions[action_index]
                     child = self._sampler.step(frame, action, self._rng)
                     transitions += 1
+                    if (self._free_card_selection_steps
+                            and action.kind == "select_cards"):
+                        virtual_steps += 1
+                        if virtual_steps > 256:
+                            raise ValueError(
+                                "PUCT virtual selection exceeded 256 steps"
+                            )
+                    else:
+                        depth += 1
                     if not isinstance(child, CombatFrame):
                         raise TypeError("Fair combat sampler returned an invalid frame")
                     if (child.information_key in seen
