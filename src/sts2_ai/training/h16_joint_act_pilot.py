@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import math
 import random
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,7 +24,7 @@ from torch import Tensor, nn
 
 from sts2_ai.emulator import FAIR_POLICY_ID, InformationPolicy, LegalAction, Observation
 from sts2_ai.emulator.episode_goal import certified_native_act1_clear
-from sts2_ai.emulator.protocol import EmulatorBackend, StateHandle
+from sts2_ai.emulator.protocol import EmulatorBackend, StateHandle, StepFrame
 from sts2_ai.emulator.run_environment import (
     EXPERIMENTAL_FIXED_ROUTE_PROFILE,
     NATIVE_OVERGROWTH,
@@ -286,6 +287,9 @@ class PilotEpisode:
     searches: int
     search_transitions: int
     search_overrides: int = 0
+    bridge_profile: dict[str, tuple[int, float]] | None = None
+    actor_inference_calls: int = 0
+    actor_inference_seconds: float = 0.0
 
     def __post_init__(self) -> None:
         if (self.outcome not in ("act_clear", "defeat", "censored")
@@ -324,6 +328,8 @@ class PilotPolicy:
         self.horizon_lambda = horizon_lambda
         self.macro_teacher = macro_teacher
         self.macro_prior_weight = macro_prior_weight
+        self.inference_calls = 0
+        self.inference_seconds = 0.0
 
     def _offsets(
         self, observation: Observation, actions: tuple[LegalAction, ...],
@@ -343,6 +349,7 @@ class PilotPolicy:
     ) -> tuple[tuple[float, ...], float, tuple[float, ...]]:
         if not actions:
             raise ValueError("Nonterminal inference needs a legal menu")
+        started = time.perf_counter()
         encoded = encode_h16_decision(public_state(observation), actions)
         batch = collate_h7([encoded]).to(next(self.model.parameters()).device)
         with torch.inference_mode():
@@ -357,6 +364,8 @@ class PilotPolicy:
         value = float(hp[0])
         if not all(math.isfinite(x) for x in (*scores, value)):
             raise ValueError("Nonfinite joint inference")
+        self.inference_calls += 1
+        self.inference_seconds += time.perf_counter() - started
         return scores, min(1.0, max(0.0, value)), offsets
 
     def value_at(
@@ -379,7 +388,11 @@ class NativeRootConditionedSampler:
     def __init__(
         self, backend: EmulatorBackend, root: StateHandle,
         policy: PilotPolicy,
+        *, rollout_transport: str = "fused",
     ) -> None:
+        if rollout_transport not in ("legacy", "fused"):
+            raise ValueError("Unsupported H16 rollout transport")
+        self.rollout_transport = rollout_transport
         self.backend = backend
         self.root = root
         self.policy = policy
@@ -400,15 +413,26 @@ class NativeRootConditionedSampler:
     ) -> CombatFrame:
         if self._active is None:
             raise RuntimeError("Search simulation has not begun")
-        transition = self.backend.step(self._active, action)
+        if self.rollout_transport == "fused":
+            (result,) = self.backend.batch_rollout_step_frame(
+                ((self._active, action),), PUBLIC_POLICY,
+            )
+            transition = result.transition
+            observation = result.observation
+            actions = result.legal_actions
+        else:
+            transition = self.backend.step(self._active, action)
+            observation = self.backend.observe(transition.child, PUBLIC_POLICY)
+            actions = (() if transition.terminal
+                       else tuple(self.backend.legal_actions(transition.child)))
         self._active = transition.child
         self._owned.append(transition.child)
-        observation = self.backend.observe(transition.child, PUBLIC_POLICY)
         public = public_state(observation)
         inside_combat = isinstance(public.get("combat"), dict)
         terminal = transition.terminal
-        actions = (() if terminal else tuple(self.backend.legal_actions(transition.child)))
-        if not terminal and not actions:
+        if terminal:
+            actions = ()
+        elif not actions:
             raise ValueError("Nonterminal emulator fork has no legal actions")
         boundary_value = None
         if terminal or not inside_combat:
@@ -435,6 +459,7 @@ def local_combat_puct(
     backend: EmulatorBackend, state: StateHandle, observation: Observation,
     actions: tuple[LegalAction, ...], policy: PilotPolicy, *,
     simulations: int, depth: int, seed: int,
+    rollout_transport: str = "fused",
 ) -> tuple[tuple[float, ...], int]:
     """Short combat search with learned Act/future-HP cutoffs.
 
@@ -446,7 +471,9 @@ def local_combat_puct(
         information_key="native-experimental-root:" + observation.observation_hash,
         observation=observation, legal_actions=actions,
     )
-    adapter = NativeRootConditionedSampler(backend, state, policy)
+    adapter = NativeRootConditionedSampler(
+        backend, state, policy, rollout_transport=rollout_transport,
+    )
     def evaluator(
         obs: Observation, menu: tuple[LegalAction, ...],
     ) -> tuple[tuple[float, ...], float]:
@@ -481,10 +508,11 @@ def collect_act_episode(
     seed: str, ascension: int, max_decisions: int,
     search_probability: float, max_searches: int,
     simulations: int, search_depth: int,
-    rng: random.Random,
+    rng: random.Random, rollout_transport: str = "fused",
 ) -> PilotEpisode:
     if not (0 <= search_probability <= 1 and max_searches >= 0
-            and max_decisions > 0 and simulations > 0 and search_depth > 0):
+            and max_decisions > 0 and simulations > 0 and search_depth > 0
+            and rollout_transport in ("legacy", "fused")):
         raise ValueError("Invalid Act collection settings")
     state = reset_training_run(
         backend, seed, NATIVE_OVERGROWTH, ascension,
@@ -493,21 +521,28 @@ def collect_act_episode(
     decisions: list[PilotDecision] = []
     frames: list[dict[str, Any]] = []
     searches = search_transitions = search_overrides = 0
+    next_frame: StepFrame | None = None
     try:
         while True:
-            observation = backend.observe(state, PUBLIC_POLICY)
+            # Fused stepping carries the next public frame and its legal menu.
+            # The initial reset still obtains its observation normally.
+            observation = (next_frame.observation if next_frame is not None
+                           else backend.observe(state, PUBLIC_POLICY))
             public = public_state(observation)
             frames.append(public)
             if certified_native_act1_clear(public):
                 outcome = "act_clear"
                 break
-            if backend.is_terminal(state):
+            terminal = (next_frame.transition.terminal if next_frame is not None
+                        else backend.is_terminal(state))
+            if terminal:
                 outcome = "defeat"
                 break
             if len(decisions) >= max_decisions:
                 outcome = "censored"
                 break
-            actions = tuple(backend.legal_actions(state))
+            actions = (next_frame.legal_actions if next_frame is not None
+                       else tuple(backend.legal_actions(state)))
             if not actions:
                 raise RuntimeError("Nonterminal run has no legal player actions")
             scores, _, offsets = policy.infer(observation, actions)
@@ -522,6 +557,7 @@ def collect_act_episode(
                     backend, state, observation, actions, policy,
                     simulations=simulations, depth=search_depth,
                     seed=rng.randrange(2**63),
+                    rollout_transport=rollout_transport,
                 )
                 search_transitions += count
                 searches += 1
@@ -536,9 +572,16 @@ def collect_act_episode(
             decisions.append(PilotDecision(
                 observation, actions, chosen, offsets, search_policy,
             ))
-            transition = backend.step(state, actions[chosen])
+            if rollout_transport == "fused":
+                (next_frame,) = backend.batch_rollout_step_frame(
+                    ((state, actions[chosen]),), PUBLIC_POLICY,
+                )
+                child = next_frame.transition.child
+            else:
+                child = backend.step(state, actions[chosen]).child
+                next_frame = None
             backend.release_many([state])
-            state = transition.child
+            state = child
         return PilotEpisode(
             seed, tuple(decisions), tuple(frames),
             outcome, searches, search_transitions, search_overrides,
