@@ -732,7 +732,7 @@ def train_joint_cohort(
                 phases = [enc.phase for enc in encoded]
                 floors = [
                     public_state(decision.observation).get("floor")
-                    for decision, _, _ in chunk
+                    for decision, _, _, _ in chunk
                 ]
                 raise FloatingPointError(
                     "H16 nonfinite batched forward at "
