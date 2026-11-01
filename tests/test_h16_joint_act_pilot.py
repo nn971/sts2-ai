@@ -13,6 +13,7 @@ from sts2_ai.emulator.run_environment import (
     EXPERIMENTAL_FIXED_ROUTE_PROFILE, validate_native_start,
 )
 from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
+from sts2_ai.training.h16_public_codec import encode_h16_decision
 from sts2_ai.training.h16_joint_act_pilot import (
     JointActPilotNet, PilotDecision, PilotEpisode, floor_completed,
     hp_at_future_floor, local_combat_puct, targets_for_episode, train_joint_cohort,
@@ -178,3 +179,33 @@ def test_local_puct_is_short_root_conditioned_and_releases_all_forks():
     assert visits[1] > visits[0]
     assert transitions == backend.step_count
     assert len(backend.released) == backend.counter + backend.step_count
+
+
+def test_h16_macro_options_and_relic_counters_are_visible_without_prices():
+    state = frame(7, 45)
+    state["relics"] = [{
+        "relic_id": "demo.counter",
+        "persistent_state": {"charges": 2, "nested": {"triggered": True}},
+    }]
+    choices = (
+        LegalAction("left", "event_choice", '{"ChoiceId":"left"}'),
+        LegalAction("right", "event_choice", '{"ChoiceId":"right"}'),
+    )
+    encoded = encode_h16_decision(state, choices)
+    assert encoded.phase == "macro"
+    assert encoded.actions[0].semantic != encoded.actions[1].semantic
+    assert len(encoded.objects) > len(
+        encode_h16_decision({**state, "relics": []}, choices).objects
+    )
+    with_persisted = encode_h16_decision(
+        {**state, "relics": [{
+            "relic_id": "demo.counter",
+            "persistent_state": {"charges": 5, "nested": {"triggered": False}},
+        }]}, choices,
+    )
+    assert encoded.objects[-2].numeric != with_persisted.objects[-2].numeric
+    combat = encode_h16_decision(
+        {**state, "combat": {"turn": 1, "enemies": []}}, ACTIONS,
+    )
+    assert combat.phase == "combat"
+    assert combat.actions[0].semantic == 0
