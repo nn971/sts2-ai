@@ -43,6 +43,11 @@ from sts2_ai.training.h16_joint_act_pilot import (
     collect_act_episode,
     train_joint_cohort,
 )
+from sts2_ai.training.h16_episode_metrics import (
+    combat_results,
+    episode_floor_record,
+    summarize_floor_progress,
+)
 from sts2_ai.training.h16_public_codec import set_h16_rollout_seed
 
 _WORKER: dict[str, Any] = {}
@@ -83,6 +88,8 @@ def _worker_init(config: dict[str, Any]) -> None:
         horizon_lambda=config["horizon_lambda"], macro_teacher=macro,
         macro_prior_weight=config["macro_prior_weight"],
         remote_actor=remote,
+        combat_credit_weight=config["combat_credit_weight"],
+        loss_progress_cap=config["loss_progress_cap"],
     )
     emulator = JsonlEmulatorBackend(
         repo_root=Path(config["ai_root"]),
@@ -141,6 +148,8 @@ def collect(
         "emulator_revision": args.emulator_revision,
         "temperature": args.temperature,
         "macro_prior_weight": args.macro_prior_weight,
+        "combat_credit_weight": args.combat_credit_weight,
+        "loss_progress_cap": args.loss_progress_cap,
         "horizon_lambda": horizon_lambda,
         "max_decisions": args.max_decisions,
         "search_probability": args.search_probability if search else 0.0,
@@ -213,7 +222,23 @@ def summarize(episodes: list[PilotEpisode]) -> dict[str, Any]:
             resource_signatures.add(digest([
                 potions, relics, deck,
             ]))
+    floor_records = [
+        episode_floor_record(ep.frames, ep.seed, ep.outcome, len(ep.decisions))
+        for ep in episodes
+    ]
+    combats = [result for ep in episodes if ep.complete
+               for result in combat_results(ep.frames, ep.outcome)]
+    defeated = [result.enemy_progress for result in combats if not result.won]
     return {
+        "floor_progress": summarize_floor_progress(floor_records),
+        "combat_progress": {
+            "completed_fights": len(combats),
+            "won_fights": sum(result.won for result in combats),
+            "lost_fights": len(defeated),
+            "mean_enemy_progress_on_defeat": (
+                sum(defeated) / len(defeated) if defeated else None
+            ),
+        },
         "played": len(episodes),
         "completed": len(completed),
         "censored": len(episodes) - len(completed),
@@ -302,6 +327,10 @@ def main() -> None:
                    help="Slow geometric HP-to-Act curriculum, or fixed post-room control")
     p.add_argument("--horizon-tau-rounds", type=float, default=200.0,
                    help="Exponential lambda ramp time constant in training rounds")
+    p.add_argument("--combat-credit-weight", type=float, default=0.25,
+                   help="Combat-win/loss-progress share of combat horizon target")
+    p.add_argument("--loss-progress-cap", type=float, default=0.2,
+                   help="Max combat progress label on defeat; victory label is 1")
     p.add_argument("--auxiliary-horizon-weight", type=float, default=0.5,
                    help="Weight of extra random-lambda critic regression")
     p.add_argument("--macro-prior-weight", type=float, default=0.5)
@@ -331,6 +360,8 @@ def main() -> None:
                     or args.actor_device.startswith("cuda"))
             or not math.isfinite(args.horizon_tau_rounds)
             or args.horizon_tau_rounds <= 0
+            or not 0 <= args.combat_credit_weight <= 1
+            or not 0 <= args.loss_progress_cap < 1
             or args.auxiliary_horizon_weight < 0
             or not 0 <= args.search_probability <= 1
             or not 0 < args.temperature <= 5
@@ -445,6 +476,8 @@ def main() -> None:
             horizon_lambda=horizon_lambda,
             hp_target=args.hp_target,
             auxiliary_horizon_weight=args.auxiliary_horizon_weight,
+            combat_credit_weight=args.combat_credit_weight,
+            loss_progress_cap=args.loss_progress_cap,
             temperature=args.temperature, minibatch=args.minibatch,
             epochs=args.epochs,
         )
