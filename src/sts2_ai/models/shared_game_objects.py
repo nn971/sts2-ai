@@ -100,6 +100,7 @@ def encode_public_decision(
     state: dict[str, Any], legal_actions: Sequence[Any], *,
     max_actions: int | None = MAX_ACTIONS,
     encode_card_subsets: bool = False,
+    compress_deck: bool = False,
 ) -> EncodedDecision:
     """Encode only published game fields and currently legal action payloads.
 
@@ -185,8 +186,32 @@ def encode_public_decision(
         for power in _records(combat.get("player_powers")):
             add("power", _entry_id(power, "power_id"), "player", power, owner=player_idx)
 
-    for card in _records(state.get("deck")):
-        add("card", _entry_id(card, "card_id"), "deck", card)
+    # H16 may treat identical inventory copies as one multiset class.
+    # Equality compares the entire public card record except the opaque
+    # instance reference: afflictions, enchantments, upgrades, persistent
+    # effects, and costs remain part of the signature. Preserve order of
+    # first appearance. H7's original per-instance encoding is unchanged.
+    deck = _records(state.get("deck"))
+    if compress_deck:
+        grouped: dict[str, tuple[dict[str, Any], int]] = {}
+        for card in deck:
+            public_card = {key: value for key, value in card.items()
+                           if key != "instance_id"}
+            signature = json.dumps(public_card, sort_keys=True, separators=(",", ":"))
+            if signature in grouped:
+                representative, n = grouped[signature]
+                grouped[signature] = (representative, n + 1)
+            else:
+                grouped[signature] = (public_card, 1)
+        for card, multiplicity in grouped.values():
+            # log1p keeps the count feature informative even for 1,000+
+            # clones rather than saturating tanh(count / 10).
+            record = dict(card)
+            record["count"] = math.log1p(multiplicity)
+            add("card", _entry_id(card, "card_id"), "deck", record)
+    else:
+        for card in deck:
+            add("card", _entry_id(card, "card_id"), "deck", card)
     for relic in state.get("relics", []) if isinstance(state.get("relics"), list) else []:
         record = {"relic_id": relic} if isinstance(relic, str) else relic
         if isinstance(record, dict):
