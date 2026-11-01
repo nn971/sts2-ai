@@ -346,7 +346,7 @@ class PilotPolicy:
         encoded = encode_h16_decision(public_state(observation), actions)
         batch = collate_h7([encoded]).to(next(self.model.parameters()).device)
         with torch.inference_mode():
-            logits, act, hp = self.model(
+            logits, _, hp = self.model(
                 batch, horizon_lambda=self.horizon_lambda,
             )
         offsets = self._offsets(observation, actions)
