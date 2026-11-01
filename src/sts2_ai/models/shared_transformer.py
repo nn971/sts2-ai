@@ -74,7 +74,11 @@ def collate_h7(decisions: list[EncodedDecision]) -> H7Batch:
     batch = len(decisions)
     max_obj = max(len(item.objects) for item in decisions)
     max_actions = max(len(item.actions) for item in decisions)
-    max_members = max(1, max((len(action.members) for decision in decisions for action in decision.actions), default=0))
+    max_members = max(
+        1,
+        max((len(action.members) for decision in decisions
+             for action in decision.actions), default=0),
+    )
     nfeatures = len(NUMERIC_FIELDS)
     kinds = torch.zeros(batch, max_obj, dtype=torch.long)
     identities = torch.zeros_like(kinds)
