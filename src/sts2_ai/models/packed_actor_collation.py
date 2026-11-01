@@ -51,6 +51,7 @@ class H7PackedHost:
     object_mask: torch.Tensor
     action_mask: torch.Tensor
     phases: torch.Tensor
+    action_members: torch.Tensor
 
     def to(
         self, device: str | torch.device, *,
@@ -63,6 +64,7 @@ class H7PackedHost:
         object_mask = self.object_mask.to(device)
         action_mask = self.action_mask.to(device)
         phases = self.phases.to(device)
+        action_members = self.action_members.to(device)
         result = H7Batch(
             kinds=obj[..., 0],
             identities=obj[..., 1],
@@ -77,6 +79,7 @@ class H7PackedHost:
             targets=act[..., 3],
             action_mask=action_mask,
             phases=phases,
+            action_members=action_members,
         )
         return contiguous_actor_metadata(result) if contiguous_metadata else result
 
@@ -92,6 +95,7 @@ def prepare_h7_actor_packed(decisions: list[EncodedDecision]) -> H7PackedHost:
 
     nobjects = max(len(d.objects) for d in decisions)
     nactions = max(len(d.actions) for d in decisions)
+    max_members = max(1, *(len(action.members) for d in decisions for action in d.actions))
     nfeatures = len(NUMERIC_FIELDS)
     zero_features = (0.0,) * nfeatures
     zero_observed = (0,) * nfeatures
@@ -103,6 +107,7 @@ def prepare_h7_actor_packed(decisions: list[EncodedDecision]) -> H7PackedHost:
     # Packed layout: (action kind, semantic, source, target).
     action_meta: list[list[tuple[int, int, int, int]]] = []
     action_masks: list[list[bool]] = []
+    member_indices: list[list[list[int]]] = []
     phases: list[int] = []
     for d in decisions:
         nobj = len(d.objects)
@@ -132,15 +137,22 @@ def prepare_h7_actor_packed(decisions: list[EncodedDecision]) -> H7PackedHost:
         object_observed.append(observed_row)
         object_masks.append([True] * nobj + [False] * padding)
         action_row = []
+        member_row = []
         for action in d.actions:
             for ptr in (action.source, action.target):
                 if ptr >= nobj or ptr < -1:
                     raise ValueError("Dangling action pointer")
+            for member in action.members:
+                if member < 0 or member >= nobj:
+                    raise ValueError("Dangling selected-card pointer")
+            member_row.append(list(action.members) + [-1] * (max_members - len(action.members)))
             action_row.append((
                 action.kind, action.semantic, action.source, action.target))
         pad_actions = nactions - nact
         action_row.extend([(0, 0, -1, -1)] * pad_actions)
+        member_row.extend([[-1] * max_members for _ in range(pad_actions)])
         action_meta.append(action_row)
+        member_indices.append(member_row)
         action_masks.append([True] * nact + [False] * pad_actions)
 
     # One copy each for object/action metadata (rather than many small
@@ -153,6 +165,7 @@ def prepare_h7_actor_packed(decisions: list[EncodedDecision]) -> H7PackedHost:
         object_mask=torch.tensor(object_masks, dtype=torch.bool),
         action_mask=torch.tensor(action_masks, dtype=torch.bool),
         phases=torch.tensor(phases, dtype=torch.long),
+        action_members=torch.tensor(member_indices, dtype=torch.long),
     )
 
 
