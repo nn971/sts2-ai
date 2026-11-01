@@ -532,29 +532,35 @@ def collect_act_episode(
 
 def train_joint_cohort(
     model: JointActPilotNet, optimizer: torch.optim.Optimizer,
-    episodes: Sequence[PilotEpisode], *, alpha: float, horizon: int,
+    episodes: Sequence[PilotEpisode], *, horizon_lambda: float,
     temperature: float = 0.85, minibatch: int = 32,
     epochs: int = 1, entropy_weight: float = 0.001,
-    search_weight: float = 0.5, hp_target: str = "future",
+    search_weight: float = 0.5, hp_target: str = "geometric",
+    auxiliary_horizon_weight: float = 0.5,
 ) -> dict[str, float | int]:
-    """Joint macro/combat on-policy updates plus search distillation.
+    """One shared optimizer for both policies and horizon-conditioned critic.
 
-    The actor uses realized horizon-HP/Act returns minus a detached learned
-    baseline for ordinary actions. Search-executed actions receive only the
-    PUCT visit CE target. Act labels are always binary and full-Act terminal.
+    For each observed state, the actor trains at the current slowly-ramped
+    horizon. The critic also trains at a separate random lambda using the
+    *same completed run*. No additional environment simulation is needed.
+    Search-executed combat moves receive visit-target CE, not a falsely
+    on-policy REINFORCE term.
     """
-    if (hp_target not in ("future", "post_room")
-            or not 0 <= alpha <= 1 or horizon <= 0 or temperature <= 0
-            or minibatch <= 0 or epochs <= 0 or search_weight < 0):
+    if (hp_target not in ("geometric", "post_room")
+            or not 0 <= horizon_lambda <= 1 or temperature <= 0
+            or minibatch <= 0 or epochs <= 0 or search_weight < 0
+            or auxiliary_horizon_weight < 0):
         raise ValueError("Invalid joint training configuration")
-    entries: list[tuple[PilotDecision, float, float]] = []
+    current_lambda = horizon_lambda if hp_target == "geometric" else 0.0
+    entries: list[tuple[PilotDecision, float, tuple[float, ...]]] = []
     for episode in episodes:
-        for i, (decision, (act, future_hp)) in enumerate(zip(
-            episode.decisions, targets_for_episode(episode, horizon), strict=True,
-        )):
-            hp = (future_hp if hp_target == "future"
-                  else hp_after_current_room(episode.frames, i))
-            entries.append((decision, act, hp))
+        if not episode.complete:
+            raise ValueError("Censored episodes cannot train geometric returns")
+        completed = completed_room_hp(episode.frames)
+        act = float(episode.outcome == "act_clear")
+        for i, decision in enumerate(episode.decisions):
+            rooms = remaining_room_hp(episode.frames[i], completed)
+            entries.append((decision, act, rooms))
     if not entries:
         raise ValueError("No complete Act decisions for joint learning")
     rng = random.Random(31001 + len(entries))
@@ -580,12 +586,20 @@ def train_joint_cohort(
                 ) for decision, _, _ in chunk
             ]
             batch = collate_h7(encoded).to(device)
-            logits, act_logit, hp_logit = model(batch, value_logits=True)
+            aux_lambdas = torch.tensor(
+                [rng.random() for _ in chunk],
+                dtype=torch.float32, device=device,
+            )
+            logits, act_logit, hp_logit, aux_hp_logit = model(
+                batch, value_logits=True, horizon_lambda=current_lambda,
+                auxiliary_lambda=aux_lambdas,
+            )
             # Report non-finite values *before* launching CUDA BCE kernels;
             # a failed CUDA device assertion invalidates the whole process.
             if (not bool(torch.isfinite(logits[batch.action_mask]).all())
                     or not bool(torch.isfinite(act_logit).all())
-                    or not bool(torch.isfinite(hp_logit).all())):
+                    or not bool(torch.isfinite(hp_logit).all())
+                    or not bool(torch.isfinite(aux_hp_logit).all())):
                 phases = [enc.phase for enc in encoded]
                 floors = [
                     public_state(decision.observation).get("floor")
@@ -599,6 +613,7 @@ def train_joint_cohort(
                 )
             act_hat = torch.sigmoid(act_logit)
             hp_hat = torch.sigmoid(hp_logit)
+            aux_hp_hat = torch.sigmoid(aux_hp_logit)
             offsets = torch.zeros_like(logits)
             for i, (decision, _, _) in enumerate(chunk):
                 offsets[i, :len(decision.macro_offset)] = torch.tensor(
@@ -617,20 +632,29 @@ def train_joint_cohort(
             entropy = -(probabilities * logp).masked_fill(
                 ~batch.action_mask, 0.0,
             ).sum(dim=1).mean()
+            aux_values = aux_lambdas.detach().cpu().tolist()
             targets = torch.tensor(
-                [[act, hp] for _, act, hp in chunk],
+                [[act,
+                  geometric_hp_return(room_hp, act, current_lambda),
+                  geometric_hp_return(room_hp, act, aux)]
+                 for (_, act, room_hp), aux in zip(chunk, aux_values, strict=True)],
                 dtype=logits.dtype, device=device,
             )
-            target_act, target_hp = targets[:, 0], targets[:, 1]
+            target_act, target_hp, target_aux_hp = (
+                targets[:, 0], targets[:, 1], targets[:, 2],
+            )
             from torch.nn import functional as F
             # Logit-space BCE avoids the fragile CUDA probability-range
             # assertion and retains gradients at saturated predictions.
             act_loss = F.binary_cross_entropy_with_logits(
                 act_logit, target_act,
             )
-            hp_loss = F.mse_loss(hp_hat, target_hp)
-            mixed_target = alpha * target_act + (1 - alpha) * target_hp
-            mixed_value = alpha * act_hat.detach() + (1 - alpha) * hp_hat.detach()
+            hp_loss = (
+                F.mse_loss(hp_hat, target_hp)
+                + auxiliary_horizon_weight * F.mse_loss(aux_hp_hat, target_aux_hp)
+            )
+            mixed_target = target_hp
+            mixed_value = hp_hat.detach()
             ordinary: dict[str, list[Tensor]] = {"macro": [], "combat": []}
             search_ce: list[Tensor] = []
             for i, ((decision, _, _), enc) in enumerate(zip(chunk, encoded, strict=True)):
@@ -692,4 +716,7 @@ def train_joint_cohort(
         "macro_decisions": phase_counts["macro"],
         "combat_decisions": phase_counts["combat"],
         "search_roots": search_roots,
+        "horizon_lambda": current_lambda,
+        "effective_horizon": (1.0 / (1.0 - current_lambda)
+                              if current_lambda < 1.0 else float("inf")),
     }
