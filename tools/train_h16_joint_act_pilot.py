@@ -22,8 +22,8 @@ import os
 import random
 import tempfile
 import time
-from dataclasses import replace as dataclass_replace
 from concurrent.futures import ProcessPoolExecutor
+from dataclasses import replace as dataclass_replace
 from pathlib import Path
 from typing import Any
 
