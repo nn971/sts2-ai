@@ -110,9 +110,22 @@ def encode_h16_decision(
         resources = state.get(field)
         if not isinstance(resources, list):
             continue
+        seen_deck_resources: set[str] = set()
         for resource in resources:
             if not isinstance(resource, dict):
                 continue
+            if field == "deck":
+                # Public deck cards are already encoded as multiset classes.
+                # Emit persistent-state leaves once per identical class,
+                # keeping the 64-token auxiliary cap independent of copies.
+                signature = json.dumps(
+                    {key: value for key, value in resource.items()
+                     if key != "instance_id"},
+                    sort_keys=True, separators=(",", ":"),
+                )
+                if signature in seen_deck_resources:
+                    continue
+                seen_deck_resources.add(signature)
             name = next(
                 (resource[key] for key in name_fields
                  if isinstance(resource.get(key), str)), "unknown",
