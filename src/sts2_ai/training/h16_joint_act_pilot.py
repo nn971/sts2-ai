@@ -628,7 +628,6 @@ def train_joint_cohort(
                     f"floors={floors}, action_lengths="
                     f"{[len(d.legal_actions) for d, _, _ in chunk]}"
                 )
-            act_hat = torch.sigmoid(act_logit)
             hp_hat = torch.sigmoid(hp_logit)
             aux_hp_hat = torch.sigmoid(aux_hp_logit)
             offsets = torch.zeros_like(logits)
