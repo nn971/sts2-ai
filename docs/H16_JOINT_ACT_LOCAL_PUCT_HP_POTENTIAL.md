@@ -270,3 +270,82 @@ measurements**, not claimed fused-path performance.
 `67307146758b0235f8e0206e054664b19f8501a9`; use that exact emulator
 revision for strict reproducibility. Do not combine both modes in one
 output directory because the transport is fingerprinted.
+
+## H16 shared batched actor (opt-in)
+
+Branch `research/h16-v2-shared-gpu-actor-20261101` adds an H16-specific
+version of the H7 shared actor service. It keeps the **fused emulator
+transport** and the original 16-simulation, depth-8, every-decision PUCT
+budget unchanged.
+
+- `--actor-inference cpu-worker` (default) preserves the existing frozen
+  CPU H16 model in each emulator worker.
+- `--actor-inference shared --actor-device cuda` loads one frozen H16
+  checkpoint in a separate GPU process. Workers send only H16-encoded
+  public decision tokens; the process batches them using the pre-existing
+  packed H7 inference collation, and returns policy logits and
+  horizon-conditioned HP predictions.
+- `--actor-max-batch 16 --actor-max-delay-ms 2` control the maximum batch
+  and the wait to collect simultaneous worker requests. Per-worker
+  requests remain synchronous, preserving PUCT's action ordering.
+- The frozen H6 macro prior remains in each emulator worker and is added
+  to logits after remote inference. Full-Act trajectories and optimizer
+  updates still occur in the original processes.
+- Worker action-sampling RNG is now derived from the game seed and
+  study seed, independent of serialized checkpoint bytes. This provides
+  a *common random-number stream* when comparing different transports
+  or actor-serving modes. Different numerical logits can still alter
+  chosen actions and cause entire runs to diverge.
+- `train.rollout_profile.actor_service` records batch count, requests,
+  max observed batch size, model startup, host collation, device transfer,
+  and forward seconds. Worker `actor_inference_seconds` includes public
+  encoding, inference queue wait and H6 macro-prior evaluation.
+
+The CPU-worker path is the reference control; shared CUDA serving is
+experimental until benchmarked on the target RTX 5070. Batch padding,
+cross-process queue overhead, and GPU contention with the optimizer
+may outweigh GPU acceleration at small worker counts.
+
+### Matched actor A/B (fish)
+
+Run from this branch after passing the focused tests. Keep the emulator
+revision and model files identical between arms; both commands use the
+same synthetic map, seeds, search budget, and fused transition protocol.
+
+```fish
+set ai ~/projects/sts2-ai
+set emu ~/projects/sts2-emulator
+cd $ai
+git fetch origin
+git switch research/h16-v2-shared-gpu-actor-20261101
+git pull --ff-only
+source .venv/bin/activate.fish
+python -m pytest -q tests/test_h16_joint_act_pilot.py tests/test_h16_batch_actor.py
+or exit 1
+
+set rev (git -C $emu rev-parse HEAD)
+set h9 results/h9-adaptive-totalhp-r40-r250/models/player-r0250.pt
+set macro results/nature/h6c-macro-attention-r80.json
+
+for actor in cpu-worker shared
+    python -u tools/train_h16_joint_act_pilot.py \
+        --initial-h9 $h9 --macro-model $macro \
+        --emulator-root $emu --emulator-revision $rev \
+        --output-root results/h16-v2-actor-$actor-r1 \
+        --rollout-transport fused --actor-inference $actor \
+        --actor-device cuda --actor-max-batch 16 \
+        --actor-max-delay-ms 2 \
+        --rounds 1 --runs-per-round 4 --heldout-runs 1 \
+        --simulations 16 --search-depth 8 \
+        --workers 4 --device cuda --execute
+    or exit 1
+end
+```
+
+Compare collection wall time and transitions/sec **first**. Report
+`actor_service.batches` and `requests` to establish whether batching
+actually occurred. Compare PUCT roots/transition counts, completed
+trajectories, policy losses and heldout metrics to detect policy divergence.
+CPU/GPU operation order can cause small floating-point differences; these
+should not be represented as proof of exact trajectory parity. One
+four-run comparison estimates feasibility, not statistical significance.

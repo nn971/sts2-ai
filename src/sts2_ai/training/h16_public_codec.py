@@ -7,6 +7,8 @@ state. No resource-specific scalar prices or private RNG information enter.
 from __future__ import annotations
 
 import json
+import sys
+from collections import Counter
 from collections.abc import Sequence
 from types import SimpleNamespace
 from typing import Any
@@ -24,8 +26,44 @@ from sts2_ai.models.shared_game_objects import (
     encode_public_decision,
 )
 
-H16_CODEC = "h16-public-persistent-macro-actions-v1"
+H16_CODEC = "h16-public-persistent-subset-actions-v2"
+LEGACY_H16_CODEC = "h16-public-persistent-macro-actions-v1"
 MAX_EXTRA_TOKENS = 64
+# Once per process: expose unusual real/search menus without dumping states.
+_LARGE_MENU_REPORTED = False
+_CURRENT_EPISODE_SEED: str | None = None
+
+
+def set_h16_rollout_seed(seed: str | None) -> None:
+    global _CURRENT_EPISODE_SEED
+    _CURRENT_EPISODE_SEED = seed
+
+
+def _diagnose_large_menu(state: dict[str, Any], actions: Sequence[Any]) -> None:
+    global _LARGE_MENU_REPORTED
+    if len(actions) <= 128 or _LARGE_MENU_REPORTED:
+        return
+    _LARGE_MENU_REPORTED = True
+    examples: dict[str, list[dict[str, str]]] = {}
+    for action in actions:
+        sample = examples.setdefault(action.kind, [])
+        if len(sample) < 3:
+            sample.append({
+                "action_id": str(action.action_id),
+                "payload": str(action.payload_json)[:240],
+            })
+    combat = state.get("combat")
+    detail = {
+        "seed": _CURRENT_EPISODE_SEED,
+        "floor": state.get("floor"),
+        "phase": "combat" if isinstance(combat, dict) else "macro",
+        "turn": combat.get("turn") if isinstance(combat, dict) else None,
+        "num_legal_actions": len(actions),
+        "action_kinds": dict(sorted(Counter(a.kind for a in actions).items())),
+        "samples": examples,
+    }
+    print("[h16-action-overflow] " + json.dumps(detail, sort_keys=True),
+          file=sys.stderr, flush=True)
 
 
 def _leaves(value: object, path: str):
@@ -52,7 +90,14 @@ def encode_h16_decision(
         [SimpleNamespace(kind=a.kind, payload_json="{}") for a in actions]
         if macro else actions
     )
-    base = encode_public_decision(state, codec_actions)
+    # H16/PUCT must preserve every legal action, including combinatorial
+    # target/choice menus exceeding H7's historical 128-action guard.
+    # collate_h7 and the shared actor already allocate by actual menu length.
+    _diagnose_large_menu(state, actions)
+    base = encode_public_decision(
+        state, codec_actions, max_actions=None,
+        encode_card_subsets=not macro,
+    )
     objects = list(base.objects)
     extra = 0
     for field, name_fields in (
@@ -87,6 +132,9 @@ def encode_h16_decision(
                     ZONES.index("inventory"), numeric, observed,
                 ))
     encoded_actions: list[ActionToken] = []
+    # Hash-bucket collisions are possible in 4,096 dimensions. Resolve
+    # collisions among different macro choices within the current menu.
+    used_macro_semantics: dict[int, str] = {}
     for old, action in zip(base.actions, actions, strict=True):
         if base.phase == "combat" or old.source >= 0:
             encoded_actions.append(old)  # preserve H9 combat token behavior
@@ -98,10 +146,37 @@ def encode_h16_decision(
             {"kind": action.kind, "payload": payload},
             sort_keys=True, separators=(",", ":"),
         )
+        semantic = _bucket(label, IDENTITY_BUCKETS)
+        salt = 0
+        while (previous := used_macro_semantics.get(semantic)) is not None and previous != label:
+            salt += 1
+            if salt >= IDENTITY_BUCKETS:
+                raise ValueError("H16 macro menu exceeds unique semantic bucket capacity")
+            semantic = _bucket(f"{label}:collision={salt}", IDENTITY_BUCKETS)
+        used_macro_semantics[semantic] = label
         encoded_actions.append(ActionToken(
-            old.kind, _bucket(label, IDENTITY_BUCKETS),
-            old.source, old.target,
+            old.kind, semantic, old.source, old.target,
         ))
+    # O(actions), almost no allocations: compare payload JSON only when
+    # identical structural tokens appear. Inference sees exactly this token
+    # structure; distinct public choices must never be silently aliased.
+    seen: dict[ActionToken, Any] = {}
+    for action, token in zip(actions, encoded_actions, strict=True):
+        prior = seen.get(token)
+        if (prior is not None
+                and (prior.kind != action.kind
+                     or prior.payload_json != action.payload_json)):
+            left = json.loads(prior.payload_json)
+            right = json.loads(action.payload_json)
+            if prior.kind != action.kind or left != right:
+                raise ValueError(
+                    "H16 action representation collision: "
+                    f"phase={base.phase}, floor={state.get('floor')}, "
+                    f"kind={action.kind}, payloads="
+                    f"{str(prior.payload_json)[:200]} and "
+                    f"{str(action.payload_json)[:200]}"
+                )
+        seen[token] = action
     return EncodedDecision(
         base.schema, base.phase, tuple(objects), tuple(encoded_actions),
     )

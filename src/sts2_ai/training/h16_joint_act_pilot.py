@@ -41,9 +41,10 @@ from sts2_ai.search.combat_puct import (
     CombatFrame,
     CombatPuct,
 )
-from sts2_ai.training.h16_public_codec import H16_CODEC, encode_h16_decision
+from sts2_ai.training.h16_public_codec import H16_CODEC, LEGACY_H16_CODEC, encode_h16_decision
 
-SCHEMA = "sts2-h16-act1-geometric-horizon-every-combat-puct-v2"
+SCHEMA = "sts2-h16-act1-geometric-horizon-every-combat-puct-v3"
+LEGACY_SCHEMA = "sts2-h16-act1-geometric-horizon-every-combat-puct-v2"
 PUBLIC_POLICY = InformationPolicy(FAIR_POLICY_ID)
 
 
@@ -261,9 +262,11 @@ class JointActPilotNet(nn.Module):
     @classmethod
     def load(cls, path: Path, *, device: str = "cpu") -> JointActPilotNet:
         checkpoint = torch.load(path, map_location="cpu", weights_only=True)
-        if (checkpoint.get("schema") != SCHEMA or
-                checkpoint.get("codec") != H16_CODEC):
-            raise ValueError("Expected an H16 joint Act checkpoint/codec")
+        if (checkpoint.get("schema"), checkpoint.get("codec")) not in (
+            (SCHEMA, H16_CODEC),
+            (LEGACY_SCHEMA, LEGACY_H16_CODEC),
+        ):
+            raise ValueError("Expected a compatible H16 joint Act checkpoint/codec")
         model = cls(SharedObjectTransformer(H7Config(**checkpoint["config"])))
         model.load_state_dict(checkpoint["state_dict"], strict=True)
         return model.to(device)
@@ -290,6 +293,7 @@ class PilotEpisode:
     bridge_profile: dict[str, tuple[int, float]] | None = None
     actor_inference_calls: int = 0
     actor_inference_seconds: float = 0.0
+    actor_service_profile: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if (self.outcome not in ("act_clear", "defeat", "censored")
@@ -317,13 +321,16 @@ class PilotPolicy:
     """Frozen cohort policy. Macro teacher is a fixed soft prior, if supplied."""
 
     def __init__(
-        self, model: JointActPilotNet, *, temperature: float,
+        self, model: JointActPilotNet | None, *, temperature: float,
         horizon_lambda: float, macro_teacher: PhaseSplitNeuralModel | None = None,
-        macro_prior_weight: float = 0.5,
+        macro_prior_weight: float = 0.5, remote_actor: Any = None,
     ) -> None:
         if not 0 <= horizon_lambda <= 1 or temperature <= 0 or macro_prior_weight < 0:
             raise ValueError("Invalid pilot continuation/policy weighting")
-        self.model = model.eval()
+        if (model is None) == (remote_actor is None):
+            raise ValueError("H16 policy needs exactly one local or remote actor")
+        self.model = model.eval() if model is not None else None
+        self.remote_actor = remote_actor
         self.temperature = temperature
         self.horizon_lambda = horizon_lambda
         self.macro_teacher = macro_teacher
@@ -333,9 +340,11 @@ class PilotPolicy:
 
     def _offsets(
         self, observation: Observation, actions: tuple[LegalAction, ...],
+        public: dict[str, Any] | None = None,
     ) -> tuple[float, ...]:
         if (self.macro_teacher is None or
-                isinstance(public_state(observation).get("combat"), dict)):
+                isinstance((public if public is not None else
+                            public_state(observation)).get("combat"), dict)):
             return (0.0,) * len(actions)
         raw = self.macro_teacher.evaluate(observation, actions).action_logits
         if len(raw) != len(actions):
@@ -350,18 +359,23 @@ class PilotPolicy:
         if not actions:
             raise ValueError("Nonterminal inference needs a legal menu")
         started = time.perf_counter()
-        encoded = encode_h16_decision(public_state(observation), actions)
-        batch = collate_h7([encoded]).to(next(self.model.parameters()).device)
-        with torch.inference_mode():
-            logits, _, hp = self.model(
-                batch, horizon_lambda=self.horizon_lambda,
-            )
-        offsets = self._offsets(observation, actions)
-        scores = tuple(
-            float(logits[0, i]) + offset
-            for i, offset in enumerate(offsets)
-        )
-        value = float(hp[0])
+        public = public_state(observation)
+        encoded = encode_h16_decision(public, actions)
+        if self.remote_actor is not None:
+            raw_scores, value = self.remote_actor.infer(encoded)
+        else:
+            if self.model is None:
+                raise AssertionError("H16 local actor missing")
+            batch = collate_h7([encoded]).to(next(self.model.parameters()).device)
+            with torch.inference_mode():
+                logits, _, hp = self.model(
+                    batch, horizon_lambda=self.horizon_lambda,
+                )
+            raw_scores = tuple(float(logits[0, i]) for i in range(len(actions)))
+            value = float(hp[0])
+        offsets = self._offsets(observation, actions, public)
+        scores = tuple(score + offset for score, offset in
+                       zip(raw_scores, offsets, strict=True))
         if not all(math.isfinite(x) for x in (*scores, value)):
             raise ValueError("Nonfinite joint inference")
         self.inference_calls += 1

@@ -84,6 +84,8 @@ class ActionToken:
     semantic: int
     source: int = -1
     target: int = -1
+    # Compositional subset selection; indexed into the public object tokens.
+    members: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -95,12 +97,16 @@ class EncodedDecision:
 
 
 def encode_public_decision(
-    state: dict[str, Any], legal_actions: Sequence[Any],
+    state: dict[str, Any], legal_actions: Sequence[Any], *,
+    max_actions: int | None = MAX_ACTIONS,
+    encode_card_subsets: bool = False,
 ) -> EncodedDecision:
     """Encode only published game fields and currently legal action payloads.
 
     Missing public target pointers fail explicitly. This prevents an invisible
     target or alias from silently getting the same action logit.
+    The historical H7 menu guard is retained by default; H16 may pass
+    max_actions=None because its action tensors are dynamically sized.
     """
     if not isinstance(state, dict) or not legal_actions:
         raise ValueError("Need a public state and a nonempty legal action menu")
@@ -141,9 +147,30 @@ def encode_public_decision(
         ):
             for card in _records(combat.get(field)):
                 ref_id = card.get("instance_id")
-                add("card", _entry_id(card, "card_id"), zone, card,
-                    ref=("hand_card", ref_id) if zone == "hand" and
-                    type(ref_id) is int else None)
+                idx = add("card", _entry_id(card, "card_id"), zone, card,
+                          ref=("hand_card", ref_id) if zone == "hand" and
+                          type(ref_id) is int else None)
+                if encode_card_subsets and type(ref_id) is int:
+                    key = ("selection_card", ref_id)
+                    if key in lookup:
+                        raise ValueError("Duplicate selectable public card instance")
+                    lookup[key] = idx
+        # The emulator exposes public pending-choice candidates, including
+        # cards temporarily shown from the draw pile or generated choice pool.
+        # Reuse an existing zone object for cards already in hand/discard/
+        # exhaust to avoid introducing duplicate aliases.
+        if encode_card_subsets:
+            for candidate in _records(combat.get("selection_candidates")):
+                ref_id = candidate.get("instance_id")
+                if type(ref_id) is not int:
+                    raise ValueError("Malformed public choice candidate")
+                key = ("selection_card", ref_id)
+                if key not in lookup:
+                    idx = add(
+                        "card", _entry_id(candidate, "card_id"), "reward",
+                        candidate,
+                    )
+                    lookup[key] = idx
         for enemy in _records(combat.get("enemies")):
             ref_id = enemy.get("instance_id")
             idx = add("enemy", _entry_id(enemy, "enemy_id"), "enemy", enemy,
@@ -177,7 +204,7 @@ def encode_public_decision(
         add("room", _entry_id(room, "room_type"), "map", room)
 
     action_tokens: list[ActionToken] = []
-    if len(legal_actions) > MAX_ACTIONS:
+    if max_actions is not None and len(legal_actions) > max_actions:
         raise ValueError("Legal action cap exceeded: all legal actions must remain present")
     for action in legal_actions:
         kind = action.kind
@@ -205,5 +232,27 @@ def encode_public_decision(
                 if source < 0:
                     raise ValueError("Legal potion slot has no visible potion")
         semantic = objects[source].identity if source >= 0 else 0
-        action_tokens.append(ActionToken(_bucket(kind, ACTION_BUCKETS), semantic, source, target))
+        members: tuple[int, ...] = ()
+        if encode_card_subsets and kind == "select_cards":
+            raw_members = payload.get("CardInstanceIds", payload.get("card_instance_ids"))
+            if (not isinstance(raw_members, list)
+                    or any(type(item) is not int for item in raw_members)
+                    or len(raw_members) != len(set(raw_members))):
+                raise ValueError("Malformed select_cards CardInstanceIds")
+            selected: list[int] = []
+            for item in raw_members:
+                pointer = lookup.get(("selection_card", item))
+                if pointer is None:
+                    raise ValueError(
+                        "select_cards candidate missing from public hand/discard/exhaust: "
+                        + str(item)
+                    )
+                selected.append(pointer)
+            members = tuple(sorted(selected))
+            # Stable across instance IDs/runs; the selected card embeddings
+            # encode content while cardinality distinguishes empty vs 1 vs 2.
+            semantic = _bucket(f"select_cards:count={len(members)}", IDENTITY_BUCKETS)
+        action_tokens.append(ActionToken(
+            _bucket(kind, ACTION_BUCKETS), semantic, source, target, members,
+        ))
     return EncodedDecision(SHARED_OBJECT_SCHEMA, phase, tuple(objects), tuple(action_tokens))

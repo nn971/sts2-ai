@@ -56,6 +56,7 @@ class H7Batch:
     targets: Tensor
     action_mask: Tensor
     phases: Tensor
+    action_members: Tensor
 
     def to(self, device: torch.device | str) -> H7Batch:
         return H7Batch(**{name: tensor.to(device) for name, tensor in vars_as_dict(self).items()})
@@ -73,6 +74,7 @@ def collate_h7(decisions: list[EncodedDecision]) -> H7Batch:
     batch = len(decisions)
     max_obj = max(len(item.objects) for item in decisions)
     max_actions = max(len(item.actions) for item in decisions)
+    max_members = max(1, max((len(action.members) for decision in decisions for action in decision.actions), default=0))
     nfeatures = len(NUMERIC_FIELDS)
     kinds = torch.zeros(batch, max_obj, dtype=torch.long)
     identities = torch.zeros_like(kinds)
@@ -87,6 +89,7 @@ def collate_h7(decisions: list[EncodedDecision]) -> H7Batch:
     targets = torch.full_like(action_kinds, -1)
     action_mask = torch.zeros(batch, max_actions, dtype=torch.bool)
     phases = torch.zeros(batch, dtype=torch.long)
+    action_members = torch.full((batch, max_actions, max_members), -1, dtype=torch.long)
     for row, decision in enumerate(decisions):
         phases[row] = 0 if decision.phase == "combat" else 1 if decision.phase == "macro" else -1
         if phases[row] < 0:
@@ -105,6 +108,13 @@ def collate_h7(decisions: list[EncodedDecision]) -> H7Batch:
             for ptr in (action.source, action.target):
                 if ptr >= len(decision.objects) or ptr < -1:
                     raise ValueError("Dangling action pointer")
+            for member in action.members:
+                if member < 0 or member >= len(decision.objects):
+                    raise ValueError("Dangling selected-card pointer")
+            if action.members:
+                action_members[row, pos, :len(action.members)] = torch.tensor(
+                    action.members, dtype=torch.long,
+                )
             action_kinds[row, pos] = action.kind
             action_semantics[row, pos] = action.semantic
             sources[row, pos] = action.source
@@ -113,6 +123,7 @@ def collate_h7(decisions: list[EncodedDecision]) -> H7Batch:
     return H7Batch(
         kinds, identities, zones, numeric, observed, owners, object_mask,
         action_kinds, action_semantics, sources, targets, action_mask, phases,
+        action_members,
     )
 
 
@@ -195,6 +206,21 @@ class SharedObjectTransformer(nn.Module):
             + self.action_source(self._point(context, batch.sources))
             + self.action_target(self._point(context, batch.targets))
         )
+        # H16 compositional card selection: pool *all* selected, visible
+        # card objects. No new trainable parameters or action-count cap.
+        # For ordinary H7 actions the mask is empty and this contributes 0.
+        members = batch.action_members
+        batch_size, num_actions, num_members = members.shape
+        member_mask = members >= 0
+        selected = context.gather(
+            1, members.clamp(min=0).reshape(batch_size, -1)
+            .unsqueeze(-1).expand(-1, -1, context.shape[-1]),
+        ).reshape(batch_size, num_actions, num_members, context.shape[-1])
+        pooled = (
+            (selected * member_mask.unsqueeze(-1)).sum(dim=2)
+            / member_mask.sum(dim=2).clamp(min=1).unsqueeze(-1)
+        )
+        queries = queries + self.action_source(pooled)
         attended, _ = self.action_attention(
             queries, context, context, key_padding_mask=~batch.object_mask,
             need_weights=False,
