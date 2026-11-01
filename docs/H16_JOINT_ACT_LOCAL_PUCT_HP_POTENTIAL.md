@@ -73,7 +73,7 @@ evaluates the complete observed post-combat state.
 states but cannot yet draw independent correctly conditioned
 public-history stochastic continuations for all native-structure run
 sites. Search therefore uses
-\`h16-native-act1-root-conditioned-privileged-v1\`.
+`h16-native-act1-root-conditioned-privileged-v1`.
 It is an **approximate, potentially privileged exploratory search
 teacher**. No such targets are labelled fair-native PUCT.
 No PUCT is used for held-out performance measurement: evaluate the
@@ -87,7 +87,7 @@ map parity. Emulator stochastic mechanics still own all random choices.
 
 On the already configured machine (H9 R250 + H6 macro files remain local):
 
-\`\`\`fish
+```fish
 set ai ~/projects/sts2-ai
 set emu ~/projects/sts2-emulator
 
@@ -111,47 +111,47 @@ or exit 1
 set rev (git -C $emu rev-parse HEAD)
 set h9 results/h9-adaptive-totalhp-r40-r250/models/player-r0250.pt
 set macro results/nature/h6c-macro-attention-r80.json
-\`\`\`
+```
 
 Preflight prints the complete pinned experiment configuration without
 collecting runs:
 
-\`\`\`fish
+```fish
 python -u tools/train_h16_joint_act_pilot.py \
     --initial-h9 $h9 --macro-model $macro \
     --emulator-root $emu --emulator-revision $rev \
     --output-root results/h16-fixedroute-futurehp-pilot-v1 \
     --rounds 3 --runs-per-round 16 --heldout-runs 8 \
     --workers 15 --device cuda
-\`\`\`
+```
 
 **Short executed smoke:** one training Act and one held-out Act, one
 optimizer update, no search (search begins in round 2 by default):
 
-\`\`\`fish
+```fish
 python -u tools/train_h16_joint_act_pilot.py \
     --initial-h9 $h9 --macro-model $macro \
     --emulator-root $emu --emulator-revision $rev \
     --output-root results/h16-fixedroute-smoke-v1 \
     --rounds 1 --runs-per-round 1 --heldout-runs 1 \
     --workers 1 --device cuda --execute
-\`\`\`
+```
 
 **Actual small pilot**, including local PUCT from round 2:
 
-\`\`\`fish
+```fish
 python -u tools/train_h16_joint_act_pilot.py \
     --initial-h9 $h9 --macro-model $macro \
     --emulator-root $emu --emulator-revision $rev \
     --output-root results/h16-fixedroute-futurehp-pilot-v1 \
     --rounds 3 --runs-per-round 16 --heldout-runs 8 \
     --workers 15 --device cuda --execute
-\`\`\`
+```
 
 **Matched immediate-HP control** (same seeds/budgets/map and initial
 model; different hypothesis, separate output):
 
-\`\`\`fish
+```fish
 python -u tools/train_h16_joint_act_pilot.py \
     --initial-h9 $h9 --macro-model $macro \
     --emulator-root $emu --emulator-revision $rev \
@@ -159,7 +159,7 @@ python -u tools/train_h16_joint_act_pilot.py \
     --hp-target immediate \
     --rounds 3 --runs-per-round 16 --heldout-runs 8 \
     --workers 15 --device cuda --execute
-\`\`\`
+```
 
 Both arms train the Act binary target as a separate critic head. The
 only difference is the HP bootstrap target (future completed floor
@@ -167,17 +167,17 @@ versus immediate HP). They retain the SAME neural architecture, local
 PUCT settings, temperature and macro prior.
 
 To resume an interrupted run, repeat the identical command and add
-\`--resume\`. Configuration and starting model fingerprints must match.
+`--resume`. Configuration and starting model fingerprints must match.
 Train and held-out seed prefixes are separate. Progress, immutable
 round checkpoints and optimizer-state snapshots are written in the
 output directory. Never overwrite another experimental arm.
 
-For a CPU-only integration smoke, use \`--device cpu\`, a fresh output
-directory and \`--workers 1\`.
+For a CPU-only integration smoke, use `--device cpu`, a fresh output
+directory and `--workers 1`.
 
 ## Pilot evidence
 
-Review \`progress.json\` for Act clears vs censored runs, raw held-out
+Review `progress.json` for Act clears vs censored runs, raw held-out
 Act-clear performance, joint optimizer steps for both heads, local PUCT
 search counts, greedy-action override rate and search transitions,
 resource inventory diversity and potion actions. Resource diversity is
