@@ -245,7 +245,10 @@ class CombatPuct:
                             break
                     if node.frame != frame:
                         raise ValueError("Same public-history key has contradictory observations")
-                    if depth == self._depth:
+                    if (depth == self._depth
+                            and not (self._free_card_selection_steps
+                                     and all(action.kind == "select_cards"
+                                             for action in frame.legal_actions))):
                         if self._leaf_mode == "terminal":
                             result, extra = self._terminal_rollout(
                                 frame, seen, root_policy_id=root.observation.policy_id,
