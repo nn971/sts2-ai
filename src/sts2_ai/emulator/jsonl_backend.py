@@ -323,7 +323,9 @@ class JsonlEmulatorBackend:
         value = self._native_overgrowth_reset_schema
         return value if isinstance(value, str) else None
 
-    def reset_native_overgrowth(self, seed: str, ascension: int = 0) -> StateHandle:
+    def reset_native_overgrowth(
+        self, seed: str, ascension: int = 0, *, map_profile_id: str | None = None,
+    ) -> StateHandle:
         """Request the native-structure run *only* from an advertising bridge.
 
         No generic reset fallback: such a fallback produces the six-floor
@@ -336,15 +338,23 @@ class JsonlEmulatorBackend:
                 "Pinned emulator does not expose native Overgrowth JSONL reset; "
                 "no fallback to the six-floor prototype is permitted"
             )
-        response = self._request(
-            "reset_native_overgrowth", seed=seed, ascension=ascension
-        )
+        payload: dict[str, Any] = {"seed": seed, "ascension": ascension}
+        if map_profile_id is not None:
+            if map_profile_id != "experimental-act1-fixed-route-credit-v2":
+                raise ValueError("Unsupported experimental native map profile")
+            payload["map_profile_id"] = map_profile_id
+        response = self._request("reset_native_overgrowth", **payload)
         if response.get("schemaId") != NATIVE_RESET_SCHEMA:
             state = response.get("stateHandle")
             if isinstance(state, str):
                 self.release_many((state,))
             raise JsonlBridgeError("Native Overgrowth reset response schema mismatch")
-        return self._require_string(response, "stateHandle")
+        state = self._require_string(response, "stateHandle")
+        if (map_profile_id is not None
+                and response.get("mapGenerationProfileId") != map_profile_id):
+            self.release_many([state])
+            raise JsonlBridgeError("Native fixed-map reset profile mismatch")
+        return state
 
     def reset(self, seed: str, ascension: int = 0) -> StateHandle:
         response = self._request("reset", seed=seed, ascension=ascension)

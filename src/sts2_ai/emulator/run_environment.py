@@ -24,6 +24,7 @@ NATIVE_MAP_PROFILE = "native-overgrowth-map-structure-v0.111.0-v1"
 # six-floor prototype to masquerade as a native run.
 NATIVE_MAP_PROFILE_CONTEXT = "native-overgrowth-map-native-rng-v0.111.0-v1"
 NATIVE_MAP_PROFILES = frozenset((NATIVE_MAP_PROFILE, NATIVE_MAP_PROFILE_CONTEXT))
+EXPERIMENTAL_FIXED_ROUTE_PROFILE = "experimental-act1-fixed-route-credit-v2"
 
 
 def require_environment(backend: EmulatorBackend, environment: str) -> None:
@@ -44,7 +45,10 @@ def require_environment(backend: EmulatorBackend, environment: str) -> None:
         )
 
 
-def validate_native_start(observation: Observation, ascension: int = 0) -> None:
+def validate_native_start(
+    observation: Observation, ascension: int = 0, *,
+    expected_map_profile: str | None = None,
+) -> None:
     """Verify native opening including the A5+ starter-curse replacement."""
     if type(ascension) is not int or not 0 <= ascension <= 10:
         raise ValueError("Native opening ascension must be between 0 and 10")
@@ -59,8 +63,13 @@ def validate_native_start(observation: Observation, ascension: int = 0) -> None:
         "proto.curse.ascenders_bane" if ascension >= 5
         else "proto.common.restlessness"
     )
+    allowed_profiles = (NATIVE_MAP_PROFILES if expected_map_profile is None
+                        else frozenset((expected_map_profile,)))
+    if (expected_map_profile is not None
+            and expected_map_profile != EXPERIMENTAL_FIXED_ROUTE_PROFILE):
+        raise ValueError("Unsupported research map profile")
     if (
-        raw.get("map_generation_profile_id") not in NATIVE_MAP_PROFILES
+        raw.get("map_generation_profile_id") not in allowed_profiles
         or raw.get("act") != 1
         or raw.get("floor") != 0
         or raw.get("event_id") != "proto.native.event.neow"
@@ -85,18 +94,22 @@ def reset_training_run(
     seed: str,
     environment: str,
     ascension: int = 0,
+    *, map_profile_id: str | None = None,
 ) -> StateHandle:
     require_environment(backend, environment)
     if environment == LEGACY:
+        if map_profile_id is not None:
+            raise ValueError("Fixed route is only supported for native Overgrowth")
         return backend.reset(seed, ascension)
-    native_reset = cast(
-        Callable[[str, int], StateHandle], cast(Any, backend).reset_native_overgrowth
-    )
-    state = native_reset(seed, ascension)
+    if map_profile_id is not None and map_profile_id != EXPERIMENTAL_FIXED_ROUTE_PROFILE:
+        raise ValueError("Unsupported research map profile")
+    native_reset = cast(Any, backend).reset_native_overgrowth
+    state = (native_reset(seed, ascension) if map_profile_id is None
+             else native_reset(seed, ascension, map_profile_id=map_profile_id))
     try:
         validate_native_start(
             backend.observe(state, InformationPolicy("prototype-fair-v0")),
-            ascension=ascension,
+            ascension=ascension, expected_map_profile=map_profile_id,
         )
     except BaseException:
         backend.release_many([state])
