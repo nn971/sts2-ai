@@ -10,7 +10,7 @@ import pytest
 import torch
 
 from sts2_ai.emulator.jsonl_backend import FAIR_POLICY_ID
-from sts2_ai.emulator.protocol import LegalAction, Observation, Transition
+from sts2_ai.emulator.protocol import LegalAction, Observation, StepFrame, Transition
 from sts2_ai.emulator.run_environment import (
     EXPERIMENTAL_FIXED_ROUTE_PROFILE,
     validate_native_start,
@@ -260,6 +260,7 @@ class ForkBackend:
         self.counter = 0
         self.released = []
         self.step_count = 0
+        self.fused_calls = 0
 
     def fork(self, root):
         assert root == "root"
@@ -277,6 +278,16 @@ class ForkBackend:
 
     def legal_actions(self, state):
         return (LegalAction("reward", "choose_reward"),)
+
+    def batch_rollout_step_frame(self, items, policy):
+        self.fused_calls += 1
+        assert len(items) == 1
+        source, action = items[0]
+        transition = self.step(source, action)
+        return (StepFrame(
+            transition, self.observe(transition.child, policy),
+            self.legal_actions(transition.child),
+        ),)
 
     def release_many(self, handles):
         self.released.extend(handles)
@@ -334,6 +345,84 @@ def test_local_puct_is_short_root_conditioned_and_releases_all_forks():
     assert visits[1] > visits[0]
     assert transitions == backend.step_count
     assert len(backend.released) == backend.counter + backend.step_count
+    assert backend.fused_calls == transitions
+
+    legacy = ForkBackend()
+    visits_old, transitions_old = local_combat_puct(
+        legacy, "root", root, ACTIONS, policy,
+        simulations=24, depth=2, seed=42, rollout_transport="legacy",
+    )
+    assert visits_old == visits
+    assert transitions_old == transitions
+    assert legacy.fused_calls == 0
+    assert len(legacy.released) == legacy.counter + legacy.step_count
+
+
+def test_fused_act_episode_carries_observations_and_legal_actions(monkeypatch):
+    import sts2_ai.training.h16_joint_act_pilot as h16
+
+    class OneStepBackend:
+        def __init__(self):
+            self.calls = {"observe": 0, "legal_actions": 0,
+                          "is_terminal": 0, "step": 0, "fused": 0}
+
+        def observe(self, state, policy):
+            self.calls["observe"] += 1
+            return obs(frame(1, 56, combat=True) if state == "start"
+                       else frame(1, 0))
+
+        def legal_actions(self, state):
+            self.calls["legal_actions"] += 1
+            assert state == "start"
+            return ACTIONS
+
+        def is_terminal(self, state):
+            self.calls["is_terminal"] += 1
+            return state == "dead"
+
+        def step(self, state, action):
+            self.calls["step"] += 1
+            assert state == "start"
+            return Transition(state, action, "dead", True)
+
+        def batch_rollout_step_frame(self, items, policy):
+            self.calls["fused"] += 1
+            assert len(items) == 1
+            state, action = items[0]
+            return (StepFrame(
+                Transition(state, action, "dead", True),
+                obs(frame(1, 0)), (),
+            ),)
+
+        def release_many(self, handles):
+            return len(handles)
+
+    monkeypatch.setattr(h16, "reset_training_run", lambda *args, **kwargs: "start")
+    episodes = []
+    for transport in ("legacy", "fused"):
+        backend = OneStepBackend()
+        episode = h16.collect_act_episode(
+            backend, ValueStub(), seed="same-seed", ascension=10,
+            max_decisions=8, search_probability=0.0, max_searches=0,
+            simulations=16, search_depth=8, rng=random.Random(13),
+            rollout_transport=transport,
+        )
+        assert episode.outcome == "defeat"
+        assert len(episode.decisions) == 1
+        assert len(episode.frames) == 2
+        episodes.append(episode)
+        if transport == "fused":
+            assert backend.calls == {
+                "observe": 1, "legal_actions": 1,
+                "is_terminal": 1, "step": 0, "fused": 1,
+            }
+        else:
+            assert backend.calls == {
+                "observe": 2, "legal_actions": 1,
+                "is_terminal": 2, "step": 1, "fused": 0,
+            }
+    assert episodes[0].decisions == episodes[1].decisions
+    assert episodes[0].frames == episodes[1].frames
 
 
 def test_h16_macro_options_and_relic_counters_are_visible_without_prices():
