@@ -188,6 +188,26 @@ def geometric_hp_return(
     return result
 
 
+def combat_shaped_hp_return(
+    room_hp: Sequence[float], act_clear: float, horizon_lambda: float,
+    *, combat_quality: float | None, combat_credit_weight: float = 0.25,
+) -> float:
+    """Leave macro values unchanged; add strictly bounded combat credit.
+
+    For the current combat, a victory has quality 1. On defeat quality is
+    capped below 1. A completed fight's return is at least alpha, whereas
+    death within that fight gives at most alpha * loss_progress_cap.
+    """
+    if not 0 <= combat_credit_weight <= 1:
+        raise ValueError("Invalid combat credit weight")
+    base = geometric_hp_return(room_hp, act_clear, horizon_lambda)
+    if combat_quality is None:
+        return base
+    if not math.isfinite(combat_quality) or not 0 <= combat_quality <= 1:
+        raise ValueError("Combat quality must be in [0,1]")
+    return (1 - combat_credit_weight) * base + combat_credit_weight * combat_quality
+
+
 def _softmax(logits: Sequence[float], temperature: float) -> tuple[float, ...]:
     if temperature <= 0 or not logits or not all(math.isfinite(x) for x in logits):
         raise ValueError("Invalid action logits or temperature")
@@ -765,16 +785,16 @@ def train_joint_cohort(
                 [
                     [
                         act,
-                        ((1 - combat_credit_weight)
-                         * geometric_hp_return(room_hp, act, current_lambda)
-                         + combat_credit_weight * quality)
-                        if quality is not None else
-                        geometric_hp_return(room_hp, act, current_lambda),
-                        ((1 - combat_credit_weight)
-                         * geometric_hp_return(room_hp, act, aux)
-                         + combat_credit_weight * quality)
-                        if quality is not None else
-                        geometric_hp_return(room_hp, act, aux),
+                        combat_shaped_hp_return(
+                            room_hp, act, current_lambda,
+                            combat_quality=quality,
+                            combat_credit_weight=combat_credit_weight,
+                        ),
+                        combat_shaped_hp_return(
+                            room_hp, act, aux,
+                            combat_quality=quality,
+                            combat_credit_weight=combat_credit_weight,
+                        ),
                     ]
                     for (_, act, room_hp, quality), aux in zip(
                         chunk, aux_values, strict=True,
