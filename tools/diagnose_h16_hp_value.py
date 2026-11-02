@@ -19,12 +19,8 @@ from typing import Any
 from xml.sax.saxutils import escape
 
 if __package__:
-    from .diagnose_h16_paired_checkpoints import (
-        SCHEMA as PAIRED_SCHEMA,
-    )
-    from .diagnose_h16_paired_checkpoints import (
-        extract_episode,
-    )
+    from .diagnose_h16_paired_checkpoints import SCHEMA as PAIRED_SCHEMA
+    from .diagnose_h16_paired_checkpoints import extract_episode
 else:
     from diagnose_h16_paired_checkpoints import SCHEMA as PAIRED_SCHEMA
     from diagnose_h16_paired_checkpoints import extract_episode
