@@ -534,10 +534,10 @@ class NativeRootConditionedSampler:
 def local_combat_puct(
     backend: EmulatorBackend, state: StateHandle, observation: Observation,
     actions: tuple[LegalAction, ...], policy: PilotPolicy, *,
-    simulations: int, depth: int, seed: int,
+    simulations: int, depth: int | None, seed: int,
     rollout_transport: str = "fused",
 ) -> tuple[tuple[float, ...], int]:
-    """Short combat search with learned Act/future-HP cutoffs.
+    """Combat PUCT: capped depth or full search to combat termination.
 
     The result is an exploratory policy teacher, not an unbiased Q estimate.
     """
@@ -584,11 +584,12 @@ def collect_act_episode(
     backend: EmulatorBackend, policy: PilotPolicy, *,
     seed: str, ascension: int, max_decisions: int,
     search_probability: float, max_searches: int,
-    simulations: int, search_depth: int,
+    simulations: int, search_depth: int | None,
     rng: random.Random, rollout_transport: str = "fused",
 ) -> PilotEpisode:
     if not (0 <= search_probability <= 1 and max_searches >= 0
-            and max_decisions > 0 and simulations > 0 and search_depth > 0
+            and max_decisions > 0 and simulations > 0
+            and (search_depth is None or search_depth > 0)
             and rollout_transport in ("legacy", "fused")):
         raise ValueError("Invalid Act collection settings")
     state = reset_training_run(
