@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+from tools.diagnose_h16_paired_checkpoints import SCHEMA as BASE_SCHEMA
 from tools.diagnose_h16_puct_budget import (
     SCHEMA,
     analyze,
@@ -12,8 +13,8 @@ from tools.diagnose_h16_puct_budget import (
     floor_delta_interval,
     load_journal,
     reference_arms,
+
 )
-from tools.diagnose_h16_paired_checkpoints import SCHEMA as BASE_SCHEMA
 
 
 def outcome(seed: str, floor: int, win7: bool, *, searches: int = 2) -> dict:
