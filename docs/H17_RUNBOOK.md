@@ -15,7 +15,12 @@ Plan: \`docs/H17_TRAINING_PLAN.md\`.
 - H6C macro prior decays from 0.5 to 0 over 120 H17 rounds. H16's
   joint macro policy remains trainable with same macro policy-gradient loss.
 - Geometric future-HP λ starts at 0.411395 and grows linearly to 0.77
-  over 200 H17 rounds. Search labels preserve combat-victory dominance.
+  over 200 H17 rounds. **HP credit is `min(1, HP / 100)`**, with a
+  fixed, configurable denominator `--h17-hp-reference 100`. The
+  100-HP cap keeps all critic labels in [0,1] while rewarding maximum-HP
+  relics that increase current HP from 70 to 80, 90, etc. Tablet of
+  Truth's 1/1 HP has credit 0.01; HP above 100 receives credit 1.
+  Search labels preserve combat-victory dominance.
 - Card exposure counts by type (deck, playable, played, searched) persisted
   in every round. Coverage-informed adaptive search.
 - Up to 8192 public-state replay examples from completed runs, <=32 rounds
@@ -29,6 +34,10 @@ Plan: \`docs/H17_TRAINING_PLAN.md\`.
 - Every full-combat simulation must terminate before the step watchdog,
   otherwise the run aborts; no fabricated terminal reward.
 - Existing H16 CLI and default fingerprint remain unchanged when H17 is off.
+- The original two-round H17 smoke used the old mutable maximum-HP
+  normalization. Its checkpoints are diagnostic only. Begin the corrected
+  run from frozen R79 in a **new** output directory; the objective has
+  changed and the H17 fingerprint prevents accidental resume.
 
 ## Commands (fish shell)
 
@@ -73,6 +82,7 @@ python tools/train_h17_adaptive.py \
     --emulator-root $emu --emulator-revision $rev \
     --macro-model $macro --output-root $smoke \
     --rounds 2 --runs-per-round 16 --heldout-runs 4 \
+    --h17-hp-reference 100 \
     --study-seed 20261118 --execute
 \`\`\`
 
@@ -85,7 +95,7 @@ set run results/h17-adaptive-fullcombat-r40
 python tools/train_h17_adaptive.py \
     --emulator-root $emu --emulator-revision $rev \
     --macro-model $macro --output-root $run \
-    --rounds 40 --execute
+    --rounds 40 --h17-hp-reference 100 --execute
 \`\`\`
 
 Resume the *same* run with **identical** options and \`--resume\`:
@@ -94,7 +104,7 @@ Resume the *same* run with **identical** options and \`--resume\`:
 python tools/train_h17_adaptive.py \
     --emulator-root $emu --emulator-revision $rev \
     --macro-model $macro --output-root $run \
-    --rounds 40 --resume --execute
+    --rounds 40 --h17-hp-reference 100 --resume --execute
 \`\`\`
 
 The progress report \`$run/progress.json\` has per-round:
