@@ -9,10 +9,9 @@ from __future__ import annotations
 
 import sys
 
-from train_h16_joint_act_pilot import main
-
-
 if __name__ == "__main__":
+    from train_h16_joint_act_pilot import main
+
     defaults = [
         "--h17-adaptive",
         "--initial-h16", "results/h16-v5-combat-credit-r150/models/joint-r0079.pt",
