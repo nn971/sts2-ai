@@ -49,6 +49,15 @@ from sts2_ai.training.h16_joint_act_pilot import (
     train_joint_cohort,
 )
 from sts2_ai.training.h16_public_codec import set_h16_rollout_seed
+from sts2_ai.training.h17_adaptive import AdaptiveSearch, coverage_summary, update_coverage
+from sts2_ai.training.h17_replay import (
+    collect_replay,
+    fit_replay,
+    load_replay,
+    merge_replay,
+    sample_replay,
+    write_replay,
+)
 
 _WORKER: dict[str, Any] = {}
 
@@ -82,7 +91,8 @@ def _worker_init(config: dict[str, Any]) -> None:
     model = (None if remote is not None
              else JointActPilotNet.load(Path(config["checkpoint"]), device="cpu"))
     macro = (PhaseSplitNeuralModel.load(Path(config["macro_model"]))
-             if config["macro_model"] is not None else None)
+             if config["macro_model"] is not None
+             and config["macro_prior_weight"] > 0 else None)
     policy = PilotPolicy(
         model, temperature=config["temperature"],
         horizon_lambda=config["horizon_lambda"], macro_teacher=macro,
@@ -124,6 +134,9 @@ def _worker_run(seed: str) -> PilotEpisode:
         rng=rng,
         rollout_transport=cfg["rollout_transport"],
         max_simulation_steps=cfg["max_simulation_steps"],
+        adaptive_search=(AdaptiveSearch(**cfg["adaptive_search"])
+                         if cfg["adaptive_search"] is not None else None),
+        card_exposure=cfg["card_exposure"],
     )
     return dataclass_replace(
         episode,
@@ -156,11 +169,19 @@ def collect(
         "search_probability": args.search_probability if search else 0.0,
         "max_searches": args.max_searches if search else 0,
         "simulations": args.simulations,
-        "search_depth": args.search_depth,
-        "max_simulation_steps": getattr(args, "max_simulation_steps", 512),
+        "search_depth": (
+            None if args.search_depth == 0 else args.search_depth
+        ),
+        "max_simulation_steps": args.max_simulation_steps,
         "study_seed": args.study_seed,
         "rollout_transport": args.rollout_transport,
         "actor_inference": args.actor_inference,
+        "adaptive_search": (
+            {"probability16": args.h17_search_p16,
+             "probability64": args.h17_search_p64}
+            if args.h17_adaptive and search else None
+        ),
+        "card_exposure": getattr(args, "card_exposure", {}).get("playable", {}),
     }
     actor = (
         SharedH16Service(
@@ -266,6 +287,12 @@ def summarize(episodes: list[PilotEpisode]) -> dict[str, Any]:
         "searches": sum(e.searches for e in episodes),
         "search_transitions": sum(e.search_transitions for e in episodes),
         "search_overrides": sum(e.search_overrides for e in episodes),
+        "search_budget_roots": {
+            str(budget): sum(
+                d.search_simulations == budget
+                for e in episodes for d in e.decisions
+            ) for budget in (16, 64)
+        },
         "search_override_rate": (
             sum(e.search_overrides for e in episodes) /
             sum(e.searches for e in episodes)
@@ -295,6 +322,27 @@ def horizon_lambda_for_round(index: int, tau_rounds: float) -> float:
     if index < 0 or not math.isfinite(tau_rounds) or tau_rounds <= 0:
         raise ValueError("Invalid geometric-horizon schedule")
     return -math.expm1(-index / tau_rounds)
+
+
+def h17_horizon_for_round(
+    round_index: int, *, start: float = 0.4113950303216448,
+    target: float = 0.77, ramp_rounds: int = 200,
+) -> float:
+    """Slow geometric-HP horizon ramp, starting at frozen R79 lambda."""
+    if (round_index < 0 or ramp_rounds <= 0
+            or not 0 <= start <= target < 1):
+        raise ValueError("Invalid H17 horizon schedule")
+    return start + (target - start) * min(1.0, round_index / ramp_rounds)
+
+
+def h17_macro_weight_for_round(
+    round_index: int, *, initial_weight: float = 0.5,
+    decay_rounds: int = 120,
+) -> float:
+    """Anneal a frozen H6C *prior*; joint macro head remains trainable."""
+    if round_index < 0 or initial_weight < 0 or decay_rounds < 1:
+        raise ValueError("Invalid H17 macro prior schedule")
+    return initial_weight * max(0.0, 1.0 - round_index / decay_rounds)
 
 
 def _checkpoint(path: Path, value: object) -> None:
@@ -351,7 +399,25 @@ def main() -> None:
     p.add_argument("--max-searches", type=int, default=0,
                    help="Maximum combat PUCT roots/run; zero means every eligible decision")
     p.add_argument("--simulations", type=int, default=16)
-    p.add_argument("--search-depth", type=int, default=8)
+    p.add_argument("--search-depth", type=int, default=8,
+                   help="0 means full-combat PUCT; otherwise a positive depth")
+    p.add_argument("--h17-adaptive", action="store_true",
+                   help="Enable H17 adaptive deep search and training schedules")
+    p.add_argument("--max-simulation-steps", type=int, default=512,
+                   help="Full-combat search watchdog, never a value cutoff")
+    p.add_argument("--h17-search-p16", type=float, default=0.15)
+    p.add_argument("--h17-search-p64", type=float, default=0.02)
+    p.add_argument("--h17-macro-decay-rounds", type=int, default=120)
+    p.add_argument("--h17-horizon-initial", type=float,
+                   default=0.4113950303216448)
+    p.add_argument("--h17-horizon-target", type=float, default=0.77)
+    p.add_argument("--h17-horizon-rounds", type=int, default=200)
+    p.add_argument("--h17-hp-reference", type=int, default=100,
+                   help="Fixed H17 HP-credit denominator (bounded at 1)")
+    p.add_argument("--h17-replay-capacity", type=int, default=8192)
+    p.add_argument("--h17-replay-samples", type=int, default=256)
+    p.add_argument("--h17-replay-age", type=int, default=32)
+    p.add_argument("--h17-replay-weight", type=float, default=0.2)
     p.add_argument("--minibatch", type=int, default=32)
     p.add_argument("--epochs", type=int, default=1)
     p.add_argument("--lr", type=float, default=0.00001)
@@ -362,8 +428,10 @@ def main() -> None:
     args = p.parse_args()
     if (min(args.rounds, args.runs_per_round, args.heldout_runs, args.workers,
             args.max_decisions, args.search_start_round,
-            args.simulations, args.search_depth, args.minibatch, args.epochs,
+            args.simulations, args.max_simulation_steps, args.minibatch, args.epochs,
             args.actor_max_batch) <= 0
+            or args.search_depth < 0
+            or (args.search_depth == 0 and not args.h17_adaptive)
             or args.max_searches < 0 or args.study_seed < 0
             or not math.isfinite(args.actor_max_delay_ms)
             or args.actor_max_delay_ms < 0
@@ -376,8 +444,25 @@ def main() -> None:
             or args.auxiliary_horizon_weight < 0
             or not 0 <= args.search_probability <= 1
             or not 0 < args.temperature <= 5
-            or args.macro_prior_weight < 0 or args.lr <= 0):
+            or args.macro_prior_weight < 0 or args.lr <= 0
+            or (args.h17_adaptive and (
+                args.h17_macro_decay_rounds <= 0
+                or args.h17_replay_capacity <= 0
+                or args.h17_replay_samples < 0
+                or args.h17_replay_age <= 0
+                or not 0 <= args.h17_replay_weight <= 1
+                or args.h17_horizon_rounds <= 0
+                or args.h17_hp_reference <= 0
+                or not 0 <= args.h17_horizon_initial <=
+                args.h17_horizon_target < 1
+            ))):
         p.error("Invalid H16 pilot configuration")
+    if args.h17_adaptive:
+        AdaptiveSearch(args.h17_search_p16, args.h17_search_p64)
+        if args.initial_h16 is None:
+            p.error("H17 must warm-start from an H16 checkpoint")
+        if args.macro_model is None and args.macro_prior_weight > 0:
+            p.error("H17 annealing requires the frozen macro reference")
     for path in (args.initial_h9, args.initial_h16, args.macro_model):
         if path is not None and not path.is_file():
             p.error(f"Missing checkpoint: {path}")
@@ -394,9 +479,10 @@ def main() -> None:
             key: value for key, value in vars(args).items()
             if key not in (
                 "execute", "resume", "output_root", "initial_h9",
-                "initial_h16",
-                "macro_model", "emulator_root", "ai_root", "device",
-            )
+                "initial_h16", "macro_model", "emulator_root", "ai_root", "device",
+            ) and (args.h17_adaptive or (
+                not key.startswith("h17_") and key != "max_simulation_steps"
+            ))
         },
     }
     fingerprint = digest(source)
@@ -454,6 +540,17 @@ def main() -> None:
         f"h16-fixedroute-heldout-{args.study_seed}-{i}"
         for i in range(args.heldout_runs)
     ]
+    initial_macro_prior_weight = args.macro_prior_weight
+    coverage: dict[str, dict[str, int]] = (
+        history[-1].get("card_coverage", {}) if history and args.h17_adaptive
+        else {}
+    )
+    replay: list[dict[str, Any]] = (
+        load_replay(
+            root / "replay" / f"r{len(history):04d}.json.gz",
+            fingerprint=fingerprint, expected_round=len(history),
+        ) if args.h17_adaptive and history else []
+    )
     if not history:
         model.save(actor_path)
         baseline = collect(
@@ -462,9 +559,21 @@ def main() -> None:
         write_json(root / "baseline.json", summarize(baseline))
     for round_index in range(len(history), args.rounds):
         horizon_lambda = (
-            horizon_lambda_for_round(round_index, args.horizon_tau_rounds)
-            if args.hp_target == "geometric" else 0.0
+            h17_horizon_for_round(
+                round_index, start=args.h17_horizon_initial,
+                target=args.h17_horizon_target,
+                ramp_rounds=args.h17_horizon_rounds,
+            ) if args.h17_adaptive else (
+                horizon_lambda_for_round(round_index, args.horizon_tau_rounds)
+                if args.hp_target == "geometric" else 0.0
+            )
         )
+        if args.h17_adaptive:
+            args.macro_prior_weight = h17_macro_weight_for_round(
+                round_index, initial_weight=initial_macro_prior_weight,
+                decay_rounds=args.h17_macro_decay_rounds,
+            )
+            args.card_exposure = coverage
         model.save(actor_path)
         collect_started = time.perf_counter()
         train = collect(
@@ -489,9 +598,37 @@ def main() -> None:
             auxiliary_horizon_weight=args.auxiliary_horizon_weight,
             combat_credit_weight=args.combat_credit_weight,
             loss_progress_cap=args.loss_progress_cap,
+            hp_reference=(args.h17_hp_reference if args.h17_adaptive else None),
             temperature=args.temperature, minibatch=args.minibatch,
             epochs=args.epochs,
         )
+        replay_report: dict[str, float | int] | None = None
+        if args.h17_adaptive:
+            replay_batch = sample_replay(
+                replay, round_index=round_index,
+                exposure=coverage.get("playable", {}),
+                samples=args.h17_replay_samples,
+            )
+            replay_report = fit_replay(
+                model, optimizer, replay_batch,
+                horizon_lambda=horizon_lambda,
+                replay_weight=args.h17_replay_weight,
+                combat_credit_weight=args.combat_credit_weight,
+            )
+            incoming = collect_replay(
+                completed, source_round=round_index,
+                exposure=coverage.get("playable", {}),
+                loss_progress_cap=args.loss_progress_cap,
+                hp_reference=args.h17_hp_reference,
+            )
+            coverage = update_coverage(completed, coverage)
+            replay = merge_replay(
+                replay, incoming,
+                round_index=round_index,
+                exposure=coverage.get("playable", {}),
+                capacity=args.h17_replay_capacity,
+                max_age=args.h17_replay_age,
+            )
         update_seconds = time.perf_counter() - update_started
         model_path = model_dir / f"joint-r{round_index + 1:04d}.pt"
         model.save(model_path)
@@ -524,6 +661,15 @@ def main() -> None:
             ),
             "train": summarize(train), "update": report,
             "heldout": summarize(evaluation),
+            **({
+                "macro_prior_weight": args.macro_prior_weight,
+                "hp_reference": args.h17_hp_reference,
+                "hp_normalization": "min(1, current_hp / fixed_reference)",
+                "card_coverage": coverage,
+                "card_coverage_summary": coverage_summary(coverage),
+                "replay": replay_report,
+                "replay_buffer_rows": len(replay),
+            } if args.h17_adaptive else {}),
             "checkpoint": str(model_path),
             "checkpoint_sha256": sha256(model_path),
         }
@@ -534,12 +680,21 @@ def main() -> None:
             "optimizer": optimizer.state_dict(),
             "rng_state": torch.get_rng_state(),
         })
+        if args.h17_adaptive:
+            write_replay(
+                root / "replay" / f"r{len(history):04d}.json.gz",
+                fingerprint=fingerprint,
+                round_index=len(history), rows=replay,
+            )
         write_json(progress_path, {
             "fingerprint": fingerprint,
             "experiment": source,
             "baseline": str(root / "baseline.json"),
             "rounds": history,
         })
+        if args.h17_adaptive and len(history) >= 3:
+            prior = root / "replay" / f"r{len(history)-2:04d}.json.gz"
+            prior.unlink(missing_ok=True)
         print("[h16-act1-joint] " + json.dumps(row, sort_keys=True), flush=True)
     print("[h16-act1-joint] completed", len(history), "rounds", flush=True)
 

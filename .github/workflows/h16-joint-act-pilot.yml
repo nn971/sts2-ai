@@ -20,6 +20,11 @@ on:
       - 'tests/test_h16_full_combat.py'
       - 'tools/diagnose_h16_hp_value.py'
       - 'tests/test_h16_hp_value.py'
+      - 'src/sts2_ai/training/h17_adaptive.py'
+      - 'src/sts2_ai/training/h17_replay.py'
+      - 'tools/train_h17_adaptive.py'
+      - 'tests/test_h17_adaptive_training.py'
+      - 'docs/H17_TRAINING_PLAN.md'
       - 'tests/test_h16_floor_progress.py'
       - 'tests/test_h16_action_overflow.py'
       - 'tests/test_h16_subset_actions.py'
@@ -50,13 +55,14 @@ jobs:
           python -m pip install -e '.[dev]'
       - name: Lint and compile pilot
         run: |
-          python -m ruff check src/sts2_ai/training/h16_joint_act_pilot.py src/sts2_ai/training/h16_public_codec.py tools/train_h16_joint_act_pilot.py tests/test_h16_joint_act_pilot.py src/sts2_ai/models/h16_batch_actor.py tests/test_h16_batch_actor.py tools/report_h16_floor_progress.py tests/test_h16_floor_progress.py tests/test_h16_action_overflow.py tests/test_h16_subset_actions.py tests/test_h16_deck_multiplicity.py tests/test_h16_virtual_selection_depth.py tests/test_h16_combat_loss_credit.py tests/test_h16_deck_multiplicity.py tools/diagnose_h16_paired_checkpoints.py tests/test_h16_paired_checkpoints.py tools/diagnose_h16_puct_budget.py tests/test_h16_puct_budget.py tools/diagnose_h16_full_combat.py tests/test_h16_full_combat.py tools/diagnose_h16_hp_value.py tests/test_h16_hp_value.py src/sts2_ai/search/combat_puct.py
-          python -m compileall -q src/sts2_ai/training/h16_joint_act_pilot.py src/sts2_ai/training/h16_public_codec.py tools/train_h16_joint_act_pilot.py tools/report_h16_floor_progress.py src/sts2_ai/models/h16_batch_actor.py src/sts2_ai/models/shared_game_objects.py src/sts2_ai/models/shared_transformer.py src/sts2_ai/models/packed_actor_collation.py src/sts2_ai/training/h16_episode_metrics.py tools/diagnose_h16_paired_checkpoints.py tools/diagnose_h16_puct_budget.py tools/diagnose_h16_full_combat.py tools/diagnose_h16_hp_value.py src/sts2_ai/search/combat_puct.py
+          python -m ruff check src/sts2_ai/training/h16_joint_act_pilot.py src/sts2_ai/training/h16_public_codec.py tools/train_h16_joint_act_pilot.py tests/test_h16_joint_act_pilot.py src/sts2_ai/models/h16_batch_actor.py tests/test_h16_batch_actor.py tools/report_h16_floor_progress.py tests/test_h16_floor_progress.py tests/test_h16_action_overflow.py tests/test_h16_subset_actions.py tests/test_h16_deck_multiplicity.py tests/test_h16_virtual_selection_depth.py tests/test_h16_combat_loss_credit.py tests/test_h16_deck_multiplicity.py tools/diagnose_h16_paired_checkpoints.py tests/test_h16_paired_checkpoints.py tools/diagnose_h16_puct_budget.py tests/test_h16_puct_budget.py tools/diagnose_h16_full_combat.py tests/test_h16_full_combat.py tools/diagnose_h16_hp_value.py tests/test_h16_hp_value.py src/sts2_ai/training/h17_adaptive.py src/sts2_ai/training/h17_replay.py tools/train_h17_adaptive.py tests/test_h17_adaptive_training.py src/sts2_ai/search/combat_puct.py
+          python -m compileall -q src/sts2_ai/training/h16_joint_act_pilot.py src/sts2_ai/training/h16_public_codec.py tools/train_h16_joint_act_pilot.py tools/report_h16_floor_progress.py src/sts2_ai/models/h16_batch_actor.py src/sts2_ai/models/shared_game_objects.py src/sts2_ai/models/shared_transformer.py src/sts2_ai/models/packed_actor_collation.py src/sts2_ai/training/h16_episode_metrics.py tools/diagnose_h16_paired_checkpoints.py tools/diagnose_h16_puct_budget.py tools/diagnose_h16_full_combat.py tools/diagnose_h16_hp_value.py src/sts2_ai/training/h17_adaptive.py src/sts2_ai/training/h17_replay.py tools/train_h17_adaptive.py src/sts2_ai/search/combat_puct.py
           python tools/train_h16_joint_act_pilot.py --help > /dev/null
           python tools/report_h16_floor_progress.py --help > /dev/null
           python tools/diagnose_h16_paired_checkpoints.py --help > /dev/null
           python tools/diagnose_h16_puct_budget.py --help > /dev/null
           python tools/diagnose_h16_full_combat.py --help > /dev/null
           python tools/diagnose_h16_hp_value.py --help > /dev/null
+          python tools/train_h17_adaptive.py --help > /dev/null
       - name: Test delayed targets, joint optimization, and padded-minibatch stability
-        run: python -m pytest -q tests/test_h16_joint_act_pilot.py tests/test_h16_batch_actor.py tests/test_h16_floor_progress.py tests/test_h16_action_overflow.py tests/test_h16_subset_actions.py tests/test_h16_deck_multiplicity.py tests/test_h16_virtual_selection_depth.py tests/test_h16_combat_loss_credit.py tests/test_h16_paired_checkpoints.py tests/test_h16_puct_budget.py tests/test_h16_full_combat.py tests/test_h16_hp_value.py tests/test_h16_virtual_selection_depth.py
+        run: python -m pytest -q tests/test_h16_joint_act_pilot.py tests/test_h16_batch_actor.py tests/test_h16_floor_progress.py tests/test_h16_action_overflow.py tests/test_h16_subset_actions.py tests/test_h16_deck_multiplicity.py tests/test_h16_virtual_selection_depth.py tests/test_h16_combat_loss_credit.py tests/test_h16_paired_checkpoints.py tests/test_h16_puct_budget.py tests/test_h16_full_combat.py tests/test_h16_hp_value.py tests/test_h16_virtual_selection_depth.py tests/test_h17_adaptive_training.py

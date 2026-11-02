@@ -14,7 +14,7 @@ import json
 import math
 import random
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -51,6 +51,7 @@ from sts2_ai.training.h16_public_codec import (
     PREVIOUS_H16_CODEC,
     encode_h16_decision,
 )
+from sts2_ai.training.h17_adaptive import AdaptiveSearch, choose_budget
 
 SCHEMA = "sts2-h16-act1-geometric-horizon-every-combat-puct-v5"
 PREVIOUS_SCHEMA = "sts2-h16-act1-geometric-horizon-every-combat-puct-v4"
@@ -68,11 +69,19 @@ def public_state(observation: Observation) -> dict[str, Any]:
     return state
 
 
-def hp_fraction(state: dict[str, Any]) -> float:
+def hp_fraction(
+    state: dict[str, Any], *, hp_reference: int | None = None,
+) -> float:
+    """Bounded HP credit: H17 fixed starting-HP reference; H16 dynamic cap."""
     hp, max_hp = state.get("hp"), state.get("max_hp")
     if type(hp) is not int or type(max_hp) is not int or max_hp <= 0:
         raise ValueError("Missing public player HP")
-    return min(1.0, max(0.0, hp / max_hp))
+    if hp_reference is not None and (
+        type(hp_reference) is not int or hp_reference <= 0
+    ):
+        raise ValueError("HP reference must be a positive fixed integer")
+    scale = max_hp if hp_reference is None else hp_reference
+    return min(1.0, max(0.0, hp / scale))
 
 
 def floor_completed(state: dict[str, Any], floor: int) -> bool:
@@ -86,7 +95,7 @@ def floor_completed(state: dict[str, Any], floor: int) -> bool:
 
 def hp_at_future_floor(
     frames: Sequence[dict[str, Any]], decision_index: int, *,
-    horizon: int,
+    horizon: int, hp_reference: int | None = None,
 ) -> float:
     """HP after a later completed room, or zero on an earlier terminal loss.
 
@@ -101,12 +110,13 @@ def hp_at_future_floor(
     target = min(16, floor + horizon)
     for frame in frames[decision_index + 1:]:
         if floor_completed(frame, target):
-            return hp_fraction(frame)
+            return hp_fraction(frame, hp_reference=hp_reference)
     return 0.0
 
 
 def hp_after_current_room(
-    frames: Sequence[dict[str, Any]], decision_index: int,
+    frames: Sequence[dict[str, Any]], decision_index: int, *,
+    hp_reference: int | None = None,
 ) -> float:
     """Normalized HP at the next room-completion boundary after a decision.
 
@@ -127,16 +137,19 @@ def hp_after_current_room(
         # Any outstanding Act-transition decision is already beyond the
         # final room. Preserve the actual terminal HP instead of assigning
         # a nonexistent floor 17 a value of zero.
-        return hp_fraction(frames[-1])
+        return hp_fraction(frames[-1], hp_reference=hp_reference)
 
     target = floor + 1 if floor == 0 or floor_completed(starting, floor) else floor
     for frame in frames[decision_index + 1:]:
         if floor_completed(frame, target):
-            return hp_fraction(frame)
+            return hp_fraction(frame, hp_reference=hp_reference)
     return 0.0
 
 
-def completed_room_hp(frames: Sequence[dict[str, Any]]) -> dict[int, float]:
+def completed_room_hp(
+    frames: Sequence[dict[str, Any]], *,
+    hp_reference: int | None = None,
+) -> dict[int, float]:
     """First observed post-completion HP for each Act-1 floor.
 
     Take the first observable boundary at which the room is completed;
@@ -152,7 +165,9 @@ def completed_room_hp(frames: Sequence[dict[str, Any]]) -> dict[int, float]:
                 continue
             floor = room.get("floor")
             if type(floor) is int and 1 <= floor <= 16 and floor not in completed:
-                completed[floor] = hp_fraction(state)
+                completed[floor] = hp_fraction(
+                    state, hp_reference=hp_reference,
+                )
     return completed
 
 
@@ -313,6 +328,7 @@ class PilotDecision:
     macro_offset: tuple[float, ...]
     search_policy: tuple[float, ...] | None = None
     predicted_value: float | None = None
+    search_simulations: int = 0
 
 
 @dataclass(frozen=True)
@@ -382,7 +398,7 @@ class PilotPolicy:
         self, observation: Observation, actions: tuple[LegalAction, ...],
         public: dict[str, Any] | None = None,
     ) -> tuple[float, ...]:
-        if (self.macro_teacher is None or
+        if (self.macro_teacher is None or self.macro_prior_weight == 0 or
                 isinstance((public if public is not None else
                             public_state(observation)).get("combat"), dict)):
             return (0.0,) * len(actions)
@@ -590,6 +606,8 @@ def collect_act_episode(
     simulations: int, search_depth: int | None,
     rng: random.Random, rollout_transport: str = "fused",
     max_simulation_steps: int = 512,
+    adaptive_search: AdaptiveSearch | None = None,
+    card_exposure: Mapping[str, int] | None = None,
 ) -> PilotEpisode:
     if not (0 <= search_probability <= 1 and max_searches >= 0
             and max_decisions > 0 and simulations > 0
@@ -630,15 +648,26 @@ def collect_act_episode(
                 raise RuntimeError("Nonterminal run has no legal player actions")
             scores, predicted_value, offsets = policy.infer(observation, actions)
             search_policy = None
-            should_search = should_search_combat(
-                public, actions, searches=searches,
-                max_searches=max_searches,
-                search_probability=search_probability, rng=rng,
-            )
-            if should_search:
+            if adaptive_search is None:
+                budget = (
+                    simulations if should_search_combat(
+                        public, actions, searches=searches,
+                        max_searches=max_searches,
+                        search_probability=search_probability, rng=rng,
+                    ) else 0
+                )
+            elif (search_probability > 0
+                  and (max_searches == 0 or searches < max_searches)):
+                budget = choose_budget(
+                    adaptive_search, public, actions, scores,
+                    card_exposure or {}, rng,
+                )
+            else:
+                budget = 0
+            if budget:
                 search_policy, count = local_combat_puct(
                     backend, state, observation, actions, policy,
-                    simulations=simulations, depth=search_depth,
+                    simulations=budget, depth=search_depth,
                     seed=rng.randrange(2**63),
                     rollout_transport=rollout_transport,
                     max_simulation_steps=max_simulation_steps,
@@ -655,6 +684,7 @@ def collect_act_episode(
                 chosen = _sample(_softmax(scores, policy.temperature), rng)
             decisions.append(PilotDecision(
                 observation, actions, chosen, offsets, search_policy, predicted_value,
+                budget,
             ))
             if rollout_transport == "fused":
                 (next_frame,) = backend.batch_rollout_step_frame(
@@ -683,6 +713,7 @@ def train_joint_cohort(
     auxiliary_horizon_weight: float = 0.5,
     combat_credit_weight: float = 0.25,
     loss_progress_cap: float = 0.2,
+    hp_reference: int | None = None,
 ) -> dict[str, float | int]:
     """One shared optimizer for both policies and horizon-conditioned critic.
 
@@ -697,14 +728,18 @@ def train_joint_cohort(
             or minibatch <= 0 or epochs <= 0 or search_weight < 0
             or auxiliary_horizon_weight < 0
             or not 0 <= combat_credit_weight <= 1
-            or not 0 <= loss_progress_cap < 1):
+            or not 0 <= loss_progress_cap < 1
+            or (hp_reference is not None
+                and (type(hp_reference) is not int or hp_reference <= 0))):
         raise ValueError("Invalid joint training configuration")
     current_lambda = horizon_lambda if hp_target == "geometric" else 0.0
     entries: list[tuple[PilotDecision, float, tuple[float, ...], float | None]] = []
     for episode in episodes:
         if not episode.complete:
             raise ValueError("Censored episodes cannot train geometric returns")
-        completed = completed_room_hp(episode.frames)
+        completed = completed_room_hp(
+            episode.frames, hp_reference=hp_reference,
+        )
         act = float(episode.outcome == "act_clear")
         quality_by_index: dict[int, float] = {}
         for result in combat_results(episode.frames, episode.outcome):
@@ -889,6 +924,7 @@ def train_joint_cohort(
         "combat_credit_weight": combat_credit_weight,
         "loss_progress_cap": loss_progress_cap,
         "horizon_lambda": current_lambda,
+        "hp_reference": hp_reference,
         "effective_horizon": (1.0 / (1.0 - current_lambda)
                               if current_lambda < 1.0 else None),
     }
