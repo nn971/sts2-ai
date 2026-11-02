@@ -63,16 +63,22 @@ def collect_replay(
     exposure: Mapping[str, int], max_macro_per_run: int = 8,
     max_combat_per_run: int = 16,
     loss_progress_cap: float = 0.2,
+    hp_reference: int | None = None,
 ) -> list[dict[str, Any]]:
     """Select varied, rare-card decision states with genuine completed labels."""
-    if source_round < 0 or min(max_macro_per_run, max_combat_per_run) < 0:
+    if (source_round < 0 or min(max_macro_per_run, max_combat_per_run) < 0
+            or (hp_reference is not None and (
+                type(hp_reference) is not int or hp_reference <= 0
+            ))):
         raise ValueError("Invalid H17 replay collection configuration")
     result: list[dict[str, Any]] = []
     rng = random.Random(1717 + source_round)
     for episode in episodes:
         if not episode.complete:
             continue
-        room_hp = completed_room_hp(episode.frames)
+        room_hp = completed_room_hp(
+            episode.frames, hp_reference=hp_reference,
+        )
         act = float(episode.outcome == "act_clear")
         quality: dict[int, float] = {}
         for fight in combat_results(episode.frames, episode.outcome):
