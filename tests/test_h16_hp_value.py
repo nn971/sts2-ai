@@ -87,6 +87,8 @@ def test_phase_specific_summaries_svg_and_same_hp_spread():
     ]
     result = summarize(data)
     assert result["all_decisions"]["count"] == 10
+    assert result["all_decisions"]["hp_value_linear_r2"] is not None
+    assert result["all_decisions"]["current_hp_baseline_target_mae"] is not None
     assert result["by_phase"]["macro"]["count"] == 2
     spread = result["same_hp_floor_phase_value_spread"][0]
     assert spread["count"] == 8
