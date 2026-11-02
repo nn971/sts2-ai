@@ -1,7 +1,7 @@
 # H17 execution: adaptive full-combat PUCT and joint macro learning
 
 Implementation in draft PR #157, stacked on H16 diagnostic PR #156.
-Plan: \`docs/H17_TRAINING_PLAN.md\`.
+Plan: `docs/H17_TRAINING_PLAN.md`.
 
 ## What is implemented
 
@@ -43,7 +43,7 @@ Plan: \`docs/H17_TRAINING_PLAN.md\`.
 
 Update the stacked branch:
 
-\`\`\`fish
+```fish
 cd ~/projects/sts2-ai
 git fetch origin
 git switch research/h17-adaptive-fullcombat-training-20261102
@@ -53,7 +53,7 @@ set emu ~/projects/sts2-emulator
 set rev (git -C $emu rev-parse HEAD)
 set macro results/nature/h6c-macro-attention-r80.json
 set initial results/h16-v5-combat-credit-r150/models/joint-r0079.pt
-\`\`\`
+```
 
 Do not switch the emulator away from ongoing fidelity work merely for this
 experiment; pass the exact SHA of the emulator checkout used for this run
@@ -61,22 +61,22 @@ and ensure the experimental fixed-route Act1 profile still works.
 
 Check source and CLI:
 
-\`\`\`fish
+```fish
 python -m pytest -q tests/test_h17_adaptive_training.py \
     tests/test_h16_joint_act_pilot.py tests/test_h16_full_combat.py
 
 python tools/train_h17_adaptive.py \
     --emulator-root $emu --emulator-revision $rev \
     --macro-model $macro --output-root results/h17-preflight
-\`\`\`
+```
 
-The final command prints config/fingerprint only (no \`--execute\`).
+The final command prints config/fingerprint only (no `--execute`).
 
 **Smoke:** use separate seed and output root. Uses 2 rounds x 16 fresh Act
 runs per round and 4 policy-only heldout runs; it exercises actual PUCT,
 the frozen teacher, horizon, replay write/load and metrics.
 
-\`\`\`fish
+```fish
 set smoke results/h17-fixedhp100-fullcombat-smoke
 python tools/train_h17_adaptive.py \
     --emulator-root $emu --emulator-revision $rev \
@@ -84,36 +84,36 @@ python tools/train_h17_adaptive.py \
     --rounds 2 --runs-per-round 16 --heldout-runs 4 \
     --h17-hp-reference 100 \
     --study-seed 20261118 --execute
-\`\`\`
+```
 
 **Long run:** begin from R79 again in a different output directory;
-64 new native Act1 runs x 40 rounds. The option \`--initial-h16\` defaults
-to \`$initial\` in the H17 entrypoint and can be overridden explicitly.
+64 new native Act1 runs x 40 rounds. The option `--initial-h16` defaults
+to `$initial` in the H17 entrypoint and can be overridden explicitly.
 
-\`\`\`fish
+```fish
 set run results/h17-fixedhp100-fullcombat-r40
 python tools/train_h17_adaptive.py \
     --emulator-root $emu --emulator-revision $rev \
     --macro-model $macro --output-root $run \
     --rounds 40 --h17-hp-reference 100 --execute
-\`\`\`
+```
 
-Resume the *same* run with **identical** options and \`--resume\`:
+Resume the *same* run with **identical** options and `--resume`:
 
-\`\`\`fish
+```fish
 python tools/train_h17_adaptive.py \
     --emulator-root $emu --emulator-revision $rev \
     --macro-model $macro --output-root $run \
     --rounds 40 --h17-hp-reference 100 --resume --execute
-\`\`\`
+```
 
-The progress report \`$run/progress.json\` has per-round:
-\`train.search_budget_roots\`, \`train.search_transitions\`,
-\`timing.collection_seconds\`, \`timing.update_seconds\`,
-\`timing.approx_emulator_transitions_per_second\`,
-\`card_coverage_summary\`, \`macro_prior_weight\`,
-\`horizon_lambda\`, \`replay\`, \`replay_buffer_rows\`, and
-policy-only \`heldout\` floor/Act-clear metrics.
+The progress report `$run/progress.json` has per-round:
+`train.search_budget_roots`, `train.search_transitions`,
+`timing.collection_seconds`, `timing.update_seconds`,
+`timing.approx_emulator_transitions_per_second`,
+`card_coverage_summary`, `macro_prior_weight`,
+`horizon_lambda`, `replay`, `replay_buffer_rows`, and
+policy-only `heldout` floor/Act-clear metrics.
 
 ## Acceptance gates
 
@@ -123,10 +123,10 @@ policy-only \`heldout\` floor/Act-clear metrics.
    actual ratios, rather than assuming exact 83/15/2%.
 3. No duplicated/stale replay samples; replay samples in round 2 derive
    from completed round-1 runs; replay and coverage resume identically.
-4. Confirm throughput is affordable. Prioritize \`fresh runs/hour\`,
-   \`PUCT-labeled states/hour\` and \`new card types encountered/hour\`.
-   If costly, reduce \`--h17-search-p16\` and
-   \`--h17-search-p64\` **in a new output directory** (fingerprint changes).
+4. Confirm throughput is affordable. Prioritize `fresh runs/hour`,
+   `PUCT-labeled states/hour` and `new card types encountered/hour`.
+   If costly, reduce `--h17-search-p16` and
+   `--h17-search-p64` **in a new output directory** (fingerprint changes).
 5. Larger independent policy-only evaluation at the first meaningful
    checkpoint (e.g. R10 or R20) before committing to 150–200 rounds.
 
