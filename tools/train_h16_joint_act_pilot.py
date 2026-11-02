@@ -412,6 +412,8 @@ def main() -> None:
                    default=0.4113950303216448)
     p.add_argument("--h17-horizon-target", type=float, default=0.77)
     p.add_argument("--h17-horizon-rounds", type=int, default=200)
+    p.add_argument("--h17-hp-reference", type=int, default=100,
+                   help="Fixed H17 HP-credit denominator (bounded at 1)")
     p.add_argument("--h17-replay-capacity", type=int, default=8192)
     p.add_argument("--h17-replay-samples", type=int, default=256)
     p.add_argument("--h17-replay-age", type=int, default=32)
@@ -450,6 +452,7 @@ def main() -> None:
                 or args.h17_replay_age <= 0
                 or not 0 <= args.h17_replay_weight <= 1
                 or args.h17_horizon_rounds <= 0
+                or args.h17_hp_reference <= 0
                 or not 0 <= args.h17_horizon_initial <=
                 args.h17_horizon_target < 1
             ))):
@@ -595,6 +598,7 @@ def main() -> None:
             auxiliary_horizon_weight=args.auxiliary_horizon_weight,
             combat_credit_weight=args.combat_credit_weight,
             loss_progress_cap=args.loss_progress_cap,
+            hp_reference=(args.h17_hp_reference if args.h17_adaptive else None),
             temperature=args.temperature, minibatch=args.minibatch,
             epochs=args.epochs,
         )
@@ -615,6 +619,7 @@ def main() -> None:
                 completed, source_round=round_index,
                 exposure=coverage.get("playable", {}),
                 loss_progress_cap=args.loss_progress_cap,
+                hp_reference=args.h17_hp_reference,
             )
             coverage = update_coverage(completed, coverage)
             replay = merge_replay(
@@ -658,6 +663,8 @@ def main() -> None:
             "heldout": summarize(evaluation),
             **({
                 "macro_prior_weight": args.macro_prior_weight,
+                "hp_reference": args.h17_hp_reference,
+                "hp_normalization": "min(1, current_hp / fixed_reference)",
                 "card_coverage": coverage,
                 "card_coverage_summary": coverage_summary(coverage),
                 "replay": replay_report,
