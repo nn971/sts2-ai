@@ -14,6 +14,10 @@ from sts2_ai.training.h16_joint_act_pilot import (
     JointActPilotNet,
     PilotDecision,
     PilotEpisode,
+    completed_room_hp,
+    geometric_hp_return,
+    hp_after_current_room,
+    hp_fraction,
 )
 from sts2_ai.training.h17_adaptive import (
     AdaptiveSearch,
@@ -80,6 +84,44 @@ def episode() -> PilotEpisode:
     )
 
 
+
+def test_fixed_hp_reference_rewards_max_hp_gains_without_tablet_exploit():
+    # Same current HP, different maximum HP: fixed normalization agrees.
+    assert hp_fraction(
+        {"hp": 1, "max_hp": 1}, hp_reference=100,
+    ) == pytest.approx(0.01)
+    assert hp_fraction(
+        {"hp": 39, "max_hp": 70}, hp_reference=100,
+    ) == pytest.approx(0.39)
+    assert hp_fraction(
+        {"hp": 80, "max_hp": 80}, hp_reference=100,
+    ) == pytest.approx(0.80)
+    assert hp_fraction(
+        {"hp": 110, "max_hp": 110}, hp_reference=100,
+    ) == 1.0
+    assert hp_fraction(
+        {"hp": 200, "max_hp": 200}, hp_reference=100,
+    ) == 1.0
+    assert hp_fraction({"hp": 1, "max_hp": 1}) == 1.0
+
+    # Tablet of Truth after an event at floor 3: 39/70 -> 1/1.
+    before = state(floor=3, hp=39)
+    after = state(floor=3, hp=1, complete=True)
+    after["max_hp"] = 1
+    frames = (before, after)
+    assert completed_room_hp(frames)[3] == 1.0  # Old biased target.
+    assert completed_room_hp(frames, hp_reference=100)[3] == 0.01
+    assert hp_after_current_room(frames, 0, hp_reference=100) == 0.01
+    lam = 0.4132
+    unfair = geometric_hp_return((1.0,) * 4, 0.0, lam)
+    corrected = geometric_hp_return((0.01,) * 4, 0.0, lam)
+    assert unfair > 0.97
+    assert corrected == pytest.approx(0.01 * unfair)
+
+    with pytest.raises(ValueError, match="HP reference"):
+        hp_fraction({"hp": 30, "max_hp": 70}, hp_reference=0)
+
+
 def test_search_is_mixed_but_preserves_a_random_confidence_audit():
     initial = state()
     assert card_for_action(initial, ACTIONS[0]) == "proto.silent.rare"
@@ -135,10 +177,11 @@ def test_h17_schedules_and_boundaries():
 
 def test_supervised_replay_is_capped_prioritized_and_resume_safe(tmp_path):
     examples = collect_replay(
-        [episode()], source_round=0, exposure={},
+        [episode()], source_round=0, exposure={}, hp_reference=100,
     )
     assert len(examples) == 1
     assert examples[0]["search_policy"] == [0.8, 0.1, 0.1]
+    assert examples[0]["room_hp"][0] == pytest.approx(0.30)
     assert len(examples[0]["room_hp"]) == 16 - 7 + 1
     pool = merge_replay(
         [], examples, round_index=0, exposure={}, capacity=4,
