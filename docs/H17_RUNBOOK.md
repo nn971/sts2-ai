@@ -77,7 +77,7 @@ runs per round and 4 policy-only heldout runs; it exercises actual PUCT,
 the frozen teacher, horizon, replay write/load and metrics.
 
 \`\`\`fish
-set smoke results/h17-adaptive-fullcombat-smoke
+set smoke results/h17-fixedhp100-fullcombat-smoke
 python tools/train_h17_adaptive.py \
     --emulator-root $emu --emulator-revision $rev \
     --macro-model $macro --output-root $smoke \
@@ -91,7 +91,7 @@ python tools/train_h17_adaptive.py \
 to \`$initial\` in the H17 entrypoint and can be overridden explicitly.
 
 \`\`\`fish
-set run results/h17-adaptive-fullcombat-r40
+set run results/h17-fixedhp100-fullcombat-r40
 python tools/train_h17_adaptive.py \
     --emulator-root $emu --emulator-revision $rev \
     --macro-model $macro --output-root $run \
