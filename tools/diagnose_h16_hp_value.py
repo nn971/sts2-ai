@@ -59,6 +59,10 @@ def from_episode(episode: PilotEpisode, *, horizon_lambda: float,
                 or not 0 <= predicted <= 1):
             raise ValueError(f"Invalid HP/value observation at decision {i}")
         phase = "combat" if isinstance(state.get("combat"), dict) else "macro"
+        post_combat = (
+            phase == "macro" and i > 0
+            and isinstance(episode.frames[i - 1].get("combat"), dict)
+        )
         combat_quality = quality.get(i) if phase == "combat" else None
         realized = (
             combat_shaped_hp_return(
@@ -70,7 +74,8 @@ def from_episode(episode: PilotEpisode, *, horizon_lambda: float,
         )
         records.append({
             "seed": episode.seed, "decision_index": i, "floor": floor,
-            "phase": phase, "hp": hp, "max_hp": max_hp,
+            "phase": phase, "post_combat_boundary": post_combat,
+            "hp": hp, "max_hp": max_hp,
             "hp_fraction": hp / max_hp,
             "predicted_value": predicted,
             "realized_training_target": realized,
@@ -200,13 +205,21 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "all_decisions": metrics(rows),
         "first_decision_per_seed_floor_phase": metrics(list(first.values())),
         "by_phase": {phase: metrics(group) for phase, group in groups.items()},
+        "post_combat_boundaries": metrics([
+            row for row in rows if row.get("post_combat_boundary", False)
+        ]),
+        "other_macro_decisions": metrics([
+            row for row in rows if row["phase"] == "macro"
+            and not row.get("post_combat_boundary", False)
+        ]),
         "by_floor_phase": by_floor,
         "by_hp_decile": hp_bins,
         "same_hp_floor_phase_value_spread": conditional[:30],
     }
 
 
-def svg_chart(rows: list[dict[str, Any]]) -> str:
+def svg_chart(rows: list[dict[str, Any]], *,
+              post_combat: bool = False) -> str:
     """Dependency-free two-panel SVG with point cloud and decile means."""
     width, height = 1180, 510
     margin = 62
@@ -222,11 +235,24 @@ def svg_chart(rows: list[dict[str, Any]]) -> str:
         '<text x="590" y="492" text-anchor="middle" font-size="13" '
         'font-family="sans-serif">Current HP / Maximum HP</text>',
     ]
-    for panel, phase in enumerate(("macro", "combat")):
+    panels = (
+        [
+            ("Post-combat continuation", [
+                r for r in rows if r.get("post_combat_boundary", False)
+            ]),
+            ("Other macro states", [
+                r for r in rows if r["phase"] == "macro"
+                and not r.get("post_combat_boundary", False)
+            ]),
+        ] if post_combat else [
+            ("Macro", [r for r in rows if r["phase"] == "macro"]),
+            ("Combat", [r for r in rows if r["phase"] == "combat"]),
+        ]
+    )
+    for panel, (name, subset) in enumerate(panels):
         ox = margin + panel * 580
         oy = origin_y
-        subset = [r for r in rows if r["phase"] == phase]
-        label = escape(phase.title())
+        label = escape(name)
         parts.append(
             f'<text x="{ox + panel_w/2}" y="55" text-anchor="middle" '
             f'font-family="sans-serif" font-size="15">{label} '
@@ -480,7 +506,12 @@ def main() -> None:
         write_json(args.output, result)
         svg_path = args.output.with_suffix(".svg")
         svg_path.write_text(svg_chart(points), encoding="utf-8")
-        print(f"[h16-hp-value] saved {args.output} and {svg_path}", flush=True)
+        post_path = args.output.with_name(args.output.stem + "-postcombat.svg")
+        post_path.write_text(
+            svg_chart(points, post_combat=True), encoding="utf-8",
+        )
+        print(f"[h16-hp-value] saved {args.output}, {svg_path}, "
+              f"and {post_path}", flush=True)
     else:
         print(f"[h16-hp-value] resumable journal: {journal}", flush=True)
 
