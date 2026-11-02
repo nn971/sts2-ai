@@ -85,7 +85,7 @@ def test_thousand_identical_selectable_cards_use_one_pooled_card_object():
     assert encoded.actions[1].members == (2,)
 
 
-def test_distinct_internal_variants_sharing_one_public_card_class_are_disambiguated():
+def test_distinct_internal_variants_sharing_one_public_card_class_share_token():
     # The emulator can distinguish internal combat-card variants while the
     # public card projection remains identical. Retain all legal choices.
     deck = [{"instance_id": i, "card_id": "demo.strike"} for i in range(3)]
@@ -99,7 +99,8 @@ def test_distinct_internal_variants_sharing_one_public_card_class_are_disambigua
         for i in range(3)
     )
     encoded = encode_h16_decision(public, choices)
-    assert len(set(encoded.actions)) == 3
+    assert len(encoded.actions) == 3  # Preserve full emulator branching.
+    assert len(set(encoded.actions)) == 1  # Identical public tokens.
     assert all(a.members == (2,) for a in encoded.actions)
     reversed_encoded = encode_h16_decision(public, choices[::-1])
     assert reversed_encoded.actions == encoded.actions[::-1]
