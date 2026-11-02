@@ -172,7 +172,7 @@ def collect(
         "search_depth": (
             None if args.search_depth == 0 else args.search_depth
         ),
-        "max_simulation_steps": getattr(args, "max_simulation_steps", 512),
+        "max_simulation_steps": args.max_simulation_steps,
         "study_seed": args.study_seed,
         "rollout_transport": args.rollout_transport,
         "actor_inference": args.actor_inference,
@@ -403,6 +403,8 @@ def main() -> None:
                    help="0 means full-combat PUCT; otherwise a positive depth")
     p.add_argument("--h17-adaptive", action="store_true",
                    help="Enable H17 adaptive deep search and training schedules")
+    p.add_argument("--max-simulation-steps", type=int, default=512,
+                   help="Full-combat search watchdog, never a value cutoff")
     p.add_argument("--h17-search-p16", type=float, default=0.15)
     p.add_argument("--h17-search-p64", type=float, default=0.02)
     p.add_argument("--h17-macro-decay-rounds", type=int, default=120)
@@ -424,7 +426,7 @@ def main() -> None:
     args = p.parse_args()
     if (min(args.rounds, args.runs_per_round, args.heldout_runs, args.workers,
             args.max_decisions, args.search_start_round,
-            args.simulations, args.minibatch, args.epochs,
+            args.simulations, args.max_simulation_steps, args.minibatch, args.epochs,
             args.actor_max_batch) <= 0
             or args.search_depth < 0
             or (args.search_depth == 0 and not args.h17_adaptive)
@@ -475,7 +477,9 @@ def main() -> None:
             if key not in (
                 "execute", "resume", "output_root", "initial_h9",
                 "initial_h16", "macro_model", "emulator_root", "ai_root", "device",
-            ) and (args.h17_adaptive or not key.startswith("h17_"))
+            ) and (args.h17_adaptive or (
+                not key.startswith("h17_") and key != "max_simulation_steps"
+            ))
         },
     }
     fingerprint = digest(source)
@@ -610,6 +614,7 @@ def main() -> None:
             incoming = collect_replay(
                 completed, source_round=round_index,
                 exposure=coverage.get("playable", {}),
+                loss_progress_cap=args.loss_progress_cap,
             )
             coverage = update_coverage(completed, coverage)
             replay = merge_replay(
