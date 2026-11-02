@@ -62,6 +62,7 @@ def collect_replay(
     episodes: Sequence[PilotEpisode], *, source_round: int,
     exposure: Mapping[str, int], max_macro_per_run: int = 8,
     max_combat_per_run: int = 16,
+    loss_progress_cap: float = 0.2,
 ) -> list[dict[str, Any]]:
     """Select varied, rare-card decision states with genuine completed labels."""
     if source_round < 0 or min(max_macro_per_run, max_combat_per_run) < 0:
@@ -76,7 +77,7 @@ def collect_replay(
         quality: dict[int, float] = {}
         for fight in combat_results(episode.frames, episode.outcome):
             for i in range(fight.start, fight.end):
-                quality[i] = fight.quality()
+                quality[i] = fight.quality(loss_progress_cap)
         phases: dict[str, list[dict[str, Any]]] = {"macro": [], "combat": []}
         for i, decision in enumerate(episode.decisions):
             state = episode.frames[i]
