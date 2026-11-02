@@ -45,13 +45,13 @@ from sts2_ai.training.h16_episode_metrics import (
     combat_results,
     enemy_hp_progress,
 )
-from sts2_ai.training.h17_adaptive import AdaptiveSearch, choose_budget
 from sts2_ai.training.h16_public_codec import (
     H16_CODEC,
     LEGACY_H16_CODEC,
     PREVIOUS_H16_CODEC,
     encode_h16_decision,
 )
+from sts2_ai.training.h17_adaptive import AdaptiveSearch, choose_budget
 
 SCHEMA = "sts2-h16-act1-geometric-horizon-every-combat-puct-v5"
 PREVIOUS_SCHEMA = "sts2-h16-act1-geometric-horizon-every-combat-puct-v4"
@@ -384,7 +384,7 @@ class PilotPolicy:
         self, observation: Observation, actions: tuple[LegalAction, ...],
         public: dict[str, Any] | None = None,
     ) -> tuple[float, ...]:
-        if (self.macro_teacher is None or
+        if (self.macro_teacher is None or self.macro_prior_weight == 0 or
                 isinstance((public if public is not None else
                             public_state(observation)).get("combat"), dict)):
             return (0.0,) * len(actions)
