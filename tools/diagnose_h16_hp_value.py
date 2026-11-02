@@ -123,22 +123,41 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     def metrics(data: list[dict[str, Any]]) -> dict[str, Any]:
         usable = [r for r in data if r["realized_training_target"] is not None]
+        r = correlation(data, "hp_fraction", "predicted_value")
+        vbar = mean(row["predicted_value"] for row in data) if data else None
+        hbar = mean(row["hp_fraction"] for row in data) if data else None
+        denominator = (
+            sum((row["hp_fraction"] - hbar)**2 for row in data)
+            if hbar is not None else 0.0
+        )
+        slope = (
+            sum((row["hp_fraction"] - hbar)
+                * (row["predicted_value"] - vbar) for row in data) / denominator
+            if denominator > 0 and vbar is not None else None
+        )
         return {
             "count": len(data),
-            "hp_mean": mean(r["hp_fraction"] for r in data) if data else None,
-            "value_mean": mean(r["predicted_value"] for r in data) if data else None,
-            "hp_value_pearson": correlation(
-                data, "hp_fraction", "predicted_value",
+            "hp_mean": hbar,
+            "value_mean": vbar,
+            "hp_value_pearson": r,
+            "hp_value_linear_r2": r * r if r is not None else None,
+            "hp_value_slope": slope,
+            "hp_value_intercept": (
+                vbar - slope * hbar if slope is not None else None
             ),
             "within_floor_phase_pearson": within_floor_phase_correlation(data),
             "target_count": len(usable),
             "target_mae": (
-                mean(abs(r["predicted_value"] - r["realized_training_target"])
-                     for r in usable) if usable else None
+                mean(abs(row["predicted_value"] - row["realized_training_target"])
+                     for row in usable) if usable else None
             ),
             "target_mse": (
-                mean((r["predicted_value"] - r["realized_training_target"])**2
-                     for r in usable) if usable else None
+                mean((row["predicted_value"] - row["realized_training_target"])**2
+                     for row in usable) if usable else None
+            ),
+            "current_hp_baseline_target_mae": (
+                mean(abs(row["hp_fraction"] - row["realized_training_target"])
+                     for row in usable) if usable else None
             ),
         }
 
