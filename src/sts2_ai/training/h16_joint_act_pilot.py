@@ -536,6 +536,7 @@ def local_combat_puct(
     actions: tuple[LegalAction, ...], policy: PilotPolicy, *,
     simulations: int, depth: int | None, seed: int,
     rollout_transport: str = "fused",
+    max_simulation_steps: int = 512,
 ) -> tuple[tuple[float, ...], int]:
     """Combat PUCT: capped depth or full search to combat termination.
 
@@ -559,6 +560,7 @@ def local_combat_puct(
         adapter, evaluator, max_depth=depth, c_puct=1.5,
         tree_expansion_mode="full_depth", leaf_mode="value", seed=seed,
         free_card_selection_steps=True,
+        max_simulation_steps=max_simulation_steps,
     ).search(root, simulations=simulations)
     return result.policy, result.transitions
 
@@ -586,10 +588,12 @@ def collect_act_episode(
     search_probability: float, max_searches: int,
     simulations: int, search_depth: int | None,
     rng: random.Random, rollout_transport: str = "fused",
+    max_simulation_steps: int = 512,
 ) -> PilotEpisode:
     if not (0 <= search_probability <= 1 and max_searches >= 0
             and max_decisions > 0 and simulations > 0
             and (search_depth is None or search_depth > 0)
+            and max_simulation_steps > 0
             and rollout_transport in ("legacy", "fused")):
         raise ValueError("Invalid Act collection settings")
     state = reset_training_run(
@@ -636,6 +640,7 @@ def collect_act_episode(
                     simulations=simulations, depth=search_depth,
                     seed=rng.randrange(2**63),
                     rollout_transport=rollout_transport,
+                    max_simulation_steps=max_simulation_steps,
                 )
                 search_transitions += count
                 searches += 1
