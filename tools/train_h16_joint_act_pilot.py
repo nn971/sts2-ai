@@ -123,6 +123,7 @@ def _worker_run(seed: str) -> PilotEpisode:
         search_depth=cfg["search_depth"],
         rng=rng,
         rollout_transport=cfg["rollout_transport"],
+        max_simulation_steps=cfg["max_simulation_steps"],
     )
     return dataclass_replace(
         episode,
@@ -156,6 +157,7 @@ def collect(
         "max_searches": args.max_searches if search else 0,
         "simulations": args.simulations,
         "search_depth": args.search_depth,
+        "max_simulation_steps": getattr(args, "max_simulation_steps", 512),
         "study_seed": args.study_seed,
         "rollout_transport": args.rollout_transport,
         "actor_inference": args.actor_inference,
