@@ -52,7 +52,10 @@ to see floor-specific correlations; and
 \`analysis.first_decision_per_seed_floor_phase\` as a robustness check that
 avoids giving the many consecutive combat decisions excessive weight.
 \`within_floor_phase_pearson\` removes floor/phase group means before computing
-HP/value correlation. Finally,
+HP/value correlation. `hp_value_linear_r2` reports how much of the critic's
+predicted-value variation a simple linear function of current HP explains,
+and `current_hp_baseline_target_mae` compares a trivial current-HP predictor
+against the critic's `target_mae`. Finally,
 \`analysis.same_hp_floor_phase_value_spread\` identifies states with **identical
 current HP / maximum HP, floor, and phase** whose value predictions differ;
 variation within such groups is direct evidence that the critic uses additional
