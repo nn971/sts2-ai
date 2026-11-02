@@ -84,7 +84,7 @@ def test_h16_154_select_cards_choices_all_have_distinct_compositional_tokens():
     assert not torch.allclose(logits[0, 1], logits[0, 2])
 
 
-def test_colliding_selection_tokens_feed_finite_distinct_policy_logits():
+def test_publicly_identical_selection_tokens_feed_equal_policy_logits():
     # A PUCT leaf must be able to evaluate legal internal variants even when
     # they alias to the same publicly observed card class.
     public = state()
@@ -96,7 +96,8 @@ def test_colliding_selection_tokens_feed_finite_distinct_policy_logits():
         LegalAction("10", "select_cards", '{"CardInstanceIds":[10]}'),
     )
     encoded = encode_h16_decision(public, actions)
-    assert len(set(encoded.actions)) == 2
+    assert len(encoded.actions) == 2
+    assert encoded.actions[0] == encoded.actions[1]
     batch = collate_h7([encoded])
     torch.manual_seed(19)
     net = JointActPilotNet(SharedObjectTransformer(
@@ -106,7 +107,7 @@ def test_colliding_selection_tokens_feed_finite_distinct_policy_logits():
         scores, _, _ = net(batch)
     assert torch.isfinite(scores).all()
     assert scores.shape == (1, 2)
-    assert not torch.allclose(scores[0, 0], scores[0, 1])
+    assert torch.allclose(scores[0, 0], scores[0, 1])
 
 
 def test_puct_expands_alias_selection_node_instead_of_crashing():
