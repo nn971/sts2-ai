@@ -312,6 +312,7 @@ class PilotDecision:
     chosen_index: int
     macro_offset: tuple[float, ...]
     search_policy: tuple[float, ...] | None = None
+    predicted_value: float | None = None
 
 
 @dataclass(frozen=True)
@@ -627,7 +628,7 @@ def collect_act_episode(
                        else tuple(backend.legal_actions(state)))
             if not actions:
                 raise RuntimeError("Nonterminal run has no legal player actions")
-            scores, _, offsets = policy.infer(observation, actions)
+            scores, predicted_value, offsets = policy.infer(observation, actions)
             search_policy = None
             should_search = should_search_combat(
                 public, actions, searches=searches,
@@ -653,7 +654,7 @@ def collect_act_episode(
             else:
                 chosen = _sample(_softmax(scores, policy.temperature), rng)
             decisions.append(PilotDecision(
-                observation, actions, chosen, offsets, search_policy,
+                observation, actions, chosen, offsets, search_policy, predicted_value,
             ))
             if rollout_transport == "fused":
                 (next_frame,) = backend.batch_rollout_step_frame(
