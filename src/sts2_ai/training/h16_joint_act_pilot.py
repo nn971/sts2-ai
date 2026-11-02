@@ -69,11 +69,19 @@ def public_state(observation: Observation) -> dict[str, Any]:
     return state
 
 
-def hp_fraction(state: dict[str, Any]) -> float:
+def hp_fraction(
+    state: dict[str, Any], *, hp_reference: int | None = None,
+) -> float:
+    """Bounded HP credit: H17 fixed starting-HP reference; H16 dynamic cap."""
     hp, max_hp = state.get("hp"), state.get("max_hp")
     if type(hp) is not int or type(max_hp) is not int or max_hp <= 0:
         raise ValueError("Missing public player HP")
-    return min(1.0, max(0.0, hp / max_hp))
+    if hp_reference is not None and (
+        type(hp_reference) is not int or hp_reference <= 0
+    ):
+        raise ValueError("HP reference must be a positive fixed integer")
+    scale = max_hp if hp_reference is None else hp_reference
+    return min(1.0, max(0.0, hp / scale))
 
 
 def floor_completed(state: dict[str, Any], floor: int) -> bool:
@@ -87,7 +95,7 @@ def floor_completed(state: dict[str, Any], floor: int) -> bool:
 
 def hp_at_future_floor(
     frames: Sequence[dict[str, Any]], decision_index: int, *,
-    horizon: int,
+    horizon: int, hp_reference: int | None = None,
 ) -> float:
     """HP after a later completed room, or zero on an earlier terminal loss.
 
@@ -102,12 +110,13 @@ def hp_at_future_floor(
     target = min(16, floor + horizon)
     for frame in frames[decision_index + 1:]:
         if floor_completed(frame, target):
-            return hp_fraction(frame)
+            return hp_fraction(frame, hp_reference=hp_reference)
     return 0.0
 
 
 def hp_after_current_room(
-    frames: Sequence[dict[str, Any]], decision_index: int,
+    frames: Sequence[dict[str, Any]], decision_index: int, *,
+    hp_reference: int | None = None,
 ) -> float:
     """Normalized HP at the next room-completion boundary after a decision.
 
@@ -128,16 +137,19 @@ def hp_after_current_room(
         # Any outstanding Act-transition decision is already beyond the
         # final room. Preserve the actual terminal HP instead of assigning
         # a nonexistent floor 17 a value of zero.
-        return hp_fraction(frames[-1])
+        return hp_fraction(frames[-1], hp_reference=hp_reference)
 
     target = floor + 1 if floor == 0 or floor_completed(starting, floor) else floor
     for frame in frames[decision_index + 1:]:
         if floor_completed(frame, target):
-            return hp_fraction(frame)
+            return hp_fraction(frame, hp_reference=hp_reference)
     return 0.0
 
 
-def completed_room_hp(frames: Sequence[dict[str, Any]]) -> dict[int, float]:
+def completed_room_hp(
+    frames: Sequence[dict[str, Any]], *,
+    hp_reference: int | None = None,
+) -> dict[int, float]:
     """First observed post-completion HP for each Act-1 floor.
 
     Take the first observable boundary at which the room is completed;
@@ -153,7 +165,9 @@ def completed_room_hp(frames: Sequence[dict[str, Any]]) -> dict[int, float]:
                 continue
             floor = room.get("floor")
             if type(floor) is int and 1 <= floor <= 16 and floor not in completed:
-                completed[floor] = hp_fraction(state)
+                completed[floor] = hp_fraction(
+                    state, hp_reference=hp_reference,
+                )
     return completed
 
 
@@ -699,6 +713,7 @@ def train_joint_cohort(
     auxiliary_horizon_weight: float = 0.5,
     combat_credit_weight: float = 0.25,
     loss_progress_cap: float = 0.2,
+    hp_reference: int | None = None,
 ) -> dict[str, float | int]:
     """One shared optimizer for both policies and horizon-conditioned critic.
 
@@ -713,14 +728,18 @@ def train_joint_cohort(
             or minibatch <= 0 or epochs <= 0 or search_weight < 0
             or auxiliary_horizon_weight < 0
             or not 0 <= combat_credit_weight <= 1
-            or not 0 <= loss_progress_cap < 1):
+            or not 0 <= loss_progress_cap < 1
+            or (hp_reference is not None
+                and (type(hp_reference) is not int or hp_reference <= 0))):
         raise ValueError("Invalid joint training configuration")
     current_lambda = horizon_lambda if hp_target == "geometric" else 0.0
     entries: list[tuple[PilotDecision, float, tuple[float, ...], float | None]] = []
     for episode in episodes:
         if not episode.complete:
             raise ValueError("Censored episodes cannot train geometric returns")
-        completed = completed_room_hp(episode.frames)
+        completed = completed_room_hp(
+            episode.frames, hp_reference=hp_reference,
+        )
         act = float(episode.outcome == "act_clear")
         quality_by_index: dict[int, float] = {}
         for result in combat_results(episode.frames, episode.outcome):
@@ -905,6 +924,7 @@ def train_joint_cohort(
         "combat_credit_weight": combat_credit_weight,
         "loss_progress_cap": loss_progress_cap,
         "horizon_lambda": current_lambda,
+        "hp_reference": hp_reference,
         "effective_horizon": (1.0 / (1.0 - current_lambda)
                               if current_lambda < 1.0 else None),
     }
