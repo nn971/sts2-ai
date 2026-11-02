@@ -41,6 +41,10 @@ from sts2_ai.search.combat_puct import (
     CombatFrame,
     CombatPuct,
 )
+from sts2_ai.training.h16_episode_metrics import (
+    combat_results,
+    enemy_hp_progress,
+)
 from sts2_ai.training.h16_public_codec import (
     H16_CODEC,
     LEGACY_H16_CODEC,
@@ -48,8 +52,9 @@ from sts2_ai.training.h16_public_codec import (
     encode_h16_decision,
 )
 
-SCHEMA = "sts2-h16-act1-geometric-horizon-every-combat-puct-v4"
-PREVIOUS_SCHEMA = "sts2-h16-act1-geometric-horizon-every-combat-puct-v3"
+SCHEMA = "sts2-h16-act1-geometric-horizon-every-combat-puct-v5"
+PREVIOUS_SCHEMA = "sts2-h16-act1-geometric-horizon-every-combat-puct-v4"
+OLDER_SCHEMA = "sts2-h16-act1-geometric-horizon-every-combat-puct-v3"
 LEGACY_SCHEMA = "sts2-h16-act1-geometric-horizon-every-combat-puct-v2"
 PUBLIC_POLICY = InformationPolicy(FAIR_POLICY_ID)
 
@@ -183,6 +188,26 @@ def geometric_hp_return(
     return result
 
 
+def combat_shaped_hp_return(
+    room_hp: Sequence[float], act_clear: float, horizon_lambda: float,
+    *, combat_quality: float | None, combat_credit_weight: float = 0.25,
+) -> float:
+    """Leave macro values unchanged; add strictly bounded combat credit.
+
+    For the current combat, a victory has quality 1. On defeat quality is
+    capped below 1. A completed fight's return is at least alpha, whereas
+    death within that fight gives at most alpha * loss_progress_cap.
+    """
+    if not 0 <= combat_credit_weight <= 1:
+        raise ValueError("Invalid combat credit weight")
+    base = geometric_hp_return(room_hp, act_clear, horizon_lambda)
+    if combat_quality is None:
+        return base
+    if not math.isfinite(combat_quality) or not 0 <= combat_quality <= 1:
+        raise ValueError("Combat quality must be in [0,1]")
+    return (1 - combat_credit_weight) * base + combat_credit_weight * combat_quality
+
+
 def _softmax(logits: Sequence[float], temperature: float) -> tuple[float, ...]:
     if temperature <= 0 or not logits or not all(math.isfinite(x) for x in logits):
         raise ValueError("Invalid action logits or temperature")
@@ -270,7 +295,8 @@ class JointActPilotNet(nn.Module):
         checkpoint = torch.load(path, map_location="cpu", weights_only=True)
         if (checkpoint.get("schema"), checkpoint.get("codec")) not in (
             (SCHEMA, H16_CODEC),
-            (PREVIOUS_SCHEMA, PREVIOUS_H16_CODEC),
+            (PREVIOUS_SCHEMA, H16_CODEC),
+            (OLDER_SCHEMA, PREVIOUS_H16_CODEC),
             (LEGACY_SCHEMA, LEGACY_H16_CODEC),
         ):
             raise ValueError("Expected a compatible H16 joint Act checkpoint/codec")
@@ -331,9 +357,13 @@ class PilotPolicy:
         self, model: JointActPilotNet | None, *, temperature: float,
         horizon_lambda: float, macro_teacher: PhaseSplitNeuralModel | None = None,
         macro_prior_weight: float = 0.5, remote_actor: Any = None,
+        combat_credit_weight: float = 0.25, loss_progress_cap: float = 0.2,
     ) -> None:
         if not 0 <= horizon_lambda <= 1 or temperature <= 0 or macro_prior_weight < 0:
             raise ValueError("Invalid pilot continuation/policy weighting")
+        if (not 0 <= combat_credit_weight <= 1
+                or not 0 <= loss_progress_cap < 1):
+            raise ValueError("Invalid combat win/loss progress weighting")
         if (model is None) == (remote_actor is None):
             raise ValueError("H16 policy needs exactly one local or remote actor")
         self.model = model.eval() if model is not None else None
@@ -342,6 +372,8 @@ class PilotPolicy:
         self.horizon_lambda = horizon_lambda
         self.macro_teacher = macro_teacher
         self.macro_prior_weight = macro_prior_weight
+        self.combat_credit_weight = combat_credit_weight
+        self.loss_progress_cap = loss_progress_cap
         self.inference_calls = 0
         self.inference_seconds = 0.0
 
@@ -419,6 +451,7 @@ class NativeRootConditionedSampler:
         self.policy = policy
         self._active: StateHandle | None = None
         self._owned: list[StateHandle] = []
+        self._combat_frames: list[dict[str, Any]] = []
 
     def begin_simulation(
         self, root: CombatFrame, search_rng: random.Random,
@@ -427,6 +460,7 @@ class NativeRootConditionedSampler:
             raise RuntimeError("Search simulation was already active")
         self._active = self.backend.fork(self.root)
         self._owned = [self._active]
+        self._combat_frames = [public_state(root.observation)]
 
     def step(
         self, frame: CombatFrame, action: LegalAction,
@@ -450,6 +484,8 @@ class NativeRootConditionedSampler:
         self._owned.append(transition.child)
         public = public_state(observation)
         inside_combat = isinstance(public.get("combat"), dict)
+        if inside_combat:
+            self._combat_frames.append(public)
         terminal = transition.terminal
         if terminal:
             actions = ()
@@ -457,9 +493,27 @@ class NativeRootConditionedSampler:
             raise ValueError("Nonterminal emulator fork has no legal actions")
         boundary_value = None
         if terminal or not inside_combat:
-            boundary_value = 2.0 * self.policy.value_at(
-                observation, actions, terminal=terminal,
-            )
+            if terminal and not certified_native_act1_clear(public):
+                # Losing still carries a small, bounded enemy-damage signal.
+                # In particular, a dead player is always valued below a
+                # combat victory regardless of the enemy HP removed.
+                fraction = enemy_hp_progress(self._combat_frames)
+                value = (getattr(self.policy, "combat_credit_weight", 0.25)
+                         * getattr(self.policy, "loss_progress_cap", 0.2)
+                         * fraction)
+            elif not inside_combat:
+                # Winning the current fight always outranks dying after
+                # inflicting damage, even when future Act HP is very low.
+                continuation = self.policy.value_at(
+                    observation, actions, terminal=terminal,
+                )
+                alpha = getattr(self.policy, "combat_credit_weight", 0.25)
+                value = alpha + (1 - alpha) * continuation
+            else:
+                value = self.policy.value_at(
+                    observation, actions, terminal=terminal,
+                )
+            boundary_value = 2.0 * value
             actions = ()
         return CombatFrame(
             information_key=frame.information_key + "/" + action.action_id,
@@ -473,6 +527,7 @@ class NativeRootConditionedSampler:
                 self.backend.release_many(self._owned)
         finally:
             self._owned = []
+            self._combat_frames = []
             self._active = None
 
 
@@ -619,6 +674,8 @@ def train_joint_cohort(
     epochs: int = 1, entropy_weight: float = 0.001,
     search_weight: float = 0.5, hp_target: str = "geometric",
     auxiliary_horizon_weight: float = 0.5,
+    combat_credit_weight: float = 0.25,
+    loss_progress_cap: float = 0.2,
 ) -> dict[str, float | int]:
     """One shared optimizer for both policies and horizon-conditioned critic.
 
@@ -631,18 +688,29 @@ def train_joint_cohort(
     if (hp_target not in ("geometric", "post_room")
             or not 0 <= horizon_lambda <= 1 or temperature <= 0
             or minibatch <= 0 or epochs <= 0 or search_weight < 0
-            or auxiliary_horizon_weight < 0):
+            or auxiliary_horizon_weight < 0
+            or not 0 <= combat_credit_weight <= 1
+            or not 0 <= loss_progress_cap < 1):
         raise ValueError("Invalid joint training configuration")
     current_lambda = horizon_lambda if hp_target == "geometric" else 0.0
-    entries: list[tuple[PilotDecision, float, tuple[float, ...]]] = []
+    entries: list[tuple[PilotDecision, float, tuple[float, ...], float | None]] = []
     for episode in episodes:
         if not episode.complete:
             raise ValueError("Censored episodes cannot train geometric returns")
         completed = completed_room_hp(episode.frames)
         act = float(episode.outcome == "act_clear")
+        quality_by_index: dict[int, float] = {}
+        for result in combat_results(episode.frames, episode.outcome):
+            for index in range(result.start, result.end):
+                quality_by_index[index] = result.quality(loss_progress_cap)
         for i, decision in enumerate(episode.decisions):
             rooms = remaining_room_hp(episode.frames[i], completed)
-            entries.append((decision, act, rooms))
+            combat = isinstance(episode.frames[i].get("combat"), dict)
+            if combat and i not in quality_by_index:
+                raise ValueError("Complete episode has unlabelled combat decisions")
+            entries.append((
+                decision, act, rooms, quality_by_index[i] if combat else None,
+            ))
     if not entries:
         raise ValueError("No complete Act decisions for joint learning")
     rng = random.Random(31001 + len(entries))
@@ -652,7 +720,7 @@ def train_joint_cohort(
     updates = 0
     phase_counts = {"combat": 0, "macro": 0}
     search_roots = 0
-    for decision, _, _ in entries:
+    for decision, _, _, _ in entries:
         phase = "combat" if isinstance(
             public_state(decision.observation).get("combat"), dict,
         ) else "macro"
@@ -665,7 +733,7 @@ def train_joint_cohort(
             encoded = [
                 encode_h16_decision(
                     public_state(decision.observation), decision.legal_actions,
-                ) for decision, _, _ in chunk
+                ) for decision, _, _, _ in chunk
             ]
             batch = collate_h7(encoded).to(device)
             aux_lambdas = torch.tensor(
@@ -685,18 +753,18 @@ def train_joint_cohort(
                 phases = [enc.phase for enc in encoded]
                 floors = [
                     public_state(decision.observation).get("floor")
-                    for decision, _, _ in chunk
+                    for decision, _, _, _ in chunk
                 ]
                 raise FloatingPointError(
                     "H16 nonfinite batched forward at "
                     f"minibatch={start // minibatch}, phases={phases}, "
                     f"floors={floors}, action_lengths="
-                    f"{[len(d.legal_actions) for d, _, _ in chunk]}"
+                    f"{[len(d.legal_actions) for d, _, _, _ in chunk]}"
                 )
             hp_hat = torch.sigmoid(hp_logit)
             aux_hp_hat = torch.sigmoid(aux_hp_logit)
             offsets = torch.zeros_like(logits)
-            for i, (decision, _, _) in enumerate(chunk):
+            for i, (decision, _, _, _) in enumerate(chunk):
                 offsets[i, :len(decision.macro_offset)] = torch.tensor(
                     decision.macro_offset, device=device, dtype=logits.dtype,
                 )
@@ -715,10 +783,24 @@ def train_joint_cohort(
             ).sum(dim=1).mean()
             aux_values = aux_lambdas.detach().cpu().tolist()
             targets = torch.tensor(
-                [[act,
-                  geometric_hp_return(room_hp, act, current_lambda),
-                  geometric_hp_return(room_hp, act, aux)]
-                 for (_, act, room_hp), aux in zip(chunk, aux_values, strict=True)],
+                [
+                    [
+                        act,
+                        combat_shaped_hp_return(
+                            room_hp, act, current_lambda,
+                            combat_quality=quality,
+                            combat_credit_weight=combat_credit_weight,
+                        ),
+                        combat_shaped_hp_return(
+                            room_hp, act, aux,
+                            combat_quality=quality,
+                            combat_credit_weight=combat_credit_weight,
+                        ),
+                    ]
+                    for (_, act, room_hp, quality), aux in zip(
+                        chunk, aux_values, strict=True,
+                    )
+                ],
                 dtype=logits.dtype, device=device,
             )
             target_act, target_hp, target_aux_hp = (
@@ -738,7 +820,7 @@ def train_joint_cohort(
             mixed_value = hp_hat.detach()
             ordinary: dict[str, list[Tensor]] = {"macro": [], "combat": []}
             search_ce: list[Tensor] = []
-            for i, ((decision, _, _), enc) in enumerate(zip(chunk, encoded, strict=True)):
+            for i, ((decision, _, _, _), enc) in enumerate(zip(chunk, encoded, strict=True)):
                 if decision.search_policy is None:
                     phase = "combat" if enc.phase == "combat" else "macro"
                     ordinary[phase].append(
@@ -797,6 +879,8 @@ def train_joint_cohort(
         "macro_decisions": phase_counts["macro"],
         "combat_decisions": phase_counts["combat"],
         "search_roots": search_roots,
+        "combat_credit_weight": combat_credit_weight,
+        "loss_progress_cap": loss_progress_cap,
         "horizon_lambda": current_lambda,
         "effective_horizon": (1.0 / (1.0 - current_lambda)
                               if current_lambda < 1.0 else None),

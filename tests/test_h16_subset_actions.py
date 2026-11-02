@@ -1,17 +1,24 @@
 """H16 action subset encoding and collision auditor regressions."""
 from __future__ import annotations
 
+import json
 from itertools import combinations
 
 import pytest
 import torch
 
-from sts2_ai.emulator.protocol import LegalAction
+from sts2_ai.emulator import FAIR_POLICY_ID
+from sts2_ai.emulator.protocol import LegalAction, Observation
 from sts2_ai.models.packed_actor_collation import collate_h7_actor_packed
 from sts2_ai.models.shared_transformer import (
     H7Config,
     SharedObjectTransformer,
     collate_h7,
+)
+from sts2_ai.search.combat_puct import (
+    H16_EXPERIMENTAL_ROOT_CONDITIONED_CAPABILITY,
+    CombatFrame,
+    CombatPuct,
 )
 from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet
 from sts2_ai.training.h16_public_codec import encode_h16_decision
@@ -77,6 +84,97 @@ def test_h16_154_select_cards_choices_all_have_distinct_compositional_tokens():
     assert logits.shape == (1, 154)
     # Selected card properties are actually reflected in action predictions.
     assert not torch.allclose(logits[0, 1], logits[0, 2])
+
+
+def test_publicly_identical_selection_tokens_feed_equal_policy_logits():
+    # A PUCT leaf must be able to evaluate legal internal variants even when
+    # they alias to the same publicly observed card class.
+    public = state()
+    public["combat"]["discard_pile"] = [
+        {"instance_id": i, "card_id": "demo.same"} for i in (6, 10)
+    ]
+    actions = (
+        LegalAction("6", "select_cards", '{"CardInstanceIds":[6]}'),
+        LegalAction("10", "select_cards", '{"CardInstanceIds":[10]}'),
+    )
+    encoded = encode_h16_decision(public, actions)
+    assert len(encoded.actions) == 2
+    assert encoded.actions[0] == encoded.actions[1]
+    batch = collate_h7([encoded])
+    torch.manual_seed(19)
+    net = JointActPilotNet(SharedObjectTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64),
+    )).eval()
+    with torch.inference_mode():
+        scores, _, _ = net(batch)
+    assert torch.isfinite(scores).all()
+    assert scores.shape == (1, 2)
+    assert torch.allclose(scores[0, 0], scores[0, 1])
+
+
+def test_puct_expands_alias_selection_node_instead_of_crashing():
+    # Regression for the observed floor-5 PUCT leaf collision [6] versus [10].
+    public = state()
+    public["combat"]["discard_pile"] = [
+        {"instance_id": i, "card_id": "demo.same"} for i in (6, 10)
+    ]
+    aliases = (
+        LegalAction("6", "select_cards", '{"CardInstanceIds":[6]}'),
+        LegalAction("10", "select_cards", '{"CardInstanceIds":[10]}'),
+    )
+
+    def observation(suffix):
+        return Observation(
+            FAIR_POLICY_ID, json.dumps(public), "alias-test-" + suffix,
+        )
+
+    root = CombatFrame(
+        "root", observation("root"), (
+            LegalAction("start-a", "end_turn", "{}"),
+            LegalAction("start-b", "other_choice", '{"ChoiceId":1}'),
+        ),
+    )
+
+    class Sampler:
+        fair_combat_capability_id = H16_EXPERIMENTAL_ROOT_CONDITIONED_CAPABILITY
+
+        def begin_simulation(self, root_frame, rng):
+            assert root_frame.information_key == "root"
+
+        def step(self, current, action, rng):
+            if current.information_key == "root":
+                return CombatFrame(
+                    "alias-" + action.action_id,
+                    observation(action.action_id),
+                    aliases,
+                )
+            return CombatFrame(
+                current.information_key + "/" + action.action_id,
+                observation("terminal"),
+                (),
+                terminal_reward=1.0,
+            )
+
+        def end_simulation(self):
+            pass
+
+    torch.manual_seed(27)
+    net = JointActPilotNet(SharedObjectTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64),
+    )).eval()
+
+    def evaluator(obs, menu):
+        enc = encode_h16_decision(json.loads(obs.payload_json), menu)
+        with torch.inference_mode():
+            logits, _, values = net(collate_h7([enc]))
+        return (tuple(float(v) for v in logits[0]), float(values[0]))
+
+    result = CombatPuct(
+        Sampler(), evaluator, max_depth=2, tree_expansion_mode="full_depth",
+        free_card_selection_steps=True,
+    ).search(root, simulations=4)
+    assert result.transitions >= 4
+    assert result.maximum_expanded_depth >= 1
 
 
 def test_h16_rejects_missing_public_subset_candidates():

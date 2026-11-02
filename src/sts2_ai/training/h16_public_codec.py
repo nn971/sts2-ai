@@ -33,6 +33,7 @@ MAX_EXTRA_TOKENS = 64
 # Once per process: expose unusual real/search menus without dumping states.
 _LARGE_MENU_REPORTED = False
 _CURRENT_EPISODE_SEED: str | None = None
+_SELECT_ALIAS_REPORTED = False
 
 
 def set_h16_rollout_seed(seed: str | None) -> None:
@@ -172,26 +173,52 @@ def encode_h16_decision(
         encoded_actions.append(ActionToken(
             old.kind, semantic, old.source, old.target,
         ))
-    # O(actions), almost no allocations: compare payload JSON only when
-    # identical structural tokens appear. Inference sees exactly this token
-    # structure; distinct public choices must never be silently aliased.
+    # Some full emulator card states differ while their *public* card
+    # representations are identical. Player-observationally equivalent
+    # singleton selections must share an action token; distinct legal
+    # actions still remain available for exact emulator/search transitions.
+    # Never encode a synthetic ordinal based on opaque instance IDs:
+    # that would leak an arbitrary, non-generalizable distinction.
     seen: dict[ActionToken, Any] = {}
+    aliases: list[tuple[Any, Any]] = []
     for action, token in zip(actions, encoded_actions, strict=True):
-        prior = seen.get(token)
-        if (prior is not None
-                and (prior.kind != action.kind
-                     or prior.payload_json != action.payload_json)):
-            left = json.loads(prior.payload_json)
-            right = json.loads(action.payload_json)
-            if prior.kind != action.kind or left != right:
+        previous = seen.get(token)
+        if previous is not None and (
+            previous.kind != action.kind
+            or json.loads(previous.payload_json) != json.loads(action.payload_json)
+        ):
+            if (
+                base.phase == "combat"
+                and action.kind == previous.kind == "select_cards"
+                and len(token.members) == 1
+            ):
+                # The common member pointer proves the two candidate IDs
+                # were pooled into the same public selection-card class.
+                aliases.append((previous, action))
+            else:
                 raise ValueError(
                     "H16 action representation collision: "
                     f"phase={base.phase}, floor={state.get('floor')}, "
                     f"kind={action.kind}, payloads="
-                    f"{str(prior.payload_json)[:200]} and "
+                    f"{str(previous.payload_json)[:200]} and "
                     f"{str(action.payload_json)[:200]}"
                 )
-        seen[token] = action
+        else:
+            seen[token] = action
+    if aliases:
+        global _SELECT_ALIAS_REPORTED
+        if not _SELECT_ALIAS_REPORTED:
+            _SELECT_ALIAS_REPORTED = True
+            combat = state.get("combat")
+            example = aliases[0]
+            print("[h16-selection-alias] " + json.dumps({
+                "seed": _CURRENT_EPISODE_SEED,
+                "floor": state.get("floor"),
+                "turn": combat.get("turn") if isinstance(combat, dict) else None,
+                "aliases": len(aliases),
+                "public_token_shared": True,
+                "example": [example[0].payload_json, example[1].payload_json],
+            }, sort_keys=True), file=sys.stderr, flush=True)
     return EncodedDecision(
         base.schema, base.phase, tuple(objects), tuple(encoded_actions),
     )
