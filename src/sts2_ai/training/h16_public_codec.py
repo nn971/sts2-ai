@@ -260,19 +260,20 @@ def encode_h16_decision(
                 for position in positions:
                     encoded_actions[position] = replacement
 
-    # Keep the strict audit, including after any exceptional disambiguation.
-    seen_payloads: dict[ActionToken, tuple[str, object]] = {}
-    for action, token in zip(actions, encoded_actions, strict=True):
-        payload = json.loads(action.payload_json)
-        current = (action.kind, payload)
-        prior = seen_payloads.get(token)
-        if prior is not None and prior != current:
-            raise ValueError(
-                "H16 action representation collision after disambiguation: "
-                f"phase={base.phase}, floor={state.get('floor')}, "
-                f"kind={action.kind}"
-            )
-        seen_payloads[token] = current
+        # The usual path stays O(actions) without extra JSON parsing.
+        # Audit the rewritten menu only when a collision actually occurred.
+        seen_payloads: dict[ActionToken, tuple[str, object]] = {}
+        for action, token in zip(actions, encoded_actions, strict=True):
+            payload = json.loads(action.payload_json)
+            current = (action.kind, payload)
+            prior = seen_payloads.get(token)
+            if prior is not None and prior != current:
+                raise ValueError(
+                    "H16 action representation collision after disambiguation: "
+                    f"phase={base.phase}, floor={state.get('floor')}, "
+                    f"kind={action.kind}"
+                )
+            seen_payloads[token] = current
     return EncodedDecision(
         base.schema, base.phase, tuple(objects), tuple(encoded_actions),
     )
