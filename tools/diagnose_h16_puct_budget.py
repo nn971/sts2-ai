@@ -15,12 +15,23 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from tools.diagnose_h16_paired_checkpoints import (
-    SCHEMA as REFERENCE_SCHEMA,
-    extract_episode,
-    paired_comparison,
-    summarize_runs,
-)
+# Running as a script puts tools/ (rather than the repo root) on sys.path.
+try:
+    from tools.diagnose_h16_paired_checkpoints import (
+        SCHEMA as REFERENCE_SCHEMA,
+        extract_episode,
+        paired_comparison,
+        summarize_runs,
+    )
+except ModuleNotFoundError as exc:
+    if exc.name != "tools":
+        raise
+    from diagnose_h16_paired_checkpoints import (
+        SCHEMA as REFERENCE_SCHEMA,
+        extract_episode,
+        paired_comparison,
+        summarize_runs,
+    )
 
 SCHEMA = "sts2-h16-puct-budget-ablation-v1"
 
