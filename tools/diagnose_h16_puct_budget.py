@@ -17,15 +17,15 @@ from typing import Any
 
 # Direct execution sees sibling modules; package imports see tools.
 if __package__:
+    from .diagnose_h16_paired_checkpoints import SCHEMA as REFERENCE_SCHEMA
     from .diagnose_h16_paired_checkpoints import (
-        SCHEMA as REFERENCE_SCHEMA,
         extract_episode,
         paired_comparison,
         summarize_runs,
     )
 else:
+    from diagnose_h16_paired_checkpoints import SCHEMA as REFERENCE_SCHEMA
     from diagnose_h16_paired_checkpoints import (
-        SCHEMA as REFERENCE_SCHEMA,
         extract_episode,
         paired_comparison,
         summarize_runs,
