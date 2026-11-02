@@ -9,15 +9,15 @@ checkpoints or the training progress file.
 
 - Checkpoints: **R39, R79, R107** from the same H16 v5 run.
 - **Identical fresh seeds** across all six arms (3 checkpoints x 2 modes).
-  The default prefix \`h16-v5-fresh-paired-20261102\` is disjoint from the
-  \`h16-fixedroute-train-...\` and \`h16-fixedroute-heldout-...\` cohorts.
+  The default prefix `h16-v5-fresh-paired-20261102` is disjoint from the
+  `h16-fixedroute-train-...` and `h16-fixedroute-heldout-...` cohorts.
 - **Policy arm:** original stochastic actor at temperature 0.85 with no search.
 - **PUCT arm:** the same actor with 16 simulations, depth 8, search at every
   eligible combat decision, using the original seeded sampling implementation.
 - **Common horizon:** all arms use the R107 geometric lambda (~0.4114) for
   critic evaluation. The policy logits are horizon-independent; PUCT values
   are not. Fixing lambda prevents the horizon schedule from confounding the
-  checkpoint comparison. Override with \`--horizon-lambda\` for an ablation.
+  checkpoint comparison. Override with `--horizon-lambda` for an ablation.
 - Native-structure emulator (ordinary prototype RNG), fixed-route Silent A10,
   the original pinned emulator revision and fixed macro-model prior.
 - Run 64 fresh seeds as a pilot; optionally run an independent 128-seed
@@ -25,13 +25,13 @@ checkpoints or the training progress file.
 
 ## Preflight and execution (fish shell)
 
-Run from \`~/projects/sts2-ai\` with the matching emulator under
-\`~/projects/sts2-emulator\`. Set \`macro\` to **the exact macro checkpoint
+Run from `~/projects/sts2-ai` with the matching emulator under
+`~/projects/sts2-emulator`. Set `macro` to **the exact macro checkpoint
 used in H16**, whose SHA256 is recorded in progress.json; the evaluator
 enforces the digest. All three H16 checkpoints must be present in the
-\`results/.../models/\` directory.
+`results/.../models/` directory.
 
-\`\`\`fish
+```fish
 cd ~/projects/sts2-ai
 set emu ~/projects/sts2-emulator
 set progress results/h16-v5-combat-credit-r150/progress.json
@@ -55,12 +55,12 @@ python tools/diagnose_h16_paired_checkpoints.py \
     --progress $progress --emulator-root $emu --macro-model $macro \
     --seeds 64 --batch-size 16 --workers 15 \
     --output $out --execute
-\`\`\`
+```
 
-The output contains \`identity\`, \`analysis.arms\`,
-\`analysis.paired.puct_vs_policy\`,
-\`analysis.paired.checkpoint_progress\`, and per-seed \`runs\`.
-An append-only \`<output>.partial.jsonl\` journal enables resumption after
+The output contains `identity`, `analysis.arms`,
+`analysis.paired.puct_vs_policy`,
+`analysis.paired.checkpoint_progress`, and per-seed `runs`.
+An append-only `<output>.partial.jsonl` journal enables resumption after
 a crash; changed model bytes or evaluation settings invalidate the journal.
 Use separate output and seed prefix for confirmation.
 
