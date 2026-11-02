@@ -85,8 +85,10 @@ def test_thousand_identical_selectable_cards_use_one_pooled_card_object():
     assert encoded.actions[1].members == (2,)
 
 
-def test_different_instance_actions_in_one_group_require_emulator_dedup():
-    deck = [{"instance_id": i, "card_id": "demo.strike"} for i in range(2)]
+def test_distinct_internal_variants_sharing_one_public_card_class_are_disambiguated():
+    # The emulator can distinguish internal combat-card variants while the
+    # public card projection remains identical. Retain all legal choices.
+    deck = [{"instance_id": i, "card_id": "demo.strike"} for i in range(3)]
     public = make_state(deck)
     public["combat"] = {
         "turn": 1, "hand": [], "discard_pile": deck,
@@ -94,7 +96,10 @@ def test_different_instance_actions_in_one_group_require_emulator_dedup():
     }
     choices = tuple(
         LegalAction(str(i), "select_cards", '{"CardInstanceIds":[' + str(i) + ']}')
-        for i in range(2)
+        for i in range(3)
     )
-    with pytest.raises(ValueError, match="representation collision"):
-        encode_h16_decision(public, choices)
+    encoded = encode_h16_decision(public, choices)
+    assert len(set(encoded.actions)) == 3
+    assert all(a.members == (2,) for a in encoded.actions)
+    reversed_encoded = encode_h16_decision(public, choices[::-1])
+    assert reversed_encoded.actions == encoded.actions[::-1]
