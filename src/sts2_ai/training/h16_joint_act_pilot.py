@@ -14,7 +14,7 @@ import json
 import math
 import random
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -45,6 +45,7 @@ from sts2_ai.training.h16_episode_metrics import (
     combat_results,
     enemy_hp_progress,
 )
+from sts2_ai.training.h17_adaptive import AdaptiveSearch, choose_budget
 from sts2_ai.training.h16_public_codec import (
     H16_CODEC,
     LEGACY_H16_CODEC,
@@ -313,6 +314,7 @@ class PilotDecision:
     macro_offset: tuple[float, ...]
     search_policy: tuple[float, ...] | None = None
     predicted_value: float | None = None
+    search_simulations: int = 0
 
 
 @dataclass(frozen=True)
@@ -590,6 +592,8 @@ def collect_act_episode(
     simulations: int, search_depth: int | None,
     rng: random.Random, rollout_transport: str = "fused",
     max_simulation_steps: int = 512,
+    adaptive_search: AdaptiveSearch | None = None,
+    card_exposure: Mapping[str, int] | None = None,
 ) -> PilotEpisode:
     if not (0 <= search_probability <= 1 and max_searches >= 0
             and max_decisions > 0 and simulations > 0
@@ -630,15 +634,26 @@ def collect_act_episode(
                 raise RuntimeError("Nonterminal run has no legal player actions")
             scores, predicted_value, offsets = policy.infer(observation, actions)
             search_policy = None
-            should_search = should_search_combat(
-                public, actions, searches=searches,
-                max_searches=max_searches,
-                search_probability=search_probability, rng=rng,
-            )
-            if should_search:
+            if adaptive_search is None:
+                budget = (
+                    simulations if should_search_combat(
+                        public, actions, searches=searches,
+                        max_searches=max_searches,
+                        search_probability=search_probability, rng=rng,
+                    ) else 0
+                )
+            elif (search_probability > 0
+                  and (max_searches == 0 or searches < max_searches)):
+                budget = choose_budget(
+                    adaptive_search, public, actions, scores,
+                    card_exposure or {}, rng,
+                )
+            else:
+                budget = 0
+            if budget:
                 search_policy, count = local_combat_puct(
                     backend, state, observation, actions, policy,
-                    simulations=simulations, depth=search_depth,
+                    simulations=budget, depth=search_depth,
                     seed=rng.randrange(2**63),
                     rollout_transport=rollout_transport,
                     max_simulation_steps=max_simulation_steps,
@@ -655,6 +670,7 @@ def collect_act_episode(
                 chosen = _sample(_softmax(scores, policy.temperature), rng)
             decisions.append(PilotDecision(
                 observation, actions, chosen, offsets, search_policy, predicted_value,
+                budget,
             ))
             if rollout_transport == "fused":
                 (next_frame,) = backend.batch_rollout_step_frame(
