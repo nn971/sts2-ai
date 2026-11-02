@@ -161,7 +161,7 @@ def test_puct_expands_alias_selection_node_instead_of_crashing():
     )).eval()
 
     def evaluator(obs, menu):
-        enc = encode_h16_decision(json.loads(obs.observation_json), menu)
+        enc = encode_h16_decision(json.loads(obs.payload_json), menu)
         with torch.inference_mode():
             logits, _, values = net(collate_h7([enc]))
         return (tuple(float(v) for v in logits[0]), float(values[0]))
