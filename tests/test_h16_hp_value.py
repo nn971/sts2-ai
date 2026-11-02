@@ -97,6 +97,10 @@ def test_phase_specific_summaries_svg_and_same_hp_spread():
     graphic = svg_chart(data)
     assert "<svg" in graphic and "Macro" in graphic and "Combat" in graphic
     assert "Learned continuation value" in graphic
+    data[0]["post_combat_boundary"] = True
+    post = svg_chart(data, post_combat=True)
+    assert "Post-combat continuation" in post
+    assert summarize(data)["post_combat_boundaries"]["count"] == 1
 
 
 def test_value_journal_identity_and_seed_order(tmp_path):
