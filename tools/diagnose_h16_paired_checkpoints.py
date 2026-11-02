@@ -142,7 +142,7 @@ def build_report(rows: list[dict[str, Any]], rounds: list[int]) -> dict[str, Any
             mode: {
                 f"r{a}_to_r{b}": paired_comparison(grouped[a, mode],
                                                  grouped[b, mode])
-                for a, b in zip(rounds, rounds[1:])
+                for a, b in zip(rounds, rounds[1:], strict=False)
             }
             for mode in MODES
         },
@@ -161,7 +161,7 @@ def read_journal(path: Path, identity: dict[str, Any],
         rows = [json.loads(line) for line in source if line.strip()]
     if len(rows) > len(jobs):
         raise ValueError("Journal contains more jobs than requested")
-    for actual, expected in zip(rows, jobs):
+    for actual, expected in zip(rows, jobs, strict=False):
         if (actual["round"], actual["mode"], actual["seed"]) != expected:
             raise ValueError("Journal has a missing, reordered, or duplicated job")
     return rows
