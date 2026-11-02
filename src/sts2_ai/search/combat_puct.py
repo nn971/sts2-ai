@@ -122,17 +122,21 @@ class CombatPuct:
     """A search-policy teacher, never a source of fictitious terminal labels."""
 
     def __init__(self, sampler: FairCombatSampler, evaluator: CombatEvaluator, *,
-                 c_puct: float = 1.5, max_depth: int = 256, seed: int = 0,
+                 c_puct: float = 1.5, max_depth: int | None = 256, seed: int = 0,
                  leaf_mode: str = "value", rollout_depth: int = 512,
                  tree_expansion_mode: str = "one_leaf",
-                 free_card_selection_steps: bool = False):
+                 free_card_selection_steps: bool = False,
+                 max_simulation_steps: int = 512):
         if (not isinstance(sampler, FairCombatSampler) or
                 sampler.fair_combat_capability_id not in (
                     FAIR_COMBAT_CAPABILITY, ROOT_CONDITIONED_COMBAT_CAPABILITY,
                     H16_EXPERIMENTAL_ROOT_CONDITIONED_CAPABILITY,
                 )):
             raise ValueError("PUCT requires an explicitly labeled combat sampling capability")
-        if (not math.isfinite(c_puct) or c_puct <= 0 or max_depth <= 0
+        if (not math.isfinite(c_puct) or c_puct <= 0
+                or (max_depth is not None and max_depth <= 0)
+                or max_simulation_steps <= 0
+                or (max_depth is None and tree_expansion_mode != "full_depth")
                 or leaf_mode not in ("value", "terminal") or rollout_depth <= 0
                 or tree_expansion_mode not in ("one_leaf", "full_depth")):
             raise ValueError("Invalid combat search configuration")
@@ -140,6 +144,7 @@ class CombatPuct:
         self._evaluator = evaluator
         self._c = c_puct
         self._depth = max_depth
+        self._max_simulation_steps = max_simulation_steps
         self._leaf_mode = leaf_mode
         self._rollout_depth = rollout_depth
         self._tree_expansion_mode = tree_expansion_mode
@@ -217,6 +222,7 @@ class CombatPuct:
                 self._sampler.begin_simulation(root, self._rng)
                 result: float | None = None
                 depth = 0
+                steps = 0
                 virtual_steps = 0
                 while True:
                     if frame.terminal_reward is not None:
@@ -245,7 +251,7 @@ class CombatPuct:
                             break
                     if node.frame != frame:
                         raise ValueError("Same public-history key has contradictory observations")
-                    if (depth == self._depth
+                    if (self._depth is not None and depth == self._depth
                             and not (self._free_card_selection_steps
                                      and all(action.kind == "select_cards"
                                              for action in frame.legal_actions))):
@@ -259,11 +265,21 @@ class CombatPuct:
                             result = node.prior_value
                             cutoffs += 1
                         break
+                    # Unlimited search follows PUCT to an actual combat boundary.
+                    # The separate watchdog detects nonterminating simulations
+                    # without substituting a fabricated value or terminal loss.
+                    if self._depth is None and steps >= self._max_simulation_steps:
+                        raise IncompleteCombatRollout(
+                            "Full-combat PUCT exceeded "
+                            f"{self._max_simulation_steps} actions "
+                            "without reaching combat termination"
+                        )
                     action_index = self._choose(node)
                     path.append(node.edges[action_index])
                     action = frame.legal_actions[action_index]
                     child = self._sampler.step(frame, action, self._rng)
                     transitions += 1
+                    steps += 1
                     if (self._free_card_selection_steps
                             and action.kind == "select_cards"):
                         virtual_steps += 1
@@ -297,7 +313,8 @@ class CombatPuct:
             tuple(e.visits for e in edges),
             tuple(e.q if e.visits else None for e in edges),
             root_value_sum / simulations, simulations, terminals, cutoffs,
-            transitions, self._leaf_mode, len(table),
+            transitions, ("full_combat" if self._depth is None else self._leaf_mode),
+            len(table),
             self._sampler.fair_combat_capability_id,
             self._tree_expansion_mode, max_expanded_depth,
         )
