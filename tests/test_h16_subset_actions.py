@@ -79,6 +79,31 @@ def test_h16_154_select_cards_choices_all_have_distinct_compositional_tokens():
     assert not torch.allclose(logits[0, 1], logits[0, 2])
 
 
+def test_colliding_selection_tokens_feed_finite_distinct_policy_logits():
+    # A PUCT leaf must be able to evaluate legal internal variants even when
+    # they alias to the same publicly observed card class.
+    public = state()
+    public["combat"]["discard_pile"] = [
+        {"instance_id": i, "card_id": "demo.same"} for i in (6, 10)
+    ]
+    actions = (
+        LegalAction("6", "select_cards", '{"CardInstanceIds":[6]}'),
+        LegalAction("10", "select_cards", '{"CardInstanceIds":[10]}'),
+    )
+    encoded = encode_h16_decision(public, actions)
+    assert len(set(encoded.actions)) == 2
+    batch = collate_h7([encoded])
+    torch.manual_seed(19)
+    net = JointActPilotNet(SharedObjectTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64),
+    )).eval()
+    with torch.inference_mode():
+        scores, _, _ = net(batch)
+    assert torch.isfinite(scores).all()
+    assert scores.shape == (1, 2)
+    assert not torch.allclose(scores[0, 0], scores[0, 1])
+
+
 def test_h16_rejects_missing_public_subset_candidates():
     bad = LegalAction("select-missing", "select_cards", '{"CardInstanceIds":[999]}')
     with pytest.raises(ValueError, match="candidate missing from public"):
