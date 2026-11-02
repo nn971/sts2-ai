@@ -50,6 +50,14 @@ from sts2_ai.training.h16_joint_act_pilot import (
 )
 from sts2_ai.training.h16_public_codec import set_h16_rollout_seed
 from sts2_ai.training.h17_adaptive import AdaptiveSearch, coverage_summary, update_coverage
+from sts2_ai.training.h17_replay import (
+    collect_replay,
+    fit_replay,
+    load_replay,
+    merge_replay,
+    sample_replay,
+    write_replay,
+)
 
 _WORKER: dict[str, Any] = {}
 
@@ -402,6 +410,10 @@ def main() -> None:
                    default=0.4113950303216448)
     p.add_argument("--h17-horizon-target", type=float, default=0.77)
     p.add_argument("--h17-horizon-rounds", type=int, default=200)
+    p.add_argument("--h17-replay-capacity", type=int, default=8192)
+    p.add_argument("--h17-replay-samples", type=int, default=256)
+    p.add_argument("--h17-replay-age", type=int, default=32)
+    p.add_argument("--h17-replay-weight", type=float, default=0.2)
     p.add_argument("--minibatch", type=int, default=32)
     p.add_argument("--epochs", type=int, default=1)
     p.add_argument("--lr", type=float, default=0.00001)
@@ -431,6 +443,10 @@ def main() -> None:
             or args.macro_prior_weight < 0 or args.lr <= 0
             or (args.h17_adaptive and (
                 args.h17_macro_decay_rounds <= 0
+                or args.h17_replay_capacity <= 0
+                or args.h17_replay_samples < 0
+                or args.h17_replay_age <= 0
+                or not 0 <= args.h17_replay_weight <= 1
                 or args.h17_horizon_rounds <= 0
                 or not 0 <= args.h17_horizon_initial <=
                 args.h17_horizon_target < 1
@@ -522,6 +538,12 @@ def main() -> None:
         history[-1].get("card_coverage", {}) if history and args.h17_adaptive
         else {}
     )
+    replay: list[dict[str, Any]] = (
+        load_replay(
+            root / "replay" / f"r{len(history):04d}.json.gz",
+            fingerprint=fingerprint, expected_round=len(history),
+        ) if args.h17_adaptive and history else []
+    )
     if not history:
         model.save(actor_path)
         baseline = collect(
@@ -572,9 +594,32 @@ def main() -> None:
             temperature=args.temperature, minibatch=args.minibatch,
             epochs=args.epochs,
         )
-        update_seconds = time.perf_counter() - update_started
+        replay_report: dict[str, float | int] | None = None
         if args.h17_adaptive:
+            replay_batch = sample_replay(
+                replay, round_index=round_index,
+                exposure=coverage.get("playable", {}),
+                samples=args.h17_replay_samples,
+            )
+            replay_report = fit_replay(
+                model, optimizer, replay_batch,
+                horizon_lambda=horizon_lambda,
+                replay_weight=args.h17_replay_weight,
+                combat_credit_weight=args.combat_credit_weight,
+            )
+            incoming = collect_replay(
+                completed, source_round=round_index,
+                exposure=coverage.get("playable", {}),
+            )
             coverage = update_coverage(completed, coverage)
+            replay = merge_replay(
+                replay, incoming,
+                round_index=round_index,
+                exposure=coverage.get("playable", {}),
+                capacity=args.h17_replay_capacity,
+                max_age=args.h17_replay_age,
+            )
+        update_seconds = time.perf_counter() - update_started
         model_path = model_dir / f"joint-r{round_index + 1:04d}.pt"
         model.save(model_path)
         model.save(actor_path)
@@ -610,6 +655,8 @@ def main() -> None:
                 "macro_prior_weight": args.macro_prior_weight,
                 "card_coverage": coverage,
                 "card_coverage_summary": coverage_summary(coverage),
+                "replay": replay_report,
+                "replay_buffer_rows": len(replay),
             } if args.h17_adaptive else {}),
             "checkpoint": str(model_path),
             "checkpoint_sha256": sha256(model_path),
@@ -621,12 +668,21 @@ def main() -> None:
             "optimizer": optimizer.state_dict(),
             "rng_state": torch.get_rng_state(),
         })
+        if args.h17_adaptive:
+            write_replay(
+                root / "replay" / f"r{len(history):04d}.json.gz",
+                fingerprint=fingerprint,
+                round_index=len(history), rows=replay,
+            )
         write_json(progress_path, {
             "fingerprint": fingerprint,
             "experiment": source,
             "baseline": str(root / "baseline.json"),
             "rounds": history,
         })
+        if args.h17_adaptive and len(history) >= 3:
+            prior = root / "replay" / f"r{len(history)-2:04d}.json.gz"
+            prior.unlink(missing_ok=True)
         print("[h16-act1-joint] " + json.dumps(row, sort_keys=True), flush=True)
     print("[h16-act1-joint] completed", len(history), "rounds", flush=True)
 
