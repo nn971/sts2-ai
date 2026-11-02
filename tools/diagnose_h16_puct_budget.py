@@ -15,17 +15,15 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-# Running as a script puts tools/ (rather than the repo root) on sys.path.
-try:
-    from tools.diagnose_h16_paired_checkpoints import (
+# Direct execution sees sibling modules; package imports see tools.
+if __package__:
+    from .diagnose_h16_paired_checkpoints import (
         SCHEMA as REFERENCE_SCHEMA,
         extract_episode,
         paired_comparison,
         summarize_runs,
     )
-except ModuleNotFoundError as exc:
-    if exc.name != "tools":
-        raise
+else:
     from diagnose_h16_paired_checkpoints import (
         SCHEMA as REFERENCE_SCHEMA,
         extract_episode,
