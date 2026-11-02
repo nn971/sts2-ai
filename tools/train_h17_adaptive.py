@@ -27,6 +27,7 @@ if __name__ == "__main__":
         "--h17-horizon-initial", "0.4113950303216448",
         "--h17-horizon-target", "0.77",
         "--h17-horizon-rounds", "200",
+        "--h17-hp-reference", "100",
         "--h17-search-p16", "0.15",
         "--h17-search-p64", "0.02",
         "--study-seed", "20261117",
