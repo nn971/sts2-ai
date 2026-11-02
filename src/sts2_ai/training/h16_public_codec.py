@@ -173,107 +173,52 @@ def encode_h16_decision(
         encoded_actions.append(ActionToken(
             old.kind, semantic, old.source, old.target,
         ))
-    # The emulator groups only truly interchangeable internal cards.
-    # Distinct internal card variants can have the same *public* projection:
-    # an H16 multiset card token then represents several legal selections.
-    # Preserve both actions without putting arbitrary instance IDs in learned
-    # embeddings. Only in this exceptional case, give the alternatives a
-    # stable ordinal within their public action class. Other collisions are
-    # still errors, so new missing representations remain detectable.
-    seen: dict[ActionToken, tuple[int, Any]] = {}
-    aliases: dict[ActionToken, list[int]] = {}
-    for index, (action, token) in enumerate(
-        zip(actions, encoded_actions, strict=True)
-    ):
+    # Some full emulator card states differ while their *public* card
+    # representations are identical. Player-observationally equivalent
+    # singleton selections must share an action token; distinct legal
+    # actions still remain available for exact emulator/search transitions.
+    # Never encode a synthetic ordinal based on opaque instance IDs:
+    # that would leak an arbitrary, non-generalizable distinction.
+    seen: dict[ActionToken, Any] = {}
+    aliases: list[tuple[Any, Any]] = []
+    for action, token in zip(actions, encoded_actions, strict=True):
         previous = seen.get(token)
-        if previous is None:
-            seen[token] = (index, action)
-            continue
-        prev_index, prior = previous
-        if prior.kind == action.kind and (
-            json.loads(prior.payload_json) == json.loads(action.payload_json)
+        if previous is not None and (
+            previous.kind != action.kind
+            or json.loads(previous.payload_json) != json.loads(action.payload_json)
         ):
-            continue
-        if base.phase != "combat" or action.kind != "select_cards" or (
-            prior.kind != "select_cards"
-        ):
-            raise ValueError(
-                "H16 action representation collision: "
-                f"phase={base.phase}, floor={state.get('floor')}, "
-                f"kind={action.kind}, payloads="
-                f"{str(prior.payload_json)[:200]} and "
-                f"{str(action.payload_json)[:200]}"
-            )
-        aliases.setdefault(token, [prev_index]).append(index)
-
+            if (
+                base.phase == "combat"
+                and action.kind == previous.kind == "select_cards"
+                and len(token.members) == 1
+            ):
+                # The common member pointer proves the two candidate IDs
+                # were pooled into the same public selection-card class.
+                aliases.append((previous, action))
+            else:
+                raise ValueError(
+                    "H16 action representation collision: "
+                    f"phase={base.phase}, floor={state.get('floor')}, "
+                    f"kind={action.kind}, payloads="
+                    f"{str(previous.payload_json)[:200]} and "
+                    f"{str(action.payload_json)[:200]}"
+                )
+        else:
+            seen[token] = action
     if aliases:
         global _SELECT_ALIAS_REPORTED
         if not _SELECT_ALIAS_REPORTED:
             _SELECT_ALIAS_REPORTED = True
             combat = state.get("combat")
+            example = aliases[0]
             print("[h16-selection-alias] " + json.dumps({
                 "seed": _CURRENT_EPISODE_SEED,
                 "floor": state.get("floor"),
                 "turn": combat.get("turn") if isinstance(combat, dict) else None,
-                "groups": len(aliases),
-                "alternatives": sum(len(x) for x in aliases.values()),
-                "example": [actions[i].payload_json for i in
-                            next(iter(aliases.values()))[:4]],
+                "aliases": len(aliases),
+                "public_token_shared": True,
+                "example": [example[0].payload_json, example[1].payload_json],
             }, sort_keys=True), file=sys.stderr, flush=True)
-
-        used = set(encoded_actions)
-        for token, indices in aliases.items():
-            # Canonicalizing the selection payload ensures stable ordering
-            # even if the emulator emits the legal menu in another order.
-            variants: dict[tuple[int, ...], list[int]] = {}
-            for index in indices:
-                payload = json.loads(actions[index].payload_json)
-                members = payload.get(
-                    "CardInstanceIds", payload.get("card_instance_ids"),
-                )
-                if not isinstance(members, list) or any(
-                    type(item) is not int for item in members
-                ):
-                    raise ValueError("Malformed public select_cards alias")
-                variants.setdefault(tuple(sorted(members)), []).append(index)
-            for ordinal, (_, positions) in enumerate(
-                sorted(variants.items())
-            ):
-                if ordinal == 0:
-                    continue  # Retain the original class token for one choice.
-                salt = 0
-                while True:
-                    semantic = _bucket(
-                        f"h16-select-cards-alias:{token.semantic}:{ordinal}:{salt}",
-                        IDENTITY_BUCKETS,
-                    )
-                    replacement = ActionToken(
-                        token.kind, semantic, token.source, token.target,
-                        token.members,
-                    )
-                    if replacement not in used:
-                        break
-                    salt += 1
-                    if salt >= IDENTITY_BUCKETS:
-                        raise ValueError("H16 select_cards alias capacity exceeded")
-                used.add(replacement)
-                for position in positions:
-                    encoded_actions[position] = replacement
-
-        # The usual path stays O(actions) without extra JSON parsing.
-        # Audit the rewritten menu only when a collision actually occurred.
-        seen_payloads: dict[ActionToken, tuple[str, object]] = {}
-        for action, token in zip(actions, encoded_actions, strict=True):
-            payload = json.loads(action.payload_json)
-            current = (action.kind, payload)
-            prior = seen_payloads.get(token)
-            if prior is not None and prior != current:
-                raise ValueError(
-                    "H16 action representation collision after disambiguation: "
-                    f"phase={base.phase}, floor={state.get('floor')}, "
-                    f"kind={action.kind}"
-                )
-            seen_payloads[token] = current
     return EncodedDecision(
         base.schema, base.phase, tuple(objects), tuple(encoded_actions),
     )
