@@ -14,13 +14,18 @@ import torch
 from torch import nn
 
 from sts2_ai.models.shared_game_objects import (
-    OWNER_ATTRIBUTE_KIND_V2, EncodedDecision,
+    OWNER_ATTRIBUTE_KIND_V2,
+    EncodedDecision,
 )
 from sts2_ai.models.shared_transformer import (
-    H7Batch, H7Config, SharedObjectTransformer, collate_h7,
+    H7Batch,
+    H7Config,
+    SharedObjectTransformer,
+    collate_h7,
 )
 from sts2_ai.training.h19_resource_codec import (
-    H19_OBJECT_SCHEMA, H19_RESOURCE_CODEC,
+    H19_OBJECT_SCHEMA,
+    H19_RESOURCE_CODEC,
 )
 
 H19_MODEL_FORMAT = "sts2-h19-owner-shared-transformer-v1"
