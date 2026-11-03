@@ -40,8 +40,18 @@ Unknown nonempty macro payloads produce errors instead of sharing a generic
 token. Model source and target indices are relative to the current frame.
 Two identical deck copies may intentionally share a token; different
 enchantments, states, costs or offers receive distinct representations.
+`audit_h21_action_aliases` verifies that every token alias is a matching
+public card class or a matching card-subset multiset (including compact
+combat selections). The live probe reports total and canonical actions
+separately. All other aliases fail. Each known action kind validates its
+recognized payload fields before encoding; ignored new payload dimensions,
+invalid skip indices and unexpected potion replacement slots are errors.
 Per-decision macro object and action-kind hash collisions raise diagnostics.
 The object cap is 1,536 and never silently truncates targets.
+
+An event potion-replacement menu uses one shared visible offer token and
+separate source tokens for each occupied or free destination slot. Extra-gold
+rewards use the emulator's `ChooseGoldRewardPayload.GroupIndex` field.
 
 ## Field-coverage audit
 
