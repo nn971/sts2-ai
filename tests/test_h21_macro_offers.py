@@ -199,6 +199,34 @@ def test_event_choice_outcomes_and_guaranteed_items_are_owner_local():
     assert encode(changed, actions) != decision
 
 
+def test_event_potion_uses_one_offer_and_explicit_destination_slot():
+    frame = state()
+    frame["event"] = {
+        "event_id": "event.potions",
+        "pending_potion_replacement": {
+            "choice_id": "replace", "potion_id": "potion.acid",
+            "candidate_slots": [0, 1, 2],
+        },
+    }
+    actions = [
+        act("take_event_potion", Slot=0),
+        act("take_event_potion", Slot=2),
+        act("replace_event_potion", Slot=1),
+    ]
+    encoded = encode(frame, actions)
+    first, second, third = encoded.actions
+    assert first.target == second.target == third.target
+    assert len({first.source, second.source, third.source}) == 3
+    assert all(item.source >= 0 for item in encoded.actions)
+    assert encoded.objects[first.target].kind == KINDS.index("potion")
+    assert encoded.objects[third.source].kind == KINDS.index("potion")
+
+    wrong = copy.deepcopy(frame)
+    wrong["event"]["pending_potion_replacement"]["candidate_slots"] = [1]
+    with pytest.raises(ValueError, match="visible candidate"):
+        encode(wrong, [act("take_event_potion", Slot=0)])
+
+
 def test_unbound_offers_and_unknown_payloads_fail_closed():
     frame = state()
     frame["shop"] = {"card_offers": [
