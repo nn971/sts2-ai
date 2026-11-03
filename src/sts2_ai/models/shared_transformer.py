@@ -57,23 +57,27 @@ class H7Batch:
     action_mask: Tensor
     phases: Tensor
     action_members: Tensor
-    # Optional sparse, typed graph relations for the H20 schema only.
-    relation_types: Tensor | None = None
-    relation_sources: Tensor | None = None
-    relation_targets: Tensor | None = None
-    relation_mask: Tensor | None = None
-
     def to(self, device: torch.device | str) -> H7Batch:
-        return H7Batch(**{
-            name: tensor.to(device) if tensor is not None else None
+        return type(self)(**{
+            name: tensor.to(device)
             for name, tensor in vars_as_dict(self).items()
         })
 
 
-def vars_as_dict(batch: H7Batch) -> dict[str, Tensor | None]:
+@dataclass(frozen=True)
+class H20Batch(H7Batch):
+    """Graph-only batch extension. Legacy H7Batch fields remain unchanged."""
+
+    relation_types: Tensor
+    relation_sources: Tensor
+    relation_targets: Tensor
+    relation_mask: Tensor
+
+
+def vars_as_dict(batch: H7Batch) -> dict[str, Tensor]:
     return {
-        name: tensor for name in H7Batch.__dataclass_fields__
-        if (tensor := getattr(batch, name)) is not None
+        name: getattr(batch, name)
+        for name in type(batch).__dataclass_fields__
     }
 
 
