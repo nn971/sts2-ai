@@ -1,7 +1,7 @@
 """H20 sparse map-edge message passing and strictly versioned checkpoint."""
 from __future__ import annotations
 
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +10,7 @@ from torch import Tensor, nn
 
 from sts2_ai.models.shared_game_objects import EncodedDecision
 from sts2_ai.models.shared_owner_transformer_v2 import H19OwnerTransformer
-from sts2_ai.models.shared_transformer import H7Batch, H7Config, collate_h7
+from sts2_ai.models.shared_transformer import H20Batch, H7Batch, H7Config, collate_h7, vars_as_dict
 from sts2_ai.training.h20_map_graph_codec import (
     H20_MAP_CODEC,
     H20_OBJECT_SCHEMA,
@@ -38,11 +38,13 @@ def collate_h20(decisions: list[EncodedDecision]) -> H7Batch:
             sources[row, j] = edge.source
             targets[row, j] = edge.target
             mask[row, j] = True
-    return replace(batch,
-                   relation_types=types,
-                   relation_sources=sources,
-                   relation_targets=targets,
-                   relation_mask=mask)
+    return H20Batch(
+        **vars_as_dict(batch),
+        relation_types=types,
+        relation_sources=sources,
+        relation_targets=targets,
+        relation_mask=mask,
+    )
 
 
 class H20MapGraphTransformer(H19OwnerTransformer):
