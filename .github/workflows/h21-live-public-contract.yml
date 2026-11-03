@@ -9,6 +9,7 @@ on:
       - 'src/sts2_ai/training/h21_macro_offer_codec.py'
       - 'src/sts2_ai/training/h21_field_coverage.py'
       - 'tools/probe_h21_live_public.py'
+      - 'tools/check_h21_public_source_schema.py'
       - '.github/workflows/h21-live-public-contract.yml'
   workflow_dispatch:
 
@@ -31,6 +32,9 @@ jobs:
           dotnet-version: '9.0.x'
       - name: Install public codec
         run: python -m pip install -e .
+      - name: Verify every public C# DTO member is classified
+        run: |
+          python tools/check_h21_public_source_schema.py --emulator-root emulator-v1
       - name: Build actual public v1 emulator
         run: |
           dotnet build emulator-v1/src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj -c Release
