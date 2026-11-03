@@ -237,6 +237,18 @@ def collect(
 def summarize(episodes: list[PilotEpisode]) -> dict[str, Any]:
     completed = [e for e in episodes if e.complete]
     cleared = sum(e.outcome == "act_clear" for e in completed)
+    maps = [
+        e.frames[0].get("map")
+        for e in episodes if e.frames and isinstance(e.frames[0].get("map"), list)
+    ]
+    selected_routes = [
+        tuple(
+            decision.legal_actions[decision.chosen_index].payload_json
+            for decision in e.decisions
+            if decision.legal_actions[decision.chosen_index].kind == "choose_map_node"
+        ) for e in episodes
+    ]
+    map_choices = sum(len(route) for route in selected_routes)
     resource_signatures = set()
     potion_counts: list[int] = []
     potion_actions = 0
@@ -283,6 +295,12 @@ def summarize(episodes: list[PilotEpisode]) -> dict[str, Any]:
     ]
     defeated = [item["enemy_hp_removed_fraction"] for item in lost_fights]
     return {
+        "map_diversity": {
+            "observed_maps": len(maps),
+            "distinct_map_graphs": len({digest(m) for m in maps}),
+            "map_choice_decisions": map_choices,
+            "distinct_selected_route_prefixes": len(set(selected_routes)),
+        },
         "floor_progress": summarize_floor_progress(floor_records),
         "combat_progress": {
             "completed_fights": len(combats),
