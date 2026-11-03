@@ -57,13 +57,28 @@ class H7Batch:
     action_mask: Tensor
     phases: Tensor
     action_members: Tensor
-
     def to(self, device: torch.device | str) -> H7Batch:
-        return H7Batch(**{name: tensor.to(device) for name, tensor in vars_as_dict(self).items()})
+        return type(self)(**{
+            name: tensor.to(device)
+            for name, tensor in vars_as_dict(self).items()
+        })
+
+
+@dataclass(frozen=True)
+class H20Batch(H7Batch):
+    """Graph-only batch extension. Legacy H7Batch fields remain unchanged."""
+
+    relation_types: Tensor
+    relation_sources: Tensor
+    relation_targets: Tensor
+    relation_mask: Tensor
 
 
 def vars_as_dict(batch: H7Batch) -> dict[str, Tensor]:
-    return {name: getattr(batch, name) for name in H7Batch.__dataclass_fields__}
+    return {
+        name: getattr(batch, name)
+        for name in type(batch).__dataclass_fields__
+    }
 
 
 def collate_h7(
@@ -180,6 +195,16 @@ class SharedObjectTransformer(nn.Module):
         )
         return gathered * (indices >= 0).unsqueeze(-1)
 
+    def _object_embeddings(self, batch: H7Batch) -> Tensor:
+        embedding = (
+            self.kinds(batch.kinds) + self.identities(batch.identities)
+            + self.zones(batch.zones)
+            + self.numerics(torch.cat([batch.numeric, batch.observed], dim=-1))
+        )
+        embedding = self.input_norm(embedding)
+        return embedding + self.owner_projection(
+            self._point(embedding, batch.owners))
+
     def forward(
         self, batch: H7Batch, *, known_phase: int | None = None,
         return_context: bool = False,
@@ -196,13 +221,7 @@ class SharedObjectTransformer(nn.Module):
                 raise ValueError("H7 requires global token and at least one valid action")
         elif known_phase not in (0, 1):
             raise ValueError("Invalid H7 homogeneous inference phase")
-        embedding = (
-            self.kinds(batch.kinds) + self.identities(batch.identities)
-            + self.zones(batch.zones)
-            + self.numerics(torch.cat([batch.numeric, batch.observed], dim=-1))
-        )
-        embedding = self.input_norm(embedding)
-        embedding = embedding + self.owner_projection(self._point(embedding, batch.owners))
+        embedding = self._object_embeddings(batch)
         context = self.context_norm(self.encoder(
             embedding, src_key_padding_mask=~batch.object_mask,
         ))
