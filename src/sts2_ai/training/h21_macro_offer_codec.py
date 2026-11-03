@@ -759,6 +759,7 @@ def _augment_visible_combat(
     combat = state["combat"]
     ctx = _GroundedMacro(state, base)
     ctx.build_completed_history()
+    visible_sources = _bind_visible_affliction_sources(ctx, state)
     players = [
         i for i, obj in enumerate(ctx.objects)
         if obj.kind == KINDS.index("player")
@@ -783,8 +784,23 @@ def _augment_visible_combat(
         # to distinguish cards in play from already-selected dialog cards.
         ctx.attribute(index, "visible_card_zone", "play_pile")
         for field in _H21_PUBLIC_CARD_ATTRIBUTES:
-            if field in card:
-                ctx.attribute(index, field, card[field])
+            if field not in card:
+                continue
+            value = card[field]
+            if field == "affliction" and isinstance(value, dict):
+                # Opaque IDs must not enter attributes; they are graph links.
+                value = {
+                    key: item for key, item in value.items()
+                    if key != "source_enemy_instance_id"
+                }
+                source_id = card[field].get("source_enemy_instance_id")
+                if source_id is not None:
+                    if type(source_id) is not int or source_id not in visible_sources:
+                        raise ValueError("Play-pile affliction has non-visible source")
+                    ctx.edges.append(RelationToken(
+                        AFFLICTION_SOURCE, index, visible_sources[source_id],
+                    ))
+            ctx.attribute(index, field, value)
     enemy_positions = [
         i for i, obj in enumerate(ctx.objects)
         if obj.kind == KINDS.index("enemy")
