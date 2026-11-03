@@ -63,8 +63,8 @@ PUBLIC_V1_FIELD_CONTRACT: dict[str, dict[str, str]] = {
         "turn": ENCODED, "energy": ENCODED, "player_block": ENCODED,
         "hand": ENCODED, "draw_pile_count": ENCODED,
         "discard_pile": ENCODED, "exhaust_pile": ENCODED,
-        "play_pile": GAP, "enemies": PARTIAL,
-        "pending_choice_id": GAP, "player_powers": ENCODED,
+        "play_pile": ENCODED, "enemies": PARTIAL,
+        "pending_choice_id": REFERENCE, "player_powers": ENCODED,
         "selection_candidates": ENCODED,
         "selection_selected_cards": ENCODED, "history": ENCODED,
     },
@@ -78,10 +78,10 @@ PUBLIC_V1_FIELD_CONTRACT: dict[str, dict[str, str]] = {
     },
     "enemy": {
         "instance_id": REFERENCE, "enemy_id": ENCODED, "hp": ENCODED,
-        "block": ENCODED, "move_id": GAP, "statuses": ENCODED,
+        "block": ENCODED, "move_id": ENCODED, "statuses": ENCODED,
         "powers": ENCODED, "intent_damage": ENCODED, "intent_hits": ENCODED,
         "intent_base_damage": ENCODED, "max_hp": ENCODED,
-        "is_minion": GAP,
+        "is_minion": ENCODED,
     },
     "power": {"power_id": ENCODED, "stacks": ENCODED},
     "reward": {
