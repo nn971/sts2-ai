@@ -125,7 +125,7 @@ def _check_supported_payload(kind: str, payload: dict[str, Any]) -> None:
         names = {"GroupIndex", "Index"}
     else:
         if payload:
-            raise ValueError("Unaudited macro action payload: " + kind)
+            raise ValueError("Unaudited nonempty macro action: " + kind)
         return
     normalized = {
         "".join(("_" + ch.lower() if ch.isupper() else ch)
