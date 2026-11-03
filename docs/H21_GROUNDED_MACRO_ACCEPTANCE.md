@@ -13,9 +13,9 @@ is only a **within-frame join key**. Those opaque values never enter an identity
 embedding or numeric feature.
 
 The H21 v1 input is gated on emulator `prototype-ai-v1` and the H21 object
-schema `sts2-h21-public-grounded-macro-v1`. H7/H16/H18/H19/H20 models retain
+schema `sts2-h21-public-grounded-macro-v2`. H7/H16/H18/H19/H20 models retain
 their previous checkpoint formats. H21 has a distinct model checkpoint and
-seven typed edge families (including chronological room history). No pretrained weights are silently reused.
+eight typed edge families (including chronological room history). No pretrained weights are silently reused.
 
 ## Implemented action targets
 
@@ -52,6 +52,24 @@ The object cap is 1,536 and never silently truncates targets.
 An event potion-replacement menu uses one shared visible offer token and
 separate source tokens for each occupied or free destination slot. Extra-gold
 rewards use the emulator's `ChooseGoldRewardPayload.GroupIndex` field.
+
+## Affliction source relations
+
+H21 v2 adds a typed `AFFLICTION_SOURCE` edge from each visible afflicted
+card class to its source enemy, when that enemy is currently visible.
+`source_enemy_instance_id` is used only for the within-frame join: it is
+omitted from learned numeric attributes and learned identity hashes. Two
+otherwise identical cards with different visible sources remain distinct
+classes and are distinguished by their outgoing enemy edges. Rename both
+the enemy IDs and the affliction references, and the entire encoded decision
+remains unchanged.
+
+The emulator public-v1 projection redacts a source reference when the source
+enemy is absent from the visible encounter. H19 and H20 default codecs
+continue rejecting non-null affliction source IDs; the permissive path is
+available only to H21 with the matching typed edges. H21 model/codec
+versions are bumped to v2 because the relation vocabulary has expanded from
+seven to eight. No prior H21 checkpoint should be loaded into v2.
 
 ## Field-coverage audit
 
