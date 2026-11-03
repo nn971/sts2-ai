@@ -15,7 +15,7 @@ embedding or numeric feature.
 The H21 v1 input is gated on emulator `prototype-ai-v1` and the H21 object
 schema `sts2-h21-public-grounded-macro-v1`. H7/H16/H18/H19/H20 models retain
 their previous checkpoint formats. H21 has a distinct model checkpoint and
-six (currently) typed edge families. No pretrained weights are silently reused.
+seven typed edge families (including chronological room history). No pretrained weights are silently reused.
 
 ## Implemented action targets
 
@@ -46,7 +46,7 @@ The object cap is 1,536 and never silently truncates targets.
 ## Field-coverage audit
 
 `audit_public_observation()` classifies each known v1 field path as
-`encoded`, `reference`, `partial`, `gap` or `terminal`.
+`encoded`, `reference`, `partial`, `gap`, `terminal` or `auxiliary`.
 Nested typed reward/shop/event offers are traversed. Unclassified fields
 are errors, including fields introduced by future emulator changes.
 The audit intentionally reports outstanding work; its existence is not a
@@ -54,12 +54,17 @@ full representation-readiness certificate.
 
 Known unrepresented or partially represented paths currently include:
 
-- `observation.completed_rooms` (history and past-room context)
-- `observation.combat.play_pile` (visible card contents)
-- `observation.combat.pending_choice_id` (pending dialog identity)
-- `observation.combat.enemies[].move_id` and `is_minion`
-- `observation.decision_index` (a local/public decision counter)
-- Specialized action families and partial pending deck-choice contexts
+- Specialized nested reward, shop and native event continuations whose
+  action payload is not yet grounded in a published selectable object
+- Portions of pending deck-choice semantics that only have raw candidate IDs
+- Some event-specific option payloads absent from the v1 observation
+- The partial combat/enemy schema audit pending full source parity verification
+
+Newly covered by H21: visible combat play-pile card modifiers, enemy move
+identity and minion flag, pending-choice presence, and completed-room
+chronology via typed predecessor edges. Opaque pending-choice/room reference
+IDs remain outside learned features. The run decision index is categorized
+as auxiliary replay metadata, intentionally excluded from policy features.
 
 Terminal-only defeat enemy HP remains training feedback, never a normal
 mid-combat public input. Draw pile order and unrevealed future rewards
