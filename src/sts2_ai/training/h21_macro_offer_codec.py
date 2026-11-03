@@ -35,7 +35,8 @@ OPTION_OF = 3
 GROUP_OPTION = 4
 VISIBLE_VALUE = 5
 PREVIOUS_ROOM = 6
-H21_RELATION_TYPES = 7
+AFFLICTION_SOURCE = 7
+H21_RELATION_TYPES = 8
 
 # All non-map pointer-bearing action kinds in the pinned prototype action
 # surface must be dealt with explicitly. Unknown actions with empty payload
@@ -721,7 +722,9 @@ def encode_h21_macro_decision(
             raise ValueError("H21 action-kind hash collision")
         action_kind_buckets[kind_bucket] = action.kind
     base = encode_h20_map_decision(
-        state, actions, public_schema_id=public_schema_id)
+        state, actions, public_schema_id=public_schema_id,
+        allow_affliction_source_relations=True,
+    )
     if base.phase == "combat":
         return _augment_visible_combat(state, base)
     ctx = _GroundedMacro(state, base)
