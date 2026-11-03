@@ -251,6 +251,18 @@ class _GroundedMacro:
             if extra:
                 current = min(extra)
         self.current_reward_group = current
+        for index, bundle in enumerate(reward.get("card_bundles") or []):
+            if not isinstance(bundle, list) or not bundle:
+                raise ValueError("Malformed visible card reward bundle")
+            option = self.add("event_choice", "reward:card_bundle",
+                              "reward", {"count": len(bundle)},
+                              owner=reward_root)
+            for card_id in bundle:
+                if not isinstance(card_id, str):
+                    raise ValueError("Malformed card ID in visible reward bundle")
+                self.add("card", card_id, "reward", owner=option,
+                         edge_type=GROUP_OPTION)
+            self.reward_options[("bundle", 0, index)] = option
         if reward.get("potion_option") is not None:
             self.reward_options[("potion", 0, 0)] = self.add(
                 "potion", reward["potion_option"], "reward",
@@ -420,6 +432,8 @@ class _GroundedMacro:
             source = self.potion(_int(payload, "Slot"))
         elif kind in _DECK_CARD_ACTIONS:
             target = self.deck(_int(payload, "CardInstanceId"))
+        elif kind == "take_reward_bundle":
+            target = self.option("bundle", 0, _int(payload, "Index"))
         elif kind in _POTION_SLOT_ACTIONS:
             source = self.potion(_int(payload, "Slot"))
         elif kind in _REWARD_CARD_ACTIONS:
@@ -494,7 +508,8 @@ class _GroundedMacro:
             raise ValueError("Shop action offer ID has no public match")
         if (kind in (_REWARD_CARD_ACTIONS | _REWARD_GROUP_ACTIONS)
                 or kind.startswith(("take_reward_", "replace_reward_", "skip_reward_extra_"))
-                or kind in ("event_choice", "replace_shop_potion")) and target < 0:
+                or kind in ("event_choice", "replace_shop_potion",
+                            "take_reward_bundle")) and target < 0:
             raise ValueError("Macro choice has no visible target: " + kind)
         return replace(old, semantic=semantic, source=source,
                        target=target, members=members)
