@@ -13,7 +13,6 @@ from pathlib import Path
 
 from sts2_ai.training.h21_field_coverage import PUBLIC_V1_FIELD_CONTRACT
 
-
 PUBLIC_RECORDS = {
     "observation": "PrototypeAiObservation",
     "card": "PrototypeAiCard",
