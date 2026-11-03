@@ -180,6 +180,31 @@ def test_v1_field_contract_and_legacy_frame_fail_closed():
         encode(invalid)
 
 
+def test_new_public_fields_and_reference_ids_fail_closed():
+    state = resource_state()
+    state["deck"][0]["new_public_modifier"] = 1
+    with pytest.raises(ValueError, match="Unclassified public resource"):
+        encode(state)
+
+    state = resource_state()
+    state["deck"][0]["affliction"] = {
+        "kind": "Bound", "amount": 1, "source_enemy_instance_id": 37,
+    }
+    with pytest.raises(ValueError, match="explicit relation"):
+        encode(state)
+
+    state = resource_state()
+    state["potions"][0]["slot"] = 3
+    with pytest.raises(ValueError, match="slot references"):
+        encode(state)
+
+    state = resource_state()
+    state["potion_slots_occupied"] = 0
+    state["potion_slots_empty"] = 3
+    with pytest.raises(ValueError, match="Occupied potion slot"):
+        encode(state)
+
+
 def test_opaque_macro_actions_still_keep_h16_menu_collision_checks():
     state = resource_state()
     actions = (
