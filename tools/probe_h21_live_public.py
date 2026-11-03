@@ -7,6 +7,7 @@ No private RunState, RNG stream or hidden deck order is read by the policy.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -63,9 +64,29 @@ class PublicJsonl:
                 "Emulator JSONL process failed: " + lines[-2000:])
 
 
-def choose(actions: list[dict[str, Any]]) -> dict[str, Any]:
-    # Deterministic coverage heuristic, independent of any private source.
-    # Explore actions in a fixed preference order, never using hidden RNG.
+# PrototypeRoomType source enum order. These are public map categories.
+_ROOM_NAMES = ("Combat", "Elite", "Event", "Shop", "Rest",
+               "Boss", "Unknown", "Treasure")
+_ROUTE_PREFERENCES = (
+    ("Shop", "Elite", "Event", "Unknown", "Treasure", "Rest", "Combat", "Boss"),
+    ("Elite", "Shop", "Unknown", "Event", "Rest", "Combat", "Treasure", "Boss"),
+    ("Unknown", "Event", "Shop", "Elite", "Treasure", "Rest", "Combat", "Boss"),
+    ("Rest", "Treasure", "Event", "Shop", "Elite", "Unknown", "Combat", "Boss"),
+    ("Event", "Shop", "Unknown", "Elite", "Rest", "Treasure", "Combat", "Boss"),
+)
+
+
+def _public_room_name(room_type: Any) -> str:
+    if type(room_type) is int and 0 <= room_type < len(_ROOM_NAMES):
+        return _ROOM_NAMES[room_type]
+    return str(room_type)
+
+
+def choose(
+    actions: list[dict[str, Any]], *, public_state: dict[str, Any] | None = None,
+    seed: str = "", step: int = 0, route_variant: int = 0,
+) -> dict[str, Any]:
+    """Deterministic coverage policy using only the published observation."""
     priorities = {
         kind: n for n, kind in enumerate((
             "start_run", "take_reward_gold", "take_reward_relic",
@@ -75,9 +96,33 @@ def choose(actions: list[dict[str, Any]]) -> dict[str, Any]:
             "rest_upgrade", "rest_train", "use_potion", "play_card", "end_turn",
         ))
     }
-    return min(actions, key=lambda a: (
-        priorities.get(a["kind"], 99),
-        a["kind"], a["payloadJson"]))
+    nodes = {}
+    if public_state is not None:
+        nodes = {
+            node["node_id"]: _public_room_name(node["room_type"])
+            for node in public_state.get("map", [])
+        }
+    preferences = _ROUTE_PREFERENCES[route_variant % len(_ROUTE_PREFERENCES)]
+
+    def order(action: dict[str, Any]) -> tuple[int, int, str]:
+        kind = action["kind"]
+        menu_priority = priorities.get(kind, 99)
+        route_priority = 0
+        if kind == "choose_map_node":
+            payload = json.loads(action["payloadJson"])
+            node_id = payload.get("NodeId", payload.get("node_id"))
+            room_type = nodes.get(node_id, "")
+            route_priority = (
+                preferences.index(room_type)
+                if room_type in preferences else len(preferences)
+            )
+        # Stable tie-breakers vary the route/event selections across seeds
+        # without using hidden emulator streams or RNG.
+        data = f"{seed}:{step}:{action['kind']}:{action['payloadJson']}"
+        tie = hashlib.sha256(data.encode("utf-8")).hexdigest()
+        return menu_priority, route_priority, tie
+
+    return min(actions, key=order)
 
 
 def main() -> int:
