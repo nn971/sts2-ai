@@ -12,6 +12,7 @@ from dataclasses import replace
 from typing import Any
 
 from sts2_ai.models.shared_game_objects import (
+    ACTION_BUCKETS,
     IDENTITY_BUCKETS,
     KINDS,
     OWNER_ATTRIBUTE_KIND_V2,
@@ -92,7 +93,19 @@ class _GroundedMacro:
         self.event_choices: dict[str, int] = {}
         self.deck_refs: dict[int, int] = {}
         self.potion_refs: dict[int, int] = {}
+        self.identity_names: dict[tuple[int, int], str] = {}
         self._build_resource_refs()
+
+    def identity(self, kind: int, label: str) -> int:
+        bucket = _bucket(label, IDENTITY_BUCKETS)
+        key = (kind, bucket)
+        previous = self.identity_names.get(key)
+        if previous is not None and previous != label:
+            raise ValueError(
+                "H21 public identity hash collision: "
+                + repr((previous, label)))
+        self.identity_names[key] = label
+        return bucket
 
     def add(self, kind: str, identity: str, zone: str,
             data: dict[str, Any] | None = None, *, owner: int = -1,
@@ -102,7 +115,7 @@ class _GroundedMacro:
         numeric, observed = _numbers(data or {})
         pos = len(self.objects)
         self.objects.append(ObjectToken(
-            KINDS.index(kind), _bucket(identity, IDENTITY_BUCKETS),
+            KINDS.index(kind), self.identity(KINDS.index(kind), identity),
             ZONES.index(zone), numeric, observed, owner=owner))
         if owner >= 0:
             self.edges.append(RelationToken(edge_type, owner, pos))
@@ -117,7 +130,7 @@ class _GroundedMacro:
             pos = len(self.objects)
             self.objects.append(ObjectToken(
                 OWNER_ATTRIBUTE_KIND_V2,
-                _bucket("attribute:" + identity, IDENTITY_BUCKETS),
+                self.identity(OWNER_ATTRIBUTE_KIND_V2, "attribute:" + identity),
                 self.objects[owner].zone, numeric, observed, owner=owner))
             self.edges.append(RelationToken(VISIBLE_VALUE, owner, pos))
 
@@ -492,6 +505,13 @@ def encode_h21_macro_decision(
     public_schema_id: str,
 ) -> EncodedDecision:
     audit_public_observation(state)
+    action_kind_buckets: dict[int, str] = {}
+    for action in actions:
+        kind_bucket = _bucket(action.kind, ACTION_BUCKETS)
+        previous_kind = action_kind_buckets.get(kind_bucket)
+        if previous_kind is not None and previous_kind != action.kind:
+            raise ValueError("H21 action-kind hash collision")
+        action_kind_buckets[kind_bucket] = action.kind
     base = encode_h20_map_decision(
         state, actions, public_schema_id=public_schema_id)
     if base.phase == "combat":
