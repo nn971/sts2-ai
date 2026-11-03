@@ -22,7 +22,9 @@ def observation():
         "decision_index": 17, "phase": "Combat",
         "act": 1, "floor": 6, "hp": 42, "max_hp": 70, "gold": 74,
         "deck": [{"instance_id": 1, "card_id": "silent.strike",
-                  "upgrade_level": 0, "state": {}}],
+                  "upgrade_level": 0, "state": {},
+                  "affliction": {"kind": "Bound", "amount": 1,
+                                 "source_enemy_instance_id": None}}],
         "relics": [{"relic_id": "relic.1", "state": {},
                     "is_wax": False, "is_melted": False}],
         "potions": [{"slot": 0, "potion_id": "potion.1", "state": {}}],
@@ -55,6 +57,8 @@ def test_gaps_and_references_are_reported_by_specific_field_path():
     assert ("observation.combat.enemies[0].move_id", ENCODED) in report.classified
     assert ("observation.map[0].node_id", REFERENCE) in report.classified
     assert ("observation.combat.enemies[0].hp", ENCODED) in report.classified
+    assert ("observation.deck[0].affliction.source_enemy_instance_id",
+            REFERENCE) in report.classified
     assert ("observation.combat", PARTIAL) in report.classified
     assert ("observation.combat.play_pile", ENCODED) in report.classified
     assert ("observation.decision_index", AUXILIARY) in report.classified
