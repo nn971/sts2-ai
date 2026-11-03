@@ -4,8 +4,10 @@ on:
   pull_request:
     paths:
       - 'src/sts2_ai/training/h21_macro_offer_codec.py'
+      - 'src/sts2_ai/training/h21_field_coverage.py'
       - 'src/sts2_ai/models/shared_macro_transformer_v2.py'
       - 'tests/test_h21_macro_offers.py'
+      - 'tests/test_h21_field_coverage.py'
       - 'src/sts2_ai/models/shared_game_objects.py'
       - 'src/sts2_ai/models/shared_transformer.py'
       - '.github/workflows/h21-grounded-macro.yml'
@@ -26,7 +28,7 @@ jobs:
           python -m pip install -e '.[dev]'
       - name: Lint grounded macro implementation and tests
         run: |
-          python -m ruff check src/sts2_ai/training/h21_macro_offer_codec.py src/sts2_ai/models/shared_macro_transformer_v2.py tests/test_h21_macro_offers.py
+          python -m ruff check src/sts2_ai/training/h21_macro_offer_codec.py src/sts2_ai/training/h21_field_coverage.py src/sts2_ai/models/shared_macro_transformer_v2.py tests/test_h21_macro_offers.py tests/test_h21_field_coverage.py
       - name: Grounding regression and inherited version compatibility
         run: |
-          python -m pytest -q tests/test_h21_macro_offers.py tests/test_h20_map_graph.py tests/test_h19_owner_resources.py tests/test_h19_owner_model.py tests/test_h16_deck_multiplicity.py tests/test_shared_transformer_h7.py
+          python -m pytest -q tests/test_h21_macro_offers.py tests/test_h21_field_coverage.py tests/test_h20_map_graph.py tests/test_h19_owner_resources.py tests/test_h19_owner_model.py tests/test_h16_deck_multiplicity.py tests/test_shared_transformer_h7.py
