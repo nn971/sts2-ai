@@ -134,6 +134,7 @@ PUBLIC_V1_FIELD_CONTRACT: dict[str, dict[str, str]] = {
     "shop_offer": {
         "offer_id": REFERENCE, "item_id": ENCODED, "price": ENCODED,
         "sold": ENCODED, "base_price": ENCODED, "on_sale": ENCODED,
+        "undiscounted_price": ENCODED,
     },
     "shop_card_preview": {"offer_id": REFERENCE, "card": ENCODED},
     "event": {
