@@ -72,7 +72,8 @@ def _check_public_resource_fields(resource: dict[str, Any], kind: str) -> None:
             # The source is an enemy relation, never a learned ordinal.
             # Fail closed until the cross-entity edge is implemented.
             if affliction.get("source_enemy_instance_id") is not None:
-                raise ValueError("Affliction source_enemy_instance_id requires an explicit relation")
+                raise ValueError(
+                    "Affliction source_enemy_instance_id requires an explicit relation")
 
 
 def encode_h19_resource_decision(
