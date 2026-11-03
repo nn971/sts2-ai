@@ -57,7 +57,7 @@ def test_gaps_and_references_are_reported_by_specific_field_path():
     assert ("observation.combat", PARTIAL) in report.classified
     assert ("observation.combat.play_pile", ENCODED) in report.classified
     assert "observation.decision_index" in report.gaps
-    assert "observation.completed_rooms" in report.gaps
+    assert ("observation.completed_rooms", ENCODED) in report.classified
     assert not report.fully_encoded
 
 
@@ -123,7 +123,7 @@ def test_contract_declares_unrepresented_high_priority_fields():
     root = PUBLIC_V1_FIELD_CONTRACT["observation"]
     combat = PUBLIC_V1_FIELD_CONTRACT["combat"]
     enemy = PUBLIC_V1_FIELD_CONTRACT["enemy"]
-    assert root["completed_rooms"] == GAP
+    assert root["completed_rooms"] == ENCODED
     assert combat["pending_choice_id"] == REFERENCE
     assert combat["play_pile"] == ENCODED
     assert enemy["move_id"] == ENCODED
