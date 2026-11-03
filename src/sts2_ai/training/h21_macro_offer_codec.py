@@ -515,6 +515,68 @@ class _GroundedMacro:
                        target=target, members=members)
 
 
+_H21_PUBLIC_CARD_ATTRIBUTES = (
+    "state", "enchantment", "affliction", "is_temporary",
+    "combat_energy_cost_delta", "temporary_energy_cost",
+    "keyword_overrides", "enchantment_triggered_this_combat",
+    "cost_kind", "effective_energy_cost",
+)
+
+
+def _augment_visible_combat(
+    state: dict[str, Any], base: EncodedDecision,
+) -> EncodedDecision:
+    """Publish visible play-pile, enemy move/minion and dialog attributes.
+
+    This is an opt-in H21 augmentation; H7/H16/H19/H20 object layouts
+    and checkpoints are unchanged.
+    """
+    combat = state["combat"]
+    ctx = _GroundedMacro(state, base)
+    players = [
+        i for i, obj in enumerate(ctx.objects)
+        if obj.kind == KINDS.index("player")
+        and obj.zone == ZONES.index("player")
+    ]
+    if len(players) != 1:
+        raise ValueError("H21 expected exactly one visible combat player")
+    player = players[0]
+    # Pending choice ID is an opaque reference, not a learned identity.
+    ctx.attribute(player, "pending_choice_present",
+                  combat.get("pending_choice_id") is not None)
+    play_pile = combat.get("play_pile") or []
+    if not isinstance(play_pile, list):
+        raise ValueError("Malformed public play pile")
+    ctx.attribute(player, "play_pile_count", len(play_pile))
+    for card in play_pile:
+        if not isinstance(card, dict) or not isinstance(card.get("card_id"), str):
+            raise ValueError("Malformed public play-pile card")
+        index = ctx.add("card", card["card_id"], "event", card,
+                        owner=player, edge_type=VISIBLE_VALUE)
+        # Reuse the historical event zone and classify membership explicitly
+        # to distinguish cards in play from already-selected dialog cards.
+        ctx.attribute(index, "visible_card_zone", "play_pile")
+        for field in _H21_PUBLIC_CARD_ATTRIBUTES:
+            if field in card:
+                ctx.attribute(index, field, card[field])
+    enemy_positions = [
+        i for i, obj in enumerate(ctx.objects)
+        if obj.kind == KINDS.index("enemy")
+        and obj.zone == ZONES.index("enemy")
+    ]
+    enemies = combat.get("enemies") or []
+    if len(enemy_positions) != len(enemies):
+        raise ValueError("H21 enemy count differs from visible combat")
+    for index, enemy in zip(enemy_positions, enemies, strict=True):
+        for field in ("move_id", "is_minion"):
+            if field in enemy:
+                ctx.attribute(index, field, enemy[field])
+    return EncodedDecision(
+        H21_OBJECT_SCHEMA, base.phase, tuple(ctx.objects),
+        base.actions, tuple(ctx.edges),
+    )
+
+
 def encode_h21_macro_decision(
     state: dict[str, Any], actions: Sequence[Any], *,
     public_schema_id: str,
@@ -530,7 +592,7 @@ def encode_h21_macro_decision(
     base = encode_h20_map_decision(
         state, actions, public_schema_id=public_schema_id)
     if base.phase == "combat":
-        return replace(base, schema=H21_OBJECT_SCHEMA)
+        return _augment_visible_combat(state, base)
     ctx = _GroundedMacro(state, base)
     ctx.build_global()
     ctx.build_reward()
