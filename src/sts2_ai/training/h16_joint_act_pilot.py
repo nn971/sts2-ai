@@ -608,6 +608,7 @@ def collect_act_episode(
     max_simulation_steps: int = 512,
     adaptive_search: AdaptiveSearch | None = None,
     card_exposure: Mapping[str, int] | None = None,
+    map_profile_id: str | None = EXPERIMENTAL_FIXED_ROUTE_PROFILE,
 ) -> PilotEpisode:
     if not (0 <= search_probability <= 1 and max_searches >= 0
             and max_decisions > 0 and simulations > 0
@@ -617,7 +618,7 @@ def collect_act_episode(
         raise ValueError("Invalid Act collection settings")
     state = reset_training_run(
         backend, seed, NATIVE_OVERGROWTH, ascension,
-        map_profile_id=EXPERIMENTAL_FIXED_ROUTE_PROFILE,
+        map_profile_id=map_profile_id,
     )
     decisions: list[PilotDecision] = []
     frames: list[dict[str, Any]] = []
