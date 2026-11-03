@@ -390,6 +390,24 @@ class _GroundedMacro:
                      "queued_deck_choices"):
             if name in evt and evt[name] is not None:
                 self.attribute(root, name, evt[name])
+        pending_potion = evt.get("pending_potion_replacement")
+        if isinstance(pending_potion, dict):
+            potion_id = pending_potion.get("potion_id")
+            slots = pending_potion.get("candidate_slots")
+            capacity = self.state.get("potion_slot_capacity")
+            if (not isinstance(potion_id, str)
+                    or not isinstance(slots, list)
+                    or type(capacity) is not int):
+                raise ValueError("Malformed public event potion replacement")
+            self.event_potion_offer = self.add(
+                "potion", potion_id, "event", owner=root)
+            for slot in slots:
+                if type(slot) is not int or not 0 <= slot < capacity:
+                    raise ValueError("Invalid event potion candidate slot")
+                if slot not in self.potion_refs and slot not in self.empty_potion_slots:
+                    self.empty_potion_slots[slot] = self.add(
+                        "potion", "empty_potion_slot", "inventory",
+                        {"stacks": slot}, owner=0)
         if isinstance(evt.get("pending_deck_choice"), dict):
             pending = evt["pending_deck_choice"]
             for name in ("choice_id", "kind", "remaining_selections",
