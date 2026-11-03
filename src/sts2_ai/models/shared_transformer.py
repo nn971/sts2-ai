@@ -71,7 +71,10 @@ class H7Batch:
 
 
 def vars_as_dict(batch: H7Batch) -> dict[str, Tensor | None]:
-    return {name: getattr(batch, name) for name in H7Batch.__dataclass_fields__}
+    return {
+        name: tensor for name in H7Batch.__dataclass_fields__
+        if (tensor := getattr(batch, name)) is not None
+    }
 
 
 def collate_h7(
