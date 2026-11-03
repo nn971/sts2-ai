@@ -25,6 +25,7 @@ from sts2_ai.models.shared_game_objects import (
     _public_attribute_leaves,
 )
 from sts2_ai.training.h20_map_graph_codec import encode_h20_map_decision
+from sts2_ai.training.h21_field_coverage import audit_public_observation
 
 H21_OBJECT_SCHEMA = "sts2-h21-public-grounded-macro-v1"
 H21_CODEC = "h21-grounded-reward-shop-event-v1"
@@ -490,6 +491,7 @@ def encode_h21_macro_decision(
     state: dict[str, Any], actions: Sequence[Any], *,
     public_schema_id: str,
 ) -> EncodedDecision:
+    audit_public_observation(state)
     base = encode_h20_map_decision(
         state, actions, public_schema_id=public_schema_id)
     if base.phase == "combat":
