@@ -66,8 +66,11 @@ def vars_as_dict(batch: H7Batch) -> dict[str, Tensor]:
     return {name: getattr(batch, name) for name in H7Batch.__dataclass_fields__}
 
 
-def collate_h7(decisions: list[EncodedDecision]) -> H7Batch:
-    if not decisions or any(item.schema != SHARED_OBJECT_SCHEMA for item in decisions):
+def collate_h7(
+    decisions: list[EncodedDecision], *,
+    expected_schema: str = SHARED_OBJECT_SCHEMA,
+) -> H7Batch:
+    if not decisions or any(item.schema != expected_schema for item in decisions):
         raise ValueError("Need nonempty same-version H7 decisions")
     if any(not item.objects or not item.actions for item in decisions):
         raise ValueError("H7 decisions require objects and legal actions")

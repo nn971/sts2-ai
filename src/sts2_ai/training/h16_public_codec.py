@@ -147,6 +147,20 @@ def encode_h16_decision(
                     KINDS.index("status"), _bucket(identity, IDENTITY_BUCKETS),
                     ZONES.index("inventory"), numeric, observed,
                 ))
+    encoded_actions = _h16_actions(base, state, actions)
+    return EncodedDecision(
+        base.schema, base.phase, tuple(objects), tuple(encoded_actions),
+    )
+
+
+def _h16_actions(
+    base: EncodedDecision, state: dict[str, Any], actions: Sequence[Any],
+) -> tuple[ActionToken, ...]:
+    """Keep H16's exact action semantics reusable by a separately versioned codec.
+
+    The shared object indices in `base.actions` remain valid when v2 appends
+    its owner-linked attribute objects after the base object sequence.
+    """
     encoded_actions: list[ActionToken] = []
     # Hash-bucket collisions are possible in 4,096 dimensions. Resolve
     # collisions among different macro choices within the current menu.
@@ -219,6 +233,4 @@ def encode_h16_decision(
                 "public_token_shared": True,
                 "example": [example[0].payload_json, example[1].payload_json],
             }, sort_keys=True), file=sys.stderr, flush=True)
-    return EncodedDecision(
-        base.schema, base.phase, tuple(objects), tuple(encoded_actions),
-    )
+    return tuple(encoded_actions)
