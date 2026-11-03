@@ -14,7 +14,6 @@ from typing import Any
 from sts2_ai.models.shared_game_objects import (
     IDENTITY_BUCKETS,
     KINDS,
-    NUMERIC_FIELDS,
     OWNER_ATTRIBUTE_KIND_V2,
     ZONES,
     ActionToken,
