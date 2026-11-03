@@ -45,36 +45,15 @@ PUBLIC_RECORDS = {
 
 MODEL_RECORDS = {"shop_offer", "completed_room"}
 ACTION_PAYLOAD_FIELDS = {
-    'ChooseGoldRewardPayload': (
-        'group_index'
-    , ),
-    'ChooseExtraPotionRewardPayload': (
-        'group_index',
-        'slot'
-    , ),
-    'ChooseRewardCardGroupPayload': (
-        'group_index',
-        'index'
-    , ),
-    'ChooseBundlePayload': (
-        'index'
-    , ),
-    'ReplaceEventPotionPayload': (
-        'slot'
-    , ),
-    'BuyOfferPayload': (
-        'offer_id'
-    , ),
-    'ReplaceShopPotionPayload': (
-        'offer_id',
-        'slot'
-    , ),
-    'UsePotionPayload': (
-        'slot',
-        'target_enemy_id'
-    , )
+    "ChooseGoldRewardPayload": ("group_index",),
+    "ChooseExtraPotionRewardPayload": ("group_index", "slot"),
+    "ChooseRewardCardGroupPayload": ("group_index", "index"),
+    "ChooseBundlePayload": ("index",),
+    "ReplaceEventPotionPayload": ("slot",),
+    "BuyOfferPayload": ("offer_id",),
+    "ReplaceShopPotionPayload": ("offer_id", "slot"),
+    "UsePotionPayload": ("slot", "target_enemy_id"),
 }
-
 
 
 def snake(name: str) -> str:
