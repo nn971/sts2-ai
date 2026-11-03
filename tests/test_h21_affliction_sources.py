@@ -18,14 +18,15 @@ from sts2_ai.training.h21_macro_offer_codec import (
 
 
 def visible_combat():
-    card = lambda ident, source: {
-        "instance_id": ident, "card_id": "silent.strike",
-        "upgrade_level": 0, "state": {},
-        "affliction": {
-            "kind": "Bound", "amount": 1,
-            "source_enemy_instance_id": source,
-        },
-    }
+    def card(ident, source):
+        return {
+            "instance_id": ident, "card_id": "silent.strike",
+            "upgrade_level": 0, "state": {},
+            "affliction": {
+                "kind": "Bound", "amount": 1,
+                "source_enemy_instance_id": source,
+            },
+        }
     return {
         "hp": 53, "max_hp": 70, "gold": 40, "act": 1, "floor": 4,
         "deck": [], "relics": [], "potions": [],
