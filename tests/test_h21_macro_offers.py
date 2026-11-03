@@ -250,6 +250,37 @@ def test_action_kind_collision_fails_explicitly(monkeypatch):
         encode(state(), [act("start_run"), act("leave_reward")])
 
 
+def test_completed_room_history_is_ordered_and_node_ids_are_opaque():
+    from sts2_ai.training.h21_macro_offer_codec import PREVIOUS_ROOM
+
+    frame = state()
+    frame["completed_rooms"] = [
+        {"act": 1, "floor": 1, "node_id": "arbitrary-a", "room_type": "Combat"},
+        {"act": 1, "floor": 2, "node_id": "arbitrary-b", "room_type": "Shop"},
+        {"act": 1, "floor": 3, "node_id": "arbitrary-c", "room_type": "Elite"},
+    ]
+    actions = [act("leave_reward")]
+    original = encode(frame, actions)
+    predecessor = [edge for edge in original.relations
+                   if edge.relation_type == PREVIOUS_ROOM]
+    assert len(predecessor) == 2
+    assert predecessor[0].target != predecessor[1].target
+
+    renamed = copy.deepcopy(frame)
+    for index, visit in enumerate(renamed["completed_rooms"]):
+        visit["node_id"] = f"renamed-{index + 100}"
+    assert encode(renamed, actions) == original
+
+    reordered = copy.deepcopy(frame)
+    reordered["completed_rooms"] = [
+        reordered["completed_rooms"][i] for i in (0, 2, 1)]
+    changed = encode(reordered, actions)
+    assert changed != original
+    # History does not use raw NodeId values as neural features.
+    assert len([r for r in changed.relations
+                if r.relation_type == PREVIOUS_ROOM]) == 2
+
+
 def test_combat_play_pile_and_enemy_move_are_owner_local():
     frame = state()
     frame["combat"] = {
