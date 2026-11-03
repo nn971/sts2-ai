@@ -243,6 +243,32 @@ def test_unbound_offers_and_unknown_payloads_fail_closed():
         encode(frame, [act("event_choice", ChoiceId="bad")])
 
 
+def test_action_payload_guards_reject_unrepresented_choice_dimensions():
+    frame = state()
+    frame["reward"] = {
+        "card_options": ["silent.strike"],
+        "pending_card_groups": [
+            {"group_index": 0, "card_options": ["silent.strike"]},
+            {"group_index": 1, "card_options": ["silent.defend"]},
+        ],
+        "pending_extra_potion_rewards": [
+            {"group_index": 2, "potion_id": "potion.acid"},
+        ],
+    }
+    with pytest.raises(ValueError, match="Index=-1"):
+        encode(frame, [act(
+            "skip_reward_card_group", GroupIndex=1, Index=0)])
+    with pytest.raises(ValueError, match="Unexpected replacement slot"):
+        encode(frame, [act(
+            "take_reward_extra_potion", GroupIndex=2, Slot=1)])
+    with pytest.raises(ValueError, match="Unaudited macro action payload fields"):
+        encode(frame, [act(
+            "take_reward_card", Index=0, BonusDamage=3)])
+    with pytest.raises(ValueError, match="two distinct"):
+        encode(frame, [act(
+            "rest_cook", CardInstanceIds=[201, 201])])
+
+
 def test_opaque_instance_renaming_does_not_change_owned_card_action():
     before = state()
     after = copy.deepcopy(before)
