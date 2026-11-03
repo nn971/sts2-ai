@@ -38,9 +38,12 @@ MAP_ZONE = ZONES.index("map")
 def encode_h20_map_decision(
     state: dict[str, Any], actions: Sequence[Any], *,
     public_schema_id: str,
+    allow_affliction_source_relations: bool = False,
 ) -> EncodedDecision:
     base = encode_h19_resource_decision(
-        state, actions, public_schema_id=public_schema_id)
+        state, actions, public_schema_id=public_schema_id,
+        allow_affliction_source_relations=allow_affliction_source_relations,
+    )
     nodes = state.get("map")
     if not isinstance(nodes, list):
         raise ValueError("H20 requires a visible map node list")
