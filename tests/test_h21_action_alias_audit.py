@@ -15,7 +15,7 @@ def action(name: str, kind: str, payload: str) -> LegalAction:
 def duplicate_tokens(*, combat: bool = False) -> EncodedDecision:
     shared = ActionToken(kind=1, semantic=7, source=-1, target=4)
     return EncodedDecision(
-        "sts2-h21-public-grounded-macro-v1",
+        "sts2-h21-public-grounded-macro-v2",
         "combat" if combat else "macro",
         (), (shared, shared),
     )
