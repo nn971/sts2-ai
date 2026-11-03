@@ -105,6 +105,35 @@ def test_reward_options_are_grounded_with_card_upgrades_and_extra_groups():
     assert any(edge.relation_type == OPTION_OF for edge in decision.relations)
 
 
+def test_card_bundle_actions_expose_every_card_in_selected_bundle():
+    frame = state()
+    frame["reward"] = {
+        "card_resolved": False,
+        "card_bundles": [
+            ["silent.strike", "silent.defend"],
+            ["silent.strike", "silent.neutralize"],
+        ],
+    }
+    actions = [act("take_reward_bundle", Index=0),
+               act("take_reward_bundle", Index=1)]
+    decision = encode(frame, actions)
+    first, second = (a.target for a in decision.actions)
+    assert first != second
+    assert decision.actions[0].semantic == decision.actions[1].semantic
+    cards_a = {
+        decision.objects[e.target].identity for e in decision.relations
+        if e.source == first and e.target != first
+        and decision.objects[e.target].kind == KINDS.index("card")
+    }
+    cards_b = {
+        decision.objects[e.target].identity for e in decision.relations
+        if e.source == second and e.target != second
+        and decision.objects[e.target].kind == KINDS.index("card")
+    }
+    assert len(cards_a) == len(cards_b) == 2
+    assert cards_a != cards_b
+
+
 def test_shop_prices_are_attached_to_real_offers_and_replacements():
     frame = state()
     frame["shop"] = {
