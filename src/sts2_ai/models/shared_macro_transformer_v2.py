@@ -10,7 +10,7 @@ from torch import nn
 
 from sts2_ai.models.shared_game_objects import EncodedDecision
 from sts2_ai.models.shared_map_transformer_v2 import H20MapGraphTransformer
-from sts2_ai.models.shared_transformer import H20Batch, H7Batch, H7Config, collate_h7, vars_as_dict
+from sts2_ai.models.shared_transformer import H7Batch, H7Config, H20Batch, collate_h7, vars_as_dict
 from sts2_ai.training.h21_macro_offer_codec import (
     H21_CODEC,
     H21_OBJECT_SCHEMA,
