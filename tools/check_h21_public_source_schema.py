@@ -57,7 +57,7 @@ def snake(name: str) -> str:
 def parameters(source: str, record: str) -> tuple[str, ...]:
     # Remove line comments before top-level comma splitting: a public DTO
     # parameter comment can contain commas (e.g. inventory, even when empty).
-    source = re.sub(r"//[^\\n]*", "", source)
+    source = re.sub(r"//[^\n]*", "", source)
     pattern = r"\bpublic\s+sealed\s+record\s+" + re.escape(record) + r"\s*\("
     match = re.search(pattern, source)
     if not match:
