@@ -110,6 +110,6 @@ The actor must see each strategically relevant distinction that the player can o
 
 - Emulator issue #88: player-visible enchantments and temporary cost (open, existing).
 - AI issue #155: prove or disprove card-choice equivalence and residual aliasing (open, existing).
-- Additional emulator-owned work: versioned observation of history, potion capacity, card modifiers/attributes; Poison/Weak/Vulnerable -> powers with exact parity.
+- Emulator issue #237: versioned fair observation coverage and migration of Poison/Weak/Vulnerable into powers (open, implementation umbrella).
 - AI-owned work: schema coverage audit, owner-linked attributes, relational macro action/map encoder, collision diagnostics, exact variant/selection equivalence, model/checkpoint versioning.
 - Make P0 steps independent reviewable PRs (observation schema and fixtures; card/resource codec; macro objects and graph); then power-system consolidation, collision/overflow hardening and controlled evaluation.
