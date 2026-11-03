@@ -135,6 +135,10 @@ def main() -> int:
     parser.add_argument("--seed", action="append", dest="seeds")
     parser.add_argument("--max-decisions", type=int, default=55)
     parser.add_argument("--strict", action="store_true")
+    parser.add_argument(
+        "--diverse-route", action="store_true",
+        help="Use seed-varied public-map room priorities instead of fixed smoke ordering",
+    )
     args = parser.parse_args()
     seeds = args.seeds or ["h21-public-contract-s1", "h21-public-contract-s2"]
     if args.max_decisions < 1:
@@ -150,12 +154,17 @@ def main() -> int:
     decisions = 0
     equivalent_aliases = 0
     canonical_choices = 0
+    encode_seconds: list[float] = []
+    max_objects = 0
+    max_relations = 0
+    max_floor = 0
+    chosen_map_room_types: Counter[str] = Counter()
     public = PublicJsonl(args.emulator_dll)
     try:
         hello = public.call("hello")
         if hello.get("aiSchemaId") != EMULATOR_PUBLIC_SCHEMA_V1:
             raise ValueError("Unexpected public observation frame schema")
-        for seed in seeds:
+        for seed_index, seed in enumerate(seeds):
             begin = public.call(
                 "reset_native_overgrowth", seed=seed, ascension=0,
                 compact_card_selection=True,
@@ -167,6 +176,9 @@ def main() -> int:
                 if view.get("schemaId") != EMULATOR_PUBLIC_SCHEMA_V1:
                     raise ValueError("Observation schema changed within run")
                 observation = json.loads(view["payloadJson"])
+                current_floor = observation.get("floor")
+                if type(current_floor) is int:
+                    max_floor = max(max_floor, current_floor)
                 menu = public.call("legal_actions", state_handle=handle)["actions"]
                 if not menu:
                     break
@@ -178,6 +190,7 @@ def main() -> int:
                 actions = [LegalAction(
                     item["actionId"], item["kind"], item["payloadJson"],
                 ) for item in menu]
+                encode_start = time.perf_counter()
                 try:
                     encoding = encode_h21_macro_decision(
                         observation, actions, public_schema_id=view["schemaId"])
@@ -185,6 +198,8 @@ def main() -> int:
                         observation, actions, encoding)
                     equivalent_aliases += alias_audit.equivalent_aliases
                     canonical_choices += alias_audit.canonical_choices
+                    max_objects = max(max_objects, len(encoding.objects))
+                    max_relations = max(max_relations, len(encoding.relations))
                 except (ValueError, KeyError, TypeError) as exc:
                     errors.append({
                         "seed": seed, "step": step,
@@ -192,7 +207,24 @@ def main() -> int:
                         "action_kinds": sorted(set(item["kind"] for item in menu)),
                         "error": type(exc).__name__ + ": " + str(exc),
                     })
-                selected = choose(menu)
+                finally:
+                    encode_seconds.append(time.perf_counter() - encode_start)
+                if args.diverse_route:
+                    selected = choose(
+                        menu, public_state=observation, seed=seed,
+                        step=step, route_variant=seed_index,
+                    )
+                else:
+                    selected = choose(menu)
+                if selected["kind"] == "choose_map_node":
+                    selected_payload = json.loads(selected["payloadJson"])
+                    selected_node = selected_payload.get(
+                        "NodeId", selected_payload.get("node_id"))
+                    for node in observation.get("map", []):
+                        if node.get("node_id") == selected_node:
+                            chosen_map_room_types.update(
+                                [_public_room_name(node.get("room_type"))])
+                            break
                 result = public.call(
                     "step", state_handle=handle, action_id=selected["actionId"])
                 handle = result["child"]
@@ -200,10 +232,23 @@ def main() -> int:
                     break
     finally:
         public.close()
+    measured = sorted(encode_seconds)
+    p95_index = max(0, (95 * len(measured) + 99) // 100 - 1)
+    measured_total = sum(measured)
     print(json.dumps({
         "schema": EMULATOR_PUBLIC_SCHEMA_V1,
         "decisions": decisions, "seeds": seeds,
         "elapsed_seconds": round(time.perf_counter() - start, 3),
+        "diverse_route": args.diverse_route,
+        "max_floor": max_floor,
+        "chosen_map_room_types": dict(sorted(chosen_map_room_types.items())),
+        "encoding_only_seconds": round(measured_total, 6),
+        "encoding_only_decisions_per_second": (
+            round(len(measured) / measured_total, 2) if measured_total else 0),
+        "encoding_p95_ms": (
+            round(measured[p95_index] * 1000, 3) if measured else 0),
+        "max_objects": max_objects,
+        "max_relations": max_relations,
         "canonical_choices": canonical_choices,
         "equivalent_action_aliases": equivalent_aliases,
         "phase_counts": dict(phases),
