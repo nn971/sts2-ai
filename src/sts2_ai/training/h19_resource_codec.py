@@ -45,6 +45,23 @@ def _check_public_resource_fields(resource: dict[str, Any], kind: str) -> None:
             "Unclassified public resource fields in " + kind + ": "
             + ", ".join(sorted(extra)))
     if kind == "deck":
+        for field, allowed in (
+            ("enchantment", {"kind", "amount", "disabled"}),
+            ("temporary_energy_cost", {"cost", "expiry"}),
+            ("affliction", {"kind", "amount", "source_enemy_instance_id"}),
+        ):
+            child = resource.get(field)
+            if isinstance(child, dict):
+                unknown = set(child) - allowed
+                if unknown:
+                    raise ValueError(
+                        "Unclassified public " + field + " fields: "
+                        + str(sorted(unknown)))
+        for override in resource.get("keyword_overrides") or ():
+            if not isinstance(override, dict) or set(override) - {
+                "keyword", "enabled", "expiry",
+            }:
+                raise ValueError("Unclassified public keyword override")
         affliction = resource.get("affliction")
         if isinstance(affliction, dict):
             unknown = set(affliction) - {
@@ -93,9 +110,28 @@ def encode_h19_resource_decision(
             if "persistent_state" in resource:
                 raise ValueError("Legacy persistent_state is not a public v1 field")
             _check_public_resource_fields(resource, key)
+    if len(state["potions"]) != occupied:
+        raise ValueError("Occupied potion slot count disagrees with public potions")
+    slots = [potion.get("slot") for potion in state["potions"]]
+    if (any(type(slot) is not int or slot < 0 or slot >= capacity for slot in slots)
+            or len(set(slots)) != len(slots)):
+        raise ValueError("Public potion slot references are invalid")
+
     combat = state.get("combat")
-    if isinstance(combat, dict) and not isinstance(combat.get("history"), dict):
-        raise ValueError("H19 requires public combat.history")
+    if isinstance(combat, dict):
+        if not isinstance(combat.get("history"), dict):
+            raise ValueError("H19 requires public combat.history")
+        for field in ("hand", "discard_pile", "exhaust_pile", "play_pile",
+                      "selection_candidates", "selection_selected_cards"):
+            cards = combat.get(field)
+            if cards is None:
+                continue
+            if not isinstance(cards, list):
+                raise ValueError("Malformed public combat card collection: " + field)
+            for card in cards:
+                if not isinstance(card, dict):
+                    raise ValueError("Malformed public combat card")
+                _check_public_resource_fields(card, "deck")
 
     # The existing H16 macro-kind+payload collision guard and combat target
     # validation still apply. Only v2 resource attributes are appended, so
