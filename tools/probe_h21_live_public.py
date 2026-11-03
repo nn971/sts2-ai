@@ -151,6 +151,7 @@ def main() -> int:
     action_kinds: Counter[str] = Counter()
     gaps: Counter[str] = Counter()
     errors: list[dict[str, Any]] = []
+    step_errors: list[dict[str, Any]] = []
     decisions = 0
     equivalent_aliases = 0
     canonical_choices = 0
@@ -185,13 +186,13 @@ def main() -> int:
                 decisions += 1
                 phases[str(observation.get("phase"))] += 1
                 action_kinds.update(item["kind"] for item in menu)
-                report = audit_public_observation(observation)
-                gaps.update(report.gaps)
                 actions = [LegalAction(
                     item["actionId"], item["kind"], item["payloadJson"],
                 ) for item in menu]
                 encode_start = time.perf_counter()
                 try:
+                    report = audit_public_observation(observation)
+                    gaps.update(report.gaps)
                     encoding = encode_h21_macro_decision(
                         observation, actions, public_schema_id=view["schemaId"])
                     alias_audit = audit_h21_action_aliases(
@@ -225,8 +226,16 @@ def main() -> int:
                             chosen_map_room_types.update(
                                 [_public_room_name(node.get("room_type"))])
                             break
-                result = public.call(
-                    "step", state_handle=handle, action_id=selected["actionId"])
+                try:
+                    result = public.call(
+                        "step", state_handle=handle, action_id=selected["actionId"])
+                except RuntimeError as exc:
+                    step_errors.append({
+                        "seed": seed, "step": step,
+                        "action_kind": selected["kind"],
+                        "error": str(exc)[:1000],
+                    })
+                    break
                 handle = result["child"]
                 if result.get("terminal"):
                     break
@@ -255,12 +264,15 @@ def main() -> int:
         "legal_action_kinds": dict(sorted(action_kinds.items())),
         "known_gap_occurrences": dict(sorted(gaps.items())),
         "encode_failures": errors[:30], "total_encode_failures": len(errors),
+        "step_failures": step_errors[:30],
+        "total_step_failures": len(step_errors),
     }, sort_keys=True, indent=2), flush=True)
     if decisions < len(seeds):
         raise AssertionError("Insufficient live public decisions")
-    if args.strict and errors:
+    if args.strict and (errors or step_errors):
         raise AssertionError(
-            f"{len(errors)} genuine v1 public frames failed H21 grounding")
+            f"Live v1 probe: {len(errors)} H21 frame failures "
+            f"and {len(step_errors)} emulator step failures")
     return 0
 
 
