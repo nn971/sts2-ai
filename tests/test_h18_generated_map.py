@@ -7,8 +7,8 @@ import random
 import pytest
 
 from sts2_ai.emulator import FAIR_POLICY_ID
-from sts2_ai.emulator.protocol import LegalAction, Observation, Transition
 from sts2_ai.emulator.jsonl_backend import JsonlEmulatorBackend
+from sts2_ai.emulator.protocol import LegalAction, Observation, Transition
 from sts2_ai.emulator.run_environment import (
     EXPERIMENTAL_FIXED_ROUTE_PROFILE,
     NATIVE_MAP_PROFILE,
