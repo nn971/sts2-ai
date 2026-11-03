@@ -6,7 +6,6 @@ for the new owner-linked attribute kind.
 """
 from __future__ import annotations
 
-import json
 from collections.abc import Sequence
 from types import SimpleNamespace
 from typing import Any
