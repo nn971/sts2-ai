@@ -32,6 +32,8 @@ ZONES = (
 )
 MAX_OBJECTS = 256
 MAX_ACTIONS = 128
+# New v2 codec kind; the legacy KINDS vocabulary and checkpoints stay unchanged.
+OWNER_ATTRIBUTE_KIND_V2 = len(KINDS)
 
 
 def _bucket(name: str, mod: int) -> int:
@@ -101,6 +103,9 @@ def encode_public_decision(
     max_actions: int | None = MAX_ACTIONS,
     encode_card_subsets: bool = False,
     compress_deck: bool = False,
+    owned_attributes: bool = False,
+    object_limit: int = MAX_OBJECTS,
+    schema_id: str = SHARED_OBJECT_SCHEMA,
 ) -> EncodedDecision:
     """Encode only published game fields and currently legal action payloads.
 
@@ -115,10 +120,13 @@ def encode_public_decision(
     phase = "combat" if isinstance(combat, dict) else "macro"
     objects: list[ObjectToken] = []
     lookup: dict[tuple[str, object], int] = {}
+    # Keep the legacy object positions and action pointers stable. In v2,
+    # append owner-linked attributes only after every base object is built.
+    attribute_sources: list[tuple[int, str, str, dict[str, Any]]] = []
 
     def add(kind: str, identity: str, zone: str, record: dict[str, Any],
             *, owner: int = -1, ref: tuple[str, object] | None = None) -> int:
-        if len(objects) >= MAX_OBJECTS:
+        if len(objects) >= object_limit:
             raise ValueError("Public object cap exceeded: do not drop referenced targets")
         numeric, observed = _numbers(record)
         index = len(objects)
@@ -126,6 +134,8 @@ def encode_public_decision(
             KINDS.index(kind), _bucket(identity, IDENTITY_BUCKETS),
             ZONES.index(zone), numeric, observed, owner,
         ))
+        if owned_attributes and kind in ("state", "player", "card", "relic", "potion"):
+            attribute_sources.append((index, kind, zone, record))
         if ref is not None:
             if ref in lookup:
                 raise ValueError("Duplicate public object reference")
@@ -141,6 +151,8 @@ def encode_public_decision(
                 player[key] = combat[key]
         if "player_block" in combat:
             player["block"] = combat["player_block"]
+        if owned_attributes and isinstance(combat.get("history"), dict):
+            player["history"] = combat["history"]
         player_idx = add("player", "player", "player", player)
         def selection_signature(card: dict[str, Any]) -> str:
             return json.dumps(
@@ -338,4 +350,87 @@ def encode_public_decision(
         action_tokens.append(ActionToken(
             _bucket(kind, ACTION_BUCKETS), semantic, source, target, members,
         ))
-    return EncodedDecision(SHARED_OBJECT_SCHEMA, phase, tuple(objects), tuple(action_tokens))
+    if owned_attributes:
+        _append_owned_public_attributes(
+            objects, attribute_sources, object_limit=object_limit,
+        )
+    return EncodedDecision(schema_id, phase, tuple(objects), tuple(action_tokens))
+
+
+# Typed H19 resource feature paths. We deliberately never hash an instance ID
+# into a learned identity: owner is a within-observation object index only.
+# The same attribute name is reused across different resource identities.
+_V2_RESOURCE_FIELDS = {
+    "state": ("potion_slot_capacity", "potion_slots_occupied", "potion_slots_empty"),
+    "player": ("history",),
+    "card": (
+        "state", "enchantment", "affliction", "is_temporary",
+        "combat_energy_cost_delta", "temporary_energy_cost",
+        "keyword_overrides", "enchantment_triggered_this_combat",
+        "cost_kind", "effective_energy_cost",
+    ),
+    "relic": ("state", "is_wax", "is_melted"),
+    "potion": ("state",),
+}
+
+
+def _public_attribute_leaves(value: Any, path: str):
+    """Walk already-public values with deterministic key/list ordering.
+
+    Presence is represented by the existence of an attribute token. Type
+    suffixes separate false/0/empty string/null and numeric/string values.
+    """
+    if isinstance(value, dict):
+        if not value:
+            yield path + ":empty_object", 0.0
+        for key in sorted(value):
+            if not isinstance(key, str):
+                raise ValueError("Public resource state has non-string key")
+            yield from _public_attribute_leaves(value[key], path + "." + key)
+    elif isinstance(value, list):
+        if not value:
+            yield path + ":empty_list", 0.0
+        for i, item in enumerate(value):
+            yield from _public_attribute_leaves(item, path + f"[{i}]")
+    elif value is None:
+        yield path + ":null", 0.0
+    elif type(value) is bool:
+        yield path + ":bool", float(value)
+    elif type(value) is int:
+        yield path + ":integer", float(value)
+    elif type(value) is float:
+        if not math.isfinite(value):
+            raise ValueError("Nonfinite public resource attribute")
+        yield path + ":float", value
+    elif type(value) is str:
+        yield path + ":string:" + value, 1.0
+    else:
+        raise ValueError(f"Unsupported public resource value type at {path}")
+
+
+def _append_owned_public_attributes(
+    objects: list[ObjectToken],
+    sources: list[tuple[int, str, str, dict[str, Any]]],
+    *, object_limit: int,
+) -> None:
+    for owner, kind, zone, record in sources:
+        for field in _V2_RESOURCE_FIELDS[kind]:
+            # Missing stays distinct from an explicit zero/false/null.
+            if field not in record:
+                continue
+            for identity, value in _public_attribute_leaves(
+                record[field], field,
+            ):
+                if len(objects) >= object_limit:
+                    raise ValueError(
+                        "Public owner-linked attribute cap exceeded: "
+                        "no resource or attribute may be silently dropped")
+                numeric, observed = _numbers({"stacks": value})
+                objects.append(ObjectToken(
+                    kind=OWNER_ATTRIBUTE_KIND_V2,
+                    identity=_bucket("attribute:" + identity, IDENTITY_BUCKETS),
+                    zone=ZONES.index(zone),
+                    numeric=numeric,
+                    observed=observed,
+                    owner=owner,
+                ))
