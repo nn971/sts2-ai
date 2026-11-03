@@ -529,6 +529,7 @@ class _GroundedMacro:
             raise ValueError("Malformed macro action payload") from exc
         if not isinstance(payload, dict):
             raise ValueError("Macro action payload must be a JSON object")
+        _check_supported_payload(kind, payload)
         if kind == "choose_map_node":
             return old
         source, target = old.source, old.target
