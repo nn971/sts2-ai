@@ -199,7 +199,8 @@ def test_opaque_instance_renaming_does_not_change_owned_card_action():
 def test_grounded_macro_model_and_v20_checkpoint_separation(tmp_path):
     torch = pytest.importorskip("torch")
     from sts2_ai.models.shared_macro_transformer_v2 import (
-        H21GroundedMacroTransformer, collate_h21,
+        H21GroundedMacroTransformer,
+        collate_h21,
     )
     from sts2_ai.models.shared_map_transformer_v2 import H20MapGraphTransformer
     from sts2_ai.models.shared_transformer import H7Config
