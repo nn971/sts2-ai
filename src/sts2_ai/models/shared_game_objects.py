@@ -115,6 +115,7 @@ def encode_public_decision(
     owned_attributes: bool = False,
     object_limit: int = MAX_OBJECTS,
     schema_id: str = SHARED_OBJECT_SCHEMA,
+    omit_affliction_source_reference: bool = False,
 ) -> EncodedDecision:
     """Encode only published game fields and currently legal action payloads.
 
@@ -362,6 +363,7 @@ def encode_public_decision(
     if owned_attributes:
         _append_owned_public_attributes(
             objects, attribute_sources, object_limit=object_limit,
+            omit_affliction_source_reference=omit_affliction_source_reference,
         )
     return EncodedDecision(schema_id, phase, tuple(objects), tuple(action_tokens))
 
@@ -421,14 +423,25 @@ def _append_owned_public_attributes(
     objects: list[ObjectToken],
     sources: list[tuple[int, str, str, dict[str, Any]]],
     *, object_limit: int,
+    omit_affliction_source_reference: bool = False,
 ) -> None:
     for owner, kind, zone, record in sources:
         for field in _V2_RESOURCE_FIELDS[kind]:
             # Missing stays distinct from an explicit zero/false/null.
             if field not in record:
                 continue
+            field_value = record[field]
+            if (omit_affliction_source_reference and field == "affliction"
+                    and isinstance(field_value, dict)):
+                # An enemy instance ID is a within-frame reference only.
+                # Keep it for card-class grouping and explicit graph joins,
+                # while excluding it from all learned numeric/identity fields.
+                field_value = {
+                    key: value for key, value in field_value.items()
+                    if key != "source_enemy_instance_id"
+                }
             for identity, value in _public_attribute_leaves(
-                record[field], field,
+                field_value, field,
             ):
                 if len(objects) >= object_limit:
                     raise ValueError(
