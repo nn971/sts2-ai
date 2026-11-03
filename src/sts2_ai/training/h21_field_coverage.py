@@ -43,13 +43,17 @@ PUBLIC_V1_FIELD_CONTRACT: dict[str, dict[str, str]] = {
     "card": {
         "instance_id": REFERENCE, "card_id": ENCODED,
         "upgrade_level": ENCODED, "is_temporary": ENCODED,
-        "state": ENCODED, "affliction": PARTIAL,
+        "state": ENCODED, "affliction": ENCODED,
         "enchantment": ENCODED,
         "combat_energy_cost_delta": ENCODED,
         "temporary_energy_cost": ENCODED,
         "keyword_overrides": ENCODED,
         "enchantment_triggered_this_combat": ENCODED,
         "cost_kind": ENCODED, "effective_energy_cost": ENCODED,
+    },
+    "affliction": {
+        "kind": ENCODED, "amount": ENCODED,
+        "source_enemy_instance_id": REFERENCE,
     },
     "relic": {
         "relic_id": ENCODED, "state": ENCODED,
@@ -175,6 +179,7 @@ PUBLIC_V1_FIELD_CONTRACT: dict[str, dict[str, str]] = {
 
 NESTED_FIELDS: dict[tuple[str, str], str] = {
     ("observation", "deck"): "card",
+    ("card", "affliction"): "affliction",
     ("observation", "relics"): "relic",
     ("observation", "potions"): "potion",
     ("observation", "map"): "map_node",
