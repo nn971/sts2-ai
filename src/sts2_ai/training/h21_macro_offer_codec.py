@@ -28,8 +28,8 @@ from sts2_ai.models.shared_game_objects import (
 from sts2_ai.training.h20_map_graph_codec import encode_h20_map_decision
 from sts2_ai.training.h21_field_coverage import audit_public_observation
 
-H21_OBJECT_SCHEMA = "sts2-h21-public-grounded-macro-v1"
-H21_CODEC = "h21-grounded-reward-shop-event-v1"
+H21_OBJECT_SCHEMA = "sts2-h21-public-grounded-macro-v2"
+H21_CODEC = "h21-grounded-reward-shop-event-v2"
 H21_OBJECT_LIMIT = 1536
 OPTION_OF = 3
 GROUP_OPTION = 4
