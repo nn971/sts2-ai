@@ -95,17 +95,24 @@ def reset_training_run(
     environment: str,
     ascension: int = 0,
     *, map_profile_id: str | None = None,
+    compact_card_selection: bool = False,
 ) -> StateHandle:
     require_environment(backend, environment)
     if environment == LEGACY:
         if map_profile_id is not None:
             raise ValueError("Fixed route is only supported for native Overgrowth")
+        if compact_card_selection:
+            raise ValueError("Compact selection is only supported for native Overgrowth")
         return backend.reset(seed, ascension)
     if map_profile_id is not None and map_profile_id != EXPERIMENTAL_FIXED_ROUTE_PROFILE:
         raise ValueError("Unsupported research map profile")
     native_reset = cast(Any, backend).reset_native_overgrowth
-    state = (native_reset(seed, ascension) if map_profile_id is None
-             else native_reset(seed, ascension, map_profile_id=map_profile_id))
+    reset_options: dict[str, Any] = {}
+    if map_profile_id is not None:
+        reset_options["map_profile_id"] = map_profile_id
+    if compact_card_selection:
+        reset_options["compact_card_selection"] = True
+    state = native_reset(seed, ascension, **reset_options)
     try:
         validate_native_start(
             backend.observe(state, InformationPolicy("prototype-fair-v0")),

@@ -62,6 +62,25 @@ from sts2_ai.training.h17_replay import (
 _WORKER: dict[str, Any] = {}
 
 
+def selected_map_profile(selection: str) -> str | None:
+    """None selects the emulator's existing seeded Overgrowth map generator."""
+    if selection == "generated":
+        return None
+    if selection == "fixed-route":
+        return EXPERIMENTAL_FIXED_ROUTE_PROFILE
+    raise ValueError(f"Unknown Act 1 map selection: {selection}")
+
+
+def seed_namespace(ascension: int, selection: str) -> str:
+    """Keep historical H16/H17 seed identities intact."""
+    if not 0 <= ascension <= 10:
+        raise ValueError("Ascension must be between 0 and 10")
+    selected_map_profile(selection)
+    if ascension == 10 and selection == "fixed-route":
+        return "h16-fixedroute"
+    return f"h18-{selection}-a{ascension}"
+
+
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -125,7 +144,10 @@ def _worker_run(seed: str) -> PilotEpisode:
     policy.inference_seconds = 0.0
     episode = collect_act_episode(
         backend, policy,
-        seed=seed, ascension=10,
+        seed=seed, ascension=cfg["ascension"],
+        map_profile_id=cfg["map_profile_id"],
+        # Generated H18 uses research compact selection without a fixed map.
+        compact_card_selection=cfg["map_profile_id"] is None,
         max_decisions=cfg["max_decisions"],
         search_probability=cfg["search_probability"],
         max_searches=cfg["max_searches"],
@@ -160,6 +182,8 @@ def collect(
         "ai_root": str(args.ai_root.resolve()),
         "emulator_root": str(args.emulator_root.resolve()),
         "emulator_revision": args.emulator_revision,
+        "ascension": args.ascension,
+        "map_profile_id": selected_map_profile(args.map_profile),
         "temperature": args.temperature,
         "macro_prior_weight": args.macro_prior_weight,
         "combat_credit_weight": args.combat_credit_weight,
@@ -215,6 +239,18 @@ def collect(
 def summarize(episodes: list[PilotEpisode]) -> dict[str, Any]:
     completed = [e for e in episodes if e.complete]
     cleared = sum(e.outcome == "act_clear" for e in completed)
+    maps = [
+        e.frames[0].get("map")
+        for e in episodes if e.frames and isinstance(e.frames[0].get("map"), list)
+    ]
+    selected_routes = [
+        tuple(
+            decision.legal_actions[decision.chosen_index].payload_json
+            for decision in e.decisions
+            if decision.legal_actions[decision.chosen_index].kind == "choose_map_node"
+        ) for e in episodes
+    ]
+    map_choices = sum(len(route) for route in selected_routes)
     resource_signatures = set()
     potion_counts: list[int] = []
     potion_actions = 0
@@ -261,6 +297,12 @@ def summarize(episodes: list[PilotEpisode]) -> dict[str, Any]:
     ]
     defeated = [item["enemy_hp_removed_fraction"] for item in lost_fights]
     return {
+        "map_diversity": {
+            "observed_maps": len(maps),
+            "distinct_map_graphs": len({digest(m) for m in maps}),
+            "map_choice_decisions": map_choices,
+            "distinct_selected_route_prefixes": len(set(selected_routes)),
+        },
         "floor_progress": summarize_floor_progress(floor_records),
         "combat_progress": {
             "completed_fights": len(combats),
@@ -364,6 +406,11 @@ def main() -> None:
     p.add_argument("--ai-root", type=Path, default=Path.cwd())
     p.add_argument("--output-root", type=Path, required=True)
     p.add_argument("--rounds", type=int, default=3)
+    p.add_argument("--ascension", type=int, default=10,
+                   help="Silent Ascension level (0 through 10); H16/H17 default 10")
+    p.add_argument("--map-profile", choices=("fixed-route", "generated"),
+                   default="fixed-route",
+                   help="Fixed research route, or seeded Overgrowth map with player path choices")
     p.add_argument("--runs-per-round", type=int, default=16)
     p.add_argument("--heldout-runs", type=int, default=8)
     p.add_argument("--workers", type=int, default=15)
@@ -432,6 +479,7 @@ def main() -> None:
             args.actor_max_batch) <= 0
             or args.search_depth < 0
             or (args.search_depth == 0 and not args.h17_adaptive)
+            or not 0 <= args.ascension <= 10
             or args.max_searches < 0 or args.study_seed < 0
             or not math.isfinite(args.actor_max_delay_ms)
             or args.actor_max_delay_ms < 0
@@ -468,7 +516,11 @@ def main() -> None:
             p.error(f"Missing checkpoint: {path}")
     source = {
         "schema": SCHEMA,
-        "map_profile": EXPERIMENTAL_FIXED_ROUTE_PROFILE,
+        "map_profile": (
+            EXPERIMENTAL_FIXED_ROUTE_PROFILE
+            if args.map_profile == "fixed-route"
+            else "native-overgrowth-generated-default-v111"
+        ),
         "chance_provenance": "emulator-native-structure-ordinary-prototype-rng",
         "puct_provenance": "h16-native-act1-root-conditioned-privileged-v1",
         "initial_h9_sha256": sha256(args.initial_h9) if args.initial_h9 else None,
@@ -480,11 +532,17 @@ def main() -> None:
             if key not in (
                 "execute", "resume", "output_root", "initial_h9",
                 "initial_h16", "macro_model", "emulator_root", "ai_root", "device",
+            ) and (
+                key not in ("ascension", "map_profile")
+                or args.ascension != 10
+                or args.map_profile != "fixed-route"
             ) and (args.h17_adaptive or (
                 not key.startswith("h17_") and key != "max_simulation_steps"
             ))
         },
     }
+    if args.ascension != 10 or args.map_profile != "fixed-route":
+        source["ascension"] = args.ascension
     fingerprint = digest(source)
     print(json.dumps({
         "fingerprint": fingerprint, "experiment": source,
@@ -536,8 +594,9 @@ def main() -> None:
     model_dir = root / "models"
     model_dir.mkdir(parents=True, exist_ok=True)
     actor_path = root / "actor-current.pt"
+    namespace = seed_namespace(args.ascension, args.map_profile)
     heldout = [
-        f"h16-fixedroute-heldout-{args.study_seed}-{i}"
+        f"{namespace}-heldout-{args.study_seed}-{i}"
         for i in range(args.heldout_runs)
     ]
     initial_macro_prior_weight = args.macro_prior_weight
@@ -579,7 +638,7 @@ def main() -> None:
         train = collect(
             args, actor_path, horizon_lambda=horizon_lambda,
             seeds=[
-                f"h16-fixedroute-train-{args.study_seed}-r{round_index}-{i}"
+                f"{namespace}-train-{args.study_seed}-r{round_index}-{i}"
                 for i in range(args.runs_per_round)
             ],
             search=round_index + 1 >= args.search_start_round,
