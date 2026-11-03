@@ -1,7 +1,7 @@
 """H21 grounded macro model, with opt-in six-type edge vocabulary."""
 from __future__ import annotations
 
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +10,7 @@ from torch import nn
 
 from sts2_ai.models.shared_game_objects import EncodedDecision
 from sts2_ai.models.shared_map_transformer_v2 import H20MapGraphTransformer
-from sts2_ai.models.shared_transformer import H7Batch, H7Config, collate_h7
+from sts2_ai.models.shared_transformer import H20Batch, H7Batch, H7Config, collate_h7, vars_as_dict
 from sts2_ai.training.h21_macro_offer_codec import (
     H21_CODEC,
     H21_OBJECT_SCHEMA,
@@ -38,9 +38,11 @@ def collate_h21(decisions: list[EncodedDecision]) -> H7Batch:
             sources[row, col] = edge.source
             targets[row, col] = edge.target
             mask[row, col] = True
-    return replace(
-        batch, relation_types=types, relation_sources=sources,
-        relation_targets=targets, relation_mask=mask)
+    return H20Batch(
+        **vars_as_dict(batch),
+        relation_types=types, relation_sources=sources,
+        relation_targets=targets, relation_mask=mask,
+    )
 
 
 class H21GroundedMacroTransformer(H20MapGraphTransformer):
