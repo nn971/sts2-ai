@@ -32,7 +32,7 @@ PUBLIC_V1_FIELD_CONTRACT: dict[str, dict[str, str]] = {
         "combat": PARTIAL, "reward": PARTIAL, "shop": PARTIAL,
         "event_id": PARTIAL, "event": PARTIAL,
         "map_generation_profile_id": ENCODED,
-        "completed_rooms": GAP,
+        "completed_rooms": ENCODED,
         "terminal_outcome": TERMINAL,
         "defeat_total_non_minion_enemy_hp": TERMINAL,
         "defeat_remaining_non_minion_enemy_hp": TERMINAL,
@@ -58,6 +58,10 @@ PUBLIC_V1_FIELD_CONTRACT: dict[str, dict[str, str]] = {
     "map_node": {
         "node_id": REFERENCE, "act": ENCODED, "floor": ENCODED,
         "room_type": ENCODED, "next_node_ids": REFERENCE,
+    },
+    "completed_room": {
+        "node_id": REFERENCE, "act": ENCODED, "floor": ENCODED,
+        "room_type": ENCODED,
     },
     "combat": {
         "turn": ENCODED, "energy": ENCODED, "player_block": ENCODED,
@@ -172,6 +176,7 @@ NESTED_FIELDS: dict[tuple[str, str], str] = {
     ("observation", "relics"): "relic",
     ("observation", "potions"): "potion",
     ("observation", "map"): "map_node",
+    ("observation", "completed_rooms"): "completed_room",
     ("observation", "combat"): "combat",
     ("observation", "reward"): "reward",
     ("observation", "shop"): "shop",
