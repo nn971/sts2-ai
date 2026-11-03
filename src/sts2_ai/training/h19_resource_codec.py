@@ -38,7 +38,10 @@ PUBLIC_RESOURCE_FIELDS_V1 = {
 PUBLIC_CARD_FIELDS_V1 = PUBLIC_RESOURCE_FIELDS_V1["deck"]
 
 
-def _check_public_resource_fields(resource: dict[str, Any], kind: str) -> None:
+def _check_public_resource_fields(
+    resource: dict[str, Any], kind: str, *,
+    allow_affliction_source_relations: bool = False,
+) -> None:
     extra = set(resource) - PUBLIC_RESOURCE_FIELDS_V1[kind]
     if extra:
         raise ValueError(
@@ -71,9 +74,13 @@ def _check_public_resource_fields(resource: dict[str, Any], kind: str) -> None:
                 raise ValueError("Unclassified affliction fields: " + str(sorted(unknown)))
             # The source is an enemy relation, never a learned ordinal.
             # Fail closed until the cross-entity edge is implemented.
-            if affliction.get("source_enemy_instance_id") is not None:
-                raise ValueError(
-                    "Affliction source_enemy_instance_id requires an explicit relation")
+            source = affliction.get("source_enemy_instance_id")
+            if source is not None:
+                if not allow_affliction_source_relations:
+                    raise ValueError(
+                        "Affliction source_enemy_instance_id requires an explicit relation")
+                if type(source) is not int:
+                    raise ValueError("Invalid affliction enemy reference")
 
 
 def encode_h19_resource_decision(
@@ -81,6 +88,7 @@ def encode_h19_resource_decision(
     actions: Sequence[Any],
     *,
     public_schema_id: str,
+    allow_affliction_source_relations: bool = False,
 ) -> EncodedDecision:
     """Encode only explicitly versioned public data, preserving H16 action IDs.
 
@@ -110,7 +118,10 @@ def encode_h19_resource_decision(
                 raise ValueError("H19 expects canonical public resource.state: " + key)
             if "persistent_state" in resource:
                 raise ValueError("Legacy persistent_state is not a public v1 field")
-            _check_public_resource_fields(resource, key)
+            _check_public_resource_fields(
+                resource, key,
+                allow_affliction_source_relations=allow_affliction_source_relations,
+            )
     if len(state["potions"]) != occupied:
         raise ValueError("Occupied potion slot count disagrees with public potions")
     slots = [potion.get("slot") for potion in state["potions"]]
@@ -132,7 +143,10 @@ def encode_h19_resource_decision(
             for card in cards:
                 if not isinstance(card, dict):
                     raise ValueError("Malformed public combat card")
-                _check_public_resource_fields(card, "deck")
+                _check_public_resource_fields(
+                    card, "deck",
+                    allow_affliction_source_relations=allow_affliction_source_relations,
+                )
 
     # The existing H16 macro-kind+payload collision guard and combat target
     # validation still apply. Only v2 resource attributes are appended, so
@@ -148,6 +162,7 @@ def encode_h19_resource_decision(
         encode_card_subsets=not macro,
         owned_attributes=True, object_limit=H19_OBJECT_LIMIT,
         schema_id=H19_OBJECT_SCHEMA,
+        omit_affliction_source_reference=allow_affliction_source_relations,
     )
     encoded_actions = _h16_actions(base, state, actions)
     return EncodedDecision(
