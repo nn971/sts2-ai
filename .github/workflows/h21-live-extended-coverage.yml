@@ -34,6 +34,7 @@ jobs:
           dotnet build emulator-v1/src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj -c Release
       - name: Explore multiple generated maps and measure encoding speed
         run: |
+          set +e
           python tools/probe_h21_live_public.py \
             --emulator-dll emulator-v1/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
             --seed h21-route-shop-a --seed h21-route-elite-b \
@@ -42,7 +43,9 @@ jobs:
             --seed h21-route-elite-g --seed h21-route-event-h \
             --max-decisions 180 --diverse-route --strict \
             > h21-live-extended-coverage.json
+          result=$?
           cat h21-live-extended-coverage.json
+          exit "$result"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
