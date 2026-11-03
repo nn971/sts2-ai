@@ -84,7 +84,7 @@ def test_reward_options_are_grounded_with_card_upgrades_and_extra_groups():
         act("replace_reward_potion", Slot=1),
         act("take_reward_relic", Index=0),
         act("take_reward_extra_relic", Index=4),
-        act("take_reward_extra_gold", Index=5),
+        act("take_reward_extra_gold", GroupIndex=5),
         act("take_reward_extra_potion", GroupIndex=6),
     ]
     decision = encode(frame, actions)
