@@ -98,6 +98,7 @@ PUBLIC_V1_FIELD_CONTRACT: dict[str, dict[str, str]] = {
         "card_option_previews": ENCODED,
         "available_card_rerolls": REFERENCE,
         "pending_extra_potion_rewards": ENCODED,
+        "card_bundles": ENCODED,
     },
     "reward_card_group": {
         "group_index": REFERENCE, "card_options": ENCODED,
