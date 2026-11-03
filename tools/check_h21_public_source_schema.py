@@ -17,6 +17,7 @@ from sts2_ai.training.h21_field_coverage import PUBLIC_V1_FIELD_CONTRACT
 PUBLIC_RECORDS = {
     "observation": "PrototypeAiObservation",
     "card": "PrototypeAiCard",
+    "affliction": "PrototypeCardAffliction",
     "relic": "PrototypeAiRelic",
     "potion": "PrototypeAiPotion",
     "map_node": "PrototypeAiMapNode",
@@ -43,7 +44,7 @@ PUBLIC_RECORDS = {
     "completed_room": "PrototypeCompletedRoomRecord",
 }
 
-MODEL_RECORDS = {"shop_offer", "completed_room"}
+MODEL_RECORDS = {"shop_offer", "completed_room", "affliction"}
 ACTION_PAYLOAD_FIELDS = {
     "ChooseGoldRewardPayload": ("group_index",),
     "ChooseExtraPotionRewardPayload": ("group_index", "slot"),
