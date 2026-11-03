@@ -34,7 +34,8 @@ H21_OBJECT_LIMIT = 1536
 OPTION_OF = 3
 GROUP_OPTION = 4
 VISIBLE_VALUE = 5
-H21_RELATION_TYPES = 6
+PREVIOUS_ROOM = 6
+H21_RELATION_TYPES = 7
 
 # All non-map pointer-bearing action kinds in the pinned prototype action
 # surface must be dealt with explicitly. Unknown actions with empty payload
@@ -211,6 +212,33 @@ class _GroundedMacro:
                      "map_generation_profile_id", "character_id", "ruleset_id"):
             if name in self.state and self.state[name] is not None:
                 self.attribute(0, name, self.state[name])
+
+    def build_completed_history(self) -> None:
+        """Chronological public room history, with opaque NodeIds excluded."""
+        rooms = self.state.get("completed_rooms") or []
+        if not isinstance(rooms, list):
+            raise ValueError("Malformed public completed-room history")
+        self.attribute(0, "completed_rooms_count", len(rooms))
+        previous = None
+        for visit in rooms:
+            if (not isinstance(visit, dict)
+                    or type(visit.get("act")) is not int
+                    or type(visit.get("floor")) is not int
+                    or not isinstance(visit.get("room_type"), (str, int))
+                    or not isinstance(visit.get("node_id"), str)):
+                raise ValueError("Malformed completed-room visit")
+            pos = self.add(
+                "room", "completed_room:" + str(visit["room_type"]),
+                "map", {"floor": visit["floor"]},
+                owner=0, edge_type=VISIBLE_VALUE,
+            )
+            self.attribute(pos, "visited_room_act", visit["act"])
+            self.attribute(pos, "room_is_completed", True)
+            if previous is not None:
+                # Message passing on target -> source lets each visit access
+                # its immediately preceding room, respecting run chronology.
+                self.edges.append(RelationToken(PREVIOUS_ROOM, pos, previous))
+            previous = pos
 
     def build_reward(self) -> None:
         reward = self.state.get("reward")
@@ -533,6 +561,7 @@ def _augment_visible_combat(
     """
     combat = state["combat"]
     ctx = _GroundedMacro(state, base)
+    ctx.build_completed_history()
     players = [
         i for i, obj in enumerate(ctx.objects)
         if obj.kind == KINDS.index("player")
@@ -595,6 +624,7 @@ def encode_h21_macro_decision(
         return _augment_visible_combat(state, base)
     ctx = _GroundedMacro(state, base)
     ctx.build_global()
+    ctx.build_completed_history()
     ctx.build_reward()
     ctx.build_shop()
     ctx.build_event()
