@@ -57,12 +57,20 @@ class H7Batch:
     action_mask: Tensor
     phases: Tensor
     action_members: Tensor
+    # Optional sparse, typed graph relations for the H20 schema only.
+    relation_types: Tensor | None = None
+    relation_sources: Tensor | None = None
+    relation_targets: Tensor | None = None
+    relation_mask: Tensor | None = None
 
     def to(self, device: torch.device | str) -> H7Batch:
-        return H7Batch(**{name: tensor.to(device) for name, tensor in vars_as_dict(self).items()})
+        return H7Batch(**{
+            name: tensor.to(device) if tensor is not None else None
+            for name, tensor in vars_as_dict(self).items()
+        })
 
 
-def vars_as_dict(batch: H7Batch) -> dict[str, Tensor]:
+def vars_as_dict(batch: H7Batch) -> dict[str, Tensor | None]:
     return {name: getattr(batch, name) for name in H7Batch.__dataclass_fields__}
 
 
@@ -180,6 +188,16 @@ class SharedObjectTransformer(nn.Module):
         )
         return gathered * (indices >= 0).unsqueeze(-1)
 
+    def _object_embeddings(self, batch: H7Batch) -> Tensor:
+        embedding = (
+            self.kinds(batch.kinds) + self.identities(batch.identities)
+            + self.zones(batch.zones)
+            + self.numerics(torch.cat([batch.numeric, batch.observed], dim=-1))
+        )
+        embedding = self.input_norm(embedding)
+        return embedding + self.owner_projection(
+            self._point(embedding, batch.owners))
+
     def forward(
         self, batch: H7Batch, *, known_phase: int | None = None,
         return_context: bool = False,
@@ -196,13 +214,7 @@ class SharedObjectTransformer(nn.Module):
                 raise ValueError("H7 requires global token and at least one valid action")
         elif known_phase not in (0, 1):
             raise ValueError("Invalid H7 homogeneous inference phase")
-        embedding = (
-            self.kinds(batch.kinds) + self.identities(batch.identities)
-            + self.zones(batch.zones)
-            + self.numerics(torch.cat([batch.numeric, batch.observed], dim=-1))
-        )
-        embedding = self.input_norm(embedding)
-        embedding = embedding + self.owner_projection(self._point(embedding, batch.owners))
+        embedding = self._object_embeddings(batch)
         context = self.context_norm(self.encoder(
             embedding, src_key_padding_mask=~batch.object_mask,
         ))
