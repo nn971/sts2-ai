@@ -110,7 +110,7 @@ def audit_h21_action_aliases(
     for action, token in zip(actions, encoded.actions, strict=True):
         grouped[token].append(action)
     aliases = 0
-    for token, group in grouped.items():
+    for group in grouped.values():
         if len(group) == 1:
             continue
         expected = _equivalence_key(state, group[0])
