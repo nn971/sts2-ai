@@ -6,14 +6,17 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from sts2_ai.emulator.protocol import LegalAction  # noqa: E402
-from sts2_ai.models.shared_transformer import (  # noqa: E402
-    H7Config, SharedObjectTransformer,
-)
 from sts2_ai.models.shared_owner_transformer_v2 import (  # noqa: E402
-    H19OwnerTransformer, collate_h19,
+    H19OwnerTransformer,
+    collate_h19,
+)
+from sts2_ai.models.shared_transformer import (  # noqa: E402
+    H7Config,
+    SharedObjectTransformer,
 )
 from sts2_ai.training.h19_resource_codec import (  # noqa: E402
-    EMULATOR_PUBLIC_SCHEMA_V1, encode_h19_resource_decision,
+    EMULATOR_PUBLIC_SCHEMA_V1,
+    encode_h19_resource_decision,
 )
 
 
