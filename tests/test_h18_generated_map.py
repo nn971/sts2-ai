@@ -8,6 +8,7 @@ import pytest
 
 from sts2_ai.emulator import FAIR_POLICY_ID
 from sts2_ai.emulator.protocol import LegalAction, Observation, Transition
+from sts2_ai.emulator.jsonl_backend import JsonlEmulatorBackend
 from sts2_ai.emulator.run_environment import (
     EXPERIMENTAL_FIXED_ROUTE_PROFILE,
     NATIVE_MAP_PROFILE,
@@ -205,4 +206,69 @@ def test_worker_passes_generated_map_and_a0_into_collector(monkeypatch):
     assert result.outcome == "defeat"
     assert seen[0]["ascension"] == 0
     assert seen[0]["map_profile_id"] is None
+    assert seen[0]["compact_card_selection"] is True
     assert seen[0]["seed"] == "h18-seed"
+
+
+def test_generated_compact_reset_preserves_native_map_and_selection_request() -> None:
+    class FakeNativeBackend:
+        native_overgrowth_reset_schema = NATIVE_RESET_SCHEMA
+
+        def __init__(self):
+            self.calls = []
+
+        def reset_native_overgrowth(
+            self, seed, ascension=0, *, compact_card_selection=False,
+        ):
+            self.calls.append((seed, ascension, compact_card_selection))
+            return "generated-compact-start"
+
+        def observe(self, state, policy):
+            frame = _frame()
+            frame.update(
+                map_generation_profile_id=NATIVE_MAP_PROFILE,
+                event_id="proto.native.event.neow",
+                map=[{"floor": 1, "node_id": "1:1:0"},
+                     {"floor": 16, "node_id": "1:16:3"}],
+                deck=[{"card_id": "proto.silent.strike"}] * 12
+                + [{"card_id": "proto.common.restlessness"}],
+            )
+            return _observation(frame)
+
+    backend = FakeNativeBackend()
+    assert reset_training_run(
+        backend, "h18-compact", NATIVE_OVERGROWTH, 0,
+        compact_card_selection=True,
+    ) == "generated-compact-start"
+    assert backend.calls == [("h18-compact", 0, True)]
+
+
+def test_jsonl_generated_reset_sends_compact_flag_without_map_profile() -> None:
+    backend = object.__new__(JsonlEmulatorBackend)
+    backend._native_overgrowth_reset_schema = NATIVE_RESET_SCHEMA
+    requests = []
+
+    def request(operation, **kwargs):
+        requests.append((operation, kwargs))
+        return {
+            "schemaId": NATIVE_RESET_SCHEMA,
+            "stateHandle": "generated-compact-start",
+            "mapGenerationProfileId": NATIVE_MAP_PROFILE,
+        }
+
+    backend._request = request
+    assert backend.reset_native_overgrowth(
+        "h18-compact", 0, compact_card_selection=True,
+    ) == "generated-compact-start"
+    assert requests == [("reset_native_overgrowth", {
+        "seed": "h18-compact",
+        "ascension": 0,
+        "compact_card_selection": True,
+    })]
+
+    requests.clear()
+    backend.reset_native_overgrowth("native-unmodified", 0)
+    assert requests == [("reset_native_overgrowth", {
+        "seed": "native-unmodified",
+        "ascension": 0,
+    })]

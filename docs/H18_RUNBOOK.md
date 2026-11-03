@@ -8,13 +8,17 @@ branching Overgrowth map. No emulator changes are required.
 ## Scope and provenance
 
 - `--ascension 0 --map-profile generated` calls
-  `reset_native_overgrowth(seed, 0)`, **without** `map_profile_id`.
-  This retains the emulator's seeded source-shaped Overgrowth map
+  `reset_native_overgrowth(seed, 0, compact_card_selection=True)`,
+  **without** `map_profile_id`. The research-only selection flag exposes
+  visible candidate cards independently of the generated map. This retains the emulator's seeded source-shaped Overgrowth map
   generator and normal `choose_map_node` player decisions.
 - It uses the **existing prototype-RNG native-structure** map profile
   (`native-overgrowth-map-structure-v0.111.0-v1`, or the declared
   native-context-stream variant). This is distinct from the experimental
   exact native `StandardActMap` RNG profile. No native-map parity claim.
+- Ordinary native/fidelity resets omit `compact_card_selection` and retain
+  the original action interface. The pinned H18 emulator revision explicitly
+  permits compact selection without the fixed-route map.
 - H16/H17 commands retain their defaults: fixed route, Ascension 10.
   H18 uses a separate `h18-generated-a0` seed namespace and records
   map selection and ascension in its fingerprint. It cannot silently
@@ -35,11 +39,16 @@ git switch research/h18-a0-generated-map-20261103
 git pull --ff-only
 
 set emu ~/projects/sts2-emulator
+git -C $emu fetch origin
+git -C $emu switch research/h18-generated-compact-selection-20261103
+git -C $emu pull --ff-only
 set rev (git -C $emu rev-parse HEAD)
 set macro results/nature/h6c-macro-attention-r80.json
 set initial results/h16-v5-combat-credit-r150/models/joint-r0079.pt
 ```
 
+Build the pinned emulator checkout (for example with
+`dotnet build $emu/Sts2Emulator.sln -c Release`) before running the smoke.
 The emulator must be built from the exact checkout at `$rev` and
 support `prototype-native-overgrowth-reset-v1`. Its **default generated**
 Overgrowth reset is required; a fixed-route research profile is not

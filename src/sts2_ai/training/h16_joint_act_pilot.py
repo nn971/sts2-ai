@@ -609,6 +609,7 @@ def collect_act_episode(
     adaptive_search: AdaptiveSearch | None = None,
     card_exposure: Mapping[str, int] | None = None,
     map_profile_id: str | None = EXPERIMENTAL_FIXED_ROUTE_PROFILE,
+    compact_card_selection: bool = False,
 ) -> PilotEpisode:
     if not (0 <= search_probability <= 1 and max_searches >= 0
             and max_decisions > 0 and simulations > 0
@@ -619,6 +620,7 @@ def collect_act_episode(
     state = reset_training_run(
         backend, seed, NATIVE_OVERGROWTH, ascension,
         map_profile_id=map_profile_id,
+        **({"compact_card_selection": True} if compact_card_selection else {}),
     )
     decisions: list[PilotDecision] = []
     frames: list[dict[str, Any]] = []

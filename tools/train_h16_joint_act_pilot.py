@@ -146,6 +146,8 @@ def _worker_run(seed: str) -> PilotEpisode:
         backend, policy,
         seed=seed, ascension=cfg["ascension"],
         map_profile_id=cfg["map_profile_id"],
+        # Generated H18 uses research compact selection without a fixed map.
+        compact_card_selection=cfg["map_profile_id"] is None,
         max_decisions=cfg["max_decisions"],
         search_probability=cfg["search_probability"],
         max_searches=cfg["max_searches"],

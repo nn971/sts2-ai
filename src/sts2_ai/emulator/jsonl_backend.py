@@ -325,6 +325,7 @@ class JsonlEmulatorBackend:
 
     def reset_native_overgrowth(
         self, seed: str, ascension: int = 0, *, map_profile_id: str | None = None,
+        compact_card_selection: bool = False,
     ) -> StateHandle:
         """Request the native-structure run *only* from an advertising bridge.
 
@@ -343,8 +344,9 @@ class JsonlEmulatorBackend:
             if map_profile_id != "experimental-act1-fixed-route-credit-v2":
                 raise ValueError("Unsupported experimental native map profile")
             payload["map_profile_id"] = map_profile_id
-            # Explicitly opt in: original native/fidelity runs retain atomic
-            # combination enumeration and original decision-index semantics.
+        # Fixed-route historical runs implicitly opt in. Generated-map H18
+        # opts in independently; unmodified native/fidelity resets stay atomic.
+        if map_profile_id is not None or compact_card_selection:
             payload["compact_card_selection"] = True
         response = self._request("reset_native_overgrowth", **payload)
         if response.get("schemaId") != NATIVE_RESET_SCHEMA:
