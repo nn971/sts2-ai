@@ -503,7 +503,9 @@ class _GroundedMacro:
         elif kind == "take_reward_gold":
             target = self.option("gold", 0)
         elif kind == "take_reward_extra_gold":
-            target = self.option("extra_gold", _int(payload, "Index"))
+            # ChooseGoldRewardPayload.GroupIndex names the actual extra
+            # reward group; it is not an offer-local Index.
+            target = self.option("extra_gold", _int(payload, "GroupIndex"))
         elif kind == "event_choice":
             choice_id = _field(payload, "ChoiceId")
             evt = self.state.get("event")
