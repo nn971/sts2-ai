@@ -250,6 +250,53 @@ def test_action_kind_collision_fails_explicitly(monkeypatch):
         encode(state(), [act("start_run"), act("leave_reward")])
 
 
+def test_combat_play_pile_and_enemy_move_are_owner_local():
+    frame = state()
+    frame["combat"] = {
+        "turn": 3, "energy": 2, "player_block": 3,
+        "hand": [], "draw_pile_count": 4, "discard_pile": [],
+        "exhaust_pile": [],
+        "play_pile": [{
+            "instance_id": 700, "card_id": "silent.strike",
+            "upgrade_level": 1, "state": {},
+            "is_temporary": False,
+            "enchantment": {"kind": "Sharp", "amount": 3},
+            "effective_energy_cost": 1, "cost_kind": "Fixed",
+        }],
+        "enemies": [{
+            "instance_id": 44, "enemy_id": "enemy.boss", "hp": 52, "block": 0,
+            "move_id": "sweep", "is_minion": False, "powers": [],
+            "statuses": {},
+        }],
+        "player_powers": [], "history": {"cards_played_this_turn": 1},
+        "pending_choice_id": "opaque-dialog-123",
+    }
+    actions = [act("end_turn")]
+    first = encode(frame, actions)
+    played = [i for i, obj in enumerate(first.objects)
+              if obj.kind == KINDS.index("card")
+              and obj.zone == ZONES.index("event")
+              and obj.owner >= 0]
+    assert len(played) == 1
+    assert sum(obj.owner == played[0] for obj in first.objects) >= 3
+    changed = copy.deepcopy(frame)
+    changed["combat"]["play_pile"][0]["enchantment"]["amount"] = 4
+    assert encode(changed, actions) != first
+    changed = copy.deepcopy(frame)
+    changed["combat"]["enemies"][0]["move_id"] = "defend"
+    assert encode(changed, actions) != first
+    changed = copy.deepcopy(frame)
+    changed["combat"]["enemies"][0]["is_minion"] = True
+    assert encode(changed, actions) != first
+    # The exact pending-choice reference must be opaque; only its presence
+    # affects policy features until a dedicated choice relation exists.
+    changed = copy.deepcopy(frame)
+    changed["combat"]["pending_choice_id"] = "opaque-dialog-999"
+    assert encode(changed, actions) == first
+    changed["combat"]["pending_choice_id"] = None
+    assert encode(changed, actions) != first
+
+
 def test_grounded_macro_model_and_v20_checkpoint_separation(tmp_path):
     torch = pytest.importorskip("torch")
     from sts2_ai.models.shared_macro_transformer_v2 import (
