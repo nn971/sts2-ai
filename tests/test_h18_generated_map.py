@@ -16,6 +16,7 @@ from sts2_ai.emulator.run_environment import (
     reset_training_run,
 )
 from sts2_ai.training.h16_joint_act_pilot import collect_act_episode
+from sts2_ai.training.h16_public_codec import encode_h16_decision
 from tools.train_h16_joint_act_pilot import seed_namespace, selected_map_profile
 
 
@@ -46,6 +47,21 @@ def test_map_selection_and_seed_namespace_keep_h17_unchanged() -> None:
         selected_map_profile("invented")
     with pytest.raises(ValueError, match="Ascension"):
         seed_namespace(11, "generated")
+
+
+def test_map_choices_have_distinct_public_action_tokens() -> None:
+    frame = _frame()
+    frame["map"] = [
+        {"node_id": "1:1:0", "floor": 1, "room_type": "combat"},
+        {"node_id": "1:1:1", "floor": 1, "room_type": "combat"},
+    ]
+    actions = (
+        LegalAction("left", "choose_map_node", '{"NodeId":"1:1:0"}'),
+        LegalAction("right", "choose_map_node", '{"NodeId":"1:1:1"}'),
+    )
+    encoded = encode_h16_decision(frame, actions)
+    assert encoded.phase == "macro"
+    assert encoded.actions[0].semantic != encoded.actions[1].semantic
 
 
 def test_generated_a0_reset_invokes_existing_default_native_operation() -> None:
