@@ -16,6 +16,7 @@ REFERENCE = "reference"
 PARTIAL = "partial"
 GAP = "gap"
 TERMINAL = "terminal"
+AUXILIARY = "auxiliary"
 
 # Every field in the current PrototypeAiObservation and its typed public
 # children. Dynamic card/relic/potion state payloads are encoded recursively
@@ -23,7 +24,7 @@ TERMINAL = "terminal"
 PUBLIC_V1_FIELD_CONTRACT: dict[str, dict[str, str]] = {
     "observation": {
         "ruleset_id": ENCODED, "character_id": ENCODED,
-        "decision_index": GAP, "phase": ENCODED,
+        "decision_index": AUXILIARY, "phase": ENCODED,
         "act": ENCODED, "floor": ENCODED,
         "act_one_region": ENCODED, "act_one_boss_encounter_id": ENCODED,
         "hp": ENCODED, "max_hp": ENCODED, "gold": ENCODED,
