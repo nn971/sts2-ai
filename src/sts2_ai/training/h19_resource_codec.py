@@ -21,6 +21,42 @@ H19_RESOURCE_CODEC = "h19-public-owned-resources-v1"
 H19_OBJECT_SCHEMA = "sts2-h19-public-owned-resources-v1"
 H19_OBJECT_LIMIT = 1024
 
+# Machine-readable first-slice contract. New emulator fields must be
+# classified before they can enter this versioned training representation.
+# Source references are local keys, never learned scalar identities.
+PUBLIC_RESOURCE_FIELDS_V1 = {
+    "deck": frozenset({
+        "instance_id", "card_id", "upgrade_level", "is_temporary",
+        "state", "affliction", "enchantment", "combat_energy_cost_delta",
+        "temporary_energy_cost", "keyword_overrides",
+        "enchantment_triggered_this_combat", "cost_kind",
+        "effective_energy_cost",
+    }),
+    "relics": frozenset({"relic_id", "state", "is_wax", "is_melted"}),
+    "potions": frozenset({"slot", "potion_id", "state"}),
+}
+PUBLIC_CARD_FIELDS_V1 = PUBLIC_RESOURCE_FIELDS_V1["deck"]
+
+
+def _check_public_resource_fields(resource: dict[str, Any], kind: str) -> None:
+    extra = set(resource) - PUBLIC_RESOURCE_FIELDS_V1[kind]
+    if extra:
+        raise ValueError(
+            "Unclassified public resource fields in " + kind + ": "
+            + ", ".join(sorted(extra)))
+    if kind == "deck":
+        affliction = resource.get("affliction")
+        if isinstance(affliction, dict):
+            unknown = set(affliction) - {
+                "kind", "amount", "source_enemy_instance_id",
+            }
+            if unknown:
+                raise ValueError("Unclassified affliction fields: " + str(sorted(unknown)))
+            # The source is an enemy relation, never a learned ordinal.
+            # Fail closed until the cross-entity edge is implemented.
+            if affliction.get("source_enemy_instance_id") is not None:
+                raise ValueError("Affliction source_enemy_instance_id requires an explicit relation")
+
 
 def encode_h19_resource_decision(
     state: dict[str, Any],
@@ -56,6 +92,7 @@ def encode_h19_resource_decision(
                 raise ValueError("H19 expects canonical public resource.state: " + key)
             if "persistent_state" in resource:
                 raise ValueError("Legacy persistent_state is not a public v1 field")
+            _check_public_resource_fields(resource, key)
     combat = state.get("combat")
     if isinstance(combat, dict) and not isinstance(combat.get("history"), dict):
         raise ValueError("H19 requires public combat.history")
