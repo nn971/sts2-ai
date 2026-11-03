@@ -196,6 +196,31 @@ def test_opaque_instance_renaming_does_not_change_owned_card_action():
     assert lhs == rhs
 
 
+def test_hash_collisions_raise_diagnostics_instead_of_aliasing(monkeypatch):
+    import sts2_ai.training.h21_macro_offer_codec as codec
+
+    frame = state()
+    frame["shop"] = {
+        "card_offers": [
+            {"offer_id": 1, "item_id": "silent.strike",
+             "price": 40, "sold": False},
+            {"offer_id": 2, "item_id": "silent.defend",
+             "price": 45, "sold": False},
+        ],
+    }
+    monkeypatch.setattr(codec, "_bucket", lambda _name, _mod: 7)
+    with pytest.raises(ValueError, match="public identity hash collision"):
+        encode(frame, [act("buy_card", OfferId=1)])
+
+
+def test_action_kind_collision_fails_explicitly(monkeypatch):
+    import sts2_ai.training.h21_macro_offer_codec as codec
+
+    monkeypatch.setattr(codec, "_bucket", lambda _name, _mod: 7)
+    with pytest.raises(ValueError, match="action-kind hash collision"):
+        encode(state(), [act("start_run"), act("leave_reward")])
+
+
 def test_grounded_macro_model_and_v20_checkpoint_separation(tmp_path):
     torch = pytest.importorskip("torch")
     from sts2_ai.models.shared_macro_transformer_v2 import (
