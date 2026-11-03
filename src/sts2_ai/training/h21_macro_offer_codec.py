@@ -345,10 +345,14 @@ class _GroundedMacro:
                     raise ValueError("Duplicate public shop offer reference")
                 pos = self.add("shop_offer", item["item_id"], "shop",
                                {"gold": item["price"]}, owner=root)
-                for field in ("sold", "on_sale", "base_price"):
+                for field in ("sold", "on_sale", "base_price",
+                              "undiscounted_price"):
                     if field in item and item[field] is not None:
-                        self.attribute(pos, field, item[field],
-                                       "gold" if field == "base_price" else "stacks")
+                        self.attribute(
+                            pos, field, item[field],
+                            "gold" if field in ("base_price", "undiscounted_price")
+                            else "stacks",
+                        )
                 self.attribute(pos, "offer_category", category)
                 if category == "card" and offer_id in previews:
                     preview = previews[offer_id]
