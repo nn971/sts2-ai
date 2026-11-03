@@ -17,6 +17,7 @@ from typing import Any
 
 from sts2_ai.emulator.protocol import LegalAction
 from sts2_ai.training.h19_resource_codec import EMULATOR_PUBLIC_SCHEMA_V1
+from sts2_ai.training.h21_action_alias_audit import audit_h21_action_aliases
 from sts2_ai.training.h21_field_coverage import audit_public_observation
 from sts2_ai.training.h21_macro_offer_codec import encode_h21_macro_decision
 
@@ -98,6 +99,8 @@ def main() -> int:
     gaps: Counter[str] = Counter()
     errors: list[dict[str, Any]] = []
     decisions = 0
+    equivalent_aliases = 0
+    canonical_choices = 0
     public = PublicJsonl(args.emulator_dll)
     try:
         hello = public.call("hello")
@@ -129,10 +132,10 @@ def main() -> int:
                 try:
                     encoding = encode_h21_macro_decision(
                         observation, actions, public_schema_id=view["schemaId"])
-                    if len(encoding.actions) != len(actions):
-                        raise ValueError("Legal menu cardinality changed")
-                    if len(set(encoding.actions)) != len(encoding.actions):
-                        raise ValueError("Two distinct legal actions share H21 tokens")
+                    alias_audit = audit_h21_action_aliases(
+                        observation, actions, encoding)
+                    equivalent_aliases += alias_audit.equivalent_aliases
+                    canonical_choices += alias_audit.canonical_choices
                 except (ValueError, KeyError, TypeError) as exc:
                     errors.append({
                         "seed": seed, "step": step,
@@ -152,6 +155,8 @@ def main() -> int:
         "schema": EMULATOR_PUBLIC_SCHEMA_V1,
         "decisions": decisions, "seeds": seeds,
         "elapsed_seconds": round(time.perf_counter() - start, 3),
+        "canonical_choices": canonical_choices,
+        "equivalent_action_aliases": equivalent_aliases,
         "phase_counts": dict(phases),
         "legal_action_kinds": dict(sorted(action_kinds.items())),
         "known_gap_occurrences": dict(sorted(gaps.items())),
