@@ -17,7 +17,7 @@ from sts2_ai.training.h21_macro_offer_codec import (
     H21_RELATION_TYPES,
 )
 
-H21_MODEL_FORMAT = "sts2-h21-grounded-macro-transformer-v1"
+H21_MODEL_FORMAT = "sts2-h21-grounded-macro-transformer-v2"
 
 
 def collate_h21(decisions: list[EncodedDecision]) -> H7Batch:
