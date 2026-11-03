@@ -191,11 +191,29 @@ class _GroundedMacro:
                 self.attribute(option, "option_upgrade_flag", upgrades[i])
             self.reward_options[("card", group, i)] = option
 
+    def build_global(self) -> None:
+        # Macro context independent of opaque map node IDs.
+        for name in ("act", "act_one_region", "act_one_boss_encounter_id",
+                     "map_generation_profile_id", "character_id", "ruleset_id"):
+            if name in self.state and self.state[name] is not None:
+                self.attribute(0, name, self.state[name])
+
     def build_reward(self) -> None:
         reward = self.state.get("reward")
         if not isinstance(reward, dict):
             return
-        self.root("reward")
+        reward_root = self.root("reward")
+        for name in ("card_resolved", "potion_resolved", "relic_resolved",
+                     "gold_resolved", "independent_selection",
+                     "extra_card_reward_groups_remaining"):
+            if name in reward:
+                self.attribute(reward_root, name, reward[name])
+        if isinstance(reward.get("pending_deck_choice"), dict):
+            pending = reward["pending_deck_choice"]
+            for name in ("source_relic_id", "kind", "remaining_selections"):
+                if name in pending:
+                    self.attribute(reward_root, "pending_deck_choice." + name,
+                                   pending[name])
         groups = reward.get("pending_card_groups")
         if groups is not None and not isinstance(groups, list):
             raise ValueError("Malformed public pending_card_groups")
@@ -256,9 +274,12 @@ class _GroundedMacro:
         }
         for category in ("card", "potion", "relic"):
             offers = shop.get(category + "_offers")
+            singular = shop.get(category + "_offer")
             if offers is None:
-                singular = shop.get(category + "_offer")
                 offers = [singular] if singular else []
+            elif singular and not any(
+                    item.get("offer_id") == singular.get("offer_id") for item in offers):
+                offers = [*offers, singular]
             for item in offers:
                 if not isinstance(item, dict):
                     raise ValueError("Malformed public shop offer")
@@ -289,6 +310,12 @@ class _GroundedMacro:
             self.attribute(root, "removal_price", shop["removal_price"], "gold")
         if "removal_used" in shop:
             self.attribute(root, "removal_used", shop["removal_used"])
+        if isinstance(shop.get("pending_deck_choice"), dict):
+            pending = shop["pending_deck_choice"]
+            for name in ("source_relic_id", "kind", "remaining_selections"):
+                if name in pending:
+                    self.attribute(root, "pending_deck_choice." + name,
+                                   pending[name])
 
     def build_event(self) -> None:
         evt = self.state.get("event")
@@ -298,6 +325,18 @@ class _GroundedMacro:
         if not isinstance(event_id, str):
             raise ValueError("Missing public event identity")
         root = self.root("event", event_id)
+        for name in ("chosen_choice_id", "current_dish_id",
+                     "current_dish_number", "queued_potion_ids",
+                     "queued_deck_choices"):
+            if name in evt and evt[name] is not None:
+                self.attribute(root, name, evt[name])
+        if isinstance(evt.get("pending_deck_choice"), dict):
+            pending = evt["pending_deck_choice"]
+            for name in ("choice_id", "kind", "remaining_selections",
+                         "upgrade_transformed_cards", "source_relic_id"):
+                if name in pending:
+                    self.attribute(root, "pending_deck_choice." + name,
+                                   pending[name])
         value_by_id = {v["choice_id"]: v for v in evt.get("visible_choice_values") or []}
         choices = evt.get("offered_choice_ids")
         if choices is not None and not isinstance(choices, list):
@@ -456,6 +495,7 @@ def encode_h21_macro_decision(
     if base.phase == "combat":
         return replace(base, schema=H21_OBJECT_SCHEMA)
     ctx = _GroundedMacro(state, base)
+    ctx.build_global()
     ctx.build_reward()
     ctx.build_shop()
     ctx.build_event()
