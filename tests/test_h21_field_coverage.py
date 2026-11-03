@@ -6,6 +6,7 @@ import copy
 import pytest
 
 from sts2_ai.training.h21_field_coverage import (
+    AUXILIARY,
     ENCODED,
     GAP,
     PARTIAL,
@@ -56,7 +57,7 @@ def test_gaps_and_references_are_reported_by_specific_field_path():
     assert ("observation.combat.enemies[0].hp", ENCODED) in report.classified
     assert ("observation.combat", PARTIAL) in report.classified
     assert ("observation.combat.play_pile", ENCODED) in report.classified
-    assert "observation.decision_index" in report.gaps
+    assert ("observation.decision_index", AUXILIARY) in report.classified
     assert ("observation.completed_rooms", ENCODED) in report.classified
     assert not report.fully_encoded
 
