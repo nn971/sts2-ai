@@ -54,16 +54,28 @@ def _equivalence_key(state: dict[str, Any], action: Any) -> str:
         raise ValueError("Malformed aliased legal action payload") from exc
     if not isinstance(payload, dict):
         raise ValueError("Aliased legal action must have an object payload")
-    cards = state.get("deck")
-    if not isinstance(cards, list):
-        raise ValueError("Aliased deck action has no public deck")
+    combat = state.get("combat")
+    if isinstance(combat, dict) and action.kind != "select_cards":
+        raise ValueError("H21 aliased a non-selection combat action")
+    sources = [state.get("deck")]
+    if isinstance(combat, dict):
+        sources = [
+            combat.get(zone) or []
+            for zone in ("hand", "discard_pile", "exhaust_pile",
+                         "selection_candidates")
+        ]
     by_id = {}
-    for card in cards:
-        if not isinstance(card, dict) or type(card.get("instance_id")) is not int:
-            raise ValueError("Malformed public deck card for alias audit")
-        if card["instance_id"] in by_id:
-            raise ValueError("Duplicate public card instance reference")
-        by_id[card["instance_id"]] = _card_signature(card)
+    for cards in sources:
+        if not isinstance(cards, list):
+            raise ValueError("Malformed public card pool for alias audit")
+        for card in cards:
+            if not isinstance(card, dict) or type(card.get("instance_id")) is not int:
+                raise ValueError("Malformed public card for alias audit")
+            signature = _card_signature(card)
+            old = by_id.get(card["instance_id"])
+            if old is not None and old != signature:
+                raise ValueError("Conflicting public card reference in choice pools")
+            by_id[card["instance_id"]] = signature
 
     if action.kind in _SINGLE_CARD_KINDS:
         if set(payload) not in ({"CardInstanceId"}, {"card_instance_id"}):
@@ -101,8 +113,6 @@ def audit_h21_action_aliases(
     for token, group in grouped.items():
         if len(group) == 1:
             continue
-        if encoded.phase == "combat":
-            raise ValueError("H21 aliased distinct combat actions")
         expected = _equivalence_key(state, group[0])
         for item in group[1:]:
             if _equivalence_key(state, item) != expected:
