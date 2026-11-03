@@ -8,10 +8,9 @@ import pytest
 from sts2_ai.training.h21_field_coverage import (
     AUXILIARY,
     ENCODED,
-    GAP,
     PARTIAL,
-    REFERENCE,
     PUBLIC_V1_FIELD_CONTRACT,
+    REFERENCE,
     audit_public_observation,
 )
 
