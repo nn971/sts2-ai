@@ -91,11 +91,20 @@ class ActionToken:
 
 
 @dataclass(frozen=True)
+class RelationToken:
+    relation_type: int
+    source: int
+    target: int
+
+
+@dataclass(frozen=True)
 class EncodedDecision:
     schema: str
     phase: str
     objects: tuple[ObjectToken, ...]
     actions: tuple[ActionToken, ...]
+    # Opt-in H20 typed graph edges; older codecs keep the empty default.
+    relations: tuple[RelationToken, ...] = ()
 
 
 def encode_public_decision(
