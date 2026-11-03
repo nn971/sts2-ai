@@ -1,0 +1,51 @@
+name: h21-live-extended-coverage
+
+on:
+  pull_request:
+    paths:
+      - 'src/sts2_ai/training/h21_macro_offer_codec.py'
+      - 'src/sts2_ai/training/h21_action_alias_audit.py'
+      - 'src/sts2_ai/training/h21_field_coverage.py'
+      - 'tools/probe_h21_live_public.py'
+      - '.github/workflows/h21-live-extended-coverage.yml'
+  workflow_dispatch:
+
+jobs:
+  h21-diverse-overgrowth-a0:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: fix/h18-public-observation-v1-20261104
+          path: emulator-v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Install H21 public codec
+        run: python -m pip install -e .
+      - name: Build matching emulator public v1
+        run: |
+          dotnet build emulator-v1/src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj -c Release
+      - name: Explore multiple generated maps and measure encoding speed
+        run: |
+          python tools/probe_h21_live_public.py \
+            --emulator-dll emulator-v1/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --seed h21-route-shop-a --seed h21-route-elite-b \
+            --seed h21-route-unknown-c --seed h21-route-rest-d \
+            --seed h21-route-event-e --seed h21-route-shop-f \
+            --seed h21-route-elite-g --seed h21-route-event-h \
+            --max-decisions 180 --diverse-route --strict \
+            > h21-live-extended-coverage.json
+          cat h21-live-extended-coverage.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: h21-live-extended-coverage
+          path: h21-live-extended-coverage.json
+          if-no-files-found: warn
