@@ -7,14 +7,13 @@ edges. Every choose_map_node action points at its true map object.
 from __future__ import annotations
 
 import json
-from dataclasses import replace
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import Any
 
 from sts2_ai.models.shared_game_objects import (
     IDENTITY_BUCKETS,
     KINDS,
-    NUMERIC_FIELDS,
     OWNER_ATTRIBUTE_KIND_V2,
     ZONES,
     ActionToken,
