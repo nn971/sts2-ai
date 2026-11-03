@@ -140,6 +140,18 @@ def _check_supported_payload(kind: str, payload: dict[str, Any]) -> None:
         target = _field(payload, "TargetEnemyId", optional=True)
         if target is not None:
             raise ValueError("Event potion action has an ungrounded enemy target")
+    if kind in {"take_reward_extra_potion", "skip_reward_extra_potion"}:
+        slot = _int(payload, "Slot", optional=True)
+        if slot not in (None, -1):
+            raise ValueError("Unexpected replacement slot on extra-potion choice")
+    if kind in {"skip_reward_card_group", "sacrifice_reward_card_group"}:
+        if _int(payload, "Index") != -1:
+            raise ValueError("Grouped skip/sacrifice must have Index=-1")
+    if kind == "rest_cook":
+        cards = _field(payload, "CardInstanceIds")
+        if (not isinstance(cards, list) or len(cards) != 2
+                or len(set(cards)) != 2):
+            raise ValueError("Rest cook requires two distinct public cards")
 
 
 class _GroundedMacro:
