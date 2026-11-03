@@ -542,13 +542,16 @@ class _GroundedMacro:
             pending = evt.get("pending_potion_replacement") or {}
             if _int(payload, "Slot") not in pending.get("candidate_slots", []):
                 raise ValueError("Event potion choice slot is not a visible candidate")
+            slot = _int(payload, "Slot")
             if kind == "replace_event_potion":
-                source = self.potion(_int(payload, "Slot"))
-            potion_id = pending.get("potion_id")
-            if not isinstance(potion_id, str):
-                raise ValueError("Event potion replacement has no visible potion")
-            target = self.add("potion", potion_id, "event",
-                              owner=self.root("event", evt["event_id"]))
+                source = self.potion(slot)
+            else:
+                source = self.empty_potion_slots.get(slot, -1)
+                if source < 0:
+                    raise ValueError("Event take-potion requires a visible empty slot")
+            if self.event_potion_offer is None:
+                raise ValueError("Event potion offer missing from public state")
+            target = self.event_potion_offer
         elif kind == "select_cards" or "CardInstanceIds" in payload:
             raw = _field(payload, "CardInstanceIds")
             if not isinstance(raw, list) or any(type(i) is not int for i in raw):
