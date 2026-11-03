@@ -96,6 +96,10 @@ def choose(
             "rest_upgrade", "rest_train", "use_potion", "play_card", "end_turn",
         ))
     }
+    if public_state is None:
+        # Keep the short 2-seed smoke policy exactly reproducible.
+        return min(actions, key=lambda a: (
+            priorities.get(a["kind"], 99), a["kind"], a["payloadJson"]))
     nodes = {}
     if public_state is not None:
         nodes = {
