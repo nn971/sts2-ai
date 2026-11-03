@@ -94,6 +94,8 @@ class _GroundedMacro:
         self.event_choices: dict[str, int] = {}
         self.deck_refs: dict[int, int] = {}
         self.potion_refs: dict[int, int] = {}
+        self.empty_potion_slots: dict[int, int] = {}
+        self.event_potion_offer: int | None = None
         self.identity_names: dict[tuple[int, int], str] = {}
         self._build_resource_refs()
 
