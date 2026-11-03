@@ -241,8 +241,10 @@ def audit_public_observation(state: dict[str, Any]) -> PublicFieldAudit:
             records.append((subpath, contract[name]))
             child = NESTED_FIELDS.get((schema, name))
             if child and value is not None:
-                for index, nested in enumerate(value) if isinstance(value, list) else [(0, value)]:
-                    visit(nested, child, subpath + (f"[{index}]" if isinstance(value, list) else ""))
+                items = enumerate(value) if isinstance(value, list) else [(0, value)]
+                for index, nested in items:
+                    suffix = f"[{index}]" if isinstance(value, list) else ""
+                    visit(nested, child, subpath + suffix)
 
     visit(state, "observation", "observation")
     return PublicFieldAudit(
