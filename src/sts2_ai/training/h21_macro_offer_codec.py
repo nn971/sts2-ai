@@ -646,6 +646,100 @@ class _GroundedMacro:
                        target=target, members=members)
 
 
+def _bind_visible_affliction_sources(
+    ctx: _GroundedMacro, state: dict[str, Any],
+) -> dict[int, int]:
+    """Link visible afflicted card classes to their visible enemy source.
+
+    The join uses raw IDs transiently; learned token identities, numerics,
+    and the saved graph contain only card/enemy object indices.
+    """
+    combat = state["combat"]
+    enemy_records = combat.get("enemies") or []
+    enemy_objects = [
+        idx for idx, obj in enumerate(ctx.objects)
+        if obj.kind == KINDS.index("enemy")
+        and obj.zone == ZONES.index("enemy")
+    ]
+    if len(enemy_objects) != len(enemy_records):
+        raise ValueError("Affliction source enemy positions are inconsistent")
+    enemies: dict[int, int] = {}
+    for record, index in zip(enemy_records, enemy_objects, strict=True):
+        enemy_id = record.get("instance_id")
+        if type(enemy_id) is not int or enemy_id in enemies:
+            raise ValueError("Invalid public enemy instance reference")
+        enemies[enemy_id] = index
+
+    edges: set[tuple[int, int]] = set()
+
+    def link(index: int, card: dict[str, Any]) -> None:
+        affliction = card.get("affliction")
+        if not isinstance(affliction, dict):
+            return
+        source = affliction.get("source_enemy_instance_id")
+        if source is None:
+            return
+        if type(source) is not int or source not in enemies:
+            raise ValueError("Affliction references a non-visible source enemy")
+        edges.add((index, enemies[source]))
+
+    def signature(card: dict[str, Any]) -> str:
+        return json.dumps(
+            {key: value for key, value in card.items()
+             if key != "instance_id"},
+            sort_keys=True, separators=(",", ":"),
+        )
+
+    def bind(zone: str, records: list[dict[str, Any]],
+             *, individual: bool = False) -> None:
+        indices = [
+            idx for idx, obj in enumerate(ctx.objects)
+            if obj.kind == KINDS.index("card")
+            and obj.zone == ZONES.index(zone)
+        ]
+        if individual:
+            groups = [[card] for card in records]
+        else:
+            grouped: dict[str, list[dict[str, Any]]] = {}
+            for card in records:
+                grouped.setdefault(signature(card), []).append(card)
+            groups = list(grouped.values())
+        if len(groups) != len(indices):
+            raise ValueError("Affliction card-class mapping disagrees with H19")
+        for index, group in zip(indices, groups, strict=True):
+            for card in group:
+                link(index, card)
+
+    hand = combat.get("hand") or []
+    discard = combat.get("discard_pile") or []
+    exhaust = combat.get("exhaust_pile") or []
+    if any(not isinstance(pile, list) for pile in (hand, discard, exhaust)):
+        raise ValueError("Malformed public affliction card piles")
+    bind("hand", hand, individual=True)
+    bind("discard", discard)
+    bind("exhaust", exhaust)
+    # H19 inserts only previously unseen candidate IDs into the reward zone.
+    known = {
+        card["instance_id"]
+        for pile in (hand, discard, exhaust)
+        for card in pile
+    }
+    candidates = combat.get("selection_candidates") or []
+    if not isinstance(candidates, list):
+        raise ValueError("Malformed public selection candidates")
+    bind("reward", [
+        card for card in candidates
+        if card["instance_id"] not in known
+    ])
+    bind("event", combat.get("selection_selected_cards") or [])
+    bind("deck", state.get("deck") or [])
+    ctx.edges.extend(
+        RelationToken(AFFLICTION_SOURCE, owner, enemy)
+        for owner, enemy in sorted(edges)
+    )
+    return enemies
+
+
 _H21_PUBLIC_CARD_ATTRIBUTES = (
     "state", "enchantment", "affliction", "is_temporary",
     "combat_energy_cost_delta", "temporary_energy_cost",
