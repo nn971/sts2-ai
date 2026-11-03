@@ -161,6 +161,9 @@ def compare_source_contract(root: Path) -> None:
                 "record": record, "missing_contract": sorted(fields - expected),
                 "stale_contract": sorted(expected - fields),
             })
+    for record, fields in ACTION_PAYLOAD_FIELDS.items():
+        if parameters(model_source, record) != tuple(fields):
+            issues.append({"action_payload": record, "fields": fields})
     if issues:
         raise ValueError("Public v1 DTO contract drift: " + repr(issues))
     print(f"H21 public v1 DTO contract verified: {len(PUBLIC_RECORDS)} record types")
