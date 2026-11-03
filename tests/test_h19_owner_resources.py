@@ -8,10 +8,13 @@ import pytest
 
 from sts2_ai.emulator.protocol import LegalAction
 from sts2_ai.models.shared_game_objects import (
-    KINDS, OWNER_ATTRIBUTE_KIND_V2, NUMERIC_FIELDS,
+    KINDS,
+    NUMERIC_FIELDS,
+    OWNER_ATTRIBUTE_KIND_V2,
 )
 from sts2_ai.training.h19_resource_codec import (
-    EMULATOR_PUBLIC_SCHEMA_V1, H19_OBJECT_SCHEMA,
+    EMULATOR_PUBLIC_SCHEMA_V1,
+    H19_OBJECT_SCHEMA,
     encode_h19_resource_decision,
 )
 
