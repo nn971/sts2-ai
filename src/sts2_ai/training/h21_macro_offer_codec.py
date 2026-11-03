@@ -82,6 +82,66 @@ def _int(payload: dict[str, Any], name: str, *, optional: bool = False) -> int |
     return value
 
 
+def _check_supported_payload(kind: str, payload: dict[str, Any]) -> None:
+    """Reject silently ignored dimensions of known legal action payloads.
+
+    The emulator serializes C# payload records with PascalCase property
+    names, or snake_case in its canonical action wire. Existing actions with
+    empty payloads are separate no-target decisions.
+    """
+    if kind == "choose_map_node":
+        names = {"NodeId"}
+    elif kind in _SIMPLE_SHOP_ACTIONS:
+        names = {"OfferId"}
+    elif kind == "replace_shop_potion":
+        names = {"OfferId", "Slot"}
+    elif kind in _DECK_CARD_ACTIONS:
+        names = {"CardInstanceId"}
+    elif kind in _POTION_SLOT_ACTIONS:
+        names = {"Slot", "TargetEnemyId"} if kind == "throw_foul_potion_at_merchant" else {"Slot"}
+    elif kind in _REWARD_CARD_ACTIONS:
+        names = {"GroupIndex", "Index"} if kind.endswith("_group") else {"Index"}
+    elif kind in _REWARD_GROUP_ACTIONS:
+        if kind.endswith("_group"):
+            names = {"GroupIndex", "Index"}
+        elif kind == "reroll_reward_card":
+            names = {"GroupIndex"}
+        else:
+            names = set()
+    elif kind in {"take_reward_extra_relic", "skip_reward_extra_relic",
+                  "take_reward_relic", "take_reward_bundle"}:
+        names = {"Index"}
+    elif kind in {"take_reward_extra_gold", "take_reward_extra_potion",
+                  "skip_reward_extra_potion", "replace_reward_extra_potion"}:
+        names = {"GroupIndex", "Slot"} if "potion" in kind else {"GroupIndex"}
+    elif kind in {"replace_reward_potion", "take_event_potion",
+                  "replace_event_potion"}:
+        names = {"Slot"}
+    elif kind == "event_choice":
+        names = {"ChoiceId"}
+    elif kind in {"select_cards", "rest_cook"}:
+        names = {"CardInstanceIds"}
+    elif kind == "take_reward_card_group" or kind == "skip_reward_card_group":
+        names = {"GroupIndex", "Index"}
+    else:
+        if payload:
+            raise ValueError("Unaudited macro action payload: " + kind)
+        return
+    normalized = {
+        "".join(("_" + ch.lower() if ch.isupper() else ch)
+                for ch in name).lstrip("_") for name in names
+    }
+    unknown = set(payload) - names - normalized
+    if unknown:
+        raise ValueError(
+            "Unaudited macro action payload fields: "
+            + kind + ":" + ",".join(sorted(unknown)))
+    if "TargetEnemyId" in names:
+        target = _field(payload, "TargetEnemyId", optional=True)
+        if target is not None:
+            raise ValueError("Event potion action has an ungrounded enemy target")
+
+
 class _GroundedMacro:
     def __init__(self, state: dict[str, Any], base: EncodedDecision) -> None:
         self.state = state
