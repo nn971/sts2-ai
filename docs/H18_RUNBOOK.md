@@ -126,6 +126,11 @@ short or repeatedly reused held-out seed set.
 - Exact native-RNG StandardActMap and native game RNG/content parity
   require separate fidelity validation. H18 uses the current playable
   Overgrowth map generator behind the default emulator reset.
+- The current public codec distinguishes map-node choices by their
+  action payloads and observes map room records, but has no explicit
+  adjacency-aware graph representation. The first H18 experiment tests
+  end-to-end route choice with this existing encoder; learning a robust
+  route heuristic may require a later versioned relational map encoder.
 - No browser/game launch is required for the training preflight.
 - CI tests cover wiring and contracts. An actual `--execute` smoke
   must run locally against the pinned emulator and pretrained model.
