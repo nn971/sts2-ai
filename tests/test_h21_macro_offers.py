@@ -464,3 +464,69 @@ def test_grounded_macro_model_and_v20_checkpoint_separation(tmp_path):
     torch.testing.assert_close(values, value)
     with pytest.raises(ValueError, match="Unsupported H20"):
         H20MapGraphTransformer.load_checkpoint(path)
+
+
+def test_sequential_extra_relic_binds_active_offer_after_primary_resolution():
+    frame = state()
+    frame["reward"] = {
+        # Source still publishes the old primary option after acquisition.
+        "relic_options": ["relic.already_acquired"],
+        "relic_resolved": True,
+        "independent_selection": False,
+        "pending_extra_relic_rewards": [
+            {"group_index": 2, "relic_id": "relic.active", "is_wax": True},
+        ],
+    }
+    chosen = encode(frame, [act("take_reward_relic", Index=0)])
+    selected = chosen.objects[chosen.actions[0].target]
+    assert selected.kind == KINDS.index("relic")
+    assert selected.zone == ZONES.index("reward")
+
+    # The current extra-relic identity determines the action target.
+    changed = copy.deepcopy(frame)
+    changed["reward"]["pending_extra_relic_rewards"][0]["relic_id"] = "relic.other"
+    other = encode(changed, [act("take_reward_relic", Index=0)])
+    assert chosen.objects[chosen.actions[0].target].identity != (
+        other.objects[other.actions[0].target].identity
+    )
+
+    # Changing the stale primary offer cannot change the selected target.
+    old_changed = copy.deepcopy(frame)
+    old_changed["reward"]["relic_options"] = ["relic.old_but_different"]
+    unchanged = encode(old_changed, [act("take_reward_relic", Index=0)])
+    assert selected.identity == unchanged.objects[unchanged.actions[0].target].identity
+
+    # When the primary choice is still open, the same action selects it.
+    primary = copy.deepcopy(frame)
+    primary["reward"]["relic_resolved"] = False
+    primary_choice = encode(primary, [act("take_reward_relic", Index=0)])
+    assert selected.identity != (
+        primary_choice.objects[primary_choice.actions[0].target].identity
+    )
+
+    # A resolved primary choice without a public extra offer is an error.
+    malformed = copy.deepcopy(frame)
+    malformed["reward"]["pending_extra_relic_rewards"] = []
+    with pytest.raises(ValueError, match="no pending extra offer"):
+        encode(malformed, [act("take_reward_relic", Index=0)])
+
+
+def test_independent_extra_relic_alias_targets_first_pending_group():
+    frame = state()
+    frame["reward"] = {
+        "relic_resolved": True, "independent_selection": True,
+        "relic_options": ["relic.resolved_primary"],
+        "pending_extra_relic_rewards": [
+            {"group_index": 5, "relic_id": "relic.first", "is_wax": False},
+            {"group_index": 8, "relic_id": "relic.later", "is_wax": False},
+        ],
+    }
+    result = encode(frame, [
+        act("take_reward_relic", Index=0),
+        act("take_reward_extra_relic", Index=8),
+    ])
+    first, second = (result.objects[a.target] for a in result.actions)
+    assert first.kind == second.kind == KINDS.index("relic")
+    assert first.identity != second.identity
+    with pytest.raises(ValueError, match="no pending extra offer"):
+        encode(frame, [act("take_reward_relic", Index=1)])

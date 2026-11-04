@@ -694,12 +694,20 @@ class _GroundedMacro:
                       "skip_reward_extra_relic"):
             index = _int(payload, "Index")
             if kind == "take_reward_relic":
-                key = ("relic", 0, index)
-                if key not in self.reward_options:
+                reward = self.state.get("reward") or {}
+                if reward.get("relic_resolved"):
+                    # The emulator reuses Index=0 for the first pending
+                    # sequential extra relic. A resolved primary offer can
+                    # remain in relic_options, so a fallback on key absence
+                    # would silently bind the wrong public object.
                     extra = sorted(k[1] for k in self.reward_options
                                    if k[0] == "extra_relic")
-                    if index == 0 and extra:
-                        key = ("extra_relic", extra[0], 0)
+                    if index != 0 or not extra:
+                        raise ValueError(
+                            "Resolved relic action has no pending extra offer")
+                    key = ("extra_relic", extra[0], 0)
+                else:
+                    key = ("relic", 0, index)
                 target = self.reward_options.get(key, -1)
             else:
                 target = self.option("extra_relic", index)
