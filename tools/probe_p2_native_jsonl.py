@@ -15,7 +15,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-
 SCHEMA = "sts2-p2-v1-native-transport-smoke-v1"
 P2_NATIVE_SCHEMA = "sts2-p2-jsonl-performance-v1"
 POLICY = "prototype-fair-v0"
