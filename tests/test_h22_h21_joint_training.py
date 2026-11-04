@@ -1,12 +1,14 @@
 """H22 H21 joint-inference/training schema and checkpoint isolation tests."""
 from __future__ import annotations
 
+import hashlib
 import json
 
 import pytest
 import torch
 
 from sts2_ai.emulator.protocol import LegalAction, Observation
+from sts2_ai.models.h16_batch_actor import RemoteH16Actor, SharedH16Service
 from sts2_ai.models.shared_macro_transformer_v2 import H21GroundedMacroTransformer
 from sts2_ai.models.shared_transformer import H7Config, H20Batch, SharedObjectTransformer
 from sts2_ai.training.h16_joint_act_pilot import (
@@ -15,7 +17,9 @@ from sts2_ai.training.h16_joint_act_pilot import (
     PilotPolicy,
     encode_joint_decision,
 )
+from sts2_ai.training.h17_replay import fit_replay
 from sts2_ai.training.h21_macro_offer_codec import H21_CODEC, H21_OBJECT_SCHEMA
+from tools.train_h22_h21_generated_a0 import h22_default_arguments
 
 
 def _state() -> dict:
@@ -117,3 +121,59 @@ def test_h22_alias_audit_and_policy_forward():
     assert len(scores) == 2
     assert 0.0 <= value <= 1.0
     assert offsets == (0.0, 0.0)
+
+
+def test_h22_replay_uses_h21_relation_batch():
+    model = JointActPilotNet(H21GroundedMacroTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64)))
+    state = _state()
+    actions = _actions()
+    rows = [{
+        "observation": json.dumps(state),
+        "actions": [[a.action_id, a.kind, a.payload_json] for a in actions],
+        "phase": "macro",
+        "act": 0.0,
+        "room_hp": [0.8, 0.4],
+        "combat_quality": None,
+        "search_policy": [0.7, 0.3],
+    }]
+    report = fit_replay(model, torch.optim.AdamW(model.parameters(), lr=1e-5),
+                        rows, horizon_lambda=0.42, replay_weight=0.2)
+    assert report["examples"] == 1
+    assert report["macro_examples"] == 1
+    assert report["search_targets"] == 1
+    assert report["steps"] == 1
+
+
+def test_h22_shared_cpu_actor_matches_local_h21_graph_forward(tmp_path):
+    torch.manual_seed(4)
+    model = JointActPilotNet(H21GroundedMacroTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64))).eval()
+    path = tmp_path / "h22-actor.pt"
+    model.save(path)
+    encoded = model.encode_decision(_state(), _actions())
+    with torch.inference_mode():
+        local_logits, _, local_hp = model(
+            model.collate([encoded]), horizon_lambda=0.42)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    with SharedH16Service(
+        checkpoint=path, digest=digest, workers=1, device="cpu",
+        horizon_lambda=0.42, max_batch=4,
+        fixed_shape_batch_size=0,
+    ) as service:
+        remote = RemoteH16Actor(service.transport)
+        logits, hp = remote.infer(encoded)
+    assert list(logits) == pytest.approx(
+        local_logits[0, :len(encoded.actions)].detach().tolist(), abs=1e-5)
+    assert hp == pytest.approx(float(local_hp[0]), abs=1e-5)
+
+
+def test_h22_entrypoint_defaults_stay_schema_isolated():
+    defaults = h22_default_arguments()
+    def last(flag):
+        return defaults[len(defaults) - 1 - defaults[::-1].index(flag) + 1]
+    assert last("--representation") == "h21"
+    assert last("--actor-fixed-shape-batch-size") == "0"
+    assert last("--actor-max-batch") == "4"
+    assert last("--map-profile") == "generated"
+    assert last("--rollout-transport") == "fused"
