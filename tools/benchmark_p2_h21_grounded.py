@@ -104,13 +104,20 @@ def benchmark(
         )
 
     # Cache warmup must use exactly the same public data as timed passes.
-    encodings = [encode_decision(record)[0] for record in records]
+    first_pass = [encode_decision(record) for record in records]
+    encodings = [item[0] for item in first_pass]
+    accepted_alias_counts = [
+        (item[1].canonical_choices, item[1].equivalent_aliases)
+        for item in first_pass
+    ]
     codec_times: list[float] = []
     alias_times: list[float] = []
     audit_times: list[float] = []
     for iteration in range(warmups + repeats):
         timed = iteration >= warmups
-        for record, expected in zip(records, encodings, strict=True):
+        for record, expected, accepted_alias in zip(
+            records, encodings, accepted_alias_counts, strict=True,
+        ):
             actions = [LegalAction(item["action_id"], item["kind"],
                                    item["payload_json"])
                        for item in record["actions"]]
@@ -128,8 +135,10 @@ def benchmark(
             c = time.perf_counter()
             if actual != expected:
                 raise ValueError("Nondeterministic H21 public encoding")
-            if aliases.canonical_choices < 1:
-                raise ValueError("Invalid canonical H21 action menu")
+            if (aliases.canonical_choices, aliases.equivalent_aliases) != (
+                accepted_alias
+            ):
+                raise ValueError("Changed H21 canonical action alias audit")
             if timed:
                 audit_times.append(a - t)
                 codec_times.append(b - a)
@@ -152,6 +161,10 @@ def benchmark(
             "relations_max": max(len(d.relations) for d in encodings),
             "legal_actions_total": sum(len(d.actions) for d in encodings),
             "legal_actions_max": max(len(d.actions) for d in encodings),
+            "canonical_actions_total": sum(a for a, _ in accepted_alias_counts),
+            "equivalent_action_aliases_total": sum(
+                b for _, b in accepted_alias_counts
+            ),
             "public_encoding_sha256": public_digest([
                 {"schema": d.schema, "phase": d.phase,
                  "objects": [vars(obj) for obj in d.objects],
