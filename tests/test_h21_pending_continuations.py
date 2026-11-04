@@ -303,3 +303,43 @@ def test_unmatched_exceptional_public_continuations_fail_closed(which):
         menu = [action("take_reward_card_group", GroupIndex=0, Index=0)]
     with pytest.raises(ValueError):
         encode(observation, menu)
+
+
+def test_skip_event_potion_and_skip_relic_are_grounded_to_visible_offers():
+    event = state()
+    event["event"] = {
+        "event_id": "native.potion_offer",
+        "pending_potion_replacement": {
+            "choice_id": "c", "potion_id": "proto.potion.healing",
+            "candidate_slots": [0],
+        },
+    }
+    selected = encode(event, [
+        action("take_event_potion", Slot=0),
+        action("skip_event_potion"),
+    ])
+    assert selected.actions[0].target == selected.actions[1].target
+    assert selected.actions[0].source >= 0
+    assert selected.actions[1].source == -1
+
+    reward = state()
+    reward["reward"] = {
+        "relic_options": ["proto.relic.a", "proto.relic.b"],
+    }
+    encoded = encode(reward, [
+        action("take_reward_relic", Index=0),
+        action("take_reward_relic", Index=1),
+        action("skip_reward_relic"),
+    ])
+    skip = encoded.actions[-1].target
+    assert skip >= 0
+    assert encoded.objects[skip].kind == KINDS.index("event_choice")
+    assert all(encoded.objects[t.target].owner == skip
+               for t in encoded.actions[:2])
+    assert encoded.actions[0].target != encoded.actions[1].target
+
+    missing = state()
+    with pytest.raises(ValueError, match="no visible offer"):
+        encode(missing, [action("skip_event_potion")])
+    with pytest.raises(ValueError, match="no visible group"):
+        encode(missing, [action("skip_reward_relic")])
