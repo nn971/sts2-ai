@@ -639,7 +639,48 @@ If complete episodes remain rare, adjust the observation horizon or
 use a representative complete-combat cohort with unchanged search
 budgets, rather than counting censored episodes as wins or losses.
 
-**P2.5 remains open** until the order-balanced measured comparison
-passes, independent seeds and completed-workload checks are documented,
-actor profiling overhead is bounded, and native state/RNG fidelity gates
-apply to proposed P2.1 caching.
+**P2.5 remains open** pending the complete-workload evidence,
+actor profiling-overhead measurements and native state/RNG fidelity
+gates needed for P2.1 caching. The independent-seed order-balanced
+actor confirmation has passed as recorded below.
+
+### Measured independent-seed A/B/B/A result — 2026-11-04
+
+User-supplied `results/p2-a0-abba-independent-32-v1/actor-abba-report.json`,
+schema `sts2-p2-actor-abba-acceptance-v1`.
+This second cohort used **32 new generated-map A0 seeds**, 15 workers,
+frozen H16 checkpoint, 16 PUCT simulations, depth 8, two searches and
+at most 80 player decisions. Two repetitions per seed; profiler flags
+off. AI source `1e915a3b680dc02e698945761f2e80aab707d5d7`,
+emulator source `9fcd75a8a856e67a20f95c7caad0cc8ae255590f`,
+and one binary/checkpoint digest throughout. Public actions, teacher
+distributions, all search work and outcomes matched **exactly across
+A1/B1/B2/A2**.
+
+| Arm | Actor config | Cohort wall (s) | Search transitions/s |
+|---|---|---:|---:|
+| A1 | Single-row batch 1 | 69.898 | 245.729 |
+| B1 | Fixed-shape batch 4 | 47.300 | 363.130 |
+| B2 | Fixed-shape batch 4 | 45.103 | 380.814 |
+| A2 | Single-row batch 1 | 65.416 | 262.568 |
+
+Each arm performed **17,176 search transitions, 5,120 real transitions,
+0 completed and 64 censored executions**.
+Speedup ratios A1/B1 = **1.47777×** and A2/B2 = **1.45035×**;
+order-balanced sum ratio
+`(69.8982435 + 65.4155366)/(47.2998366 + 45.1033377)`
+= **1.46438×**, or **31.71% less cohort wall**. Both paired order
+comparisons favor B, agreeing with the earlier 32-seed profiled
+diagnostic of 1.47360×.
+
+**Gate result:** P2.3 shared fixed-shape-4 actor optimization is a
+confirmed throughput improvement for the specified 15-worker search
+workload, with strict public/teacher replay parity; retain it as
+opt-in pending integration. The capped throughput test is now
+complete. **Remaining gates:** measure actor instrumentation overhead
+separately, obtain representative *completed* runs (all 64 executions
+per arm in this confirmation reached the artificial 80-decision cap),
+and keep H16/public-v0 versus P1/public-v1 C# fidelity evidence
+separate. Do not claim a complete-Act improvement or a native
+state/RNG parity certificate from this report. Next actionable
+workload is the independent `--max-decisions 600` pilot above.
