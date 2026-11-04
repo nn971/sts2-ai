@@ -51,3 +51,32 @@ def test_opaque_node_renaming_changes_no_public_room_priority():
                   public_state=source, route_variant=0)["actionId"] == "node:first"
     assert choose([_action("y-random"), _action("x-unknown")],
                   public_state=new, route_variant=0)["actionId"] == "node:x-unknown"
+
+
+def test_continuation_rollout_actually_buys_before_leaving_shop():
+    public = {"map": []}
+    actions = [
+        {"actionId": "leave", "kind": "leave_shop", "payloadJson": "{}"},
+        {"actionId": "buy", "kind": "buy_relic",
+         "payloadJson": '{"OfferId":7}'},
+    ]
+    assert choose(actions, public_state=public, seed="shop", step=2,
+                  route_variant=0)["actionId"] == "leave"
+    assert choose(actions, public_state=public, seed="shop", step=2,
+                  route_variant=0, continuation_coverage=True
+                  )["actionId"] == "buy"
+
+
+def test_continuation_policy_exercises_both_deck_pick_and_optional_finish():
+    actions = [
+        {"actionId": "finish", "kind": "finish_relic_deck_choice",
+         "payloadJson": "{}"},
+        {"actionId": "pick", "kind": "choose_relic_deck_card",
+         "payloadJson": '{"CardInstanceId":12}'},
+    ]
+    assert choose(actions, public_state={"map": []},
+                  route_variant=0, continuation_coverage=True
+                  )["actionId"] == "pick"
+    assert choose(actions, public_state={"map": []},
+                  route_variant=1, continuation_coverage=True
+                  )["actionId"] == "finish"
