@@ -1297,3 +1297,51 @@ separately before attempting schema changes or additional server
 commands. If pipe wait dominates, the client alone cannot separate
 C# mechanics, DTO/JSON serialization and scheduling; a compatible
 C# profiler/receipt is needed for that split.
+
+
+### P2.2 next subcost gate — fused-only JSONL wire decomposition
+
+The transport A/B/B/A result above isolates how many requests the
+already-fused path saves. To profile what remains *within* the fused
+step-frame RPC, use the new `--experiment wire-profile`:
+all four arms use fused JSONL, fixed-shape batch 4, the same exact
+player model/PUCT work, cache off and PUCT/actor native profiling off.
+A1/A2 run without wire timers; B1/B2 enable **wire-only** Python
+framing instrumentation. Both within-seed and cross-arm public-action
+and search-teacher replay must match. The report separates
+`encode_seconds`, `pipe_seconds`, `decode_seconds`,
+request/response bytes and op counts; the order-balanced ratio
+measures the instrumentation overhead.
+
+```fish
+cd ~/projects/sts2-ai
+git pull --ff-only
+
+python tools/run_p2_actor_abba.py \
+    --experiment wire-profile \
+    --emulator-root $emu_p2 --emulator-revision $rev \
+    --checkpoint $ckpt --macro-model $macro \
+    --workers 1 --actor-device cuda \
+    --seed-prefix p2-fused-wire-a0-20261104 \
+    --seed-count 4 \
+    --simulations 16 --depth 8 --max-searches 2 \
+    --max-decisions 80 \
+    --output-root results/p2-fused-wire-a0-smoke-v1 \
+    --execute
+
+jq '{wire_profile_overhead_fraction, wire_profile_diagnostics}' \
+    results/p2-fused-wire-a0-smoke-v1/p2-wire-profile-abba-report.json
+```
+
+Interpretation: `pipe_seconds` includes the C# mechanics transition,
+managed DTO and serialization work, OS pipe wait and scheduling, so it
+is not C# self-time. Encode/decode are Python framing costs only;
+their ratio to pipe time provides the first profile-driven indication
+of whether a Python-side serializer change is worthwhile. These are
+*instrumented* diagnostic sums across sequential requests; do not
+add them to cohort wall, and do not treat this small 1-worker smoke
+as the 15-worker performance acceptance. If pipe time dominates,
+the next meaningful decomposition requires H16/v0-compatible,
+versioned C# timing around mechanics, DTO projection and JSON
+serialization, with a separately measured instrumentation overhead.
+Keep independent Nature/fair-history continuation semantics intact.
