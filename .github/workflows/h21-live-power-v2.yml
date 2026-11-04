@@ -7,6 +7,7 @@ on:
       - 'src/sts2_ai/training/h21_macro_offer_codec.py'
       - 'tests/test_h21_enemy_powers_v2.py'
       - 'tools/probe_h21_live_public.py'
+      - 'tools/check_h21_v2_observation_parity.py'
       - '.github/workflows/h21-live-power-v2.yml'
   workflow_dispatch:
 
@@ -43,9 +44,18 @@ jobs:
             --seed p1-power-v2-coverage-a --seed p1-power-v2-coverage-b \
             --max-decisions 100 > h21-live-power-v2.json
           cat h21-live-power-v2.json
+      - name: Check legacy and canonical mode observation parity
+        run: |
+          python tools/check_h21_v2_observation_parity.py \
+            --emulator-dll emulator-p1/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --seed p1-power-v2-coverage-a --seed p1-power-v2-coverage-b \
+            --max-decisions 100 > h21-v2-observation-parity.json
+          cat h21-v2-observation-parity.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: h21-live-power-v2
-          path: h21-live-power-v2.json
+          path: |
+            h21-live-power-v2.json
+            h21-v2-observation-parity.json
           if-no-files-found: warn
