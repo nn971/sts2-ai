@@ -171,6 +171,65 @@ def test_public_event_potion_choice_id_changes_offered_potion_features():
     assert encode(second_state, action0) != first
 
 
+
+def test_public_reroll_eligibility_changes_other_reward_actions():
+    observation = state()
+    observation["reward"] = {
+        "pending_card_groups": [
+            {"group_index": 0, "card_options": ["proto.silent.strike"]},
+        ],
+        "available_card_rerolls": [],
+    }
+    actions = [action("take_reward_card_group", GroupIndex=0, Index=0)]
+    no_reroll = encode(observation, actions)
+    changed = copy.deepcopy(observation)
+    changed["reward"]["available_card_rerolls"] = [{"group_index": 0}]
+    available = encode(changed, actions)
+    assert no_reroll != available
+    assert no_reroll.actions == available.actions
+
+
+def test_public_combat_run_context_is_retained_on_v3_tokens():
+    initial = state()
+    initial["character_id"] = "silent"
+    initial["act_one_region"] = "Overgrowth"
+    initial["ruleset_id"] = "v111"
+    initial["combat"] = {
+        "turn": 1, "energy": 3, "player_block": 0,
+        "draw_pile_count": 0,
+        "hand": [], "discard_pile": [], "exhaust_pile": [],
+        "play_pile": [], "enemies": [], "player_powers": [],
+        "history": {"cards_played_this_turn": 0},
+    }
+    base = encode(initial, [action("end_turn")])
+    for field, value in (
+        ("character_id", "other_character"),
+        ("act_one_region", "Underdocks"),
+        ("ruleset_id", "v112"),
+        ("act", 2),
+    ):
+        changed = copy.deepcopy(initial)
+        changed[field] = value
+        assert encode(changed, [action("end_turn")]) != base, field
+
+
+def test_event_queue_and_deck_choice_future_affordances_are_distinct():
+    observation = state()
+    observation["event"] = {
+        "event_id": "native.quest",
+        "queued_deck_choices": [
+            {"kind": 2, "requested_selections": 2, "source_relic_id": "relic.a"},
+        ],
+        "queued_potion_ids": ["proto.potion.healing"],
+    }
+    menu = [action("continue_event")]
+    encoded = encode(observation, menu)
+    changed = copy.deepcopy(observation)
+    changed["event"]["queued_deck_choices"][0]["requested_selections"] = 1
+    assert encode(changed, menu) != encoded
+
+
+
 def test_top_level_public_event_id_is_an_encoded_cross_phase_attribute():
     initial = state()
     initial["event_id"] = "native.chapter_event_a"
