@@ -20,6 +20,7 @@ def fixture(workers: int, wall: float = 10.0):
         "actor_inference": "shared", "actor_device": "cpu",
         "actor_max_batch": 16, "actor_max_delay_ms": 2.0,
         "actor_profile": True, "actor_batch_parity_probe": False,
+        "actor_fixed_shape_batch_size": 0,
         "seeds": ["x", "y"],
     }
     assert set(fields) == set(MATCH_FIELDS)
@@ -95,4 +96,11 @@ def test_actor_numerical_probe_is_not_valid_throughput_evidence():
     a["identity"]["actor_batch_parity_probe"] = True
     b["identity"]["actor_batch_parity_probe"] = True
     with pytest.raises(ValueError, match="extra forwards"):
+        compare_cohorts(a, b)
+
+
+def test_shape_bucket_mode_must_match_in_comparison():
+    a, b = fixture(1), fixture(15)
+    b["identity"]["actor_fixed_shape_batch_size"] = 4
+    with pytest.raises(ValueError, match="actor_fixed_shape_batch_size"):
         compare_cohorts(a, b)
