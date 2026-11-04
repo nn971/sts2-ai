@@ -19,6 +19,12 @@ from pathlib import Path
 from typing import Any
 
 from sts2_ai.emulator.protocol import LegalAction
+
+from p2_h21_public_corpus import (
+    make_public_corpus,
+    make_public_record,
+    write_public_corpus,
+)
 from sts2_ai.training.h19_resource_codec import (
     EMULATOR_PUBLIC_SCHEMA_V1,
     EMULATOR_PUBLIC_SCHEMA_V2,
@@ -238,6 +244,11 @@ def main() -> int:
     parser.add_argument("--emulator-dll", type=Path, required=True)
     parser.add_argument("--seed", action="append", dest="seeds")
     parser.add_argument("--max-decisions", type=int, default=55)
+    parser.add_argument(
+        "--capture-public-decisions", type=Path,
+        help="P2/H21: save validated public frames and legal menus only, "
+             "for source-pinned offline codec/collation benchmarks",
+    )
     parser.add_argument("--strict", action="store_true")
     parser.add_argument(
         "--canonical-enemy-powers", action="store_true",
@@ -275,6 +286,9 @@ def main() -> int:
         parser.error("--max-decisions must be positive")
     if not args.emulator_dll.is_file():
         parser.error("emulator DLL not found")
+    if (args.capture_public_decisions is not None
+            and args.capture_public_decisions.exists()):
+        parser.error("Refusing to overwrite H21 public benchmark corpus")
     if args.continuation_coverage and not args.diverse_route:
         parser.error("--continuation-coverage requires --diverse-route")
     if args.require_observed_enemy_power and not args.canonical_enemy_powers:
@@ -290,6 +304,7 @@ def main() -> int:
     errors: list[dict[str, Any]] = []
     step_errors: list[dict[str, Any]] = []
     decisions = 0
+    public_corpus_records: list[dict[str, Any]] = []
     equivalent_aliases = 0
     canonical_choices = 0
     encode_seconds: list[float] = []
@@ -366,6 +381,10 @@ def main() -> int:
                     alias_seconds += time.perf_counter() - codec_end
                     equivalent_aliases += alias_audit.equivalent_aliases
                     canonical_choices += alias_audit.canonical_choices
+                    if args.capture_public_decisions is not None:
+                        public_corpus_records.append(make_public_record(
+                            seed, step, view["schemaId"], observation, menu,
+                        ))
                     max_objects = max(max_objects, len(encoding.objects))
                     max_relations = max(max_relations, len(encoding.relations))
                 except (ValueError, KeyError, TypeError) as exc:
@@ -439,6 +458,11 @@ def main() -> int:
         "observed_enemy_power_frames": dict(sorted(observed_enemy_effect_frames.items())),
         "required_observed_enemy_powers": args.require_observed_enemy_power,
         "decisions": decisions, "seeds": seeds,
+        "p2_public_corpus_records": len(public_corpus_records),
+        "p2_public_corpus_output": (
+            str(args.capture_public_decisions)
+            if args.capture_public_decisions is not None else None
+        ),
         "elapsed_seconds": round(time.perf_counter() - start, 3),
         "diverse_route": args.diverse_route,
         "continuation_coverage": args.continuation_coverage,
@@ -490,6 +514,19 @@ def main() -> int:
             f"{len(step_errors)} emulator step failures, "
             f"{sum(gaps.values())} field gaps and "
             f"{sum(partials.values())} incomplete fields")
+    if args.capture_public_decisions is not None:
+        if len(public_corpus_records) != decisions or errors or step_errors:
+            raise AssertionError(
+                "P2/H21 corpus requires fully successful encoded public frames "
+                "and emulator continuations; no partial capture"
+            )
+        write_public_corpus(
+            args.capture_public_decisions,
+            make_public_corpus(
+                emulator_dll=args.emulator_dll,
+                records=public_corpus_records,
+            ),
+        )
     return 0
 
 
