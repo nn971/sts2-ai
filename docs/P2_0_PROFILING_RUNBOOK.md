@@ -281,6 +281,63 @@ speedup comparator rejects numerical-probe runs.
 Keep separate output directories for batch-1 and batch-16 runs. An
 overwritten 1-worker profile cannot be recovered from a later report.
 
+### Experimental fixed-shape GPU microbatches
+
+Batch-16's 256-request audit found numerical changes in 233/256 sampled
+mixed GPU batches (maximum logit delta 1.72e-5 and value delta
+2.98e-7). These differences can be amplified into one PUCT root visit;
+a direct causal trace at each root remains to be captured.
+
+The opt-in `--actor-fixed-shape-batch-size 4` groups requests by a
+*per-decision* token/action/member shape bucket. It pads every group to
+exactly four physical rows and the fixed bucket dimensions, duplicating
+an existing fully masked-correct encoded input for unused rows. Other
+requests never affect the shape used to evaluate a given decision.
+The complete model, logits, value heads, stochastic owner and search
+logic remain unchanged. Bucket boundaries are round-up 32 object tokens,
+16 action tokens and 4 selected-card members; no maximum is imposed.
+The existing variable-shape batching path remains the default.
+
+A first validation must check **exact B/B trace parity** for matched
+1-/15-worker cohorts, then throughput/physical-row overhead. Run:
+
+```fish
+cd ~/projects/sts2-ai
+git pull --ff-only
+
+for workers in 1 15
+    python tools/profile_p2_parallel_cohort.py \
+      --emulator-root $emu_p2 --emulator-revision $rev \
+      --checkpoint $ckpt --macro-model $macro \
+      --macro-prior-weight 0.5 --horizon-lambda 0.411395 \
+      --workers $workers --actor-inference shared --actor-device cuda \
+      --actor-max-batch 16 --actor-fixed-shape-batch-size 4 \
+      --actor-profile --seeds $seeds \
+      --ascension 0 --map-profile generated \
+      --simulations 16 --depth 8 --max-searches 2 --max-decisions 80 \
+      --paired \
+      --output results/p2-fixedshape4-w$workers/profile.json \
+      --execute
+end
+
+python tools/report_p2_cohort_comparison.py \
+    --single results/p2-fixedshape4-w1/profile.json \
+    --parallel results/p2-fixedshape4-w15/profile.json \
+    --output results/p2-fixedshape4-comparison.json
+```
+
+The new actor metrics
+`p2_fixed_shape_physical_rows` and
+`p2_fixed_shape_bucket_forwards` expose padding overhead. Each
+execution physically evaluates four rows even if fewer arrived in a
+bucket. Performance may be worse than dynamic batching, especially
+with only eight seeds; **only full exact-parity results justify further
+throughput evaluation**. A failed parity check remains a blocker and
+writes the same first-difference diagnostic, never a success claim.
+The fixed-shape option and the singleton-versus-mixed audit are
+mutually exclusive (they ask different scientific questions).
+
+
 ## Offline 1-worker versus 15-worker replay/scalability comparison
 
 Once both cohort JSON reports exist, validate **matching AI/emulator/model SHA,
