@@ -214,6 +214,7 @@ def collect(
             horizon_lambda=horizon_lambda,
             max_batch=args.actor_max_batch,
             max_delay_ms=args.actor_max_delay_ms,
+            fixed_shape_batch_size=args.actor_fixed_shape_batch_size,
         )
         if args.actor_inference == "shared" else nullcontext(None)
     )
@@ -427,6 +428,11 @@ def main() -> None:
                    help="Device for the shared inference actor only.")
     p.add_argument("--actor-max-batch", type=int, default=16)
     p.add_argument("--actor-max-delay-ms", type=float, default=2.0)
+    p.add_argument(
+        "--actor-fixed-shape-batch-size", type=int, default=0,
+        help="Opt-in P2 fixed-shape shared actor bucket (0 preserves historical "
+             "H16/H17 behavior; H18 performance stage uses 4).",
+    )
     p.add_argument("--max-decisions", type=int, default=4096)
     p.add_argument("--hp-target", choices=("geometric", "post_room"),
                    default="geometric",
@@ -483,6 +489,9 @@ def main() -> None:
             or args.max_searches < 0 or args.study_seed < 0
             or not math.isfinite(args.actor_max_delay_ms)
             or args.actor_max_delay_ms < 0
+            or not 0 <= args.actor_fixed_shape_batch_size <= args.actor_max_batch
+            or (args.actor_fixed_shape_batch_size > 0
+                and args.actor_inference != "shared")
             or not (args.actor_device == "cpu"
                     or args.actor_device.startswith("cuda"))
             or not math.isfinite(args.horizon_tau_rounds)
@@ -532,7 +541,7 @@ def main() -> None:
             if key not in (
                 "execute", "resume", "output_root", "initial_h9",
                 "initial_h16", "macro_model", "emulator_root", "ai_root", "device",
-            ) and (
+            ) and (key != "actor_fixed_shape_batch_size" or value != 0) and (
                 key not in ("ascension", "map_profile")
                 or args.ascension != 10
                 or args.map_profile != "fixed-route"
