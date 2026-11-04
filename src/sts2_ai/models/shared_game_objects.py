@@ -9,9 +9,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 SHARED_OBJECT_SCHEMA = "sts2-h7-public-shared-objects-v1"
 IDENTITY_BUCKETS = 4096
