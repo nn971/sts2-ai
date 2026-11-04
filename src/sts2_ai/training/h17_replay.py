@@ -187,10 +187,10 @@ def fit_replay(
             tuple(LegalAction(*item) for item in row["actions"]) for row in chunk
         ]
         encoded = [
-            encode_h16_decision(json.loads(row["observation"]), actions)
+            model.encode_decision(json.loads(row["observation"]), actions)
             for row, actions in zip(chunk, legal, strict=True)
         ]
-        batch = collate_h7(encoded).to(device)
+        batch = model.collate(encoded).to(device)
         logits, act_logit, hp_logit = model(
             batch, value_logits=True, horizon_lambda=horizon_lambda,
         )
