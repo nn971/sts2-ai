@@ -13,7 +13,10 @@ import sys
 
 def h22_default_arguments() -> tuple[str, ...]:
     """Generated Silent A0 defaults; inspect without launching the emulator."""
-    from train_h18_generated_a0 import h18_default_arguments
+    try:
+        from tools.train_h18_generated_a0 import h18_default_arguments
+    except ModuleNotFoundError:
+        from train_h18_generated_a0 import h18_default_arguments
 
     baseline = list(h18_default_arguments())
     # H21 relations are dynamically collated. The validated P2 fixed-shape
