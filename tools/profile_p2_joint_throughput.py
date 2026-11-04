@@ -114,6 +114,7 @@ def run_episode(
     profile_search: bool = True,
     profile_wire: bool = True,
     native_profile: bool = False,
+    search_enabled: bool = True,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     # The H16 policy and emulator streams have stable per-episode seed owners.
     set_h16_rollout_seed(seed)
@@ -127,6 +128,8 @@ def run_episode(
     backend.reset_operation_profile()
     policy.inference_calls = 0
     policy.inference_seconds = 0.0
+    remote = policy.remote_actor
+    remote_wait_before = remote.wait_seconds if remote is not None else 0.0
     roots: list[dict[str, object]] = []
     from sts2_ai.emulator.run_environment import EXPERIMENTAL_FIXED_ROUTE_PROFILE
     start = time.perf_counter()
@@ -137,7 +140,7 @@ def run_episode(
         map_profile_id=(EXPERIMENTAL_FIXED_ROUTE_PROFILE if fixed_route else None),
         compact_card_selection=not fixed_route,
         max_decisions=max_decisions,
-        search_probability=1.0,
+        search_probability=1.0 if search_enabled else 0.0,
         max_searches=max_searches,
         simulations=simulations,
         search_depth=search_depth,
@@ -189,7 +192,11 @@ def run_episode(
         "actor": {
             "inference_calls": policy.inference_calls,
             "inference_seconds": actor_wall,
-            "note": "CPU/public codec and forward are combined in PilotPolicy.infer",
+            "worker_remote_wait_seconds": (
+                remote.wait_seconds - remote_wait_before if remote is not None else 0.0
+            ),
+            "note": "CPU/public codec and forward are combined in PilotPolicy.infer; "
+                    "remote wait is nested, not additional wall time",
         },
         "search": roots,
         "native_csharp": csharp,
@@ -224,6 +231,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--map-profile", choices=["generated", "fixed-route"],
                    default="generated")
     p.add_argument("--simulations", type=int, choices=[8, 16, 64], default=16)
+    p.add_argument("--no-search", action="store_true",
+                   help="PUCT-0 policy-only diagnostic; does not change other inference")
     p.add_argument("--depth", type=int, default=8,
                    help="0 = full-combat PUCT; otherwise measured action depth")
     p.add_argument("--max-simulation-steps", type=int, default=512)
@@ -297,6 +306,7 @@ def main() -> None:
                 "search_depth": None if a.depth == 0 else a.depth,
                 "max_simulation_steps": a.max_simulation_steps,
                 "rollout_transport": a.rollout_transport,
+                "search_enabled": not a.no_search,
             }
             if a.profile_overhead:
                 # Controls execute the *same* search/actor policy, with only
@@ -371,7 +381,7 @@ def main() -> None:
             "worker_count": 1,
             "native_profile": a.native_profile,
             "profile_overhead": a.profile_overhead,
-            "search_simulations": a.simulations,
+            "search_simulations": 0 if a.no_search else a.simulations,
             "search_depth": None if a.depth == 0 else a.depth,
             "max_searches": a.max_searches,
             "rollout_transport": a.rollout_transport,
