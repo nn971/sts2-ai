@@ -80,3 +80,83 @@ and fused-transport ratios are not applicable to H22/H21.
 Training smoke approval still follows H22's separate source-compatible
 emulator and real joint update gates; native-game parity is an independent
 fidelity project.
+
+## Reproducible H22 PUCT A/B/B/A protocol
+
+The `h21-collator` option in `tools/run_p2_actor_abba.py` now invokes
+four **full frozen H22 inference/search cohorts**, in order
+reference/packed/packed/reference. Each cohort repeats each generated-map seed
+twice using the normal H22 action sampler and exact public/PUCT teacher trace
+verification. The reporter refuses changes to the emulator CLI hash,
+AI revision, checkpoint SHA, source seed order, stochastic settings,
+representation/public schema/codec, actor batch cap, and any non-collator
+actor flag. The measured denominator is whole-cohort wall, including
+startup, full emulator work and shutdown. It records completion/censoring,
+search roots/transitions and actor metrics separately.
+
+Use a real **H22 v4** checkpoint if available. If none exists, make an explicit
+**R79-partially-warmstarted but H21-untrained diagnostic checkpoint**.
+Its timings measure the H22 architecture and actor implementation, not
+trained policy quality:
+
+```fish
+cd ~/projects/sts2-ai
+git fetch origin
+git switch perf/p2-h22-packed-collator-20261105
+git pull --ff-only
+
+set emu ~/projects/sts2-emulator
+git -C $emu fetch origin
+git -C $emu switch fix/h18-public-observation-v1-20261104
+git -C $emu pull --ff-only
+set rev (git -C $emu rev-parse HEAD)
+dotnet build $emu/src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj -c Release -m:1
+
+set initial results/h16-v5-combat-credit-r150/models/joint-r0079.pt
+set h22 results/p2-h22-frozen-warmstart-v1.pt
+test -f $initial; or echo "Missing R79 source checkpoint"
+test -f $h22; or python -c 'from pathlib import Path; from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet; base = JointActPilotNet.load(Path("results/h16-v5-combat-credit-r150/models/joint-r0079.pt")); JointActPilotNet.warmstart_h21(base).save(Path("results/p2-h22-frozen-warmstart-v1.pt"))'
+```
+
+First perform the 8-seed, one-worker bounded integration/pairing test
+(`--max-decisions 160`): it is **diagnostic, not full-Act throughput**.
+
+```fish
+python tools/run_p2_actor_abba.py \
+    --experiment h21-collator \
+    --emulator-root $emu --emulator-revision $rev \
+    --checkpoint $h22 --macro-prior-weight 0 \
+    --workers 1 --actor-device cuda --h21-max-batch 4 \
+    --seed-count 8 --seed-prefix p2-h22-collator-v1-small \
+    --simulations 16 --depth 8 --max-searches 2 \
+    --max-decisions 160 \
+    --output-root results/p2-h22-collator-oneworker-v1 --execute
+```
+
+After exact matching and a real PUCT root are established, use 16 independent
+seeds and 15 workers. `--depth 0` means full-combat search with existing
+simulation safety bounds. The report will label any censored episodes.
+
+```fish
+python tools/run_p2_actor_abba.py \
+    --experiment h21-collator \
+    --emulator-root $emu --emulator-revision $rev \
+    --checkpoint $h22 --macro-prior-weight 0 \
+    --workers 15 --actor-device cuda --h21-max-batch 4 \
+    --seed-count 16 --seed-prefix p2-h22-collator-v1-full \
+    --simulations 16 --depth 0 --max-searches 2 \
+    --max-decisions 4096 \
+    --output-root results/p2-h22-collator-15workers-v1 --execute
+```
+
+Each cohort report is under `A1/profile.json`, `B1/profile.json`,
+`B2/profile.json`, `A2/profile.json`. Aggregated strict acceptance is
+`p2-h22-collator-abba-report.json`. Refuse overwrite; use distinct output
+roots for batch size 1/4/8/16 or additional independent seeds.
+
+**Decision:** Require zero public/PUCT trace drift and both A/B order pairs to
+favor packed collation before considering it as the H22 shared inference
+default. The result must include actual PUCT roots and noncensored episodes
+for a completed-Act throughput claim. Treat ordinary stochastic game parity
+as emulator-relative; native installed-game fidelity remains an independent
+research thread.
