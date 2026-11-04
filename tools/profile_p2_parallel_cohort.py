@@ -151,6 +151,9 @@ def _worker_seed(seed: str) -> dict[str, Any]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--execute", action="store_true")
+    parser.add_argument("--overwrite-output", action="store_true",
+                        help="Explicitly allow replacing a finished profile.json "
+                             "(default: preserve previous evidence)")
     parser.add_argument("--ai-root", type=Path, default=ROOT)
     parser.add_argument("--emulator-root", type=Path, required=True)
     parser.add_argument("--emulator-revision", required=True)
@@ -195,6 +198,11 @@ def main() -> None:
     a = parse_args()
     if not a.execute:
         raise SystemExit("Pass --execute for actual emulator profiling")
+    if a.output.exists() and not a.overwrite_output:
+        raise SystemExit(
+            f"Refusing to overwrite existing P2 profile: {a.output}. "
+            "Choose a new --output or pass --overwrite-output explicitly."
+        )
     seeds = [x.strip() for x in a.seeds.split(",") if x.strip()]
     if (
         not seeds or len(set(seeds)) != len(seeds)
