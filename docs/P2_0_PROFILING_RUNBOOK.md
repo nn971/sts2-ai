@@ -813,3 +813,91 @@ that both public and exact private continuations agree, restore
 test teardown on exceptions, and bypass fair-history or independently
 sampled Nature continuations. Then compare 8/16/64 simulations and
 depth-8/full-combat roots against the unchanged search teacher.
+
+
+## Measured actor-profile overhead and preflight findings — 2026-11-04
+
+User-supplied `actor-profile-overhead-abba-report.json` is an
+order-balanced, fixed-shape-4 actor-profiling comparison on 32 seeds and
+15 workers, with the same H16 checkpoint, source `e3a4f22449110df3a2e43534208d3d3ab051a584`,
+and compatible emulator `9fcd75a8a856e67a20f95c7caad0cc8ae255590f`.
+Exact within-run and cross-arm public/teacher replay and work parity
+passed. All four cohorts had 17,176 search transitions, 5,120 real
+transitions and 64 censored executions:
+
+| Arm | Actor profiling | Wall (s) |
+|---|---|---:|
+| A1 | Off | 41.803 |
+| B1 | On | 44.196 |
+| B2 | On | 48.192 |
+| A2 | Off | 44.142 |
+
+Measured overhead `(44.1959293+48.1922995)/(41.8029810+44.1420672)-1`
+= **+7.49686%**. This includes actor sampling and CUDA synchronization
+and may include changing host load. It is measured overhead, not a
+change in underlying gameplay or the earlier fixed-batch optimization.
+The 1.46438× speedup obtained with actor profiling disabled remains
+the accepted diagnostic for 15-worker capped throughput.
+
+User-supplied `report(20261104-150902).json` is the original
+eight-step same-root deterministic Native-fork preflight, using the
+same frozen H16 emulator at `9fcd75a8a856e67a20f95c7caad0cc8ae255590f`.
+**16 forks checked, 32 temporary handles released, public frame/menu and
+canonical exact state-hash replay passed.** All visited transitions
+were part of one first-legal-action path; only its final three steps
+involved combat card plays. The report explicitly marked
+`independent_rng_receipt_available=false` and
+`ready_for_p2_1_caching=false`.
+
+### Source audit: exact hash projection versus stochastic envelope
+
+The H16 emulator uses `CanonicalJson.Sha256(state)` for
+`exact_hash`, and `RunState` serializes flat public and RNG
+compatibility projections. The internal
+`RunState.Simulation.Stochastic` envelope is
+`[JsonIgnore]` at the `Simulation` property and contains
+`SemanticOtherChance` and `SemanticRewardAudit` members without
+the same flat `RunState` serialization projections. Thus the old
+`exact_hash` is **not proven to fingerprint all provider-private state**
+in all modes; equality is necessary but not sufficient for arbitrary
+stochastic-continuation reuse.
+
+The P2.1 read-only receipt patch on the H16-compatible emulator PR #242
+adds `p2_exact_continuation_receipt`, returning a versioned
+`exactHash`, canonical `runStochasticHash`,
+`worldStochasticHash`, and optional
+`combatNativeRngHash` plus flags for Nature/semantic-provider owners.
+No hidden RNG bytes are exposed and no game semantics change.
+The AI bridge validates its schema and all hashes, and the
+updated fork preflight checks equality of these receipts before and
+after each step. A differing provider-private hash fails even if
+`exactHash` and public observations agree.
+
+**The new receipt requires rebuilding the emulator at the matching
+new commit**; the preflight intentionally rejects the old server
+without it. Both the receipt and the preflight remain diagnostic.
+They do not certify independent Nature sample identity, and
+`ready_for_p2_1_caching` stays **false**.
+
+```fish
+cd ~/projects/sts2-ai
+git pull --ff-only
+git -C $emu_p2 fetch origin
+git -C $emu_p2 switch --detach origin/fix/p2-h16-selection-public-projection-20261104
+set rev (git -C $emu_p2 rev-parse HEAD)
+dotnet build $emu_p2/src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj -c Release -m:1
+
+python tools/probe_p2_exact_fork_prefix.py \
+    --emulator-root $emu_p2 --emulator-revision $rev \
+    --seed p2-native-exact-receipt-20261104-1 \
+    --max-steps 8 \
+    --output results/p2-exact-receipt-v1/report.json --execute
+```
+
+The next P2.1 stage is exact-receipt source/fidelity matrix coverage
+across combat roots and chance-provider transitions, then an **opt-in,
+root-conditioned-only** retained-state prototype with bounded handles,
+full public combat-progress history, exact teacher parity and a
+separate Nature/fair-sampling bypass. The retained-state prototype
+must fail closed until those invariants are established; it is not
+enabled by either preflight.
