@@ -4,11 +4,13 @@
 Keeps H17's model, reward, replay and full-combat search settings.
 P2 training staging opts into the separately validated fixed-shape-4 shared
 actor and preserves the existing fused emulator transport. The checkpoint,
-map generator, ascension and search curriculum remain H18-specific. With no --execute, prints the complete run fingerprint/configuration.
+map generator, ascension and search curriculum remain H18-specific.
+With no --execute, print the complete experiment fingerprint and configuration.
 """
 from __future__ import annotations
 
 import sys
+
 
 def h18_default_arguments() -> tuple[str, ...]:
     """The staged H18 defaults, inspectable without importing torch or the game."""
