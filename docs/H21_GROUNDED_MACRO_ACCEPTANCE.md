@@ -108,9 +108,28 @@ explicitly rejected outside combat.
 The pre-v3 encoder-only pilot measured approximately 320.49 decisions/s
 and 4.546 ms p95 per decision, with maxima of 376 objects and 202 typed
 relations; these numbers exclude neural inference and tree search.
-The next eight-seed run must confirm that both failure classes are
-eliminated and remeasure v3 encoding overhead. The initial two-seed
-110-decision integration pass remains independently verified.
+The repaired eight-seed H21 **v3** run
+([GitHub Actions 41765577641](https://github.com/nn971/sts2-ai/actions/runs/41765577641))
+passed: 1,364 decisions, 5,834 canonical legal choices, 107 intentional
+aliases, **zero encoding errors and zero emulator step errors**. The
+prototype-ai-v1 public contract gate and focused H21 v3 tests passed too.
+The initial two-seed 110-decision integration pass remains independently
+verified.
+
+The first v3 run measured **174.78 encoder-audited decisions/s** and
+**9.55 ms p95**, a material regression versus the earlier 320.49/s and
+4.546 ms. These are CPU-side measurements without neural inference or
+search. Repeated SHA-256 computation is a plausible contributor, so
+the stable 63-bit hash now has a bounded 65,536-concept cache, while
+per-decision full/neural collision checks remain active. The probe now
+reports cache hits/misses, pure codec time and alias-audit time separately.
+A longer 350-decision-per-seed run has been queued to exercise deeper floors
+and remeasure performance. Treat these changes as unverified until new
+focused, inherited H19/H20, and live runs complete.
+
+Two inherited H19/H20 jobs on the first v3 revision failed only at Ruff's
+`UP035` import check for `Callable`; the imports have been corrected.
+No inference-speed or full-Act success claim follows from these codec passes.
 
 ## Field-coverage audit
 
