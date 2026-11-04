@@ -11,7 +11,6 @@ import pytest
 
 from sts2_ai.emulator.jsonl_backend import JsonlEmulatorBackend
 from sts2_ai.emulator.protocol import LegalAction, Observation
-from sts2_ai.training.h16_public_codec import encode_h16_decision
 from sts2_ai.search.combat_puct import (
     FAIR_COMBAT_CAPABILITY,
     H16_EXPERIMENTAL_ROOT_CONDITIONED_CAPABILITY,
@@ -19,6 +18,7 @@ from sts2_ai.search.combat_puct import (
     CombatPuct,
     CombatSearchProfile,
 )
+from sts2_ai.training.h16_public_codec import encode_h16_decision
 
 A = LegalAction("a", "end_turn")
 B = LegalAction("b", "end_turn")
