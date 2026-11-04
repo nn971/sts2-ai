@@ -20,11 +20,18 @@ from typing import Any
 
 from sts2_ai.emulator.protocol import LegalAction
 
-from p2_h21_public_corpus import (
-    make_public_corpus,
-    make_public_record,
-    write_public_corpus,
-)
+if __package__:
+    from .p2_h21_public_corpus import (
+        make_public_corpus,
+        make_public_record,
+        write_public_corpus,
+    )
+else:
+    from p2_h21_public_corpus import (
+        make_public_corpus,
+        make_public_record,
+        write_public_corpus,
+    )
 from sts2_ai.training.h19_resource_codec import (
     EMULATOR_PUBLIC_SCHEMA_V1,
     EMULATOR_PUBLIC_SCHEMA_V2,
