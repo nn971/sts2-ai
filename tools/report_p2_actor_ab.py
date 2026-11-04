@@ -122,9 +122,17 @@ def compare_actor_candidate(
         "warnings": [
             "Each configuration must pass complete B/B and 1/15 replay",
             "This is one baseline/candidate measurement, not multi-order A/B/B/A",
-            "Saturate 15 workers with at least 15 independent seed tasks",
+            *(
+                ["Fewer than 15 independent seeds cannot saturate 15 workers"]
+                if base["parity"]["seed_count"] < 15 else []
+            ),
             "Compare profile-on and profile-off timings separately",
-            "Zero completed episodes yields no completed-run speedup estimate",
+            *(
+                ["Zero completed episodes yields no completed-run speedup estimate"]
+                if old_many["completed_episodes"] == 0
+                or new_many["completed_episodes"] == 0 else []
+            ),
+            "Censored episodes limit completed-run throughput conclusions",
         ],
     }
 
