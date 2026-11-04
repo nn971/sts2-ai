@@ -1070,3 +1070,74 @@ The optional PyTorch H16 integration tests compare PUCT teachers,
 visits and values at 8/16/64 simulations in both depth-8 and
 full-combat modes. **No live emulator benchmark of the cache has been
 completed yet.**
+
+
+### 2026-11-04 first live P2.1 cache smoke: exact parity, negative throughput
+
+User-supplied `p2-prefix-cache-abba-report.json` at AI source
+`f56209ae11673fb10e078906783986ac2e4493e4` and H16 emulator
+`0937456588d563b48e9810290b7382f64d30d5a7` used two
+independent A0 generated-map seeds, one CUDA actor worker, fixed-shape
+batch 4, eight PUCT simulations, depth 8, two searches per episode
+and two exact replay executions per seed. The A/B/B/A parity passed
+both within-seed and across arms: each arm performed **576 logical
+search transitions and 320 real transitions**; all four repeated
+executions were censored at 80 decisions. Cache caps: A1/A2 zero,
+B1/B2 64 retained handles/root.
+
+| Arm | Cache | Cohort wall (s) |
+|---|---|---:|
+| A1 | Off | 13.31837 |
+| B1 | On | 13.16277 |
+| B2 | On | 15.75797 |
+| A2 | Off | 11.64686 |
+
+The combined ratio `(A1+A2)/(B1+B2)` is **0.86323×**.
+Equivalently, the cached configuration consumed **15.84% more
+wall time**. The first paired comparison very slightly favored B;
+the second substantially favored A. This is a **negative performance
+result in a tiny, unsaturated, startup-inclusive sample**, not proof
+of a reproducible 15-worker regression, and not evidence of improved
+training. It does establish that the unchanged PUCT teacher is
+achievable with the opt-in cache in a real emulator smoke.
+
+The first report cannot distinguish a low cache-hit rate from high
+per-hit receipt RPC cost. The next diagnostic adds lightweight
+in-process counters (no additional emulator RPCs): hit/miss counts,
+actual fused-step calls bypassed, receipt-RPC count and summed receipt
+wall time, skipped-capacity/provider counts, aggregated across
+roots/episodes/cohorts and displayed for each A/B/B/A arm.
+
+**Next experiment: repeat the small 8-simulation smoke with the
+same seed names and a new output path.** Keep cache opt-in and
+instrumentation otherwise off:
+
+```fish
+cd ~/projects/sts2-ai
+git pull --ff-only
+
+python tools/run_p2_actor_abba.py \
+    --experiment prefix-cache \
+    --emulator-root $emu_p2 --emulator-revision $rev \
+    --checkpoint $ckpt --macro-model $macro \
+    --workers 1 --actor-device cuda \
+    --seed-prefix p2-native-prefix-smoke-20261104 \
+    --seed-count 2 \
+    --simulations 8 --depth 8 --max-searches 2 \
+    --max-decisions 80 \
+    --output-root results/p2-native-prefix-smoke-metrics-v2 \
+    --execute
+```
+
+Inspect `prefix_cache_diagnostics` in the new
+`p2-prefix-cache-abba-report.json`, especially B1/B2
+`hits`, `emulator_step_calls_avoided`, `receipt_calls` and
+`receipt_seconds`. The first two are identical by construction:
+one cache hit replaces one emulator step request; search transition
+counts remain *logical* and thus unchanged. Receipt time is
+nested within wall and should not be added to cohort wall.
+If receipt RPCs dominate saved calls or hits are scarce at 8
+simulations, avoid scaling this approach without reducing verification
+overhead. If the saving looks material, proceed to matched
+16/64-simulation tests and a 15-worker ≥32-seed comparison.
+The outcome must be reported regardless of sign.
