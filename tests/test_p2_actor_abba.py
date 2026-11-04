@@ -596,3 +596,82 @@ def test_p2_native_fused_runner_only_toggles_native_timing(tmp_path):
         call[call.index("--p2-prefix-cache-handles") + 1] == "0"
         for call in calls[:4]
     )
+
+
+def test_p2_actor_delay_trial_keeps_fixed4_exact_teacher_and_all_other_provenance():
+    data = [
+        cohort(wall, batch=16, fixed_shape=4)
+        for wall in (42.0, 37.0, 38.0, 41.0)
+    ]
+    for profile in data[1:3]:
+        profile["identity"]["actor_max_delay_ms"] = 0.0
+    report = report_actor_abba(*data, experiment="actor-delay")
+    assert report["parity"]["passed"] is True
+    assert report["candidate_faster_in_both_pairs"] is True
+    assert report["ratio_of_total_baseline_to_candidate_wall"] == pytest.approx(
+        83.0 / 75.0
+    )
+    assert report["configurations"]["A_fixed4_delay2ms"][
+        "actor_max_delay_ms"
+    ] == 2.0
+    assert report["configurations"]["B_fixed4_candidate_delay"][
+        "actor_max_delay_ms"
+    ] == 0.0
+
+    wrong = deepcopy(data)
+    wrong[1]["identity"]["actor_max_delay_ms"] = 1.0
+    with pytest.raises(ValueError, match="inconsistent actor mode"):
+        report_actor_abba(*wrong, experiment="actor-delay")
+    wrong = deepcopy(data)
+    wrong[2]["identity"]["actor_max_delay_ms"] = 2.0
+    with pytest.raises(ValueError, match="inconsistent actor mode"):
+        report_actor_abba(*wrong, experiment="actor-delay")
+    wrong = deepcopy(data)
+    wrong[3]["identity"]["actor_max_delay_ms"] = 0.0
+    with pytest.raises(ValueError, match="inconsistent actor mode"):
+        report_actor_abba(*wrong, experiment="actor-delay")
+    wrong = deepcopy(data)
+    wrong[2]["identity"]["actor_max_batch"] = 8
+    with pytest.raises(ValueError, match="inconsistent actor mode"):
+        report_actor_abba(*wrong, experiment="actor-delay")
+    wrong = deepcopy(data)
+    wrong[2]["identity"]["actor_profile"] = True
+    with pytest.raises(ValueError, match="measurement instrumentation"):
+        report_actor_abba(*wrong, experiment="actor-delay")
+    wrong = deepcopy(data)
+    wrong[1]["seed_reports"][0]["trace_sha256"] = "bad-teacher"
+    with pytest.raises(ValueError, match="teacher replay drift"):
+        report_actor_abba(*wrong, experiment="actor-delay")
+
+
+def test_p2_actor_delay_runner_controls_only_queue_delay(tmp_path):
+    args = Namespace(
+        experiment="actor-delay",
+        seeds=None, seed_prefix="p2-delay", seed_count=8, workers=15,
+        max_decisions=80, max_searches=2, simulations=16, depth=8,
+        actor_max_delay_ms=2.0, candidate_actor_max_delay_ms=0.0,
+        horizon_lambda=0.411395, macro_prior_weight=0.5,
+        macro_model=Path("macro.json"), ascension=0,
+        ai_root=Path("/tmp/ai"), emulator_root=Path("/tmp/emu"),
+        emulator_revision="emulator-sha", checkpoint=Path("model.pt"),
+        actor_device="cuda", map_profile="generated", output_root=tmp_path,
+    )
+    commands, files = make_commands(args)
+    assert files[-1].name == "p2-actor-delay-abba-report.json"
+    assert [float(call[call.index("--actor-max-delay-ms") + 1])
+            for call in commands[:4]] == [2.0, 0.0, 0.0, 2.0]
+    assert [int(call[call.index("--actor-max-batch") + 1])
+            for call in commands[:4]] == [16, 16, 16, 16]
+    assert [int(call[call.index("--actor-fixed-shape-batch-size") + 1])
+            for call in commands[:4]] == [4, 4, 4, 4]
+    assert all("--no-episode-profile" in call for call in commands[:4])
+    assert all("--actor-profile" not in call for call in commands[:4])
+    assert all("--paired" in call for call in commands[:4])
+    assert all(call[call.index("--rollout-transport") + 1] == "fused"
+               for call in commands[:4])
+    assert commands[-1][commands[-1].index("--experiment") + 1] == "actor-delay"
+
+    for candidate in (-1, float("nan"), float("inf"), 2.0, 5.0):
+        bad = Namespace(**{**vars(args), "candidate_actor_max_delay_ms": candidate})
+        with pytest.raises(ValueError, match="Invalid P2"):
+            make_commands(bad)
