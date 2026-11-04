@@ -167,7 +167,7 @@ def test_orchestrator_stages_exact_15_worker_unprofiled_order(tmp_path):
         assert "--actor-profile" not in command
         assert command[command.index("--workers") + 1] == "15"
         assert command[command.index("--seeds") + 1].count(",") == 31
-        assert "p2-independent-0" in command
+        assert command[command.index("--seeds") + 1].startswith("p2-independent-0,")
     assert [int(c[c.index("--actor-max-batch") + 1]) for c in commands[:4]] == [
         1, 16, 16, 1,
     ]
