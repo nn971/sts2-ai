@@ -157,6 +157,7 @@ def main() -> int:
     phases: Counter[str] = Counter()
     action_kinds: Counter[str] = Counter()
     gaps: Counter[str] = Counter()
+    partials: Counter[str] = Counter()
     errors: list[dict[str, Any]] = []
     step_errors: list[dict[str, Any]] = []
     decisions = 0
@@ -204,6 +205,7 @@ def main() -> int:
                 try:
                     report = audit_public_observation(observation)
                     gaps.update(report.gaps)
+                    partials.update(report.partial)
                     codec_start = time.perf_counter()
                     if profiler is not None:
                         profiler.enable()
@@ -298,16 +300,19 @@ def main() -> int:
         "phase_counts": dict(phases),
         "legal_action_kinds": dict(sorted(action_kinds.items())),
         "known_gap_occurrences": dict(sorted(gaps.items())),
+        "known_partial_occurrences": dict(sorted(partials.items())),
         "encode_failures": errors[:30], "total_encode_failures": len(errors),
         "step_failures": step_errors[:30],
         "total_step_failures": len(step_errors),
     }, sort_keys=True, indent=2), flush=True)
     if decisions < len(seeds):
         raise AssertionError("Insufficient live public decisions")
-    if args.strict and (errors or step_errors):
+    if args.strict and (errors or step_errors or gaps or partials):
         raise AssertionError(
-            f"Live v1 probe: {len(errors)} H21 frame failures "
-            f"and {len(step_errors)} emulator step failures")
+            f"Live v1 probe: {len(errors)} H21 frame failures, "
+            f"{len(step_errors)} emulator step failures, "
+            f"{sum(gaps.values())} field gaps and "
+            f"{sum(partials.values())} incomplete fields")
     return 0
 
 
