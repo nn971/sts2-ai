@@ -48,6 +48,20 @@ jobs:
           result=$?
           cat h21-live-extended-coverage.json
           exit "$result"
+      - name: Execute public shop, reward and event continuation branches
+        if: success()
+        run: |
+          set +e
+          python tools/probe_h21_live_public.py \
+            --emulator-dll emulator-v1/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --seed h21-continue-shop-a --seed h21-continue-elite-b \
+            --seed h21-continue-event-c --seed h21-continue-rest-d \
+            --seed h21-continue-shop-e --seed h21-continue-event-f \
+            --max-decisions 250 --diverse-route --continuation-coverage --strict \
+            > h21-live-continuation-coverage.json
+          result=$?
+          cat h21-live-continuation-coverage.json
+          exit "$result"
       - name: Profile the real H21 public encoder separately from throughput
         if: success()
         run: |
@@ -65,6 +79,7 @@ jobs:
           name: h21-live-extended-coverage
           path: |
             h21-live-extended-coverage.json
+            h21-live-continuation-coverage.json
             h21-codec-profile-run.json
             h21-codec-profile.txt
           if-no-files-found: warn
