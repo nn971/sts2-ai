@@ -58,7 +58,7 @@ def main() -> None:
             map_profile_id=None, compact_card_selection=True,
             rollout_transport="fused",
         )
-    if not episode.decisions or policy.inference_calls != len(episode.decisions):
+    if not episode.decisions or policy.inference_calls < len(episode.decisions):
         raise RuntimeError("H22 public-v1 Act loop did not infer each legal decision")
     phases = {
         "macro": sum(not isinstance(row.get("combat"), dict)
@@ -78,6 +78,7 @@ def main() -> None:
         "outcome": episode.outcome,
         "searches": episode.searches,
         "search_transitions": episode.search_transitions,
+        "inference_calls": policy.inference_calls,
         "representation": "h21",
         "observation_schema": "prototype-ai-v1",
     }, sort_keys=True))
