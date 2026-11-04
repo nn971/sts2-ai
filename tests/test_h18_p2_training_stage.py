@@ -8,8 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from tools.train_h18_generated_a0 import h18_default_arguments
 import tools.train_h16_joint_act_pilot as trainer
+from tools.train_h18_generated_a0 import h18_default_arguments
 
 
 def _flag(args: tuple[str, ...], key: str) -> str:
