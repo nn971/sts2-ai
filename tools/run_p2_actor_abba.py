@@ -65,7 +65,7 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
     if args.macro_model is not None:
         common.extend(("--macro-model", str(args.macro_model)))
     experiment = getattr(args, "experiment", "batching")
-    if experiment not in ("batching", "actor-profile"):
+    if experiment not in ("batching", "actor-profile", "prefix-cache"):
         raise ValueError("Invalid actor A/B/B/A experiment")
     modes = (
         ORDER if experiment == "batching" else
@@ -85,6 +85,9 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
              if experiment == "actor-profile" and name in ("B1", "B2")
              else []
          ),
+         "--p2-prefix-cache-handles",
+         str(64 if experiment == "prefix-cache"
+             and name in ("B1", "B2") else 0),
          "--output", str(output)]
         for (name, max_batch, fixed_size), output in zip(
             modes, files, strict=True
@@ -92,7 +95,9 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
     ]
     report = args.output_root / (
         "actor-profile-overhead-abba-report.json"
-        if experiment == "actor-profile" else "actor-abba-report.json"
+        if experiment == "actor-profile" else
+        "p2-prefix-cache-abba-report.json"
+        if experiment == "prefix-cache" else "actor-abba-report.json"
     )
     calls.append([
         sys.executable, str(ROOT / "tools/report_p2_actor_abba.py"),
@@ -112,7 +117,7 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--execute", action="store_true",
                    help="Perform all four runs; otherwise preview commands")
-    p.add_argument("--experiment", choices=("batching", "actor-profile"),
+    p.add_argument("--experiment", choices=("batching", "actor-profile", "prefix-cache"),
                    default="batching",
                    help="Batch-1 versus fixed4, or fixed4 actor profiling on/off")
     p.add_argument("--ai-root", type=Path, default=ROOT)
@@ -157,6 +162,9 @@ def main() -> None:
             "A1/A2 actor profile off; B1/B2 actor profile on; "
             "search/wire profile off; strict B/B replay"
             if args.experiment == "actor-profile" else
+            "P2.1 A1/A2 prefix cache off; B1/B2 bounded cache on; "
+            "actor/search/wire profiling off; strict B/B replay"
+            if args.experiment == "prefix-cache" else
             "actor/search/wire profiling disabled; strict B/B replay"
         ),
         "seed_count": len(args.seeds.split(",")) if args.seeds else args.seed_count,
