@@ -111,3 +111,67 @@ def test_shared_h16_actor_rejects_invalid_arguments(tmp_path):
             checkpoint=tmp_path / "missing.pt", digest="unused",
             workers=1, device="cpu", horizon_lambda=1.1,
         )
+
+
+def test_mixed_h16_batch_numerical_parity_probe_records_exact_differences(tmp_path):
+    torch.manual_seed(73)
+    torch.set_num_threads(1)
+    model = JointActPilotNet(SharedObjectTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64),
+    )).eval()
+    checkpoint = tmp_path / "actor-batch-probe.pt"
+    model.save(checkpoint)
+    digest = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
+    states = (
+        public_frame(combat=True),
+        {
+            **public_frame(combat=False),
+            "deck": [
+                {"instance_id": i, "card_id": f"test.card.{i}"}
+                for i in range(7)
+            ],
+        },
+    )
+    menus = (
+        (LegalAction("end", "end_turn"), LegalAction("skip", "skip")),
+        (LegalAction("left", "event_choice"), LegalAction("right", "event_choice"),
+         LegalAction("skip", "skip")),
+    )
+    decisions = [
+        encode_h16_decision(state, menu)
+        for state, menu in zip(states, menus, strict=True)
+    ]
+    with SharedH16Service(
+        checkpoint=checkpoint, digest=digest,
+        workers=2, device="cpu", horizon_lambda=0.3,
+        max_batch=2, max_delay_ms=150,
+        profile_actor=True, verify_batch_parity=True,
+    ) as service:
+        remotes = [RemoteH16Actor(service.transport) for _ in range(2)]
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [
+                pool.submit(remote.infer, decision)
+                for remote, decision in zip(remotes, decisions, strict=True)
+            ]
+            for future in futures:
+                scores, value = future.result(timeout=30)
+                assert scores
+                assert 0 <= value <= 1
+    parity = service.metrics["p2_batch_numerical_parity"]
+    assert parity["schema"] == "sts2-p2-actor-batch-numerical-parity-v1"
+    assert parity["samples"] == 1
+    assert 0 <= parity["changed_logits"] <= 1
+    assert 0 <= parity["changed_value"] <= 1
+    assert 0 <= parity["changed_argmax"] <= 1
+    assert parity["max_abs_logit_difference"] >= 0
+    assert parity["max_abs_value_difference"] >= 0
+    assert service.metrics["max_batch_observed"] == 2
+
+
+def test_h16_batch_probe_must_be_explicitly_profiled(tmp_path):
+    with pytest.raises(ValueError, match="configuration"):
+        SharedH16Service(
+            checkpoint=tmp_path / "missing.pt", digest="unused",
+            workers=2, device="cpu", horizon_lambda=0.25,
+            verify_batch_parity=True, profile_actor=False,
+        )
