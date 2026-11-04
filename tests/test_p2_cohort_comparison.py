@@ -19,7 +19,8 @@ def fixture(workers: int, wall: float = 10.0):
         "paired": True, "profile_overhead": False,
         "actor_inference": "shared", "actor_device": "cpu",
         "actor_max_batch": 16, "actor_max_delay_ms": 2.0,
-        "actor_profile": True, "seeds": ["x", "y"],
+        "actor_profile": True, "actor_batch_parity_probe": False,
+        "seeds": ["x", "y"],
     }
     assert set(fields) == set(MATCH_FIELDS)
     runs = [
@@ -86,4 +87,12 @@ def test_duplicate_and_reordered_seeds_fail_closed():
     b["identity"]["worker_count"] = 15
     b["seed_reports"][1]["seed"] = "x"
     with pytest.raises(ValueError, match="duplicate seed"):
+        compare_cohorts(a, b)
+
+
+def test_actor_numerical_probe_is_not_valid_throughput_evidence():
+    a, b = fixture(1), fixture(15)
+    a["identity"]["actor_batch_parity_probe"] = True
+    b["identity"]["actor_batch_parity_probe"] = True
+    with pytest.raises(ValueError, match="extra forwards"):
         compare_cohorts(a, b)
