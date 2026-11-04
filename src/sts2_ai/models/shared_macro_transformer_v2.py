@@ -21,7 +21,7 @@ from sts2_ai.training.h21_stable_identity import (
     H21_IDENTITY_COMPONENTS,
 )
 
-H21_MODEL_FORMAT = "sts2-h21-grounded-macro-transformer-v3"
+H21_MODEL_FORMAT = "sts2-h21-grounded-macro-transformer-v4"
 
 
 class H21StableEmbedding(nn.Module):
