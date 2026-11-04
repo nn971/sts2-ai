@@ -34,6 +34,31 @@ GPU actor queue-delay histograms and 15-worker runtime measurements remain
 pending. C# heap retained bytes and exact root RNG receipt comparisons also
 remain separate gates before P2.1.
 
+## Compatible H16 public-v0 emulator for generated maps
+
+Native generated-map card-selection prompts require visible
+`combat.selection_candidates` even when compact selection is disabled.
+The old H16 emulator at `e265c0f` emitted these records only for the
+experimental fixed route, causing the H16 encoder to reject legal
+draw-pile card selections. The compatible source fix is
+[emulator PR #242](https://github.com/nn971/sts2-emulator/pull/242),
+branched from that *exact* H16 revision. Apply the emulator branch and
+rebuild before running the generated-map H16 benchmark:
+
+```fish
+set emu_p2 /tmp/sts2-emulator-p2-h16
+git -C $emu_p2 fetch origin
+git -C $emu_p2 switch --detach origin/fix/p2-h16-selection-public-projection-20261104
+set rev (git -C $emu_p2 rev-parse HEAD)
+dotnet build $emu_p2/src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj -c Release -m:1
+```
+
+Pass `--emulator-root $emu_p2 --emulator-revision $rev`.
+The report pins the new SHA and CLI digest. The P1 public-v1 emulator and
+its P2 native allocation profiler remain **separate cohorts**. Exact
+baseline comparisons cannot mix the fixed-route-only selection
+projection with the corrected generated-map choice projection.
+
 ## Run a two-seed smoke (fish)
 
 Use a clean checkout of the PR branch and a pinned emulator checkout built
