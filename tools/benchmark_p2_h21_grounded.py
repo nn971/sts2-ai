@@ -18,7 +18,10 @@ from pathlib import Path
 from statistics import median
 from typing import Any
 
-from p2_h21_public_corpus import load_public_corpus, public_digest
+if __package__:
+    from .p2_h21_public_corpus import load_public_corpus, public_digest
+else:
+    from p2_h21_public_corpus import load_public_corpus, public_digest
 from sts2_ai.emulator.protocol import LegalAction
 from sts2_ai.training.h19_resource_codec import EMULATOR_PUBLIC_SCHEMA_V1
 from sts2_ai.training.h21_action_alias_audit import audit_h21_action_aliases
