@@ -1,0 +1,63 @@
+name: h22-h21-joint-training
+
+on:
+  pull_request:
+    paths:
+      - 'src/sts2_ai/training/h16_joint_act_pilot.py'
+      - 'src/sts2_ai/training/h17_replay.py'
+      - 'src/sts2_ai/emulator/jsonl_backend.py'
+      - 'src/sts2_ai/models/h16_batch_actor.py'
+      - 'tools/train_h16_joint_act_pilot.py'
+      - 'tools/train_h22_h21_generated_a0.py'
+      - 'tools/probe_h22_joint_bridge.py'
+      - 'tests/test_h22_h21_joint_training.py'
+      - '.github/workflows/h22-h21-joint.yml'
+  workflow_dispatch:
+
+jobs:
+  h22-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install CPU PyTorch and research tests
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e '.[dev]'
+      - name: H22 lint and compile
+        run: |
+          python -m ruff check src/sts2_ai/training/h16_joint_act_pilot.py src/sts2_ai/training/h17_replay.py src/sts2_ai/emulator/jsonl_backend.py src/sts2_ai/models/h16_batch_actor.py tools/train_h16_joint_act_pilot.py tools/train_h22_h21_generated_a0.py tests/test_h22_h21_joint_training.py
+          python -m compileall -q src/sts2_ai/training/h16_joint_act_pilot.py src/sts2_ai/training/h17_replay.py src/sts2_ai/emulator/jsonl_backend.py src/sts2_ai/models/h16_batch_actor.py tools/train_h16_joint_act_pilot.py tools/train_h22_h21_generated_a0.py
+      - name: H21 representation, H22 joint and H18 regression
+        run: |
+          python -m pytest -q tests/test_h22_h21_joint_training.py tests/test_h21_macro_offers.py tests/test_h21_pending_continuations.py tests/test_h21_action_alias_audit.py tests/test_h16_joint_act_pilot.py tests/test_h18_p2_training_stage.py
+
+  h22-live-public-v1-bridge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: fix/h18-public-observation-v1-20261104
+          path: emulator-v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Install CPU joint model
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e .
+      - name: Build real public-v1 emulator
+        run: dotnet build emulator-v1/src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj -c Release -m:1
+      - name: Exercise H22 public-v1 emulator, model and fused Act loop
+        run: |
+          python tools/probe_h22_joint_bridge.py \
+            --emulator-root emulator-v1 --max-decisions 80

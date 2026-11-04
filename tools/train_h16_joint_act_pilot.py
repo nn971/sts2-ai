@@ -41,6 +41,7 @@ from sts2_ai.training.h16_episode_metrics import (
     summarize_floor_progress,
 )
 from sts2_ai.training.h16_joint_act_pilot import (
+    H22_SCHEMA,
     SCHEMA,
     JointActPilotNet,
     PilotEpisode,
@@ -114,6 +115,7 @@ def _worker_init(config: dict[str, Any]) -> None:
              and config["macro_prior_weight"] > 0 else None)
     policy = PilotPolicy(
         model, temperature=config["temperature"],
+        representation=config["representation"],
         horizon_lambda=config["horizon_lambda"], macro_teacher=macro,
         macro_prior_weight=config["macro_prior_weight"],
         remote_actor=remote,
@@ -125,6 +127,10 @@ def _worker_init(config: dict[str, Any]) -> None:
         emulator_root=Path(config["emulator_root"]),
         expected_emulator_revision=config["emulator_revision"],
         build=False,
+        expected_public_schema_id=(
+            "prototype-ai-v1" if config["representation"] == "h21"
+            else "prototype-ai-v0"
+        ),
     )
     global _WORKER
     _WORKER = {"backend": emulator, "policy": policy, "config": config}
@@ -177,6 +183,7 @@ def collect(
 ) -> list[PilotEpisode]:
     cfg = {
         "checkpoint": str(checkpoint.resolve()),
+        "representation": getattr(args, "representation", "h16"),
         "checkpoint_sha256": sha256(checkpoint),
         "macro_model": str(args.macro_model.resolve()) if args.macro_model else None,
         "ai_root": str(args.ai_root.resolve()),
@@ -402,6 +409,8 @@ def main() -> None:
     start.add_argument("--initial-h16", type=Path,
                        help="Warm-start from a saved H16 v2/v3 policy/value checkpoint")
     p.add_argument("--macro-model", type=Path, default=None)
+    p.add_argument("--representation", choices=("h16", "h21"), default="h16",
+                   help="Opt-in H21 owner-linked map/offer graph codec and joint model")
     p.add_argument("--emulator-root", type=Path, required=True)
     p.add_argument("--emulator-revision", required=True)
     p.add_argument("--ai-root", type=Path, default=Path.cwd())
@@ -492,6 +501,7 @@ def main() -> None:
             or not 0 <= args.actor_fixed_shape_batch_size <= args.actor_max_batch
             or (args.actor_fixed_shape_batch_size > 0
                 and args.actor_inference != "shared")
+            or (args.representation == "h21" and args.actor_fixed_shape_batch_size != 0)
             or not (args.actor_device == "cpu"
                     or args.actor_device.startswith("cuda"))
             or not math.isfinite(args.horizon_tau_rounds)
@@ -524,7 +534,7 @@ def main() -> None:
         if path is not None and not path.is_file():
             p.error(f"Missing checkpoint: {path}")
     source = {
-        "schema": SCHEMA,
+        "schema": H22_SCHEMA if args.representation == "h21" else SCHEMA,
         "map_profile": (
             EXPERIMENTAL_FIXED_ROUTE_PROFILE
             if args.map_profile == "fixed-route"
@@ -542,6 +552,8 @@ def main() -> None:
                 "execute", "resume", "output_root", "initial_h9",
                 "initial_h16", "macro_model", "emulator_root", "ai_root", "device",
             ) and (key != "actor_fixed_shape_batch_size" or value != 0) and (
+                key != "representation" or value != "h16"
+            ) and (
                 key not in ("ascension", "map_profile")
                 or args.ascension != 10
                 or args.map_profile != "fixed-route"
@@ -584,15 +596,23 @@ def main() -> None:
             root / "models" / f"joint-r{len(history):04d}.pt",
             device=args.device,
         )
+        if model.representation != args.representation:
+            p.error("Resume checkpoint representation differs from experiment")
     else:
         if progress_path.exists() or optimizer_path.exists():
             p.error("Output contains an existing run; use --resume or a new directory")
-        model = (
-            JointActPilotNet.load(args.initial_h16, device=args.device)
-            if args.initial_h16 is not None else JointActPilotNet(
-                SharedObjectTransformer.load_checkpoint(args.initial_h9),
-            ).to(args.device)
-        )
+        if args.representation == "h21":
+            if args.initial_h16 is None:
+                p.error("H21 joint training requires an explicit H16 warm-start checkpoint")
+            h16 = JointActPilotNet.load(args.initial_h16, device="cpu")
+            model = JointActPilotNet.warmstart_h21(h16).to(args.device)
+        else:
+            model = (
+                JointActPilotNet.load(args.initial_h16, device=args.device)
+                if args.initial_h16 is not None else JointActPilotNet(
+                    SharedObjectTransformer.load_checkpoint(args.initial_h9),
+                ).to(args.device)
+            )
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
     if args.resume:
         saved = torch.load(optimizer_path, map_location="cpu", weights_only=True)

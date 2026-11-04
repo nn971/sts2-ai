@@ -20,7 +20,6 @@ import torch
 from torch.nn import functional as F
 
 from sts2_ai.emulator.protocol import LegalAction
-from sts2_ai.models.shared_transformer import collate_h7
 from sts2_ai.training.h16_episode_metrics import combat_results
 from sts2_ai.training.h16_joint_act_pilot import (
     JointActPilotNet,
@@ -29,7 +28,6 @@ from sts2_ai.training.h16_joint_act_pilot import (
     completed_room_hp,
     remaining_room_hp,
 )
-from sts2_ai.training.h16_public_codec import encode_h16_decision
 from sts2_ai.training.h17_adaptive import playable_card_types
 
 SCHEMA = "sts2-h17-supervised-replay-v1"
@@ -187,10 +185,10 @@ def fit_replay(
             tuple(LegalAction(*item) for item in row["actions"]) for row in chunk
         ]
         encoded = [
-            encode_h16_decision(json.loads(row["observation"]), actions)
+            model.encode_decision(json.loads(row["observation"]), actions)
             for row, actions in zip(chunk, legal, strict=True)
         ]
-        batch = collate_h7(encoded).to(device)
+        batch = model.collate(encoded).to(device)
         logits, act_logit, hp_logit = model(
             batch, value_logits=True, horizon_lambda=horizon_lambda,
         )

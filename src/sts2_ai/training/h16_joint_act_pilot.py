@@ -32,6 +32,10 @@ from sts2_ai.emulator.run_environment import (
     reset_training_run,
 )
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
+from sts2_ai.models.shared_macro_transformer_v2 import (
+    H21GroundedMacroTransformer,
+    collate_h21,
+)
 from sts2_ai.models.shared_transformer import (
     H7Config,
     SharedObjectTransformer,
@@ -55,8 +59,16 @@ from sts2_ai.training.h16_public_codec import (
     encode_h16_decision,
 )
 from sts2_ai.training.h17_adaptive import AdaptiveSearch, choose_budget
+from sts2_ai.training.h19_resource_codec import EMULATOR_PUBLIC_SCHEMA_V1
+from sts2_ai.training.h21_action_alias_audit import audit_h21_action_aliases
+from sts2_ai.training.h21_macro_offer_codec import (
+    H21_CODEC,
+    H21_OBJECT_SCHEMA,
+    encode_h21_macro_decision,
+)
 
 SCHEMA = "sts2-h16-act1-geometric-horizon-every-combat-puct-v5"
+H22_SCHEMA = "sts2-h22-h21-grounded-joint-act-v1"
 PREVIOUS_SCHEMA = "sts2-h16-act1-geometric-horizon-every-combat-puct-v4"
 OLDER_SCHEMA = "sts2-h16-act1-geometric-horizon-every-combat-puct-v3"
 LEGACY_SCHEMA = "sts2-h16-act1-geometric-horizon-every-combat-puct-v2"
@@ -249,6 +261,9 @@ class JointActPilotNet(nn.Module):
     def __init__(self, backbone: SharedObjectTransformer) -> None:
         super().__init__()
         self.backbone = backbone
+        self.representation = (
+            "h21" if isinstance(backbone, H21GroundedMacroTransformer) else "h16"
+        )
         dim = backbone.config.width
         self.act_clear = nn.Linear(dim, 1)
         # The same public state has different values at different horizons.
@@ -298,27 +313,69 @@ class JointActPilotNet(nn.Module):
             return logits, act, hp
         return logits, torch.sigmoid(act), torch.sigmoid(hp)
 
+    def encode_decision(
+        self, state: dict[str, Any], actions: Sequence[LegalAction],
+    ) -> Any:
+        return encode_joint_decision(state, actions, representation=self.representation)
+
+    def collate(self, decisions: list[Any]) -> Any:
+        return collate_h21(decisions) if self.representation == "h21" else collate_h7(decisions)
+
     def save(self, path: Path) -> None:
         from dataclasses import asdict
         path.parent.mkdir(parents=True, exist_ok=True)
+        if self.representation == "h21":
+            identity = {
+                "schema": H22_SCHEMA, "codec": H21_CODEC,
+                "object_schema": H21_OBJECT_SCHEMA,
+                "public_schema": EMULATOR_PUBLIC_SCHEMA_V1,
+            }
+        else:
+            identity = {"schema": SCHEMA, "codec": H16_CODEC}
         torch.save({
-            "schema": SCHEMA,
-            "codec": H16_CODEC,
+            **identity,
             "config": asdict(self.backbone.config),
             "state_dict": self.state_dict(),
         }, path)
 
     @classmethod
+    def warmstart_h21(cls, source: JointActPilotNet) -> JointActPilotNet:
+        """Copy only shape-compatible H16 parameters; H21 IDs/edges initialize anew."""
+        if source.representation != "h16":
+            raise ValueError("H21 initialization requires an H16 source checkpoint")
+        candidate = cls(H21GroundedMacroTransformer(source.backbone.config))
+        old, new = source.state_dict(), candidate.state_dict()
+        with torch.no_grad():
+            for name, target in new.items():
+                previous = old.get(name)
+                if previous is None:
+                    continue
+                if name == "backbone.kinds.weight":
+                    target[:previous.shape[0]].copy_(previous)
+                elif previous.shape == target.shape:
+                    target.copy_(previous)
+        candidate.load_state_dict(new, strict=True)
+        return candidate
+
+    @classmethod
     def load(cls, path: Path, *, device: str = "cpu") -> JointActPilotNet:
         checkpoint = torch.load(path, map_location="cpu", weights_only=True)
-        if (checkpoint.get("schema"), checkpoint.get("codec")) not in (
-            (SCHEMA, H16_CODEC),
-            (PREVIOUS_SCHEMA, H16_CODEC),
-            (OLDER_SCHEMA, PREVIOUS_H16_CODEC),
-            (LEGACY_SCHEMA, LEGACY_H16_CODEC),
-        ):
-            raise ValueError("Expected a compatible H16 joint Act checkpoint/codec")
-        model = cls(SharedObjectTransformer(H7Config(**checkpoint["config"])))
+        if checkpoint.get("schema") == H22_SCHEMA:
+            if (checkpoint.get("codec") != H21_CODEC
+                    or checkpoint.get("object_schema") != H21_OBJECT_SCHEMA
+                    or checkpoint.get("public_schema") != EMULATOR_PUBLIC_SCHEMA_V1):
+                raise ValueError("H22 checkpoint public/codec schema mismatch")
+            backbone = H21GroundedMacroTransformer(H7Config(**checkpoint["config"]))
+        else:
+            if (checkpoint.get("schema"), checkpoint.get("codec")) not in (
+                (SCHEMA, H16_CODEC),
+                (PREVIOUS_SCHEMA, H16_CODEC),
+                (OLDER_SCHEMA, PREVIOUS_H16_CODEC),
+                (LEGACY_SCHEMA, LEGACY_H16_CODEC),
+            ):
+                raise ValueError("Expected a compatible H16 or H22 joint checkpoint")
+            backbone = SharedObjectTransformer(H7Config(**checkpoint["config"]))
+        model = cls(backbone)
         model.load_state_dict(checkpoint["state_dict"], strict=True)
         return model.to(device)
 
@@ -370,6 +427,21 @@ def targets_for_episode(
     )
 
 
+def encode_joint_decision(
+    state: dict[str, Any], actions: Sequence[LegalAction], *,
+    representation: str = "h16",
+) -> Any:
+    if representation == "h16":
+        return encode_h16_decision(state, actions)
+    if representation == "h21":
+        encoded = encode_h21_macro_decision(
+            state, actions, public_schema_id=EMULATOR_PUBLIC_SCHEMA_V1,
+        )
+        audit_h21_action_aliases(state, actions, encoded)
+        return encoded
+    raise ValueError("Unknown joint public representation")
+
+
 class PilotPolicy:
     """Frozen cohort policy. Macro teacher is a fixed soft prior, if supplied."""
 
@@ -378,6 +450,7 @@ class PilotPolicy:
         horizon_lambda: float, macro_teacher: PhaseSplitNeuralModel | None = None,
         macro_prior_weight: float = 0.5, remote_actor: Any = None,
         combat_credit_weight: float = 0.25, loss_progress_cap: float = 0.2,
+        representation: str = "h16",
     ) -> None:
         if not 0 <= horizon_lambda <= 1 or temperature <= 0 or macro_prior_weight < 0:
             raise ValueError("Invalid pilot continuation/policy weighting")
@@ -386,6 +459,10 @@ class PilotPolicy:
             raise ValueError("Invalid combat win/loss progress weighting")
         if (model is None) == (remote_actor is None):
             raise ValueError("H16 policy needs exactly one local or remote actor")
+        if (representation not in ("h16", "h21")
+                or (model is not None and model.representation != representation)):
+            raise ValueError("Joint policy representation/model mismatch")
+        self.representation = representation
         self.model = model.eval() if model is not None else None
         self.remote_actor = remote_actor
         self.temperature = temperature
@@ -419,13 +496,13 @@ class PilotPolicy:
             raise ValueError("Nonterminal inference needs a legal menu")
         started = time.perf_counter()
         public = public_state(observation)
-        encoded = encode_h16_decision(public, actions)
+        encoded = encode_joint_decision(public, actions, representation=self.representation)
         if self.remote_actor is not None:
             raw_scores, value = self.remote_actor.infer(encoded)
         else:
             if self.model is None:
                 raise AssertionError("H16 local actor missing")
-            batch = collate_h7([encoded]).to(next(self.model.parameters()).device)
+            batch = self.model.collate([encoded]).to(next(self.model.parameters()).device)
             with torch.inference_mode():
                 logits, _, hp = self.model(
                     batch, horizon_lambda=self.horizon_lambda,
@@ -850,11 +927,11 @@ def train_joint_cohort(
         for start in range(0, len(entries), minibatch):
             chunk = entries[start:start + minibatch]
             encoded = [
-                encode_h16_decision(
+                model.encode_decision(
                     public_state(decision.observation), decision.legal_actions,
                 ) for decision, _, _, _ in chunk
             ]
-            batch = collate_h7(encoded).to(device)
+            batch = model.collate(encoded).to(device)
             aux_lambdas = torch.tensor(
                 [rng.random() for _ in chunk],
                 dtype=torch.float32, device=device,
