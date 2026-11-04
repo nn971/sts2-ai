@@ -6,9 +6,9 @@ for the new owner-linked attribute kind.
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from types import SimpleNamespace
-from typing import Any, Callable
+from typing import Any
 
 from sts2_ai.models.shared_game_objects import (
     EncodedDecision,
