@@ -359,7 +359,9 @@ def encode_public_decision(
             members = tuple(sorted(selected))
             # Stable across instance IDs/runs; the selected card embeddings
             # encode content while cardinality distinguishes empty vs 1 vs 2.
-            semantic = _bucket(f"select_cards:count={len(members)}", IDENTITY_BUCKETS)
+            label = f"select_cards:count={len(members)}"
+            semantic = (identity_hasher(label) if identity_hasher is not None
+                        else _bucket(label, IDENTITY_BUCKETS))
         action_tokens.append(ActionToken(
             _bucket(kind, ACTION_BUCKETS), semantic, source, target, members,
         ))
