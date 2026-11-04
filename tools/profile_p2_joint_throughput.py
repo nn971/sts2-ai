@@ -115,6 +115,7 @@ def run_episode(
     profile_wire: bool = True,
     native_profile: bool = False,
     search_enabled: bool = True,
+    p2_prefix_cache_handles: int = 0,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     # The H16 policy and emulator streams have stable per-episode seed owners.
     set_h16_rollout_seed(seed)
@@ -151,6 +152,7 @@ def run_episode(
         rng=random.Random(rng_seed),
         rollout_transport=rollout_transport,
         search_profiles=(roots if profile_search else None),
+        p2_prefix_cache_handles=p2_prefix_cache_handles,
     )
     elapsed = time.perf_counter() - start
     ops = backend.operation_profile()
@@ -175,6 +177,7 @@ def run_episode(
             decision.search_simulations for decision in episode.decisions
         ),
         "search_instrumentation": profile_search,
+        "p2_prefix_cache_handles": p2_prefix_cache_handles,
         "wire_instrumentation": profile_wire,
         "native_instrumentation": native_profile,
         "search_transitions": episode.search_transitions,
