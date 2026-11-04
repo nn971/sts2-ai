@@ -500,9 +500,10 @@ class NativeRootConditionedSampler:
         if self._active is None:
             raise RuntimeError("Search simulation has not begun")
         parent_history = list(self._combat_frames)
+        parent_handle = self._active
         if self._prefix_cache is not None:
             entry = self._prefix_cache.lookup(
-                frame, action.action_id, self._combat_frames,
+                frame, action.action_id, self._combat_frames, parent_handle,
             )
             if entry is not None:
                 self._active = entry.handle
@@ -562,7 +563,7 @@ class NativeRootConditionedSampler:
         )
         if self._prefix_cache is not None and self._prefix_cache.record(
             frame, action.action_id, child_frame, transition.child,
-            parent_history, self._combat_frames,
+            parent_history, self._combat_frames, parent_handle,
         ):
             # Ownership moves to a bounded cache; the child is immutable.
             # The current simulation can step from it without modifying it.
