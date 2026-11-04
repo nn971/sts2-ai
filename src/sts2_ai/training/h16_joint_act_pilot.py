@@ -10,12 +10,12 @@ public-history fair posterior. No hidden state is passed to the network.
 """
 from __future__ import annotations
 
-from copy import deepcopy
 import json
 import math
 import random
 import time
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
