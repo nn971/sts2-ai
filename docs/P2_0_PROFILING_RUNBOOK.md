@@ -465,10 +465,26 @@ python tools/report_p2_profile_overhead.py \
 **Scope:** this estimates PUCT/JSONL episode instrumentation overhead.
 `--actor-profile` is a **cohort-wide** shared-service setting, so the
 four arms cannot estimate actor-service profiling overhead. To measure
-that separately, repeat matched complete cohorts with actor profiling
-off/on at the same revision and compare wall, using the recorded actor
-configuration in the profile identity. Only after overhead is bounded
-should a speedup claim use instrumentation-neutral wall times.
+that separately, repeat matched cohorts with actor profiling off/on
+under **the same pinned source, seed and batching setup**, passing
+`--paired` in both, and compare with:
+
+```fish
+python tools/report_p2_actor_ab.py --experiment actor-profile \
+    --baseline-one $out/unprofiled-w1/profile.json \
+    --baseline-fifteen $out/unprofiled-w15/profile.json \
+    --candidate-one $out/profiled-w1/profile.json \
+    --candidate-fifteen $out/profiled-w15/profile.json \
+    --output $out/actor-profile-overhead.json
+```
+
+The `actor-profile` experiment allows ONLY the actor-profile toggle;
+the default `batching` experiment allows ONLY the batch limit and
+fixed-shape batch size to differ. Both require **identical public and
+teacher replay across all four reports**, and matching episode work.
+The wall speedup ratio from unprofiled to profiled becomes a measured
+overhead diagnostic, not an optimization claim. Only after overhead is
+bounded should a speedup claim use instrumentation-neutral wall times.
 
 **Further P2.0 gate work:** native v1 C# fork/rollout/serialization
 allocations and handle audits; H16 codec parsing attribution;
