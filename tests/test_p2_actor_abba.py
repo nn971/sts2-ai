@@ -596,3 +596,97 @@ def test_p2_native_fused_runner_only_toggles_native_timing(tmp_path):
         call[call.index("--p2-prefix-cache-handles") + 1] == "0"
         for call in calls[:4]
     )
+
+
+def h22_collator_cohorts() -> list[dict]:
+    arms = ("reference", "packed", "packed", "reference")
+    data = [cohort(wall, batch=4, fixed_shape=0, complete=True)
+            for wall in (18.0, 13.0, 12.0, 19.0)]
+    for record, collator in zip(data, arms, strict=True):
+        record["identity"].update({
+            "representation": "h21",
+            "public_schema_id": "prototype-ai-v1",
+            "codec": "h21-grounded-reward-shop-event-v4",
+            "actor_h21_collator": collator,
+        })
+        record["shared_actor_metrics"] = {"p2_h21_collator": collator}
+    return data
+
+
+def test_h22_collator_abba_accepts_exact_h21_variable_shape_replay():
+    data = h22_collator_cohorts()
+    frozen = deepcopy(data)
+    result = report_actor_abba(*data, experiment="h21-collator")
+    assert data == frozen
+    assert result["parity"]["passed"]
+    assert result["public_schema_id"] == "prototype-ai-v1"
+    assert result["actor_h21_collators"] == [
+        "reference", "packed", "packed", "reference",
+    ]
+    assert result["ratio_of_total_baseline_to_candidate_wall"] == pytest.approx(
+        37 / 25,
+    )
+    assert result["candidate_faster_in_both_pairs"]
+    assert result["configurations"]["A_H21_reference"]["h21_collator"] == "reference"
+    assert result["configurations"]["B_H21_packed"]["h21_collator"] == "packed"
+
+
+@pytest.mark.parametrize(("arm", "change", "reason"), [
+    (1, lambda p: p["identity"].update({"public_schema_id": "prototype-ai-v0"}),
+     "public schema"),
+    (1, lambda p: p["identity"].update({"representation": "h16"}),
+     "public schema"),
+    (1, lambda p: p["identity"].update({"actor_h21_collator": "reference"}),
+     "collator"),
+    (1, lambda p: p["shared_actor_metrics"].update({"p2_h21_collator": "reference"}),
+     "actor collator receipt"),
+    (2, lambda p: p["identity"].update({"actor_fixed_shape_batch_size": 4}),
+     "H21 variable-shape"),
+    (2, lambda p: p["identity"].update({"actor_max_batch": 16}),
+     "batch/transport"),
+    (2, lambda p: p["identity"].update({"rollout_transport": "legacy"}),
+     "provenance drift"),
+    (2, lambda p: p["identity"].update({"checkpoint_sha256": "wrong"}),
+     "provenance drift"),
+    (3, lambda p: p["seed_reports"][0].update({"trace_sha256": "wrong"}),
+     "teacher replay"),
+    (3, lambda p: p["seed_reports"][0]["runs"][0].update({"search_transitions": 1}),
+     "paired work drift"),
+    (1, lambda p: p["identity"].update({"wire_profile_only": True}),
+     "instrumentation"),
+])
+def test_h22_collator_abba_rejects_drift(arm, change, reason):
+    data = h22_collator_cohorts()
+    change(data[arm])
+    with pytest.raises(ValueError, match=reason):
+        report_actor_abba(*data, experiment="h21-collator")
+
+
+def test_h22_collator_abba_runner_changes_only_collator(tmp_path):
+    args = Namespace(
+        experiment="h21-collator", h21_max_batch=4,
+        seeds=None, seed_prefix="p2-h22", seed_count=16, workers=15,
+        max_decisions=4096, max_searches=2, simulations=16, depth=0,
+        actor_max_delay_ms=2.0, horizon_lambda=0.411395,
+        macro_prior_weight=0, macro_model=None,
+        ascension=0, ai_root=Path("/tmp/ai"), emulator_root=Path("/tmp/emu"),
+        emulator_revision="emulator-v1-sha", checkpoint=Path("h22.pt"),
+        actor_device="cuda", map_profile="generated", output_root=tmp_path,
+    )
+    calls, outputs = make_commands(args)
+    assert outputs[-1].name == "p2-h22-collator-abba-report.json"
+    assert [call[call.index("--actor-h21-collator") + 1]
+            for call in calls[:4]] == [
+                "reference", "packed", "packed", "reference",
+            ]
+    for command in calls[:4]:
+        assert command[command.index("--representation") + 1] == "h21"
+        assert command[command.index("--actor-max-batch") + 1] == "4"
+        assert command[command.index("--actor-fixed-shape-batch-size") + 1] == "0"
+        assert command[command.index("--max-decisions") + 1] == "4096"
+        assert command[command.index("--depth") + 1] == "0"
+        assert "--paired" in command and "--no-episode-profile" in command
+        assert "--actor-profile" not in command
+        assert "--execute" in command
+        assert command[command.index("--rollout-transport") + 1] == "fused"
+    assert calls[-1][calls[-1].index("--experiment") + 1] == "h21-collator"
