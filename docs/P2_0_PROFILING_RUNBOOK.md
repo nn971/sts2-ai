@@ -1515,8 +1515,9 @@ instrumentation. Profilers and experimental prefix cache are off.
 Order-balanced wall is authoritative; each episode's two replay
 executions are included in the denominator.
 
-Pilot first at 8 generated A0 seeds and 15 workers (do not mistake
-one-worker actor results for 15-worker scheduling behavior):
+Pilot first at 16 generated A0 seeds and 15 workers, so all 15
+workers can potentially contribute (eight seeds would underfill
+the worker pool):
 
 ```fish
 cd ~/projects/sts2-ai
@@ -1532,7 +1533,7 @@ python tools/run_p2_actor_abba.py \
     --actor-max-delay-ms 2 \
     --candidate-actor-max-delay-ms 0 \
     --seed-prefix p2-a0-actor-delay-20261105 \
-    --seed-count 8 \
+    --seed-count 16 \
     --simulations 16 --depth 8 --max-searches 2 \
     --max-decisions 80 \
     --output-root results/p2-actor-delay0-smoke-v1 \
