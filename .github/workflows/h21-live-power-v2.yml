@@ -24,7 +24,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: nn971/sts2-emulator
-          ref: refactor/p1-enemy-effects-as-powers-20261104
+          # P1 canonical-only enemy effect storage, old snapshot adapter accepted.
+          ref: 252ca624ff52885d4eedc78b818eda75a9eafb89
           path: emulator-p1
       - uses: actions/setup-python@v5
         with:
