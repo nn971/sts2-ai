@@ -87,9 +87,12 @@ def benchmark(
     corpus: dict[str, Any], *, sample_count: int, repeats: int, warmups: int,
     batch_size: int, stage: str, device: str, checkpoint: Path | None,
     random_model: bool = False, config: dict[str, int] | None = None,
+    collator: str = "reference",
 ) -> dict[str, Any]:
     if (sample_count < 1 or repeats < 1 or warmups < 0 or batch_size < 1
             or stage not in {"codec", "collate", "forward"}
+            or collator not in {"reference", "packed"}
+            or (stage == "codec" and collator != "reference")
             or (checkpoint is not None and random_model)
             or (stage == "forward" and (checkpoint is None) == (not random_model))
             or (stage != "forward" and (checkpoint is not None or random_model))
@@ -152,6 +155,7 @@ def benchmark(
             "sampled_decisions": len(records),
             "sample_method": "evenly-spaced-full-route",
             "repeats": repeats, "warmups": warmups, "batch_size": batch_size,
+            "collator": collator,
             "phase_counts": dict(sorted(Counter(
                 decision.phase for decision in encodings
             ).items())),
@@ -187,19 +191,29 @@ def benchmark(
 
     from sts2_ai.models.shared_macro_transformer_v2 import (
         H21GroundedMacroTransformer,
-        collate_h21,
+        collate_h21, collate_h21_packed,
     )
     from sts2_ai.models.shared_transformer import H7Config
 
     torch.set_num_threads(1)
     chunks = [encodings[i:i + batch_size]
               for i in range(0, len(encodings), batch_size)]
-    collated = [collate_h21(chunk) for chunk in chunks]
+    collate_fn = collate_h21 if collator == "reference" else collate_h21_packed
+    collated = [collate_fn(chunk) for chunk in chunks]
+    if collator == "packed":
+        # Exact field-by-field tensor parity on the same public decisions.
+        for chunk, candidate in zip(chunks, collated, strict=True):
+            reference = collate_h21(chunk)
+            if any(
+                not torch.equal(getattr(candidate, key), getattr(reference, key))
+                for key in type(reference).__dataclass_fields__
+            ):
+                raise ValueError("Packed H21 collator differs from reference tensors")
     collate_times: list[float] = []
     for iteration in range(warmups + repeats):
         for chunk, expected in zip(chunks, collated, strict=True):
             t = time.perf_counter()
-            actual = collate_h21(chunk)
+            actual = collate_fn(chunk)
             dt = time.perf_counter() - t
             if any(not torch.equal(getattr(actual, key), getattr(expected, key))
                    for key in type(actual).__dataclass_fields__):
@@ -210,6 +224,7 @@ def benchmark(
         collate_times, work=len(records) * repeats,
     )
     result["collation_batches"] = len(chunks)
+    result["relational_collation"]["implementation"] = collator
 
     if stage == "collate":
         return result
@@ -283,6 +298,8 @@ def main() -> None:
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--collator", choices=["reference", "packed"],
+                        default="reference")
     parser.add_argument("--stage", choices=["codec", "collate", "forward"],
                         default="collate")
     parser.add_argument("--device", default="cpu")
@@ -303,7 +320,7 @@ def main() -> None:
         corpus, sample_count=args.sample_count, repeats=args.repeats,
         warmups=args.warmups, batch_size=args.batch_size,
         stage=args.stage, device=args.device, checkpoint=args.checkpoint,
-        random_model=args.untrained_model,
+        random_model=args.untrained_model, collator=args.collator,
         config={
             "width": args.untrained_width, "layers": args.untrained_layers,
             "heads": args.untrained_heads,
