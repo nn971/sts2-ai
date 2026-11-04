@@ -20,6 +20,7 @@ from sts2_ai.models.shared_game_objects import (
     ObjectToken,
     RelationToken,
     _numbers,
+    _single_numeric,
     _public_attribute_leaves,
 )
 from sts2_ai.training.h20_map_graph_codec import encode_h20_map_decision
@@ -199,7 +200,7 @@ class _GroundedMacro:
         for identity, number in _public_attribute_leaves(value, path):
             if len(self.objects) >= H21_OBJECT_LIMIT:
                 raise ValueError("H21 visible attribute cap exceeded")
-            numeric, observed = _numbers({numeric_field: number})
+            numeric, observed = _single_numeric(numeric_field, number)
             pos = len(self.objects)
             self.objects.append(ObjectToken(
                 OWNER_ATTRIBUTE_KIND_V2,
