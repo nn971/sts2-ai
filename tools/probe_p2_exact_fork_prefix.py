@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -21,10 +22,28 @@ from sts2_ai.emulator.jsonl_backend import JsonlEmulatorBackend
 from sts2_ai.emulator.protocol import EmulatorBackend, StateHandle
 from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH, reset_training_run
 
-if __package__:
-    from .profile_p2_joint_throughput import ROOT, dll_identity, git_head
-else:
-    from profile_p2_joint_throughput import ROOT, dll_identity, git_head
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def git_head(root: Path) -> str:
+    return subprocess.check_output(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], text=True,
+    ).strip()
+
+
+def dll_identity(root: Path) -> dict[str, str] | None:
+    binaries = sorted(
+        (root / "src/Sts2Emulator.Cli/bin/Release").glob(
+            "*/Sts2Emulator.Cli.dll",
+        )
+    )
+    if len(binaries) != 1:
+        return None
+    return {
+        "path": str(binaries[0]),
+        "sha256": hashlib.sha256(binaries[0].read_bytes()).hexdigest(),
+    }
+
 
 SCHEMA = "sts2-p2-root-conditioned-exact-prefix-preflight-v1"
 POLICY = InformationPolicy(FAIR_POLICY_ID)
