@@ -551,10 +551,10 @@ class _GroundedMacro:
                 raise ValueError("Malformed public event potion replacement")
             self.event_potion_offer = self.add(
                 "potion", potion_id, "event", owner=root)
-            if "choice_id" in pending:
+            if "choice_id" in pending_potion:
                 self.attribute(
                     self.event_potion_offer, "potion_choice_id",
-                    pending["choice_id"],
+                    pending_potion["choice_id"],
                 )
             for slot in slots:
                 if type(slot) is not int or not 0 <= slot < capacity:
