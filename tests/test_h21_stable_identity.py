@@ -79,7 +79,9 @@ def test_sparse_h21_numeric_projection_matches_original_all_field_shapes():
     import math
 
     from sts2_ai.models.shared_game_objects import (
-        NUMERIC_FIELDS, _numbers, _numbers_h21,
+        NUMERIC_FIELDS,
+        _numbers,
+        _numbers_h21,
     )
 
     examples = [
