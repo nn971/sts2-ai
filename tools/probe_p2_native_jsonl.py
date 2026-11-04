@@ -83,6 +83,8 @@ def run_root(client: RawJsonl, seed: str, *, profile: bool) -> dict[str, Any]:
     if clone["exactHash"] != exact:
         raise AssertionError("Fork changed exact state hash")
     actions = client.request("legal_actions", state_handle=root)["actions"]
+    if actions != client.request("legal_actions", state_handle=fork)["actions"]:
+        raise AssertionError("Fork changed root legal-action payloads")
     if not actions:
         raise RuntimeError("No legal native root actions")
     action_id = actions[0]["actionId"]
@@ -100,9 +102,7 @@ def run_root(client: RawJsonl, seed: str, *, profile: bool) -> dict[str, Any]:
             public_frames.append({
                 "exact_hash": full_hash,
                 "observation": frame["payloadJson"],
-                "legal_action_ids": [
-                    a["actionId"] for a in frame["legalActions"]
-                ],
+                "legal_actions": frame["legalActions"],
                 "terminal": frame["terminal"],
             })
         if public_frames[0] != public_frames[1]:
@@ -139,7 +139,7 @@ def run_root(client: RawJsonl, seed: str, *, profile: bool) -> dict[str, Any]:
         "action_id": action_id,
         "child_exact_hash": public_frames[0]["exact_hash"],
         "public_observation": public_frames[0]["observation"],
-        "legal_action_ids": public_frames[0]["legal_action_ids"],
+        "legal_actions": public_frames[0]["legal_actions"],
         "terminal": public_frames[0]["terminal"],
         "native_profiler": native,
     }
@@ -166,7 +166,7 @@ def main() -> None:
         control = run_root(client, args.seed, profile=False)
         instrumented = run_root(client, args.seed, profile=True)
         for key in ("root_exact_hash", "action_id", "child_exact_hash",
-                    "public_observation", "legal_action_ids", "terminal"):
+                    "public_observation", "legal_actions", "terminal"):
             if control[key] != instrumented[key]:
                 raise AssertionError(f"P2 profile-on/off parity failed: {key}")
     finally:
