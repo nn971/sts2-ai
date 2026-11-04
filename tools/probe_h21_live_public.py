@@ -19,7 +19,9 @@ from pathlib import Path
 from typing import Any
 
 from sts2_ai.emulator.protocol import LegalAction
-from sts2_ai.training.h19_resource_codec import EMULATOR_PUBLIC_SCHEMA_V1
+from sts2_ai.training.h19_resource_codec import (
+    EMULATOR_PUBLIC_SCHEMA_V1, EMULATOR_PUBLIC_SCHEMA_V2,
+)
 from sts2_ai.training.h21_action_alias_audit import audit_h21_action_aliases
 from sts2_ai.training.h21_field_coverage import audit_public_observation
 from sts2_ai.training.h21_macro_offer_codec import encode_h21_macro_decision
@@ -186,6 +188,10 @@ def main() -> int:
     parser.add_argument("--max-decisions", type=int, default=55)
     parser.add_argument("--strict", action="store_true")
     parser.add_argument(
+        "--canonical-enemy-powers", action="store_true",
+        help="Opt into the experimental v2 canonical enemy-power public frames",
+    )
+    parser.add_argument(
         "--require-executed-any", action="append", default=[], metavar="KIND[,KIND...]",
         help=("Require at least one actually executed action from each "
               "comma-separated group"),
@@ -229,6 +235,7 @@ def main() -> int:
     max_relations = 0
     max_floor = 0
     chosen_map_room_types: Counter[str] = Counter()
+    seen_schema_ids: Counter[str] = Counter()
     stable_id.cache_clear()
     profiler = cProfile.Profile() if args.profile_codec_out is not None else None
     public = PublicJsonl(args.emulator_dll)
@@ -236,18 +243,29 @@ def main() -> int:
         hello = public.call("hello")
         if hello.get("aiSchemaId") != EMULATOR_PUBLIC_SCHEMA_V1:
             raise ValueError("Unexpected public observation frame schema")
+        if (args.canonical_enemy_powers
+                and hello.get("experimentalAiPowerSchemaId")
+                != EMULATOR_PUBLIC_SCHEMA_V2):
+            raise ValueError("Emulator does not advertise canonical v2 power frames")
         for seed_index, seed in enumerate(seeds):
-            begin = public.call(
-                "reset_native_overgrowth", seed=seed, ascension=0,
-                compact_card_selection=True,
-            )
+            reset_args = {"seed": seed, "ascension": 0,
+                          "compact_card_selection": True}
+            if args.canonical_enemy_powers:
+                reset_args["canonical_enemy_effect_powers"] = True
+            begin = public.call("reset_native_overgrowth", **reset_args)
             handle = begin["stateHandle"]
             for step in range(args.max_decisions):
                 view = public.call(
                     "observe", state_handle=handle, policy_id=FAIR_POLICY_ID)
-                if view.get("schemaId") != EMULATOR_PUBLIC_SCHEMA_V1:
-                    raise ValueError("Observation schema changed within run")
                 observation = json.loads(view["payloadJson"])
+                required_schema = (
+                    EMULATOR_PUBLIC_SCHEMA_V2 if args.canonical_enemy_powers
+                    and isinstance(observation.get("combat"), dict)
+                    else EMULATOR_PUBLIC_SCHEMA_V1
+                )
+                if view.get("schemaId") != required_schema:
+                    raise ValueError("Unexpected public frame schema at decision")
+                seen_schema_ids[required_schema] += 1
                 current_floor = observation.get("floor")
                 if type(current_floor) is int:
                     max_floor = max(max_floor, current_floor)
@@ -341,7 +359,10 @@ def main() -> int:
         executed_action_kinds, args.require_executed_any,
     )
     print(json.dumps({
-        "schema": EMULATOR_PUBLIC_SCHEMA_V1,
+        "schema": (EMULATOR_PUBLIC_SCHEMA_V2
+                   if args.canonical_enemy_powers else EMULATOR_PUBLIC_SCHEMA_V1),
+        "seen_schema_ids": dict(sorted(seen_schema_ids.items())),
+        "canonical_enemy_powers": args.canonical_enemy_powers,
         "decisions": decisions, "seeds": seeds,
         "elapsed_seconds": round(time.perf_counter() - start, 3),
         "diverse_route": args.diverse_route,
@@ -378,9 +399,12 @@ def main() -> int:
     if missing_required:
         raise AssertionError(
             "Unexercised required public continuations: " + repr(missing_required))
+    if (args.canonical_enemy_powers
+            and seen_schema_ids[EMULATOR_PUBLIC_SCHEMA_V2] == 0):
+        raise AssertionError("Canonical probe did not visit any v2 combat frames")
     if args.strict and (errors or step_errors or gaps or partials):
         raise AssertionError(
-            f"Live v1 probe: {len(errors)} H21 frame failures, "
+            f"Live public probe: {len(errors)} H21 frame failures, "
             f"{len(step_errors)} emulator step failures, "
             f"{sum(gaps.values())} field gaps and "
             f"{sum(partials.values())} incomplete fields")
