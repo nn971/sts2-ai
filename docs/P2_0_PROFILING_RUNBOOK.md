@@ -729,3 +729,87 @@ cohort if full-Act scalability is a production criterion.
 independently quantified; native hidden-state/RNG receipts and P1
 public-v1 fidelity do not follow from H16 public replay.
 P2.1 exact-state reuse requires its separate state/RNG tests.
+
+
+## P2.0 actor-service instrumentation overhead: order-balanced control
+
+The original `--profile-overhead` compares per-episode PUCT and JSONL
+instrumentation inside each worker. The shared actor's `--actor-profile`
+is a separate *cohort-wide* flag: it enables queue samples, GPU transfer
+synchronization and forward timing. To quantify its cost at the accepted
+fixed-shape-4 batching configuration, use the existing A/B/B/A runner's
+new `--experiment actor-profile` mode. This keeps **batch max 16,
+fixed shape 4, 15 workers, H16 checkpoint, macro and search budgets
+identical in all four arms**. A1/A2 run without actor profiling;
+B1/B2 add only `--actor-profile`. PUCT/root and JSONL-wire
+instrumentation stay off in all arms. Every arm repeats the same
+public/teacher replay twice per seed and the reporter fails closed on
+trace/work/source drift.
+
+```fish
+cd ~/projects/sts2-ai
+git pull --ff-only
+
+python tools/run_p2_actor_abba.py \
+    --experiment actor-profile \
+    --emulator-root $emu_p2 --emulator-revision $rev \
+    --checkpoint $ckpt --macro-model $macro \
+    --macro-prior-weight 0.5 --horizon-lambda 0.411395 \
+    --workers 15 --actor-device cuda \
+    --seed-prefix p2-a0-actor-profile-overhead-20261104 \
+    --seed-count 32 \
+    --simulations 16 --depth 8 --max-searches 2 \
+    --max-decisions 80 \
+    --output-root results/p2-a0-actor-profile-overhead-32-v1 \
+    --execute
+```
+
+Output: `results/p2-a0-actor-profile-overhead-32-v1/actor-profile-overhead-abba-report.json`.
+The report's `actor_profile_overhead_fraction` is
+`(T_B1+T_B2)/(T_A1+T_A2)-1`. A positive value means actor profiling
+added elapsed time; a negative value may result from scheduling noise.
+The reporter requires exact seeds, complete public/PUCT teacher
+digests, terminal outcomes and transition/search work in all four
+cohorts, and explicitly refuses a batching-configuration change.
+This quantifies the *actor* instrumentation overhead, independently of
+the earlier PUCT/JSONL within-seed overhead experiment. It is not a
+new actor optimization trial.
+
+## P2.1 first gate: exact Native fork/prefix preflight (read-only)
+
+The existing H16 root-conditioned search forks the current run and
+replays the selected action prefix for each simulation. The v0 JSONL
+emulator supports `exact_hash(state_handle)`, `fork`,
+`batch_rollout_step_frame`, and `release_many`. The fast fused
+step response intentionally **omits the exact hash**: obtaining it
+currently requires a separate `exact_hash` RPC. This audit checks
+that the same action applied to two independent forks produces equal
+exact canonical hashes, public observations, legal menus, and terminal
+status, while releasing every child handle. It runs only as a bounded
+first-legal-action deterministic prefix probe:
+
+```fish
+python tools/probe_p2_exact_fork_prefix.py \
+    --emulator-root $emu_p2 --emulator-revision $rev \
+    --seed p2-native-exact-prefix-20261104-0 \
+    --max-steps 8 \
+    --output results/p2-exact-prefix-preflight-v1/report.json \
+    --execute
+```
+
+The output explicitly records
+`independent_rng_receipt_available=false`,
+`continuation_cache_enabled=false`,
+`ready_for_p2_1_caching=false`. A canonical state hash alone
+does not establish whether the exact stochastic continuation includes
+all Nature/RNG-provider receipt information. This audit has no
+neural inference and makes **zero throughput claim**.
+
+Before enabling optional state reuse, obtain a source-audited,
+versioned exact-state/RNG receipt (or proof that the canonical hash
+covers all relevant stochastic state); verify at every cached node
+that both public and exact private continuations agree, restore
+`_combat_frames` for defeat-damage credit, bound resident handles,
+test teardown on exceptions, and bypass fair-history or independently
+sampled Nature continuations. Then compare 8/16/64 simulations and
+depth-8/full-combat roots against the unchanged search teacher.
