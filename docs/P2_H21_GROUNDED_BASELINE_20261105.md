@@ -204,9 +204,23 @@ Follow with interleaved **A/B/B/A** reference/packed repetitions on an idle
 machine, then batch sizes 1, 4, 8, 16. Compare identical corpus SHA,
 public encoding SHA, emulator DLL hash, AI code revision, and sampled
 decision count. Treat small variations without repeated advantage as noise.
-No numerical speedup is claimed before those paired benchmark receipts.
-Only after verified wall-time improvement and actor-level replay parity
-should the packed collator be wired as an opt-in shared actor setting.
+The first uploaded matched reference/packed pair uses the exact same
+128 sampled H21 v4 public decisions, batch size 4, 3 repeats, source
+revision `f0079afa47cdb8761ab2494648778ca6a83d839a`,
+corpus SHA256 `acc22eaed62891cb595d82b4a28e9920721e836fe23a1a982c792fe7c2c8ebf9`
+and public-encoding SHA256
+`b74d9c0af74efc6cd26c24b8b27ec6856a28e168619bdb8d6a5f3d9d556f3e10`.
+Collation reference 1.512006 s (253.97 decisions/s, median batch
+15.802 ms, p95 17.969 ms); packed 0.144936 s
+(2649.45 decisions/s, median batch 1.505 ms, p95 1.740 ms).
+**Observed CPU collation ratio: 10.43x** with exact tensor
+parity asserted by the benchmark. This first sequential pair is diagnostic,
+pending independent A/B/B/A replicates.
+
+A separate H22 actor integration is staged in draft
+[PR #172](https://github.com/nn971/sts2-ai/pull/172)
+with default reference preserved; actor search parity and full-cohort
+wall-time remain separate acceptance requirements.
 
 The initial uploaded evidence (`p2-h21-v4-public-corpus-v1.json`) contains
 400 frames from four source seeds (100 each), 1,773 legal action entries,
