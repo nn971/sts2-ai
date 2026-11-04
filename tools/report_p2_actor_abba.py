@@ -259,6 +259,32 @@ def report_actor_abba(
     if any(not math.isfinite(value) or value <= 0 for value in wall):
         raise ValueError("Invalid measured wall time")
     a_wall, b_wall = wall[0] + wall[3], wall[1] + wall[2]
+    h21_actor_stages: list[dict[str, Any]] | None = None
+    if experiment == "h21-collator":
+        h21_actor_stages = []
+        for arm, profile, elapsed in zip(ORDER, profiles, wall, strict=True):
+            metrics = profile["shared_actor_metrics"]
+            for count_key in ("requests", "batches"):
+                count = metrics.get(count_key)
+                if type(count) is not int or count < 1:
+                    raise ValueError(f"{arm}: missing H21 actor {count_key}")
+            stages = {}
+            for key in (
+                "host_collate_seconds", "transfer_seconds", "forward_seconds",
+            ):
+                value = metrics.get(key)
+                if (isinstance(value, bool) or not isinstance(value, (float, int))
+                        or not math.isfinite(value) or value < 0):
+                    raise ValueError(f"{arm}: invalid H21 actor stage {key}")
+                stages[key] = float(value)
+            h21_actor_stages.append({
+                "arm": arm, "collator": metrics["p2_h21_collator"],
+                "requests": metrics["requests"], "batches": metrics["batches"],
+                "single_actor_process_seconds": stages,
+                "host_collate_fraction_of_cohort_wall": (
+                    stages["host_collate_seconds"] / elapsed
+                ),
+            })
     cache_diagnostics: list[dict[str, Any]] | None = None
     if experiment == "prefix-cache":
         available = ["p2_prefix_cache_diagnostics" in p for p in profiles]
@@ -512,6 +538,10 @@ def report_actor_abba(
             {"arm": arm, **verified[i]["totals"]}
             for i, arm in enumerate(ORDER)
         ],
+        **(
+            {"h21_shared_actor_stages": h21_actor_stages}
+            if h21_actor_stages is not None else {}
+        ),
         **(
             {"prefix_cache_diagnostics": cache_diagnostics}
             if cache_diagnostics is not None else {}
