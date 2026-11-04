@@ -7,6 +7,7 @@ import json
 import pytest
 
 from sts2_ai.emulator import FAIR_POLICY_ID, LegalAction, Observation
+from sts2_ai.emulator.jsonl_backend import JsonlBridgeError, JsonlEmulatorBackend
 from sts2_ai.emulator.protocol import StepFrame, Transition
 from tools.probe_p2_exact_fork_prefix import verify_exact_fork_prefix
 
@@ -163,3 +164,44 @@ def test_receipt_exact_hash_binding_is_required_even_with_equal_forks():
     with pytest.raises(ValueError, match="does not match parent exact hash"):
         verify_exact_fork_prefix(backend, "root", max_steps=2)
     assert backend.states == {"root": (0, "rng-0")}
+
+
+def test_jsonl_receipt_requires_versioned_valid_hashes_and_provider_flags():
+    receipt = {
+        "schemaId": "sts2-p2-exact-continuation-receipt-v1",
+        "hashAlgorithm": "sha256-canonical-json",
+        "exactHash": "0" * 64,
+        "runStochasticHash": "a" * 64,
+        "worldStochasticHash": None,
+        "combatNativeRngHash": "f" * 64,
+        "referenceNaturePresent": False,
+        "semanticOtherChancePresent": False,
+        "semanticRewardAuditPresent": False,
+    }
+
+    class FakeBackend:
+        def __init__(self, reply):
+            self.reply = reply
+
+        def _request(self, op, **payload):
+            assert op == "p2_exact_continuation_receipt"
+            assert payload["state_handle"] == "root"
+            return self.reply
+
+    def fetch(reply):
+        return JsonlEmulatorBackend.exact_continuation_receipt(
+            FakeBackend(reply), "root",
+        )
+
+    assert fetch(receipt)["runStochasticHash"] == "a" * 64
+    for field, invalid in (
+        ("schemaId", "unversioned"),
+        ("hashAlgorithm", "md5"),
+        ("runStochasticHash", None),
+        ("exactHash", "NOT-HEX" * 10),
+        ("combatNativeRngHash", "g" * 64),
+        ("semanticOtherChancePresent", None),
+    ):
+        changed = {**receipt, field: invalid}
+        with pytest.raises(JsonlBridgeError):
+            fetch(changed)
