@@ -138,7 +138,25 @@ def test_new_private_provider_state_cannot_be_cached():
     c.begin_simulation()
     assert not c.record(parent, "a", child, "c1", [], [], "root")
     assert c.metrics()["retained_handles"] == 0
+    assert c.metrics()["enabled"] is False
+    # Even if a later child no longer exposes the transient provider,
+    # it must never inherit the old deterministic-root cache permission.
+    assert not c.record(child, "end", child, "c2", [], [], "c1")
+    assert c.metrics()["retained_handles"] == 0
     c.close()
+
+
+def test_record_validates_live_root_receipt_after_simulation_begins():
+    backend = StubBackend()
+    c = cache(backend)
+    parent, child, _ = frames()
+    c.begin_simulation()
+    backend.hidden["root"] = ("state-root", "changed-before-action")
+    with pytest.raises(ValueError, match="changed private search root"):
+        c.record(parent, "a", child, "c1", [], [], "root")
+    c.close()
+    assert "c1" in backend.hidden  # unretained caller-owned child
+
 
 
 def test_private_rng_receipt_mutation_fails_closed_even_if_public_same():
