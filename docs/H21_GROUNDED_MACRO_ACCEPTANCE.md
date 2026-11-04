@@ -12,8 +12,8 @@ and semantic action kind. An `OfferId`, `InstanceId`, `NodeId`, or group index
 is only a **within-frame join key**. Those opaque values never enter an identity
 embedding or numeric feature.
 
-The H21 v3 input is gated on emulator `prototype-ai-v1` and the H21 object
-schema `sts2-h21-public-grounded-macro-v3`. H7/H16/H18/H19/H20 models retain
+The H21 v4 input is gated on emulator `prototype-ai-v1` and the H21 object
+schema `sts2-h21-public-grounded-macro-v4`. H7/H16/H18/H19/H20 models retain
 their previous checkpoint formats. H21 has a distinct model checkpoint and
 eight typed edge families (including chronological room history). No pretrained weights are silently reused.
 
@@ -70,7 +70,8 @@ continue rejecting non-null affliction source IDs; the permissive path is
 available only to H21 with the matching typed edges. H21 model/codec
 versions were bumped to v2 for the additional source relation. H21 v3
 further changes identity embeddings as described below. Prior H21 v1/v2
-checkpoints cannot be loaded into v3.
+checkpoints cannot be loaded into v3, and the new v4 continuation graph
+has a distinct model/codec checkpoint format.
 
 ## Stable public concept identities (H21 v3)
 
@@ -123,9 +124,9 @@ search. Repeated SHA-256 computation is a plausible contributor, so
 the stable 63-bit hash now has a bounded 65,536-concept cache, while
 per-decision full/neural collision checks remain active. The probe now
 reports cache hits/misses, pure codec time and alias-audit time separately.
-A longer 350-decision-per-seed run has been queued to exercise deeper floors
-and remeasure performance. Treat these changes as unverified until new
-focused, inherited H19/H20, and live runs complete.
+The later floor-16 v3 run measured the stabilized cache on
+eight seeds. The next sparse-numeric optimization has since completed
+the same real-emulator sweep; see the benchmark below.
 
 Two inherited H19/H20 jobs on the first v3 revision failed only at Ruff's
 `UP035` import check for `Callable`; the imports have been corrected.
@@ -149,8 +150,63 @@ construction as a significant CPU cost. An H21-specific sparse numeric
 encoder now handles empty and single-field records while falling back to
 the original implementation for multi-field records; edge-case
 equivalence tests keep all legacy H7/H16/H19/H20 semantics unchanged.
-The optimized branch is pending rerun; these passing figures describe
-the pre-optimization revision, **not** a measured speedup.
+A subsequent v3 sparse-numeric run
+([GitHub Actions 41770972529](https://github.com/nn971/sts2-ai/actions/runs/41770972529))
+passed the eight-seed extended live check: 1,721 decisions, 7,708
+canonical choices, 169 equivalent aliases, zero encoding/stepping
+errors, floor 16. The encoder+audit throughput rose to **279.42
+decisions/s**, p95 fell to **5.033 ms**, with 5.385 seconds spent in
+the codec. This is approximately +45% throughput and -35% p95 latency
+versus the immediately prior v3 run with the same seeds/coverage.
+The focused CI stopped at two Ruff import-order findings; both were
+corrected. The newer H21 v4 continuation and DTO changes require their
+own tests and re-benchmark before signoff.
+
+## Completed published-field / exceptional-continuation P0 slice (H21 v4)
+
+The H21 v4 codec explicitly joins `reward`, `shop`, and `event` pending
+deck-choice candidate IDs to their existing canonical public deck-card
+objects. The pending choice is an owned graph node with visible choice kind,
+source relic, remaining selections, **minimum required selections**,
+and event-specific transformation/choice attributes. A per-card-class
+candidate node stores multiplicity; candidate IDs remain transient joins.
+Individual `choose_*_deck_card` actions are checked against the actual
+published pool and now point from their pending choice to the selected
+deck class. `finish_relic_deck_choice` points to that same pending choice.
+
+The emulator public-v1 DTO now exposes the visible
+`minimum_selections_remaining` for reward, shop and event continuations
+(including the event's nullable minimum with its existing fallback).
+This affects whether the player can finish without using all offered
+selections, and it is covered by emulator/AI regression fixtures.
+The publicly offered reroll-group list is validated and represented as
+an owned `reroll_available` feature on each visible card group; orphan
+groups fail closed. Likewise, public event-potion choice identity is
+attached to the actual offered potion. Duplicate/orphan shop previews,
+event outcome values, event choice IDs and reward group identifiers
+are rejected instead of being silently overwritten.
+
+The v4 codec also preserves the existing published act, region, boss,
+ruleset, character and event context in **combat**, not just macro.
+These extra nodes/relations change the policy input: the v4 model
+schema/codec/checkpoint are intentionally incompatible with H21 v3.
+
+The published `prototype-ai-v1` schema's P0 `PARTIAL` classifications
+have been closed **at the published interface level**. Every published
+field now has an `encoded`, `reference`, `auxiliary`, or `terminal`
+disposition, and strict live validation fails if any `gap` or `partial`
+entry appears. Source-DTO parity checking covers nested optional fields.
+This does not certify that native game UI details absent from
+`prototype-ai-v1` have been discovered; those belong to the
+separately planned native fidelity audit. Controlled chance-outcome
+adapters belong to Nature, not to player action menus.
+
+A new focused test corpus covers three pending deck-choice contexts,
+duplicate card classes, reference-renaming invariance, optional finish,
+eligibility changes, event potion replacement identity, event queues,
+macro and combat run context, and malformed/orphan continuation records.
+The latest H21 v4 CI and real-emulator public probe must pass before
+this slice is declared verified.
 
 ## Field-coverage audit
 
@@ -161,13 +217,12 @@ are errors, including fields introduced by future emulator changes.
 The audit intentionally reports outstanding work; its existence is not a
 full representation-readiness certificate.
 
-Known unrepresented or partially represented paths currently include:
-
-- Specialized nested reward, shop and native event continuations whose
-  action payload is not yet grounded in a published selectable object
-- Portions of pending deck-choice semantics that only have raw candidate IDs
-- Some event-specific option payloads absent from the v1 observation
-- The partial combat/enemy schema audit pending full source parity verification
+No known published v1 field retains the P0 `partial` or `gap`
+classification in v4. Specifically, pending deck-choice references,
+reroll eligibility, event potion replacement choice identity, and
+enemy/combat attributes have explicit typed destinations and tests.
+Field completeness here is about `prototype-ai-v1`, not a claim
+that all current native event/UI mechanics have public DTOs.
 
 Newly covered by H21: visible combat play-pile card modifiers, enemy move
 identity and minion flag, pending-choice presence, and completed-room
