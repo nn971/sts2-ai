@@ -4,7 +4,9 @@ Every known published field is classified as represented (encoded), joined
 through a within-frame pointer (reference), terminal feedback (terminal),
 or a tracked outstanding representation gap (gap/partial).
 The audit fails on newly added or misspelled fields until classified.
-This is an explicit inventory, not a declaration of P0 readiness.
+H21 v4 covers every *published* prototype-ai-v1 field; reference, replay
+metadata and terminal feedback have separately recorded dispositions.
+This is an interface-level audit, not a native-UI fidelity certificate.
 """
 from __future__ import annotations
 
@@ -30,8 +32,8 @@ PUBLIC_V1_FIELD_CONTRACT: dict[str, dict[str, str]] = {
         "hp": ENCODED, "max_hp": ENCODED, "gold": ENCODED,
         "deck": ENCODED, "relics": ENCODED, "potions": ENCODED,
         "map": ENCODED, "current_map_node_id": REFERENCE,
-        "combat": PARTIAL, "reward": PARTIAL, "shop": PARTIAL,
-        "event_id": PARTIAL, "event": PARTIAL,
+        "combat": ENCODED, "reward": ENCODED, "shop": ENCODED,
+        "event_id": ENCODED, "event": ENCODED,
         "map_generation_profile_id": ENCODED,
         "completed_rooms": ENCODED,
         "terminal_outcome": TERMINAL,
@@ -72,7 +74,7 @@ PUBLIC_V1_FIELD_CONTRACT: dict[str, dict[str, str]] = {
         "turn": ENCODED, "energy": ENCODED, "player_block": ENCODED,
         "hand": ENCODED, "draw_pile_count": ENCODED,
         "discard_pile": ENCODED, "exhaust_pile": ENCODED,
-        "play_pile": ENCODED, "enemies": PARTIAL,
+        "play_pile": ENCODED, "enemies": ENCODED,
         "pending_choice_id": REFERENCE, "player_powers": ENCODED,
         "selection_candidates": ENCODED,
         "selection_selected_cards": ENCODED, "history": ENCODED,
@@ -98,7 +100,7 @@ PUBLIC_V1_FIELD_CONTRACT: dict[str, dict[str, str]] = {
         "relic_option": ENCODED, "card_resolved": ENCODED,
         "potion_resolved": ENCODED, "relic_resolved": ENCODED,
         "extra_card_reward_groups_remaining": ENCODED,
-        "relic_options": ENCODED, "pending_deck_choice": PARTIAL,
+        "relic_options": ENCODED, "pending_deck_choice": ENCODED,
         "card_option_upgrade_flags": ENCODED,
         "gold_option": ENCODED, "gold_resolved": ENCODED,
         "independent_selection": ENCODED, "pending_card_groups": ENCODED,
@@ -133,7 +135,7 @@ PUBLIC_V1_FIELD_CONTRACT: dict[str, dict[str, str]] = {
         "card_offers": ENCODED, "potion_offer": ENCODED,
         "relic_offer": ENCODED, "removal_price": ENCODED,
         "removal_used": ENCODED, "potion_offers": ENCODED,
-        "relic_offers": ENCODED, "pending_deck_choice": PARTIAL,
+        "relic_offers": ENCODED, "pending_deck_choice": ENCODED,
         "card_offer_previews": ENCODED,
     },
     "shop_offer": {
@@ -144,8 +146,8 @@ PUBLIC_V1_FIELD_CONTRACT: dict[str, dict[str, str]] = {
     "shop_card_preview": {"offer_id": REFERENCE, "card": ENCODED},
     "event": {
         "event_id": ENCODED, "chosen_choice_id": ENCODED,
-        "pending_deck_choice": PARTIAL,
-        "pending_potion_replacement": PARTIAL,
+        "pending_deck_choice": ENCODED,
+        "pending_potion_replacement": ENCODED,
         "queued_potion_ids": ENCODED,
         "queued_deck_choices": ENCODED,
         "offered_choice_ids": ENCODED,
