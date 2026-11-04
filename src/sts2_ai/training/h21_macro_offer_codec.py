@@ -889,6 +889,13 @@ def _augment_visible_combat(
     ctx.build_global()
     ctx.build_completed_history()
     visible_sources = _bind_visible_affliction_sources(ctx, state)
+    # An event-triggered combat may retain an observable event/reward/shop
+    # continuation in the public frame. Keep those published structures
+    # even while combat actions are active. Affliction source binding must
+    # run first to avoid contaminating H19 base card-zone index matching.
+    ctx.build_reward()
+    ctx.build_shop()
+    ctx.build_event()
     players = [
         i for i, obj in enumerate(ctx.objects)
         if obj.kind == KINDS.index("player")
