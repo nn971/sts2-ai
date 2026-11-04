@@ -203,6 +203,38 @@ def report_actor_abba(
     if any(not math.isfinite(value) or value <= 0 for value in wall):
         raise ValueError("Invalid measured wall time")
     a_wall, b_wall = wall[0] + wall[3], wall[1] + wall[2]
+    cache_diagnostics: list[dict[str, Any]] | None = None
+    if experiment == "prefix-cache":
+        available = ["p2_prefix_cache_diagnostics" in p for p in profiles]
+        if any(available) and not all(available):
+            raise ValueError("Partial P2 cache instrumentation across A/B/B/A")
+        if all(available):
+            cache_diagnostics = []
+            for arm, profile in zip(ORDER, profiles, strict=True):
+                stats = profile["p2_prefix_cache_diagnostics"]
+                if not isinstance(stats, Mapping):
+                    raise ValueError(f"{arm}: invalid cache diagnostics")
+                for field in (
+                    "roots", "hits", "misses", "emulator_step_calls_avoided",
+                    "receipt_calls", "skipped_capacity", "skipped_provider",
+                ):
+                    v = stats.get(field)
+                    if type(v) is not int or v < 0:
+                        raise ValueError(f"{arm}: invalid cache count: {field}")
+                receipt_seconds = stats.get("receipt_seconds")
+                if (
+                    isinstance(receipt_seconds, bool)
+                    or not isinstance(receipt_seconds, (int, float))
+                    or not math.isfinite(receipt_seconds)
+                    or receipt_seconds < 0
+                    or stats["emulator_step_calls_avoided"] != stats["hits"]
+                ):
+                    raise ValueError(f"{arm}: invalid cache step/receipt metrics")
+                if arm in ("A1", "A2") and (
+                    stats["hits"] or stats["receipt_calls"] or stats["roots"]
+                ):
+                    raise ValueError(f"{arm}: uncached arm performed cache work")
+                cache_diagnostics.append({"arm": arm, **stats})
     return {
         "schema": REPORT_SCHEMA,
         "experiment": experiment,
@@ -263,6 +295,10 @@ def report_actor_abba(
             {"arm": arm, **verified[i]["totals"]}
             for i, arm in enumerate(ORDER)
         ],
+        **(
+            {"prefix_cache_diagnostics": cache_diagnostics}
+            if cache_diagnostics is not None else {}
+        ),
         "ratio_of_total_baseline_to_candidate_wall": a_wall / b_wall,
         "wall_reduction_fraction": 1 - b_wall / a_wall,
         **(
