@@ -164,3 +164,53 @@ def test_bridge_wire_profile_preserves_jsonl_output(instrumented: bool):
     backend.reset_operation_profile()
     assert backend.operation_profile() == {}
     assert backend.wire_operation_profile() == {}
+
+
+def test_p2_native_profiler_protocol_and_wire_profile_toggle():
+    backend = make_backend(profile_wire=False)
+    response = [
+        {
+            "requestId": "1", "ok": True,
+            "schemaId": "sts2-p2-jsonl-performance-v1",
+        },
+        {
+            "requestId": "2", "ok": True,
+            "profile": {
+                "schemaId": "sts2-p2-jsonl-performance-v1",
+                "enabled": False,
+                "operations": {
+                    "p2.fork.run_state": {
+                        "count": 3, "totalSeconds": 0.1,
+                        "allocatedBytes": 2048,
+                    },
+                },
+            },
+            "liveStateHandles": 0, "peakStateHandles": 4,
+        },
+    ]
+    backend._process.stdout = io.StringIO(
+        "".join(json.dumps(row) + "\n" for row in response),
+    )
+    backend.p2_native_profile_reset()
+    stats = backend.p2_native_profile_snapshot(stop=True)
+    assert stats["live_state_handles"] == 0
+    assert stats["peak_state_handles"] == 4
+    assert stats["profile"]["operations"]["p2.fork.run_state"]["count"] == 3
+    assert backend.operation_profile()["p2_perf_stop"].calls == 1
+    assert backend.wire_operation_profile() == {}
+    backend.set_p2_wire_profile(True)
+    assert backend.wire_operation_profile() == {}
+
+
+def test_p2_native_profile_rejects_malformed_handle_counts():
+    backend = make_backend(profile_wire=False)
+    backend._process.stdout = io.StringIO(json.dumps({
+        "requestId": "1", "ok": True,
+        "profile": {
+            "schemaId": "sts2-p2-jsonl-performance-v1",
+            "operations": {},
+        },
+        "liveStateHandles": 5, "peakStateHandles": 4,
+    }) + "\n")
+    with pytest.raises(Exception, match="Malformed C# P2"):
+        backend.p2_native_profile_snapshot(stop=True)
