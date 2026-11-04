@@ -147,7 +147,7 @@ p95 **7.795 ms**. The H21 v3 stable-hash cache recorded 603,834 hits
 and 450 misses; profiling singled out repeated 16-field `_numbers`
 construction as a significant CPU cost. An H21-specific sparse numeric
 encoder now handles empty and single-field records while falling back to
-the original implementation for multi-field records; randomized/edge
+the original implementation for multi-field records; edge-case
 equivalence tests keep all legacy H7/H16/H19/H20 semantics unchanged.
 The optimized branch is pending rerun; these passing figures describe
 the pre-optimization revision, **not** a measured speedup.
