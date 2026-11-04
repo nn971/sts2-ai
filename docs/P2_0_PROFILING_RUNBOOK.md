@@ -556,3 +556,90 @@ allocations and handle audits; H16 codec parsing attribution;
 PUCT 0/16/64 and depth-8/full-combat comparisons with a fixed
 stochastic law; profile-off baseline; independently reproduced full
 run outcomes, rather than only capped episodes.
+
+## P2.5 order-balanced actor confirmation: A1/B1/B2/A2
+
+The 32-seed diagnostic reported **1.47360×** lower wall (77.145 s ->
+52.351 s) for 15-worker fixed-shape batch 4 relative to shared batch 1.
+The next test repeats on a **new 32-seed cohort**, in chronological order
+A1 (batch 1), B1 (fixed-shape 4), B2 (fixed-shape 4), A2 (batch 1).
+Each cohort still runs each seed twice and demands identical public
+actions, legal menus and PUCT teacher distributions. All four cohorts must
+match each other *exactly* at the digest and search-work level.
+
+The original `--paired` benchmark implicitly enabled optional
+search-root and JSONL-wire instrumentation, even if `--actor-profile`
+was omitted. The new `--no-episode-profile` mode disables both optional
+root and wire profiles while retaining replay certification. This
+confirmation runs with **no actor profiling, no PUCT root instrumentation,
+no wire-byte/JSON profiling, and no numerical forward probe**. The original
+basic per-operation timing remains part of the emulator backend.
+
+Run the four arms fail-fast through one script instead of a shell loop:
+
+```fish
+cd ~/projects/sts2-ai
+git pull --ff-only
+
+python tools/run_p2_actor_abba.py \
+    --emulator-root $emu_p2 \
+    --emulator-revision $rev \
+    --checkpoint $ckpt \
+    --macro-model $macro \
+    --macro-prior-weight 0.5 \
+    --horizon-lambda 0.411395 \
+    --workers 15 \
+    --actor-device cuda \
+    --seed-prefix p2-a0-abba-independent-20261104 \
+    --seed-count 32 \
+    --ascension 0 --map-profile generated \
+    --simulations 16 --depth 8 --max-searches 2 \
+    --max-decisions 80 \
+    --output-root results/p2-a0-abba-independent-32-v1 \
+    --execute
+```
+
+The runner uses distinct `A1/profile.json`, `B1/profile.json`,
+`B2/profile.json` and `A2/profile.json` paths and produces a
+single `actor-abba-report.json`. It refuses to overwrite prior
+evidence and fails on the first invalid worker/seed/teacher trace.
+Without `--execute`, the same command prints its exact staged commands.
+
+`report_p2_actor_abba.py` verifies every run's explicit
+`episode_profile=false`, `actor_profile=false`, paired action/teacher
+replay, complete source/model/emulator/CLI identity, seed order,
+matching action outcomes and search work across all four arms.
+It reports `(A1+A2)/(B1+B2)` as the order-balanced cohort-wall speedup,
+both pairwise speedups, completed/censored counts, and any failures.
+The reporter does **not** infer game win rate from censored episodes.
+
+**After** the 32-seed capped acceptance test, evaluate completion
+coverage separately using a fresh, smaller seed cohort and a larger
+decision limit. For example, keep every other workload setting
+unchanged and use:
+
+```fish
+python tools/run_p2_actor_abba.py \
+    --emulator-root $emu_p2 --emulator-revision $rev \
+    --checkpoint $ckpt --macro-model $macro \
+    --macro-prior-weight 0.5 --horizon-lambda 0.411395 \
+    --workers 15 --actor-device cuda \
+    --seed-prefix p2-a0-abba-full-20261104 \
+    --seed-count 8 --ascension 0 --map-profile generated \
+    --simulations 16 --depth 8 --max-searches 2 \
+    --max-decisions 600 \
+    --output-root results/p2-a0-abba-full-8-v1 \
+    --execute
+```
+
+This 8-seed test is a **pilot**, not a 15-worker saturation test. A
+600-decision cap may still censor runs; inspect the emitted
+`completed_episode_executions_per_run` before drawing conclusions.
+If complete episodes remain rare, adjust the observation horizon or
+use a representative complete-combat cohort with unchanged search
+budgets, rather than counting censored episodes as wins or losses.
+
+**P2.5 remains open** until the order-balanced measured comparison
+passes, independent seeds and completed-workload checks are documented,
+actor profiling overhead is bounded, and native state/RNG fidelity gates
+apply to proposed P2.1 caching.
