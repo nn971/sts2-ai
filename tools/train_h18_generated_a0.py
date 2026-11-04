@@ -10,10 +10,9 @@ from __future__ import annotations
 
 import sys
 
-if __name__ == "__main__":
-    from train_h16_joint_act_pilot import main
-
-    defaults = [
+def h18_default_arguments() -> tuple[str, ...]:
+    """The staged H18 defaults, inspectable without importing torch or the game."""
+    return (
         "--h17-adaptive",
         "--initial-h16", "results/h16-v5-combat-credit-r150/models/joint-r0079.pt",
         "--ascension", "0",
@@ -41,6 +40,11 @@ if __name__ == "__main__":
         "--h17-search-p64", "0.02",
         "--study-seed", "20261120",
         "--rounds", "40",
-    ]
-    sys.argv = [sys.argv[0], *defaults, *sys.argv[1:]]
+    )
+
+
+if __name__ == "__main__":
+    from train_h16_joint_act_pilot import main
+
+    sys.argv = [sys.argv[0], *h18_default_arguments(), *sys.argv[1:]]
     main()
