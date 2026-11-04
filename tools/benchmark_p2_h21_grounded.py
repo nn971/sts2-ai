@@ -191,7 +191,8 @@ def benchmark(
 
     from sts2_ai.models.shared_macro_transformer_v2 import (
         H21GroundedMacroTransformer,
-        collate_h21, collate_h21_packed,
+        collate_h21,
+        collate_h21_packed,
     )
     from sts2_ai.models.shared_transformer import H7Config
 
