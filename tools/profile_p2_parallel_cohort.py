@@ -84,6 +84,7 @@ def _worker_seed(seed: str) -> dict[str, Any]:
         "max_simulation_steps": cfg["max_simulation_steps"],
         "rollout_transport": cfg["rollout_transport"],
         "search_enabled": not cfg["no_search"],
+        "p2_prefix_cache_handles": cfg["p2_prefix_cache_handles"],
     }
     if cfg["profile_overhead"]:
         arms = ("control_a", "profile_b1", "profile_b2", "control_a2")
@@ -199,6 +200,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--native-profile", action="store_true")
     parser.add_argument("--paired", action="store_true")
     parser.add_argument("--profile-overhead", action="store_true")
+    parser.add_argument("--p2-prefix-cache-handles", type=int, default=0,
+                        help="P2.1 opt-in Native root-conditioned prefix cache; "
+                             "0 = no cache, positive = max retained handles/root")
     parser.add_argument("--no-episode-profile", action="store_true",
                         help="Disable per-root PUCT and JSONL-wire profiling "
                              "while retaining exact B/B public+teacher replay")
@@ -221,6 +225,8 @@ def main() -> None:
         or a.workers < 1 or a.depth < 0
         or a.max_decisions < 1 or a.max_searches < 0
         or a.max_simulation_steps < 1
+        or a.p2_prefix_cache_handles < 0
+        or a.p2_prefix_cache_handles > 128
         or not 0 <= a.ascension <= 10
         or not 0 <= a.horizon_lambda <= 1
         or a.macro_prior_weight < 0
@@ -261,6 +267,7 @@ def main() -> None:
         "no_search": a.no_search,
         "depth": a.depth,
         "max_simulation_steps": a.max_simulation_steps,
+        "p2_prefix_cache_handles": a.p2_prefix_cache_handles,
         "max_searches": a.max_searches,
         "max_decisions": a.max_decisions,
         "rollout_transport": a.rollout_transport,
@@ -386,6 +393,11 @@ def main() -> None:
             *(
                 ["Batch parity probe adds GPU forwards: timing is NOT a throughput benchmark"]
                 if a.actor_batch_parity_probe else []
+            ),
+            *(
+                ["P2.1 retained-state cache is opt-in, root-conditioned only; "
+                 "verify exact teacher replay against zero-cache control"]
+                if a.p2_prefix_cache_handles else []
             ),
             *(
                 ["Experimental fixed-row batching pads each shape bucket; "
