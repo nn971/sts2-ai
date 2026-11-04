@@ -209,7 +209,8 @@ def test_actor_profile_abba_detects_wrong_toggle_and_changed_batching():
     with pytest.raises(ValueError, match="inconsistent actor mode"):
         report_actor_abba(*wrong, experiment="actor-profile")
     wrong = deepcopy(data)
-    wrong[1]["identity"]["actor_fixed_shape_batch_size"] = 3
+    for profile in wrong[1:3]:
+        profile["identity"]["actor_fixed_shape_batch_size"] = 3
     with pytest.raises(ValueError, match="changed batching"):
         report_actor_abba(*wrong, experiment="actor-profile")
     wrong = deepcopy(data)
