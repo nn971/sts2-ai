@@ -1193,3 +1193,61 @@ subcost estimate. Proceed to **P2.2 transport decomposition**
 for the next profile-driven optimization candidate. The cached
 teacher parity is useful correctness evidence, not an acceptance
 or Nature/fair-history certificate.
+
+
+## P2.2 JSONL transport decomposition: split versus fused control
+
+Because P2.1 saved 202 of 576 emulator step requests but incurred
+1,216 separate receipt RPCs and a reproducible negative wall result
+in the two-seed pilot, the next diagnostic isolates the *existing*
+JSONL transport improvement. A2/B2 ordering controls some drift:
+A1 and A2 use the original three-call
+`step -> observe -> legal_actions` path, whereas B1 and B2 use
+the already-implemented single `batch_rollout_step_frame` call.
+All four arms retain fixed-shape batch 4, opt-out prefix cache,
+same source/model/seed/PUCT budgets and disabled optional
+actor/PUCT/wire profiling. The strict reporter demands identical
+public actions, PUCT teachers, search work and terminal outcomes.
+It also summarizes existing Python JSONL operation-profile
+`calls` and `total_seconds` by opcode without new remote
+instrumentation.
+
+**Run a small, independent seed smoke first:**
+
+```fish
+cd ~/projects/sts2-ai
+git pull --ff-only
+
+python tools/run_p2_actor_abba.py \
+    --experiment transport \
+    --emulator-root $emu_p2 --emulator-revision $rev \
+    --checkpoint $ckpt --macro-model $macro \
+    --macro-prior-weight 0.5 --horizon-lambda 0.411395 \
+    --workers 1 --actor-device cuda \
+    --seed-prefix p2-transport-a0-20261104 \
+    --seed-count 4 \
+    --simulations 16 --depth 8 --max-searches 2 \
+    --max-decisions 80 \
+    --output-root results/p2-transport-a0-smoke-v1 \
+    --execute
+```
+
+The combined output is
+`results/p2-transport-a0-smoke-v1/p2-transport-abba-report.json`.
+Inspect `transport_bridge_operation_totals`: opcode call counts,
+sums of worker-side operation seconds, and the authoritative
+`cohorts[].wall_seconds`. Worker operation seconds are **nested**,
+are not an extra fee to add to measured wall, and overlap across
+workers when the worker count is greater than one. Report exact
+B/B/A/A seed and teacher parity failures; do not round mismatches.
+If the already-fused path is faster, the result quantifies a
+*previously integrated gain*, not a new optimization. Use its
+relative operation-cost decomposition to decide whether the next
+P2.2 intervention should eliminate a roundtrip, reduce observation
+payloads, or target C# projection/serialization.
+
+The P2.2 source-fidelity and Nature continuation checks still
+apply to any new protocol behavior. The default fused transport
+is unchanged; this trial only measures it against the legacy
+control. Gate P2.2 on measured relevant end-to-end improvement,
+rather than extrapolating from raw RPC counts.
