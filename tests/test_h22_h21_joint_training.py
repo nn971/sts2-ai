@@ -9,7 +9,11 @@ import torch
 
 from sts2_ai.emulator.protocol import LegalAction, Observation
 from sts2_ai.models.h16_batch_actor import RemoteH16Actor, SharedH16Service
-from sts2_ai.models.shared_macro_transformer_v2 import H21GroundedMacroTransformer
+from sts2_ai.models.shared_macro_transformer_v2 import (
+    H21GroundedMacroTransformer,
+    collate_h21,
+    collate_h21_packed,
+)
 from sts2_ai.models.shared_transformer import H7Config, H20Batch, SharedObjectTransformer
 from sts2_ai.training.h16_joint_act_pilot import (
     H22_SCHEMA,
@@ -148,7 +152,8 @@ def test_h22_replay_uses_h21_relation_batch():
     assert report["steps"] == 1
 
 
-def test_h22_shared_cpu_actor_matches_local_h21_graph_forward(tmp_path):
+@pytest.mark.parametrize("collator", ("reference", "packed"))
+def test_h22_shared_cpu_actor_matches_local_h21_graph_forward(tmp_path, collator):
     torch.manual_seed(4)
     model = JointActPilotNet(H21GroundedMacroTransformer(
         H7Config(width=32, layers=1, heads=4, feedforward=64))).eval()
@@ -162,13 +167,14 @@ def test_h22_shared_cpu_actor_matches_local_h21_graph_forward(tmp_path):
     with SharedH16Service(
         checkpoint=path, digest=digest, workers=1, device="cpu",
         horizon_lambda=0.42, max_batch=4,
-        fixed_shape_batch_size=0,
+        fixed_shape_batch_size=0, h21_collator=collator,
     ) as service:
         remote = RemoteH16Actor(service.transport)
         logits, hp = remote.infer(encoded)
     assert list(logits) == pytest.approx(
         local_logits[0, :len(encoded.actions)].detach().tolist(), abs=1e-5)
     assert hp == pytest.approx(float(local_hp[0]), abs=1e-5)
+    assert service.metrics["p2_h21_collator"] == collator
 
 
 def test_h22_entrypoint_defaults_stay_schema_isolated():
@@ -204,3 +210,34 @@ def test_h22_joint_optimizer_updates_h21_macro_graph():
     assert report["combat_decisions"] == 0
     assert report["optimizer_steps"] == 1
     assert report["loss"] == pytest.approx(float(report["loss"]))
+
+
+def test_h22_packed_collate_exact_tensors_and_mixed_sizes():
+    first = encode_joint_decision(_state(), _actions(), representation="h21")
+    next_state = {**_state(), "deck": [
+        *_state()["deck"],
+        {"instance_id": 202, "card_id": "silent.defend",
+         "upgrade_level": 0, "state": {}},
+    ]}
+    second = encode_joint_decision(next_state, _actions(), representation="h21")
+    for decisions in ([first], [first, second], [second, first]):
+        reference = collate_h21(decisions)
+        packed = collate_h21_packed(decisions)
+        for name in type(reference).__dataclass_fields__:
+            expected, actual = getattr(reference, name), getattr(packed, name)
+            assert expected.dtype == actual.dtype, name
+            assert torch.equal(expected, actual), name
+
+
+def test_h22_packed_collator_refuses_legacy_mode(tmp_path):
+    base = JointActPilotNet(SharedObjectTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64))).eval()
+    path = tmp_path / "h16-actor.pt"
+    base.save(path)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    with pytest.raises(RuntimeError, match="Packed H21 collator requires H21"):
+        with SharedH16Service(
+            checkpoint=path, digest=digest, workers=1, device="cpu",
+            horizon_lambda=0.42, max_batch=4, h21_collator="packed",
+        ):
+            pass
