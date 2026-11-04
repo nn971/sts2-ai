@@ -244,3 +244,62 @@ def test_top_level_public_event_id_is_an_encoded_cross_phase_attribute():
     later["event_id"] = "native.chapter_event_b"
     b = encode(later, [action("start_run")])
     assert a != b
+
+
+@pytest.mark.parametrize("which", [
+    "duplicate_event_value", "orphan_event_value", "duplicate_event_choice",
+    "orphan_shop_preview", "duplicate_shop_preview",
+    "orphan_reroll_group", "duplicate_reward_group",
+])
+def test_unmatched_exceptional_public_continuations_fail_closed(which):
+    observation = state()
+    if which in {
+        "duplicate_event_value", "orphan_event_value", "duplicate_event_choice",
+    }:
+        observation["event"] = {
+            "event_id": "native.test", "offered_choice_ids": ["a", "b"],
+            "visible_choice_values": [{"choice_id": "a", "heal": 5}],
+        }
+        if which == "duplicate_event_value":
+            observation["event"]["visible_choice_values"].append(
+                {"choice_id": "a", "heal": 12})
+        elif which == "orphan_event_value":
+            observation["event"]["visible_choice_values"].append(
+                {"choice_id": "c", "heal": 12})
+        else:
+            observation["event"]["offered_choice_ids"].append("a")
+        menu = [action("event_choice", ChoiceId="a")]
+    elif which in {"orphan_shop_preview", "duplicate_shop_preview"}:
+        observation["shop"] = {
+            "card_offers": [{
+                "offer_id": 17, "item_id": "proto.silent.strike",
+                "price": 45, "sold": False,
+            }],
+            "card_offer_previews": [{
+                "offer_id": 17, "card": {
+                    "card_id": "proto.silent.strike", "upgrade_level": 0,
+                },
+            }],
+        }
+        if which == "orphan_shop_preview":
+            observation["shop"]["card_offer_previews"][0]["offer_id"] = 100
+        else:
+            observation["shop"]["card_offer_previews"].append(
+                copy.deepcopy(observation["shop"]["card_offer_previews"][0]))
+        menu = [action("buy_card", OfferId=17)]
+    else:
+        observation["reward"] = {
+            "pending_card_groups": [{
+                "group_index": 0, "card_options": ["proto.silent.strike"],
+            }],
+        }
+        if which == "orphan_reroll_group":
+            observation["reward"]["available_card_rerolls"] = [
+                {"group_index": 99},
+            ]
+        else:
+            observation["reward"]["pending_card_groups"].append(
+                copy.deepcopy(observation["reward"]["pending_card_groups"][0]))
+        menu = [action("take_reward_card_group", GroupIndex=0, Index=0)]
+    with pytest.raises(ValueError):
+        encode(observation, menu)
