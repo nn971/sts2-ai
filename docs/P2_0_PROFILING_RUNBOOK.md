@@ -815,6 +815,36 @@ sampled Nature continuations. Then compare 8/16/64 simulations and
 depth-8/full-combat roots against the unchanged search teacher.
 
 
+### Versioned stochastic-envelope receipt preflight — 2026-11-04
+
+User-supplied `report(20261104-151839).json` shows a **passed**
+`sts2-p2-root-conditioned-exact-prefix-preflight-v1` at AI revision
+`f0cc1aa86f7c4dc173209c8f9dd5498574719b5d`, emulator revision
+`0937456588d563b48e9810290b7382f64d30d5a7`, and compiled CLI
+SHA-256 `83400d3f858b9031bffddbe43e4a63d9c7be98d7e101e83c6ab5c328cfe2289c`.
+Across **8 steps**, the preflight checked **16 independent forks**,
+verified equality of the versioned
+`sts2-p2-exact-continuation-receipt-v1` fingerprints, and released
+**all 32 temporary handles**. Matching covers canonical run state,
+run stochastic envelope, world stochastic envelope, public observation,
+and legal menu. The bounded path includes map/event choices followed
+by four combat card plays. The optional combat-native RNG hash is
+`null` at these visited states, so this report specifically tests
+the prototype/H16 state configuration, not opt-in native-combat RNG
+ownership.
+
+**Scope:** One deterministic first-legal-action path from one native
+root. The report explicitly states
+`independent_rng_receipt_available=false`,
+`continuation_cache_enabled=false` and
+`ready_for_p2_1_caching=false`. The matching private fingerprints
+now justify constructing an **opt-in, strictly root-conditioned**
+prototype with its own per-edge receipt and lifetime checks, followed
+by 8/16/64 simulation teacher parity and performance tests.
+They do **not** authorize reuse between independent Nature samples or
+fair-history-conditioned continuations, nor do they certify native
+combat RNG provenance or a speedup.
+
 ## Measured actor-profile overhead and preflight findings — 2026-11-04
 
 User-supplied `actor-profile-overhead-abba-report.json` is an
