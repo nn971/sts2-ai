@@ -108,7 +108,7 @@ def test_distinct_action_path_and_capacity_limit_never_steal_handle():
     assert c.metrics()["skipped_capacity"] == 1
     c.begin_simulation()
     assert c.lookup(start, "b", initial) is None
-    assert c.lookup(start, "a", initial).handle == "c1" if False else True
+    assert c.lookup(start, "a", initial).handle == "c1"
     c.close()
     assert backend.released == ["c1"]
     assert "c2" in backend.hidden  # caller still owns unretained child
