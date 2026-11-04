@@ -834,6 +834,7 @@ def _augment_visible_combat(
     """
     combat = state["combat"]
     ctx = _GroundedMacro(state, base, identity_hasher)
+    ctx.build_global()
     ctx.build_completed_history()
     visible_sources = _bind_visible_affliction_sources(ctx, state)
     players = [
