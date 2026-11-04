@@ -114,6 +114,7 @@ def run_episode(
     profile_search: bool = True,
     profile_wire: bool = True,
     native_profile: bool = False,
+    native_fused_profile: bool = False,
     search_enabled: bool = True,
     p2_prefix_cache_handles: int = 0,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -125,6 +126,8 @@ def run_episode(
     backend.set_p2_wire_profile(profile_wire)
     if native_profile:
         backend.p2_native_profile_reset()
+    if native_fused_profile:
+        backend.p2_h16_fused_native_profile_reset()
     # Exclude the profiler-control RPC itself from episode accounting.
     backend.reset_operation_profile()
     policy.inference_calls = 0
@@ -161,6 +164,10 @@ def run_episode(
     wire = backend.wire_operation_profile()
     csharp = (
         backend.p2_native_profile_snapshot(stop=True) if native_profile else None
+    )
+    h16_native_fused = (
+        backend.p2_h16_fused_native_profile_snapshot(stop=True)
+        if native_fused_profile else None
     )
     bridge_wall = sum(op.total_seconds for op in ops.values())
     actor_wall = policy.inference_seconds
@@ -202,6 +209,7 @@ def run_episode(
         },
         "wire_instrumentation": profile_wire,
         "native_instrumentation": native_profile,
+        "h16_native_fused_instrumentation": native_fused_profile,
         "search_transitions": episode.search_transitions,
         "real_transitions": len(episode.decisions),
         "real_transitions_per_second": len(episode.decisions) / elapsed,
@@ -228,6 +236,7 @@ def run_episode(
         },
         "search": roots,
         "native_csharp": csharp,
+        "h16_native_fused": h16_native_fused,
         "critical_path_shares": critical_path_shares(
             elapsed, bridge_wall, actor_wall,
         ),
