@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """H18: Silent A0 training on seeded, branching Overgrowth maps.
 
-Keeps H17's model, reward, replay and full-combat search settings. Only the
-ascension, default map generator, experiment seed namespace and run output
-change. With no --execute, prints the complete run fingerprint/configuration.
+Keeps H17's model, reward, replay and full-combat search settings.
+P2 training staging opts into the separately validated fixed-shape-4 shared
+actor and preserves the existing fused emulator transport. The checkpoint,
+map generator, ascension and search curriculum remain H18-specific. With no --execute, prints the complete run fingerprint/configuration.
 """
 from __future__ import annotations
 
@@ -22,6 +23,12 @@ if __name__ == "__main__":
         "--workers", "15",
         "--actor-inference", "shared",
         "--actor-device", "cuda",
+        # P2: accepted 15-worker actor optimization, teacher-parity checked.
+        "--actor-max-batch", "16",
+        "--actor-fixed-shape-batch-size", "4",
+        "--actor-max-delay-ms", "2",
+        # P2: already-fused emulator step/frame transport; cache stays disabled.
+        "--rollout-transport", "fused",
         "--search-depth", "0",
         "--search-probability", "1",
         "--macro-prior-weight", "0.5",
