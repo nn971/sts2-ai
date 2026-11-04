@@ -465,6 +465,43 @@ profiling mode, or source revision between conditions. The zero-run
 limit, 64-simulation and full-combat cases are later independent
 stages; do not launch every Cartesian combination at once.
 
+### Confirmed 32-seed fixed-shape-4 actor cohort (2026-11-04)
+
+**Diagnostic P2.3 performance evidence, not final P2.5 acceptance.**
+User-provided `results/p2-a0-confirm-32-v2/actor-ab-report.json`;
+AI source `8928a17568e644f73acf9b37523ef3c81ff5e044`,
+emulator source `9fcd75a8a856e67a20f95c7caad0cc8ae255590f`.
+The 32 fixed A0 generated-map seeds, H16 frozen checkpoint,
+two `--paired` arms per seed, 16 PUCT simulations, depth 8,
+two search roots and 80 decisions were held fixed across the
+1-/15-worker baseline and fixed-shape-4 candidate. The reporter
+verified **exact public decisions and PUCT teacher digests across all
+four cohorts**, with the same 17,574 search and 5,072 real transitions
+in each cohort. Every configuration recorded **2 completed episode
+executions and 62 censored**; do not treat this as 64 full runs.
+
+| Metric | 15-worker batch-1 | 15-worker fixed-shape-4 |
+|---|---:|---:|
+| Cohort wall | 77.145 s | **52.351 s** |
+| Search transitions/s | 227.81 | **335.70** |
+| GPU forwards | 13,370 | **5,251** |
+| Actor forward cumulative | 49.86 s | 25.37 s |
+| Queue delay p50/p95 | 55.86/85.92 ms | 29.82/52.18 ms |
+| Host collation cumulative | 4.17 s | 5.89 s |
+
+**Matched 15-worker improvement:** `77.1446/52.3510 = 1.47360×`,
+a **32.14% reduction in wall time**. The candidate physically
+evaluated 21,004 rows for 13,370 actual requests, i.e. **63.65%
+row utilization**. Its 1-worker wall was **139.84 s** versus
+the batch-1 1-worker wall of **101.60 s**; fixed padding is expensive
+without enough outstanding work. These measurements were made with
+`--actor-profile` enabled and in baseline-then-candidate order.
+Actor-profile overhead, order effects, independent new seeds and full
+episode coverage must be measured before production acceptance.
+The batching optimization is nevertheless a **validated leading
+P2.3 candidate**, and the 32-seed result substantially strengthens
+the earlier 8-seed diagnostic.
+
 ### Profile-on/off overhead (fish)
 
 The existing `--profile-overhead` option runs
