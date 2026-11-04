@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Any
 
 from sts2_ai.emulator.protocol import StateHandle
@@ -59,6 +60,8 @@ class ExactRootPrefixCache:
         self.misses = 0
         self.skipped_capacity = 0
         self.skipped_provider = 0
+        self.receipt_calls = 0
+        self.receipt_seconds = 0.0
 
     @staticmethod
     def _allowed(receipt: dict[str, str | bool | None]) -> bool:
@@ -69,10 +72,18 @@ class ExactRootPrefixCache:
             and all(receipt.get(flag) is False for flag in PRIVATE_PROVIDER_FLAGS)
         )
 
+    def _receipt(self, handle: StateHandle) -> dict[str, str | bool | None]:
+        started = perf_counter()
+        try:
+            return self.backend.exact_continuation_receipt(handle)
+        finally:
+            self.receipt_seconds += perf_counter() - started
+            self.receipt_calls += 1
+
     def begin_simulation(self) -> None:
         if self._closed:
             raise RuntimeError("P2 cache was closed")
-        receipt = self.backend.exact_continuation_receipt(self.root)
+        receipt = self._receipt(self.root)
         if self._root_receipt is None:
             self._root_receipt = receipt
             self._enabled = self._allowed(receipt)
@@ -96,13 +107,13 @@ class ExactRootPrefixCache:
         if entry.parent_frame != parent or entry.parent_history != tuple(history):
             raise ValueError("P2 retained prefix conflicts with public parent/history")
         if (
-            self.backend.exact_continuation_receipt(parent_handle)
+            self._receipt(parent_handle)
             != entry.parent_receipt
         ):
             raise ValueError(
                 "P2 current parent changed private stochastic continuation"
             )
-        if self.backend.exact_continuation_receipt(entry.handle) != entry.receipt:
+        if self._receipt(entry.handle) != entry.receipt:
             raise ValueError("P2 retained prefix changed stochastic continuation")
         self._path = key
         self.hits += 1
@@ -129,8 +140,8 @@ class ExactRootPrefixCache:
         if len(self._entries) >= self.max_handles:
             self.skipped_capacity += 1
             return False
-        parent_receipt = self.backend.exact_continuation_receipt(parent_handle)
-        receipt = self.backend.exact_continuation_receipt(handle)
+        parent_receipt = self._receipt(parent_handle)
+        receipt = self._receipt(handle)
         if not self._allowed(parent_receipt) or not self._allowed(receipt):
             # Once an incompatible private provider appears, descendant
             # prefixes cannot inherit the root-conditioned authorization.
@@ -162,10 +173,13 @@ class ExactRootPrefixCache:
                     f"P2 retained-prefix handle leak: {released}/{len(handles)}"
                 )
 
-    def metrics(self) -> dict[str, int | bool]:
+    def metrics(self) -> dict[str, int | bool | float]:
         return {
             "enabled": self._enabled and not self._closed,
             "hits": self.hits, "misses": self.misses,
+            "emulator_step_calls_avoided": self.hits,
+            "receipt_calls": self.receipt_calls,
+            "receipt_seconds": self.receipt_seconds,
             "retained_handles": len(self._entries),
             "handle_limit": self.max_handles,
             "skipped_capacity": self.skipped_capacity,
