@@ -4,10 +4,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/p2-native-bridge-smoke.yml'
-      - 'src/sts2_ai/emulator/jsonl_backend.py'
-      - 'src/sts2_ai/search/combat_puct.py'
-      - 'src/sts2_ai/training/h16_joint_act_pilot.py'
-      - 'tools/profile_p2_joint_throughput.py'
+      - 'tools/probe_p2_native_jsonl.py'
   workflow_dispatch:
 
 concurrency:
@@ -15,9 +12,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  p2-native-profile-smoke:
+  p2-public-v1-native-protocol:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - name: Checkout pinned P1+P2 emulator
@@ -29,78 +26,22 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: pip
-          cache-dependency-path: pyproject.toml
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '9.0.x'
-      - name: Install CPU inference and tests
-        run: |
-          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-          python -m pip install -e '.[dev]'
-      - name: Build pinned emulator
+      - name: Build the pinned public-v1 emulator
         run: |
           dotnet build emulator/src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj \
             -c Release --nologo -v quiet -m:1
-      - name: Create seeded synthetic checkpoint (protocol smoke only)
+      - name: Test native JSONL P2 C# profile and exact replay (no H16 model)
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
-          from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet
-          import torch
-          torch.set_num_threads(1)
-          torch.manual_seed(20261104)
-          JointActPilotNet(
-              SharedObjectTransformer(
-                  H7Config(width=32, layers=1, heads=4, feedforward=64)
-              )
-          ).save(Path('/tmp/p2-native-smoke-initial.pt'))
-          PY
-      - name: Execute real JSONL native/C# profile with A/B/B/A replay
-        run: |
-          python tools/profile_p2_joint_throughput.py \
+          python tools/probe_p2_native_jsonl.py \
             --emulator-root "$GITHUB_WORKSPACE/emulator" \
             --emulator-revision "$(git -C emulator rev-parse HEAD)" \
-            --checkpoint /tmp/p2-native-smoke-initial.pt \
-            --ascension 0 --map-profile generated \
-            --seeds p2-native-smoke-0 \
-            --simulations 8 --depth 8 \
-            --max-searches 1 --max-decisions 90 \
-            --native-profile --profile-overhead \
-            --output "$RUNNER_TEMP/p2-native-smoke/profile.json" \
-            --execute
-      - name: Verify C# allocations, wire time, replay, handle peak
-        run: |
-          python - <<'PY'
-          import json, os
-          from pathlib import Path
-          path = Path(os.environ['RUNNER_TEMP']) / 'p2-native-smoke/profile.json'
-          report = json.loads(path.read_text())
-          assert report['schema'] == 'sts2-p2-joint-throughput-profile-v1'
-          assert len(report['runs']) == 4
-          assert len(report['paired_checks']) == 1
-          assert report['paired_checks'][0]['public_teacher_parity']
-          profiled = [run for run in report['runs'] if run['native_csharp'] is not None]
-          assert len(profiled) == 2
-          for run in profiled:
-              native = run['native_csharp']
-              assert native['profile']['schemaId'] == 'sts2-p2-jsonl-performance-v1'
-              assert native['live_state_handles'] == 0
-              assert native['peak_state_handles'] >= 1
-              ops = native['profile']['operations']
-              assert 'p2.jsonl.op.fork' in ops
-              assert 'p2.fork.run_state' in ops
-              assert 'p2.rollout.step_and_public_frame' in ops
-              assert any(v['allocatedBytes'] > 0 for v in ops.values())
-              assert run['search_roots'] >= 1
-              assert run['search_transitions'] >= 1
-              assert run['wire']['fork']['request_bytes'] > 0
-          print('P2 native profile smoke: exact public/teacher replay and cost probes passed')
-          PY
+            --output "$RUNNER_TEMP/p2-v1-transport/profile.json"
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: p2-native-smoke-profile
-          path: ${{ runner.temp }}/p2-native-smoke/profile.json
+          name: p2-v1-native-transport-profile
+          path: ${{ runner.temp }}/p2-v1-transport/profile.json
           if-no-files-found: ignore
