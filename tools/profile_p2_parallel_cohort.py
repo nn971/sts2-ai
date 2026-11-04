@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import Any
 
 import torch
-
 from profile_p2_joint_throughput import (
     ROOT,
     critical_path_shares,
