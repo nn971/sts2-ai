@@ -299,6 +299,8 @@ class _GroundedMacro:
         root = self.root("reward")
         idx = self.add("event_choice", "reward:card_group", "reward",
                        {"count": len(cards)}, owner=root)
+        if ("card", group) in self.reward_groups:
+            raise ValueError("Duplicate published card reward group")
         self.reward_groups[("card", group)] = idx
         if self.reward_reroll_groups is not None:
             self.attribute(
@@ -408,6 +410,12 @@ class _GroundedMacro:
             if extra:
                 current = min(extra)
         self.current_reward_group = current
+        if self.reward_reroll_groups is not None:
+            known_groups = {
+                group for category, group in self.reward_groups if category == "card"
+            }
+            if not self.reward_reroll_groups <= known_groups:
+                raise ValueError("Reroll advertises an absent public card group")
         for index, bundle in enumerate(reward.get("card_bundles") or []):
             if not isinstance(bundle, list) or not bundle:
                 raise ValueError("Malformed visible card reward bundle")
@@ -451,10 +459,17 @@ class _GroundedMacro:
         if not isinstance(shop, dict):
             return
         root = self.root("shop")
-        previews = {
-            p["offer_id"]: p["card"]
-            for p in shop.get("card_offer_previews") or []
-        }
+        preview_items = shop.get("card_offer_previews") or []
+        if not isinstance(preview_items, list):
+            raise ValueError("Malformed public shop card previews")
+        previews: dict[int, dict[str, Any]] = {}
+        for item in preview_items:
+            if (not isinstance(item, dict)
+                    or type(item.get("offer_id")) is not int
+                    or not isinstance(item.get("card"), dict)
+                    or item["offer_id"] in previews):
+                raise ValueError("Duplicate or malformed shop offer preview")
+            previews[item["offer_id"]] = item["card"]
         for category in ("card", "potion", "relic"):
             offers = shop.get(category + "_offers")
             singular = shop.get(category + "_offer")
@@ -493,6 +508,9 @@ class _GroundedMacro:
                         self.attribute(pos, "card_enchantment",
                                        preview["enchantment"])
                 self.shop[key] = pos
+        if set(previews) - {ident for category, ident in self.shop
+                             if category == "card"}:
+            raise ValueError("Shop card preview has no public offer")
         if "removal_price" in shop:
             self.attribute(root, "removal_price", shop["removal_price"], "gold")
         if "removal_used" in shop:
@@ -542,12 +560,31 @@ class _GroundedMacro:
             self.build_pending_deck_choice(
                 root, evt["pending_deck_choice"], context="event",
             )
-        value_by_id = {v["choice_id"]: v for v in evt.get("visible_choice_values") or []}
+        values = evt.get("visible_choice_values") or []
+        if not isinstance(values, list):
+            raise ValueError("Malformed event choice values")
+        value_by_id: dict[str, dict[str, Any]] = {}
+        for value in values:
+            if (not isinstance(value, dict)
+                    or not isinstance(value.get("choice_id"), str)
+                    or value["choice_id"] in value_by_id):
+                raise ValueError("Duplicate or malformed visible event choice values")
+            value_by_id[value["choice_id"]] = value
         choices = evt.get("offered_choice_ids")
         if choices is not None and not isinstance(choices, list):
             raise ValueError("Malformed offered event choices")
         if choices:
+            if (any(not isinstance(cid, str) for cid in choices)
+                    or len(choices) != len(set(choices))):
+                raise ValueError("Malformed or duplicate visible event choice IDs")
+            if set(value_by_id) - set(choices):
+                raise ValueError("Event outcome refers to an unoffered public choice")
             for choice_id in choices:
+                self.event_choice(choice_id, root, value_by_id)
+        elif value_by_id:
+            # Some native event pages publish outcomes without an explicit
+            # offered list. These are still visible event-owned features.
+            for choice_id in value_by_id:
                 self.event_choice(choice_id, root, value_by_id)
 
     def event_choice(self, choice_id: str, root: int,
