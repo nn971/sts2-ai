@@ -82,7 +82,7 @@ def test_profile_overhead_requires_exact_abba_and_reports_paired_totals():
      "profile-overhead"),
     (lambda data: data["identity"].update({"paired": False}), "--paired"),
     (lambda data: data["seed_reports"][0].update({"public_teacher_parity": False}),
-     "exact replay"),
+     "within-seed replay"),
     (lambda data: data["seed_reports"][0]["runs"][0].update(
         {"search_instrumentation": True}), "instrumentation"),
     (lambda data: data["seed_reports"][0]["runs"][0].update(
@@ -114,7 +114,8 @@ def test_actor_ab_requires_exact_cross_config_replay():
 def test_actor_ab_rejects_cross_mode_teacher_drift():
     profiles = [cohort(workers=w, actor_max_batch=b, fixed_shape=f) for w, b, f
                 in ((1, 1, 0), (15, 1, 0), (1, 16, 4), (15, 16, 4))]
-    profiles[3]["seed_reports"][1]["trace_sha256"] = "different-teacher"
+    for candidate in profiles[2:]:
+        candidate["seed_reports"][1]["trace_sha256"] = "different-teacher"
     with pytest.raises(ValueError, match="exact teacher/public replay drift"):
         compare_actor_candidate(*profiles)
 
@@ -130,7 +131,9 @@ def test_actor_ab_rejects_non_actor_identity_differences(field, value):
     profiles = [cohort(workers=w, actor_max_batch=b, fixed_shape=f) for w, b, f
                 in ((1, 1, 0), (15, 1, 0), (1, 16, 4), (15, 16, 4))]
     profiles[2]["identity"][field] = value
-    with pytest.raises(ValueError, match="(identity mismatch|cohort identity mismatch)"):
+    with pytest.raises(
+        ValueError, match="(identity mismatch|Different compiled|Different AI)"
+    ):
         compare_actor_candidate(*profiles)
 
 
