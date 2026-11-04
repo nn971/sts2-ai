@@ -174,3 +174,42 @@ and are documented in the report.
 The tool is instrumentation-only. It changes no PUCT budgets,
 Nature/RNG law, model training objectives, H18 checkpoints,
 or production actor flags.
+
+## P2.3 opt-in packed H21 CPU collation experiment
+
+The reference H21 relational collator writes object/action/edge tensor cells
+individually. The opt-in `collate_h21_packed` candidate builds each typed
+tensor from one dense Python batch array, preserving exactly the same schema,
+padding, owner/action pointers, selected-card membership and eight typed
+relation IDs. **Production H21 inference/training still uses the reference
+collator**. The benchmark compares every candidate tensor (shape, dtype,
+content) to the reference before recording a candidate time; regression
+tests include variable object/action/edge sizes, mixed phases and invalid
+pointers.
+
+Measure the same verified v4 corpus, no checkpoint required, on the same
+machine; report *CPU collation only*, not full search/training TPS.
+
+```fish
+set corpus results/p2-h21-v4-public-corpus-v1.json
+for impl in reference packed
+    python tools/benchmark_p2_h21_grounded.py \
+        --input $corpus --sample-count 128 --warmups 1 --repeats 3 \
+        --stage collate --batch-size 4 --device cpu --collator $impl \
+        --output results/p2-h21-v4-collate-$impl-v1.json
+end
+```
+
+Follow with interleaved **A/B/B/A** reference/packed repetitions on an idle
+machine, then batch sizes 1, 4, 8, 16. Compare identical corpus SHA,
+public encoding SHA, emulator DLL hash, AI code revision, and sampled
+decision count. Treat small variations without repeated advantage as noise.
+No numerical speedup is claimed before those paired benchmark receipts.
+Only after verified wall-time improvement and actor-level replay parity
+should the packed collator be wired as an opt-in shared actor setting.
+
+The initial uploaded evidence (`p2-h21-v4-public-corpus-v1.json`) contains
+400 frames from four source seeds (100 each), 1,773 legal action entries,
+320 combat frames, 80 noncombat frames and all 400 valid public SHA-256 digests.
+It reaches floor 6 but includes **no shop-state frame**; an eight-seed,
+shop-inclusive later-floor corpus is still needed for broad promotion.
