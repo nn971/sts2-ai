@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
-from torch import nn
+from torch import Tensor, nn
 
 from sts2_ai.models.shared_game_objects import EncodedDecision
 from sts2_ai.models.shared_map_transformer_v2 import H20MapGraphTransformer
@@ -16,8 +16,37 @@ from sts2_ai.training.h21_macro_offer_codec import (
     H21_OBJECT_SCHEMA,
     H21_RELATION_TYPES,
 )
+from sts2_ai.training.h21_stable_identity import (
+    H21_IDENTITY_COMPONENT_BUCKETS,
+    H21_IDENTITY_COMPONENTS,
+)
 
-H21_MODEL_FORMAT = "sts2-h21-grounded-macro-transformer-v2"
+H21_MODEL_FORMAT = "sts2-h21-grounded-macro-transformer-v3"
+
+
+class H21StableEmbedding(nn.Module):
+    """Four hashed embedding streams representing a stable 48-bit key.
+
+    The codec checks for collisions in the *effective* 48-bit key. There
+    are no floating-point conversions or raw instance-ID embeddings.
+    """
+
+    def __init__(self, width: int) -> None:
+        super().__init__()
+        self.tables = nn.ModuleList([
+            nn.Embedding(H21_IDENTITY_COMPONENT_BUCKETS, width, padding_idx=0)
+            for _ in range(H21_IDENTITY_COMPONENTS)
+        ])
+
+    def forward(self, ids: Tensor) -> Tensor:
+        if ids.dtype != torch.long:
+            raise ValueError("H21 requires 64-bit integer public concept IDs")
+        bucket = H21_IDENTITY_COMPONENT_BUCKETS
+        result = self.tables[0](ids % bucket)
+        for stream in range(1, H21_IDENTITY_COMPONENTS):
+            result = result + self.tables[stream](
+                (ids // (bucket ** stream)) % bucket)
+        return result
 
 
 def collate_h21(decisions: list[EncodedDecision]) -> H7Batch:
@@ -51,6 +80,8 @@ class H21GroundedMacroTransformer(H20MapGraphTransformer):
     def __init__(self, config: H7Config | None = None) -> None:
         super().__init__(config)
         self.relation_types = nn.Embedding(H21_RELATION_TYPES, self.config.width)
+        self.identities = H21StableEmbedding(self.config.width)
+        self.action_kinds = H21StableEmbedding(self.config.width)
 
     def save_checkpoint(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
