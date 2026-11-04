@@ -172,6 +172,10 @@ def test_public_event_potion_choice_id_changes_offered_potion_features():
     }
     action0 = [action("take_event_potion", Slot=0)]
     first = encode(observation, action0)
+    target = first.actions[0].target
+    assert target >= 0
+    assert first.objects[target].kind == KINDS.index("potion")
+    assert first.objects[target].zone == ZONES.index("event")
     second_state = copy.deepcopy(observation)
     second_state["event"]["pending_potion_replacement"]["choice_id"] = "blue"
     assert encode(second_state, action0) != first
