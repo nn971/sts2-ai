@@ -38,6 +38,18 @@ class BridgeOperationStats:
         return self.total_seconds / self.calls if self.calls else 0.0
 
 
+@dataclass(frozen=True, slots=True)
+class BridgeWireStats:
+    """Successful profiled JSONL RPCs, including Python framing and pipe wait."""
+
+    calls: int
+    request_bytes: int
+    response_bytes: int
+    encode_seconds: float
+    pipe_seconds: float
+    decode_seconds: float
+
+
 def _run_git(root: Path, *args: str) -> str:
     try:
         completed = subprocess.run(
@@ -72,6 +84,7 @@ class JsonlEmulatorBackend:
         expected_emulator_revision: str | None = None,
         dotnet: str = "dotnet",
         build: bool = True,
+        profile_wire: bool = False,
     ) -> None:
         self._repo_root = (
             repo_root.resolve()
@@ -106,6 +119,8 @@ class JsonlEmulatorBackend:
         self._next_request_id = 1
         self._closed = False
         self._operation_profile: dict[str, tuple[int, float]] = {}
+        self._profile_wire = profile_wire
+        self._wire_profile: dict[str, list[int | float]] = {}
 
         if build:
             try:
@@ -245,6 +260,22 @@ class JsonlEmulatorBackend:
 
     def reset_operation_profile(self) -> None:
         self._operation_profile.clear()
+        self._wire_profile.clear()
+
+    def wire_operation_profile(self) -> Mapping[str, BridgeWireStats]:
+        """Detailed bridge transport accounting when profile_wire=True.
+
+        pipe_seconds includes synchronous C# work, serialization, and pipe
+        scheduling; the Python client cannot decompose that interval alone.
+        """
+        return {
+            op: BridgeWireStats(
+                calls=int(v[0]), request_bytes=int(v[1]), response_bytes=int(v[2]),
+                encode_seconds=float(v[3]), pipe_seconds=float(v[4]),
+                decode_seconds=float(v[5]),
+            )
+            for op, v in sorted(self._wire_profile.items())
+        }
 
     @property
     def pristine_reward_proposal_schema(self) -> str | None:
@@ -1080,8 +1111,16 @@ class JsonlEmulatorBackend:
         if stdin is None or stdout is None:
             raise JsonlBridgeError("Emulator bridge pipes are unavailable")
 
+        if self._profile_wire:
+            encode_start = time.perf_counter()
+            wire_request = json.dumps(request, separators=(",", ":")) + "\n"
+            encode_seconds = time.perf_counter() - encode_start
+            pipe_start = time.perf_counter()
+        else:
+            wire_request = json.dumps(request, separators=(",", ":")) + "\n"
+
         try:
-            stdin.write(json.dumps(request, separators=(",", ":")) + "\n")
+            stdin.write(wire_request)
             stdin.flush()
             line = stdout.readline()
         except (BrokenPipeError, OSError) as exc:
@@ -1089,6 +1128,9 @@ class JsonlEmulatorBackend:
 
         if not line:
             raise JsonlBridgeError(self._dead_process_message())
+        if self._profile_wire:
+            pipe_seconds = time.perf_counter() - pipe_start
+            decode_start = time.perf_counter()
 
         try:
             raw = json.loads(line)
@@ -1107,6 +1149,15 @@ class JsonlEmulatorBackend:
             error = response.get("error", "unknown bridge failure")
             raise JsonlBridgeError(f"{error_type}: {error}")
 
+        if self._profile_wire:
+            decode_seconds = time.perf_counter() - decode_start
+            counters = self._wire_profile.setdefault(op, [0, 0, 0, 0.0, 0.0, 0.0])
+            counters[0] += 1
+            counters[1] += len(wire_request.encode("utf-8"))
+            counters[2] += len(line.encode("utf-8"))
+            counters[3] += encode_seconds
+            counters[4] += pipe_seconds
+            counters[5] += decode_seconds
         elapsed = time.perf_counter() - started
         calls, total_seconds = self._operation_profile.get(op, (0, 0.0))
         self._operation_profile[op] = (calls + 1, total_seconds + elapsed)
