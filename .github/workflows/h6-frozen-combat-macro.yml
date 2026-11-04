@@ -2,6 +2,8 @@ name: h6-frozen-combat-macro
 
 on:
   push:
+    branches:
+      - main
     paths:
       - 'src/sts2_ai/models/phase_split.py'
       - 'src/sts2_ai/training/phase_split_selfplay.py'
@@ -15,7 +17,23 @@ on:
       - 'src/sts2_ai/emulator/run_environment.py'
       - '.github/workflows/h6-frozen-combat-macro.yml'
   pull_request:
+    paths:
+      - 'src/sts2_ai/models/phase_split.py'
+      - 'src/sts2_ai/training/phase_split_selfplay.py'
+      - 'tools/train_phase_split.py'
+      - 'tests/test_h6_native_count_pile.py'
+      - 'tests/test_h6_frozen_combat_macro.py'
+      - 'tests/test_h6_dense_reward.py'
+      - 'tests/test_h6_native_reset_profiles.py'
+      - 'tests/test_h6_public_enemy_position.py'
+      - 'src/sts2_ai/models/enemy_instances.py'
+      - 'src/sts2_ai/emulator/run_environment.py'
+      - '.github/workflows/h6-frozen-combat-macro.yml'
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   frozen-combat:

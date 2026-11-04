@@ -2,6 +2,8 @@ name: h16-joint-act-pilot
 
 on:
   push:
+    branches:
+      - main
     paths:
       - 'src/sts2_ai/training/h16_joint_act_pilot.py'
       - 'src/sts2_ai/models/h16_batch_actor.py'
@@ -41,7 +43,49 @@ on:
       - 'tests/test_h16_joint_act_pilot.py'
       - '.github/workflows/h16-joint-act-pilot.yml'
   pull_request:
+    paths:
+      - 'src/sts2_ai/training/h16_joint_act_pilot.py'
+      - 'src/sts2_ai/models/h16_batch_actor.py'
+      - 'tests/test_h16_batch_actor.py'
+      - 'src/sts2_ai/training/h16_public_codec.py'
+      - 'src/sts2_ai/models/shared_transformer.py'
+      - 'src/sts2_ai/emulator/run_environment.py'
+      - 'src/sts2_ai/emulator/jsonl_backend.py'
+      - 'tools/train_h16_joint_act_pilot.py'
+      - 'tools/report_h16_floor_progress.py'
+      - 'tools/diagnose_h16_paired_checkpoints.py'
+      - 'tests/test_h16_paired_checkpoints.py'
+      - 'tools/diagnose_h16_puct_budget.py'
+      - 'tests/test_h16_puct_budget.py'
+      - 'tools/diagnose_h16_full_combat.py'
+      - 'tests/test_h16_full_combat.py'
+      - 'tools/diagnose_h16_hp_value.py'
+      - 'tests/test_h16_hp_value.py'
+      - 'src/sts2_ai/training/h17_adaptive.py'
+      - 'src/sts2_ai/training/h17_replay.py'
+      - 'tools/train_h17_adaptive.py'
+      - 'tests/test_h17_adaptive_training.py'
+      - 'tools/train_h18_generated_a0.py'
+      - 'tests/test_h18_generated_map.py'
+      - 'docs/H18_RUNBOOK.md'
+      - 'docs/H17_TRAINING_PLAN.md'
+      - 'tests/test_h16_floor_progress.py'
+      - 'tests/test_h16_action_overflow.py'
+      - 'tests/test_h16_subset_actions.py'
+      - 'tests/test_h16_deck_multiplicity.py'
+      - 'tests/test_h16_virtual_selection_depth.py'
+      - 'tests/test_h16_combat_loss_credit.py'
+      - 'src/sts2_ai/training/h16_episode_metrics.py'
+      - 'src/sts2_ai/search/combat_puct.py'
+      - 'src/sts2_ai/models/packed_actor_collation.py'
+      - 'src/sts2_ai/models/shared_game_objects.py'
+      - 'tests/test_h16_joint_act_pilot.py'
+      - '.github/workflows/h16-joint-act-pilot.yml'
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   joint-pilot-contract:

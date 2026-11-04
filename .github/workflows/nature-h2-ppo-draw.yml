@@ -2,6 +2,8 @@ name: nature-h2-ppo-draw
 
 on:
   push:
+    branches:
+      - main
     paths:
       - 'src/sts2_ai/nature/ppo_draw.py'
       - 'src/sts2_ai/nature/contextual_draw.py'
@@ -11,7 +13,19 @@ on:
       - 'tests/test_nature_ppo_draw.py'
       - '.github/workflows/nature-h2-ppo-draw.yml'
   pull_request:
+    paths:
+      - 'src/sts2_ai/nature/ppo_draw.py'
+      - 'src/sts2_ai/nature/contextual_draw.py'
+      - 'src/sts2_ai/nature/two_site_opponent.py'
+      - 'tools/train_draw_only_nature_h1.py'
+      - 'tools/probe_nature_h2_combat_profiles.py'
+      - 'tests/test_nature_ppo_draw.py'
+      - '.github/workflows/nature-h2-ppo-draw.yml'
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   nature-ppo:
