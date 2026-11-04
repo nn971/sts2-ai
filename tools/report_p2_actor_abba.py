@@ -34,6 +34,7 @@ RUN_ARMS = ("control_a", "control_a2")
 def _verified_profile(
     profile: Mapping[str, Any], arm: str, *,
     actor_profile: bool = False, wire_profile: bool = False,
+    native_fused_profile: bool = False,
 ) -> dict[str, Any]:
     if profile.get("schema") != SCHEMA:
         raise ValueError(f"{arm}: unexpected P2 cohort schema")
@@ -54,6 +55,9 @@ def _verified_profile(
         )
     if identity.get("wire_profile_only", False) is not wire_profile:
         raise ValueError(f"{arm}: unexpected wire-only profiling mode")
+    if (identity.get("native_fused_profile_only", False)
+            is not native_fused_profile):
+        raise ValueError(f"{arm}: unexpected native-fused profiling mode")
     if identity.get("actor_inference") != "shared":
         raise ValueError(f"{arm}: require shared actor inference")
     workers = identity.get("worker_count")
@@ -71,6 +75,8 @@ def _verified_profile(
                 run.get("search_instrumentation") is not False
                 or run.get("native_instrumentation") is not False
                 or run.get("wire_instrumentation") is not wire_profile
+                or (run.get("h16_native_fused_instrumentation", False)
+                    is not native_fused_profile)
             ):
                 raise ValueError(f"{arm}/{seed}: run was instrumented unexpectedly")
         for field in WORK_FIELDS:
@@ -106,7 +112,8 @@ def report_actor_abba(
     experiment: str = "batching",
 ) -> dict[str, Any]:
     if experiment not in (
-        "batching", "actor-profile", "prefix-cache", "transport", "wire-profile",
+        "batching", "actor-profile", "prefix-cache", "transport",
+        "wire-profile", "native-fused-profile",
     ):
         raise ValueError("Unsupported A/B/B/A experiment")
     profiles = (a1, b1, b2, a2)
@@ -117,6 +124,8 @@ def report_actor_abba(
                            and label in ("B1", "B2")),
             wire_profile=(experiment == "wire-profile"
                           and label in ("B1", "B2")),
+            native_fused_profile=(experiment == "native-fused-profile"
+                                  and label in ("B1", "B2")),
         )
         for label, profile in zip(ORDER, profiles, strict=True)
     ]
@@ -346,6 +355,54 @@ def report_actor_abba(
                 ),
                 "operations": dict(sorted(per_opcode.items())),
             })
+    native_fused_diagnostics: list[dict[str, Any]] | None = None
+    if experiment == "native-fused-profile":
+        native_fused_diagnostics = []
+        for arm, verified_profile in zip(ORDER, verified, strict=True):
+            per_opcode: dict[str, dict[str, int | float]] = {}
+            for row in verified_profile["rows"].values():
+                for run in row["runs"]:
+                    profile_data = run.get("h16_native_fused")
+                    if arm in ("A1", "A2"):
+                        if profile_data is not None:
+                            raise ValueError(
+                                f"{arm}: unprofiled control has native samples"
+                            )
+                        continue
+                    if (
+                        not isinstance(profile_data, Mapping)
+                        or profile_data.get("schemaId")
+                        != "sts2-p2-h16-fused-native-profile-v1"
+                        or profile_data.get("enabled") is not False
+                        or not isinstance(profile_data.get("operations"), Mapping)
+                    ):
+                        raise ValueError(f"{arm}: missing versioned native profile")
+                    for op, stats in profile_data["operations"].items():
+                        if not isinstance(op, str) or not isinstance(stats, Mapping):
+                            raise ValueError(f"{arm}: invalid native entry")
+                        for key in ("count", "allocatedBytes"):
+                            v = stats.get(key)
+                            if type(v) is not int or v < 0:
+                                raise ValueError(f"{arm}: invalid native count")
+                        for key in ("totalSeconds", "maxSeconds"):
+                            v = stats.get(key)
+                            if (
+                                isinstance(v, bool)
+                                or not isinstance(v, (int, float))
+                                or not math.isfinite(v) or v < 0
+                            ):
+                                raise ValueError(f"{arm}: invalid native timer")
+                        bucket = per_opcode.setdefault(op, {
+                            "count": 0, "totalSeconds": 0.0,
+                            "allocatedBytes": 0,
+                        })
+                        for key in bucket:
+                            bucket[key] += stats[key]
+            if arm in ("B1", "B2") and not per_opcode:
+                raise ValueError(f"{arm}: missing C# fused self-time")
+            native_fused_diagnostics.append({
+                "arm": arm, "operations": dict(sorted(per_opcode.items())),
+            })
     return {
         "schema": REPORT_SCHEMA,
         "experiment": experiment,
@@ -361,6 +418,9 @@ def report_actor_abba(
             "order-balanced P2.2 fused JSONL wire-only timing/overhead "
             "diagnostic with unchanged PUCT teacher"
             if experiment == "wire-profile" else
+            "order-balanced source-versioned H16 native fused C# "
+            "environment/serialization self-time diagnostic"
+            if experiment == "native-fused-profile" else
             "order-balanced uninstrumented P2.5 actor candidate; "
             "full episode/RNG acceptance separate"
         ),
@@ -429,6 +489,11 @@ def report_actor_abba(
              "wire_profile_overhead_fraction": b_wall / a_wall - 1}
             if wire_diagnostics is not None else {}
         ),
+        **(
+            {"native_fused_diagnostics": native_fused_diagnostics,
+             "native_fused_profile_overhead_fraction": b_wall / a_wall - 1}
+            if native_fused_diagnostics is not None else {}
+        ),
         "ratio_of_total_baseline_to_candidate_wall": a_wall / b_wall,
         "wall_reduction_fraction": 1 - b_wall / a_wall,
         **(
@@ -463,6 +528,12 @@ def report_actor_abba(
                 if experiment == "prefix-cache" else []
             ),
             *(
+                ["Native C# profiling is H16/public-v0 only, not native-v1",
+                 "B1/B2 enable C# fused-only timers. Self-time excludes "
+                 "Python actor and scheduling; compare to full cohort wall"]
+                if experiment == "native-fused-profile" else []
+            ),
+            *(
                 ["Fused transport stays enabled in all four arms; B1/B2 "
                  "collect JSONL wire-only timing. Pipe wait includes native "
                  "mechanics, native serialization and scheduling.",
@@ -486,7 +557,8 @@ def main() -> None:
     for name in ("a1", "b1", "b2", "a2"):
         p.add_argument(f"--{name}", type=Path, required=True)
     p.add_argument("--experiment", choices=("batching", "actor-profile", "prefix-cache",
-                            "transport", "wire-profile"),
+                            "transport", "wire-profile",
+                            "native-fused-profile"),
                    default="batching")
     p.add_argument("--output", type=Path, required=True)
     args = p.parse_args()
