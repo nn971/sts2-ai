@@ -26,7 +26,8 @@ class StubBackend:
 
     def exact_continuation_receipt(self, handle):
         public, private = self.hidden[handle]
-        h = lambda text: hashlib.sha256(text.encode()).hexdigest()
+        def h(text):
+            return hashlib.sha256(text.encode()).hexdigest()
         return {
             "exactHash": h(public),
             "runStochasticHash": h(private),
