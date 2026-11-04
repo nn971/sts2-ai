@@ -27,7 +27,24 @@ class NativeForkStub:
 
     def exact_hash(self, state: str) -> str:
         depth, hidden = self.states[state]
-        return hashlib.sha256(f"{depth}|{hidden}".encode()).hexdigest()
+        key = f"{depth}" if self.drift in ("receipt_fork", "receipt_step") else (
+            f"{depth}|{hidden}"
+        )
+        return hashlib.sha256(key.encode()).hexdigest()
+
+    def exact_continuation_receipt(self, state: str):
+        depth, hidden = self.states[state]
+        return {
+            "exactHash": self.exact_hash(state),
+            "runStochasticHash": hashlib.sha256(hidden.encode()).hexdigest(),
+            "worldStochasticHash": hashlib.sha256(
+                f"world-{depth}".encode()
+            ).hexdigest(),
+            "combatNativeRngHash": None,
+            "referenceNaturePresent": False,
+            "semanticOtherChancePresent": False,
+            "semanticRewardAuditPresent": False,
+        }
 
     def observe(self, state: str, policy) -> Observation:
         assert policy.policy_id == FAIR_POLICY_ID
@@ -50,7 +67,7 @@ class NativeForkStub:
     def fork(self, state: str) -> str:
         self.fork_count += 1
         depth, hidden = self.states[state]
-        if self.drift == "fork" and self.fork_count == 2:
+        if self.drift in ("fork", "receipt_fork") and self.fork_count == 2:
             hidden = "wrong-private-rng"
         return self._create((depth, hidden))
 
@@ -59,7 +76,7 @@ class NativeForkStub:
         for pos, (source, action) in enumerate(items):
             depth, hidden = self.states[source]
             assert action == self.legal_actions(source)[0]
-            if self.drift == "step" and pos == 1:
+            if self.drift in ("step", "receipt_step") and pos == 1:
                 hidden = "different-hidden-rng-after-draw"
             child = self._create((depth + 1, hidden))
             answer.append(StepFrame(
@@ -86,6 +103,10 @@ def test_exact_fork_prefix_two_steps_and_unconditional_cleanup():
     assert result["owned_handles_released"] == 8
     assert result["trace"][-1]["terminal"] is True
     assert result["independent_rng_receipt_available"] is False
+    assert result["stochastic_envelope_receipts_match"] is True
+    assert result["trace"][0]["parent_run_stochastic_hash"] == (
+        result["trace"][0]["child_run_stochastic_hash"]
+    )
     assert result["ready_for_p2_1_caching"] is False
     assert backend.states == {"root": (0, "rng-0")}
 
@@ -93,6 +114,8 @@ def test_exact_fork_prefix_two_steps_and_unconditional_cleanup():
 @pytest.mark.parametrize(("mode", "pattern"), [
     ("fork", "hash diverged on fork"),
     ("step", "hash diverged after action"),
+    ("receipt_fork", "Stochastic-envelope receipt diverged on fork"),
+    ("receipt_step", "Stochastic-envelope receipt diverged after action"),
 ])
 def test_identical_public_projection_does_not_hide_private_drift(mode, pattern):
     backend = NativeForkStub(drift=mode)
@@ -125,5 +148,18 @@ def test_stale_fused_observation_fails_with_cleanup():
 
     backend = StaleFrame()
     with pytest.raises(ValueError, match="Public continuation"):
+        verify_exact_fork_prefix(backend, "root", max_steps=2)
+    assert backend.states == {"root": (0, "rng-0")}
+
+
+def test_receipt_exact_hash_binding_is_required_even_with_equal_forks():
+    class TamperedReceipt(NativeForkStub):
+        def exact_continuation_receipt(self, state):
+            receipt = super().exact_continuation_receipt(state)
+            receipt["exactHash"] = "0" * 64
+            return receipt
+
+    backend = TamperedReceipt()
+    with pytest.raises(ValueError, match="does not match parent exact hash"):
         verify_exact_fork_prefix(backend, "root", max_steps=2)
     assert backend.states == {"root": (0, "rng-0")}
