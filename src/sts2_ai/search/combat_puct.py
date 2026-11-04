@@ -159,6 +159,7 @@ class CombatSearchProfile:
             "terminal_evaluations": result.terminal_evaluations,
             "neural_cutoffs": result.neural_cutoffs,
             "transitions": result.transitions,
+            "terminal_rollout_steps": result.transitions - self.tree_step_calls,
             "wall_seconds": self.wall_seconds,
             "begin_calls": self.begin_calls,
             "begin_seconds": self.begin_seconds,
