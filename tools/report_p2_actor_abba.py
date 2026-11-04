@@ -636,7 +636,7 @@ def main() -> None:
         p.add_argument(f"--{name}", type=Path, required=True)
     p.add_argument("--experiment", choices=("batching", "actor-profile", "prefix-cache",
                             "transport", "wire-profile",
-                            "native-fused-profile"),
+                            "native-fused-profile", "h21-collator"),
                    default="batching")
     p.add_argument("--output", type=Path, required=True)
     args = p.parse_args()
