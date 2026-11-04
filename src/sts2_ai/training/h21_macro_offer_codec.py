@@ -20,8 +20,8 @@ from sts2_ai.models.shared_game_objects import (
     ObjectToken,
     RelationToken,
     _numbers,
-    _single_numeric,
     _public_attribute_leaves,
+    _single_numeric,
 )
 from sts2_ai.training.h20_map_graph_codec import encode_h20_map_decision
 from sts2_ai.training.h21_field_coverage import audit_public_observation
