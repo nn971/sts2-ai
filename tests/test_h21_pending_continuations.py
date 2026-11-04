@@ -62,6 +62,7 @@ def test_pending_deck_candidates_are_owned_grounded_and_finishable(
     observation = state()
     pending = {
         "kind": 1, "remaining_selections": 1,
+        "minimum_selections_remaining": 0,
         "source_relic_id": "relic.decks",
         "candidate_card_instance_ids": [101, 102, 104],
     }
@@ -119,6 +120,11 @@ def test_pending_deck_candidates_are_owned_grounded_and_finishable(
         action("finish_relic_deck_choice"),
     ]
     assert encode(renamed, renamed_actions) == encoded
+
+    stricter = copy.deepcopy(observation)
+    stricter[context]["pending_deck_choice"][
+        "minimum_selections_remaining"] = 1
+    assert encode(stricter, actions[:1]) != encode(observation, actions[:1])
 
 
 def test_pending_choice_candidate_references_fail_closed():
