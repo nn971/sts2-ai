@@ -236,6 +236,19 @@ def test_event_queue_and_deck_choice_future_affordances_are_distinct():
 
 
 
+
+def test_exact_public_macro_phase_is_not_collapsed_to_one_class():
+    original = state()
+    original["phase"] = 5  # reward enum value from public v1
+    before = encode(original, [action("leave_reward")])
+    renamed = copy.deepcopy(original)
+    renamed["phase"] = 6  # shop enum value from public v1
+    after = encode(renamed, [action("leave_reward")])
+    assert before.phase == after.phase == "macro"
+    assert before != after
+
+
+
 def test_top_level_public_event_id_is_an_encoded_cross_phase_attribute():
     initial = state()
     initial["event_id"] = "native.chapter_event_a"
