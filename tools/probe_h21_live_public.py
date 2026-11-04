@@ -7,8 +7,10 @@ No private RunState, RNG stream or hidden deck order is read by the policy.
 from __future__ import annotations
 
 import argparse
+import cProfile
 import hashlib
 import json
+import pstats
 import subprocess
 import sys
 import time
@@ -137,6 +139,10 @@ def main() -> int:
     parser.add_argument("--max-decisions", type=int, default=55)
     parser.add_argument("--strict", action="store_true")
     parser.add_argument(
+        "--profile-codec-out", type=Path,
+        help="Write cProfile cumulative-time report for the H21 encoder only",
+    )
+    parser.add_argument(
         "--diverse-route", action="store_true",
         help="Use seed-varied public-map room priorities instead of fixed smoke ordering",
     )
@@ -164,6 +170,7 @@ def main() -> int:
     max_floor = 0
     chosen_map_room_types: Counter[str] = Counter()
     stable_id.cache_clear()
+    profiler = cProfile.Profile() if args.profile_codec_out is not None else None
     public = PublicJsonl(args.emulator_dll)
     try:
         hello = public.call("hello")
@@ -198,8 +205,14 @@ def main() -> int:
                     report = audit_public_observation(observation)
                     gaps.update(report.gaps)
                     codec_start = time.perf_counter()
-                    encoding = encode_h21_macro_decision(
-                        observation, actions, public_schema_id=view["schemaId"])
+                    if profiler is not None:
+                        profiler.enable()
+                    try:
+                        encoding = encode_h21_macro_decision(
+                            observation, actions, public_schema_id=view["schemaId"])
+                    finally:
+                        if profiler is not None:
+                            profiler.disable()
                     codec_end = time.perf_counter()
                     codec_seconds += codec_end - codec_start
                     alias_audit = audit_h21_action_aliases(
@@ -249,6 +262,14 @@ def main() -> int:
                     break
     finally:
         public.close()
+    if profiler is not None:
+        from io import StringIO
+
+        output = StringIO()
+        stats = pstats.Stats(profiler, stream=output)
+        stats.strip_dirs().sort_stats("cumulative").print_stats(65)
+        args.profile_codec_out.parent.mkdir(parents=True, exist_ok=True)
+        args.profile_codec_out.write_text(output.getvalue(), encoding="utf-8")
     measured = sorted(encode_seconds)
     p95_index = max(0, (95 * len(measured) + 99) // 100 - 1)
     measured_total = sum(measured)
