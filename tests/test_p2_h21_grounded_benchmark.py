@@ -7,19 +7,19 @@ from pathlib import Path
 
 import pytest
 
+from sts2_ai.training.h19_resource_codec import EMULATOR_PUBLIC_SCHEMA_V1
 from tools.benchmark_p2_h21_grounded import (
     REPORT_SCHEMA,
     benchmark,
     evenly_spaced,
 )
 from tools.p2_h21_public_corpus import (
+    load_public_corpus,
     make_public_corpus,
     make_public_record,
-    load_public_corpus,
     verify_public_corpus,
     write_public_corpus,
 )
-from sts2_ai.training.h19_resource_codec import EMULATOR_PUBLIC_SCHEMA_V1
 
 
 def live_like_frame() -> dict:
