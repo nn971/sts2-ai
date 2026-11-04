@@ -70,6 +70,33 @@ def _numbers(record: dict[str, Any]) -> tuple[tuple[float, ...], tuple[int, ...]
     return tuple(values), tuple(masks)
 
 
+# H21-only fast path. The inherited H7/H16/H19/H20 public numeric encoder
+# remains byte-for-byte unchanged. An owner-linked leaf supplies exactly one
+# numeric feature, so avoid scanning all 16 fields for every attribute.
+_ZERO_NUMERIC_VALUES = (0.0,) * len(NUMERIC_FIELDS)
+_ZERO_NUMERIC_MASKS = (0,) * len(NUMERIC_FIELDS)
+_SINGLE_NUMERIC_INDEX = {name: idx for idx, name in enumerate(NUMERIC_FIELDS)}
+_SINGLE_NUMERIC_MASKS = tuple(
+    tuple(int(i == j) for j in range(len(NUMERIC_FIELDS)))
+    for i in range(len(NUMERIC_FIELDS))
+)
+
+
+def _single_numeric(
+    field: str, raw: Any,
+) -> tuple[tuple[float, ...], tuple[int, ...]]:
+    """Return exactly _numbers({field: raw}) without a full field scan."""
+    index = _SINGLE_NUMERIC_INDEX[field]
+    if isinstance(raw, (float, int)) and not isinstance(raw, bool) and math.isfinite(raw):
+        value = math.tanh(float(raw) / NUMERIC_SCALES[index])
+        return (
+            _ZERO_NUMERIC_VALUES[:index] + (value,)
+            + _ZERO_NUMERIC_VALUES[index + 1:],
+            _SINGLE_NUMERIC_MASKS[index],
+        )
+    return _ZERO_NUMERIC_VALUES, _ZERO_NUMERIC_MASKS
+
+
 @dataclass(frozen=True)
 class ObjectToken:
     kind: int
@@ -454,7 +481,11 @@ def _append_owned_public_attributes(
                     raise ValueError(
                         "Public owner-linked attribute cap exceeded: "
                         "no resource or attribute may be silently dropped")
-                numeric, observed = _numbers({"stacks": value})
+                numeric, observed = (
+                    _single_numeric("stacks", value)
+                    if identity_hasher is not None
+                    else _numbers({"stacks": value})
+                )
                 objects.append(ObjectToken(
                     kind=OWNER_ATTRIBUTE_KIND_V2,
                     identity=(
