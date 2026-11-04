@@ -25,7 +25,8 @@ def public_frame(*, combat: bool) -> dict:
     }
 
 
-def test_shared_h16_actor_matches_local_logits_and_horizon(tmp_path):
+@pytest.mark.parametrize("profile_actor", [False, True])
+def test_shared_h16_actor_matches_local_logits_and_horizon(tmp_path, profile_actor):
     torch.manual_seed(17)
     torch.set_num_threads(1)
     model = JointActPilotNet(SharedObjectTransformer(
@@ -53,6 +54,7 @@ def test_shared_h16_actor_matches_local_logits_and_horizon(tmp_path):
         checkpoint=checkpoint, digest=digest,
         workers=2, device="cpu", horizon_lambda=0.3,
         max_batch=2, max_delay_ms=10.0,
+        profile_actor=profile_actor,
     ) as service:
         first = RemoteH16Actor(service.transport)
         second = RemoteH16Actor(service.transport)
@@ -83,6 +85,19 @@ def test_shared_h16_actor_matches_local_logits_and_horizon(tmp_path):
     assert service.metrics["requests"] == 3
     assert 1 <= service.metrics["batches"] <= 3
     assert service.metrics["max_batch_observed"] <= 2
+    if profile_actor:
+        metrics = service.metrics
+        assert sum(metrics["p2_batch_size_histogram"].values()) == metrics["batches"]
+        assert metrics["p2_actor_distributions"]["actor_queue_delay_ms"]["samples"] == 3
+        for key in ("actor_queue_delay_ms", "host_collate_ms",
+                    "host_to_device_ms", "forward_sync_ms"):
+            distribution = metrics["p2_actor_distributions"][key]
+            assert distribution is not None
+            assert distribution["samples"] >= 1
+            assert 0 <= distribution["p50_ms"] <= distribution["p95_ms"]
+            assert distribution["p95_ms"] <= distribution["max_ms"]
+    else:
+        assert "p2_actor_distributions" not in service.metrics
 
 
 def test_shared_h16_actor_rejects_invalid_arguments(tmp_path):
