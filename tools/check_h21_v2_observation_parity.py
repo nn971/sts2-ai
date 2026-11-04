@@ -11,10 +11,16 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from probe_h21_live_public import FAIR_POLICY_ID, PublicJsonl, choose
+from probe_h21_live_public import (
+    FAIR_POLICY_ID,
+    PublicJsonl,
+    choose,
+    observed_canonical_enemy_effects,
+)
 from sts2_ai.training.h19_resource_codec import (
     EMULATOR_PUBLIC_SCHEMA_V1,
     EMULATOR_PUBLIC_SCHEMA_V2,
@@ -94,16 +100,23 @@ def main() -> int:
         "--snapshot-every", type=int, default=0,
         help="Periodically save/load and replay the same next public action",
     )
+    parser.add_argument(
+        "--require-positive-snapshot", action="store_true",
+        help="Require replay verification of a snapshot with active enemy debuffs",
+    )
     args = parser.parse_args()
     if args.max_decisions < 1:
         parser.error("--max-decisions must be positive")
     if args.snapshot_every < 0:
         parser.error("--snapshot-every must be nonnegative")
+    if args.require_positive_snapshot and args.snapshot_every == 0:
+        parser.error("--require-positive-snapshot requires --snapshot-every")
     seeds = args.seeds or ["p1-v2-parity-a"]
     checked = 0
     canonical_frames = 0
     snapshot_roundtrips = 0
     snapshot_replayed_actions = 0
+    positive_snapshot_effects: Counter[str] = Counter()
     highest_floor = 0
     errors: list[dict[str, Any]] = []
     public = PublicJsonl(args.emulator_dll)
@@ -114,6 +127,7 @@ def main() -> int:
                 != EMULATOR_PUBLIC_SCHEMA_V2):
             raise RuntimeError("Emulator does not advertise v1/v2 public frames")
         for seed_index, seed in enumerate(seeds):
+            sampled_positive = False
             first = public.call("reset_native_overgrowth",
                                 seed=seed, ascension=0,
                                 compact_card_selection=True)["stateHandle"]
@@ -158,9 +172,18 @@ def main() -> int:
                 checked += 1
                 action = choose(
                     old_actions, public_state=legacy_observation,
-                    seed=seed, step=step, route_variant=seed_index)
+                    seed=seed, step=step, route_variant=seed_index,
+                    prefer_enemy_debuff_cards=True)
+                effects = observed_canonical_enemy_effects(canonical_observation)
                 replay_handles: list[tuple[str, str]] = []
-                if args.snapshot_every and step % args.snapshot_every == 0:
+                snapshot_now = args.snapshot_every and (
+                    step % args.snapshot_every == 0
+                    or (bool(effects) and not sampled_positive)
+                )
+                if snapshot_now:
+                    if effects:
+                        positive_snapshot_effects.update(effects)
+                        sampled_positive = True
                     for handle, frame, actions in (
                         (first, old, old_actions),
                         (second, new, new_actions),
@@ -225,11 +248,14 @@ def main() -> int:
         "canonical_v2_frames": canonical_frames,
         "snapshot_roundtrips": snapshot_roundtrips,
         "snapshot_replayed_actions": snapshot_replayed_actions,
+        "positive_snapshot_effects": dict(sorted(positive_snapshot_effects.items())),
         "highest_floor": highest_floor, "errors": errors[:15],
         "total_errors": len(errors),
     }, indent=2, sort_keys=True), flush=True)
     if (args.snapshot_every and snapshot_replayed_actions == 0):
         raise AssertionError("No RunSnapshot replay actions verified")
+    if args.require_positive_snapshot and not positive_snapshot_effects:
+        raise AssertionError("No active enemy debuff was replayed from RunSnapshot")
     if errors or checked < len(seeds) or canonical_frames == 0:
         raise AssertionError(
             "Canonical/legacy public observation parity failed: "
