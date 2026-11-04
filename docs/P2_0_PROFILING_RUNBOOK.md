@@ -1141,3 +1141,55 @@ simulations, avoid scaling this approach without reducing verification
 overhead. If the saving looks material, proceed to matched
 16/64-simulation tests and a 15-worker ≥32-seed comparison.
 The outcome must be reported regardless of sign.
+
+
+### 2026-11-04 second live P2.1 smoke — cache reuse proved, throughput still negative
+
+User-supplied `p2-prefix-cache-abba-report(1).json`, source AI
+`7609d048e8c772e86d09bd58d0b620fb38fa0f15`,
+emulator `0937456588d563b48e9810290b7382f64d30d5a7`,
+identical two generated-map A0 seeds, one worker, eight simulations,
+depth eight, fixed-shape batch four, capped at 80 decisions. Exact
+public action, PUCT teacher, game outcome and logical search-work
+parity passed across all A/B/B/A arms. Each arm had 576 search
+transitions, 320 real transitions, 0 completed and 4 censored episodes.
+
+| Arm | Cache | Wall (s) | Hits / steps avoided | Receipt RPCs | Receipt time (s) |
+|---|---|---:|---:|---:|---:|
+| A1 | Off | 12.19985 | 0 | 0 | 0 |
+| B1 | Cap 64 | 13.00554 | 202 | 1216 | 0.54348 |
+| B2 | Cap 64 | 13.14156 | 202 | 1216 | 0.54087 |
+| A2 | Off | 11.00109 | 0 | 0 | 0 |
+
+Each cached cohort had 8 search roots, 202 cache hits, 374 misses,
+no capacity skips and no provider bypass. Cache hit rate was
+`202 / 576 = 35.07%`, saving 202 fused emulator step requests
+without changing logical PUCT transitions. Each cached cohort made
+`64 + 2*202 + 2*374 = 1,216` versioned stochastic receipt RPCs:
+one root receipt for each of 64 PUCT simulations, two receipts for
+every hit (current parent and retained child) and two for each miss
+that records a new prefix (parent and new child). Mean receipt
+cost was approximately **0.446 ms per RPC**.
+
+Combined A/B/B/A throughput ratio (uncached wall)/(cached wall)
+was **0.887324×**, equivalent to **+12.6984% cached wall time**.
+Both paired order comparisons favored the uncached control
+(`0.93805×` and `0.83712×`). This independently reinforces the
+previous **+15.84%** cached-wall result from the same tiny seed
+cohort. The receipt RPC time totals `1.08435s` across B1/B2,
+versus a total cache-on excess wall of approximately `2.94615s`;
+receipt latency therefore accounts for only part of the difference.
+Host bookkeeping, retained-handle overhead, scheduling and startup
+may contribute, but have not been separated by this report.
+
+**P2.1 gate decision:** opt-in cache remains **off by default**.
+A 35% step-request reduction has not translated into a wall
+improvement, and the plan's provisional **20% end-to-end benefit
+gate is not met**. Do not scale this design to training or 15-worker
+production on the current evidence. Reserve further work on P2.1
+for a versioned, source-audited approach that eliminates multiple
+round-trip receipts per prefix or provides a clear favorable
+subcost estimate. Proceed to **P2.2 transport decomposition**
+for the next profile-driven optimization candidate. The cached
+teacher parity is useful correctness evidence, not an acceptance
+or Nature/fair-history certificate.
