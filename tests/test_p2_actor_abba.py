@@ -176,3 +176,71 @@ def test_orchestrator_stages_exact_15_worker_unprofiled_order(tmp_path):
         for c in commands[:4]
     ] == [0, 4, 4, 0]
     assert "--a1" in commands[-1] and "--a2" in commands[-1]
+
+
+def test_actor_profile_abba_reports_overhead_with_identical_batching():
+    data = [cohort(wall, batch=16, fixed_shape=4)
+            for wall in (40.0, 44.0, 45.0, 41.0)]
+    for profile in data[1:3]:
+        profile["identity"]["actor_profile"] = True
+    report = report_actor_abba(*data, experiment="actor-profile")
+    assert report["parity"]["passed"]
+    assert report["experiment"] == "actor-profile"
+    assert report["actor_profiled_to_unprofiled_wall_ratio"] == pytest.approx(
+        89 / 81
+    )
+    assert report["actor_profile_overhead_fraction"] == pytest.approx(
+        89 / 81 - 1
+    )
+    assert report["workload"]["censored_episode_executions_per_run"] == 4
+
+
+def test_actor_profile_abba_detects_wrong_toggle_and_changed_batching():
+    data = [cohort(40, batch=16, fixed_shape=4) for _ in range(4)]
+    for profile in data[1:3]:
+        profile["identity"]["actor_profile"] = True
+    report_actor_abba(*data, experiment="actor-profile")
+    wrong = deepcopy(data)
+    wrong[1]["identity"]["actor_profile"] = False
+    with pytest.raises(ValueError, match="measurement instrumentation"):
+        report_actor_abba(*wrong, experiment="actor-profile")
+    wrong = deepcopy(data)
+    wrong[2]["identity"]["actor_max_batch"] = 8
+    with pytest.raises(ValueError, match="inconsistent actor mode"):
+        report_actor_abba(*wrong, experiment="actor-profile")
+    wrong = deepcopy(data)
+    wrong[1]["identity"]["actor_fixed_shape_batch_size"] = 3
+    with pytest.raises(ValueError, match="changed batching"):
+        report_actor_abba(*wrong, experiment="actor-profile")
+    wrong = deepcopy(data)
+    wrong[3]["seed_reports"][1]["trace_sha256"] = "changed"
+    with pytest.raises(ValueError, match="teacher replay drift"):
+        report_actor_abba(*wrong, experiment="actor-profile")
+    with pytest.raises(ValueError, match="Unsupported"):
+        report_actor_abba(*data, experiment="unknown")
+
+
+def test_actor_profile_overhead_runner_preserves_mode_and_replay(tmp_path):
+    args = Namespace(
+        experiment="actor-profile",
+        seeds=None, seed_prefix="p2-overhead", seed_count=32, workers=15,
+        max_decisions=80, max_searches=2, simulations=16, depth=8,
+        actor_max_delay_ms=2.0, horizon_lambda=0.411395,
+        macro_prior_weight=0.5, macro_model=Path("macro.json"),
+        ascension=0, ai_root=Path("/tmp/ai"), emulator_root=Path("/tmp/emu"),
+        emulator_revision="emulator-sha", checkpoint=Path("model.pt"),
+        actor_device="cuda", map_profile="generated", output_root=tmp_path,
+    )
+    calls, files = make_commands(args)
+    assert len(calls) == 5
+    assert files[-1].name == "actor-profile-overhead-abba-report.json"
+    assert [int(call[call.index("--actor-max-batch") + 1])
+            for call in calls[:4]] == [16] * 4
+    assert [int(call[call.index("--actor-fixed-shape-batch-size") + 1])
+            for call in calls[:4]] == [4] * 4
+    assert ["--actor-profile" in call for call in calls[:4]] == [
+        False, True, True, False,
+    ]
+    assert all("--no-episode-profile" in call for call in calls[:4])
+    assert all("--paired" in call for call in calls[:4])
+    assert calls[-1][calls[-1].index("--experiment") + 1] == "actor-profile"
