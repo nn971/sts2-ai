@@ -126,6 +126,7 @@ PUBLIC_V1_FIELD_CONTRACT: dict[str, dict[str, str]] = {
     "deck_choice": {
         "source_relic_id": ENCODED, "kind": ENCODED,
         "remaining_selections": ENCODED,
+        "minimum_selections_remaining": ENCODED,
         "candidate_card_instance_ids": REFERENCE,
     },
     "shop": {
@@ -155,6 +156,7 @@ PUBLIC_V1_FIELD_CONTRACT: dict[str, dict[str, str]] = {
     "event_deck_choice": {
         "choice_id": ENCODED, "kind": ENCODED,
         "remaining_selections": ENCODED,
+        "minimum_selections_remaining": ENCODED,
         "candidate_card_instance_ids": REFERENCE,
         "upgrade_transformed_cards": ENCODED,
         "source_relic_id": ENCODED,
