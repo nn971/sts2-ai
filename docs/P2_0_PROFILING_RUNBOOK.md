@@ -384,6 +384,29 @@ allocation measurements are separate from the H16 v0 run, H21 inference
 is not schema-compatible with the frozen H16 checkpoint, and exact
 stochastic receipts are not yet attached to node-state reuse tests.
 
+### 32-seed preflight: H16 multi-card public selection aliases
+
+The first wider-seed cohort exposed a **codec** exception during PUCT
+expansion (floor 1), before any profile could be produced:
+`select_cards` payloads `[11,5]` and `[11,2]` were encoded with
+identical sorted public-card *multiset* pointers. The H16-v3 collision
+guard had allowed equivalent **one-card** selections, but rejected
+equivalent selections containing two or more cards. This did not
+implicate CUDA batching. The bounded repair on the P2 AI branch allows
+aliases of any nonempty cardinality only when all selected public class
+pointers and all non-card payload fields agree. It preserves every
+legal action and retains errors for genuine semantic differences
+(including enchantment-dependent card classes). A CPU regression
+tests two-/three-card aliases, multiplicity and strict failures.
+
+The original shell loop kept launching other configurations after a
+worker exception and the final comparator then failed with
+`FileNotFoundError`. The runner now identifies the seed and arm of a
+worker failure, the reporter diagnoses missing inputs, and the
+following fish function stops at the first failed cohort. Use a fresh
+`-v2` output directory for the rerun. Existing completed reports
+cannot be overwritten without explicit `--overwrite-output`.
+
 ### Next paired 32-seed actor comparison (fish)
 
 Use a fresh output directory and the same AI SHA and emulator DLL in
@@ -397,8 +420,9 @@ different teacher traces, the reporter refuses to publish a speedup.**
 cd ~/projects/sts2-ai
 git pull --ff-only
 set seeds32 (seq 0 31 | string replace -r '^' 'p2-a0-diagnostic-' | string join ',')
-set out results/p2-a0-confirm-32-v1
+set out results/p2-a0-confirm-32-v2
 
+function p2_actor_matrix
 for mode in batch1 fixed4
     switch $mode
         case batch1
@@ -421,6 +445,7 @@ for mode in batch1 fixed4
             --simulations 16 --depth 8 \
             --max-searches 2 --max-decisions 80 --paired \
             --output $out/$mode-w$workers/profile.json --execute
+        or return 1
     end
 end
 
@@ -430,6 +455,9 @@ python tools/report_p2_actor_ab.py \
     --candidate-one $out/fixed4-w1/profile.json \
     --candidate-fifteen $out/fixed4-w15/profile.json \
     --output $out/actor-ab-report.json
+end
+
+p2_actor_matrix
 ```
 
 Do not quietly replace the seed list, model, map, reward, device,
