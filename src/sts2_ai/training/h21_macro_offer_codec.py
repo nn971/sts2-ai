@@ -300,6 +300,10 @@ class _GroundedMacro:
         idx = self.add("event_choice", "reward:card_group", "reward",
                        {"count": len(cards)}, owner=root)
         self.reward_groups[("card", group)] = idx
+        if self.reward_reroll_groups is not None:
+            self.attribute(
+                idx, "reroll_available", group in self.reward_reroll_groups,
+            )
         if upgrades is not None and len(upgrades) != len(cards):
             raise ValueError("Card offer upgrade flags do not match visible options")
         if previews is not None and len(previews) != len(cards):
