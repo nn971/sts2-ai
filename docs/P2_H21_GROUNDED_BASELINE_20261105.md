@@ -66,7 +66,7 @@ git -C $emu fetch origin pull/239/head
 git -C $emu switch --detach FETCH_HEAD
 set rev (git -C $emu rev-parse HEAD)
 dotnet build $emu/src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj -c Release -m:1
-set dll $emu/src/Sts2Emulator.Cli/bin/Release/net8.0/Sts2Emulator.Cli.dll
+set dll $emu/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll
 test -f $dll; or echo "Adjust DLL path to the built target framework"
 
 python tools/probe_h21_live_public.py \
