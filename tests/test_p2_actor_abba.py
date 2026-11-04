@@ -426,3 +426,84 @@ def test_p2_transport_runner_stages_split_fused_fused_split(tmp_path):
         call[call.index("--actor-fixed-shape-batch-size") + 1] == "4"
         for call in calls[:4]
     )
+
+
+def test_p2_wire_only_abba_decomposes_fused_payloads_without_puct_profiling():
+    data = [
+        cohort(wall, batch=16, fixed_shape=4)
+        for wall in (40.0, 43.0, 42.0, 41.0)
+    ]
+    for index, profile in enumerate(data):
+        enabled = index in (1, 2)
+        profile["identity"]["wire_profile_only"] = enabled
+        for row in profile["seed_reports"]:
+            for run in row["runs"]:
+                run["wire_instrumentation"] = enabled
+                run["wire"] = ({
+                    "batch_rollout_step_frame": {
+                        "calls": 100,
+                        "request_bytes": 10_000,
+                        "response_bytes": 50_000,
+                        "encode_seconds": 0.05,
+                        "pipe_seconds": 0.2,
+                        "decode_seconds": 0.1,
+                    },
+                } if enabled else {})
+    report = report_actor_abba(*data, experiment="wire-profile")
+    assert report["parity"]["passed"] is True
+    assert report["wire_profile_overhead_fraction"] == pytest.approx(85/81 - 1)
+    stats = report["wire_profile_diagnostics"]
+    assert stats[0]["operations"] == {}
+    assert stats[1]["operations"]["batch_rollout_step_frame"]["calls"] == 400
+    assert stats[1]["total_response_bytes"] == 200_000
+    assert stats[1]["worker_summed_pipe_seconds"] == pytest.approx(0.8)
+
+    wrong = deepcopy(data)
+    wrong[1]["seed_reports"][0]["runs"][0]["wire_instrumentation"] = False
+    with pytest.raises(ValueError, match="instrumented unexpectedly"):
+        report_actor_abba(*wrong, experiment="wire-profile")
+
+    wrong = deepcopy(data)
+    wrong[3]["identity"]["wire_profile_only"] = True
+    with pytest.raises(ValueError, match="unexpected wire-only"):
+        report_actor_abba(*wrong, experiment="wire-profile")
+
+    wrong = deepcopy(data)
+    wrong[1]["seed_reports"][0]["runs"][0]["wire"][
+        "batch_rollout_step_frame"
+    ]["decode_seconds"] = -0.2
+    with pytest.raises(ValueError, match="invalid wire timer"):
+        report_actor_abba(*wrong, experiment="wire-profile")
+
+    wrong = deepcopy(data)
+    wrong[0]["seed_reports"][0]["trace_sha256"] = "drift"
+    with pytest.raises(ValueError, match="teacher replay drift"):
+        report_actor_abba(*wrong, experiment="wire-profile")
+
+
+def test_p2_wire_only_runner_toggles_just_jsonl_instrumentation(tmp_path):
+    args = Namespace(
+        experiment="wire-profile",
+        seeds=None, seed_prefix="p2-wire", seed_count=4, workers=1,
+        max_decisions=80, max_searches=2, simulations=16, depth=8,
+        actor_max_delay_ms=2.0, horizon_lambda=0.411395,
+        macro_prior_weight=0.5, macro_model=Path("macro.json"),
+        ascension=0, ai_root=Path("/tmp/ai"), emulator_root=Path("/tmp/emu"),
+        emulator_revision="emulator-sha", checkpoint=Path("model.pt"),
+        actor_device="cuda", map_profile="generated", output_root=tmp_path,
+    )
+    calls, files = make_commands(args)
+    assert files[-1].name == "p2-wire-profile-abba-report.json"
+    assert ["--wire-profile-only" in c for c in calls[:4]] == [
+        False, True, True, False,
+    ]
+    assert all("--no-episode-profile" in c for c in calls[:4])
+    assert all("--actor-profile" not in c for c in calls[:4])
+    assert all(
+        c[c.index("--rollout-transport") + 1] == "fused"
+        for c in calls[:4]
+    )
+    assert all(
+        c[c.index("--p2-prefix-cache-handles") + 1] == "0"
+        for c in calls[:4]
+    )
