@@ -43,7 +43,7 @@ jobs:
             --seed h21-route-unknown-c --seed h21-route-rest-d \
             --seed h21-route-event-e --seed h21-route-shop-f \
             --seed h21-route-elite-g --seed h21-route-event-h \
-            --max-decisions 180 --diverse-route --strict \
+            --max-decisions 350 --diverse-route --strict \
             > h21-live-extended-coverage.json
           result=$?
           cat h21-live-extended-coverage.json
