@@ -14,7 +14,6 @@ import json
 import multiprocessing
 import os
 import platform
-import random
 import time
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import nullcontext
@@ -27,7 +26,7 @@ from sts2_ai.emulator.jsonl_backend import JsonlEmulatorBackend
 from sts2_ai.models.h16_batch_actor import RemoteH16Actor, SharedH16Service
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet, PilotPolicy
-from tools.profile_p2_joint_throughput import (
+from profile_p2_joint_throughput import (
     ROOT,
     critical_path_shares,
     dll_identity,
