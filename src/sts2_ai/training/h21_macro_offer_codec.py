@@ -174,6 +174,9 @@ class _GroundedMacro:
         self.potion_refs: dict[int, int] = {}
         self.empty_potion_slots: dict[int, int] = {}
         self.event_potion_offer: int | None = None
+        self.pending_deck_groups: dict[str, int] = {}
+        self.pending_deck_allowed: dict[str, frozenset[int]] = {}
+        self.reward_reroll_groups: frozenset[int] | None = None
         self._build_resource_refs()
 
     def identity(self, kind: int, label: str) -> int:
@@ -251,6 +254,45 @@ class _GroundedMacro:
                 raise ValueError("Duplicate or malformed public potion slot")
             self.potion_refs[item["slot"]] = pos
 
+    def build_pending_deck_choice(
+        self, owner: int, record: dict[str, Any], *,
+        context: str,
+    ) -> None:
+        """Join the published candidate instance IDs to owned deck classes.
+
+        The candidate IDs remain transient pointers. Class multiplicities and
+        the card-class targets convey actual selectable options without
+        materializing a combinatorial list of subsets.
+        """
+        if context in self.pending_deck_groups:
+            raise ValueError("Duplicate pending deck-choice context")
+        candidates = record.get("candidate_card_instance_ids")
+        if not isinstance(candidates, list):
+            raise ValueError("Missing public deck-choice candidate list")
+        if any(type(ref) is not int for ref in candidates):
+            raise ValueError("Malformed public deck-choice candidate ID")
+        if len(candidates) != len(set(candidates)):
+            raise ValueError("Duplicate pending deck-choice candidate ID")
+        counts: dict[int, int] = {}
+        for ref in candidates:
+            idx = self.deck(ref)
+            counts[idx] = counts.get(idx, 0) + 1
+        choice = self.add(
+            "event_choice", "pending_deck_choice:" + context,
+            context, {"count": len(candidates)}, owner=owner,
+        )
+        for name, value in record.items():
+            if name != "candidate_card_instance_ids" and value is not None:
+                self.attribute(choice, "pending_deck_choice." + name, value)
+        for card_index, multiplicity in counts.items():
+            class_node = self.add(
+                "event_choice", "candidate_deck_card_class", context,
+                {"count": multiplicity}, owner=choice,
+            )
+            self.edges.append(RelationToken(GROUP_OPTION, class_node, card_index))
+        self.pending_deck_groups[context] = choice
+        self.pending_deck_allowed[context] = frozenset(candidates)
+
     def card_group(self, group: int, cards: list[str],
                    upgrades: list[bool] | None = None,
                    previews: list[dict[str, Any]] | None = None) -> None:
@@ -282,7 +324,8 @@ class _GroundedMacro:
     def build_global(self) -> None:
         # Macro context independent of opaque map node IDs.
         for name in ("act", "act_one_region", "act_one_boss_encounter_id",
-                     "map_generation_profile_id", "character_id", "ruleset_id"):
+                     "map_generation_profile_id", "character_id", "ruleset_id",
+                     "event_id"):
             if name in self.state and self.state[name] is not None:
                 self.attribute(0, name, self.state[name])
 
@@ -324,11 +367,20 @@ class _GroundedMacro:
             if name in reward:
                 self.attribute(reward_root, name, reward[name])
         if isinstance(reward.get("pending_deck_choice"), dict):
-            pending = reward["pending_deck_choice"]
-            for name in ("source_relic_id", "kind", "remaining_selections"):
-                if name in pending:
-                    self.attribute(reward_root, "pending_deck_choice." + name,
-                                   pending[name])
+            self.build_pending_deck_choice(
+                reward_root, reward["pending_deck_choice"], context="reward",
+            )
+        rerolls = reward.get("available_card_rerolls")
+        if rerolls is not None:
+            if not isinstance(rerolls, list):
+                raise ValueError("Malformed public reward reroll list")
+            indices = [entry.get("group_index") for entry in rerolls
+                       if isinstance(entry, dict)]
+            if (len(indices) != len(rerolls)
+                    or any(type(i) is not int for i in indices)
+                    or len(indices) != len(set(indices))):
+                raise ValueError("Malformed public reward reroll group")
+            self.reward_reroll_groups = frozenset(indices)
         groups = reward.get("pending_card_groups")
         if groups is not None and not isinstance(groups, list):
             raise ValueError("Malformed public pending_card_groups")
@@ -442,11 +494,9 @@ class _GroundedMacro:
         if "removal_used" in shop:
             self.attribute(root, "removal_used", shop["removal_used"])
         if isinstance(shop.get("pending_deck_choice"), dict):
-            pending = shop["pending_deck_choice"]
-            for name in ("source_relic_id", "kind", "remaining_selections"):
-                if name in pending:
-                    self.attribute(root, "pending_deck_choice." + name,
-                                   pending[name])
+            self.build_pending_deck_choice(
+                root, shop["pending_deck_choice"], context="shop",
+            )
 
     def build_event(self) -> None:
         evt = self.state.get("event")
@@ -472,6 +522,11 @@ class _GroundedMacro:
                 raise ValueError("Malformed public event potion replacement")
             self.event_potion_offer = self.add(
                 "potion", potion_id, "event", owner=root)
+            if "choice_id" in pending:
+                self.attribute(
+                    self.event_potion_offer, "potion_choice_id",
+                    pending["choice_id"],
+                )
             for slot in slots:
                 if type(slot) is not int or not 0 <= slot < capacity:
                     raise ValueError("Invalid event potion candidate slot")
@@ -480,12 +535,9 @@ class _GroundedMacro:
                         "potion", "empty_potion_slot", "inventory",
                         {"stacks": slot}, owner=0)
         if isinstance(evt.get("pending_deck_choice"), dict):
-            pending = evt["pending_deck_choice"]
-            for name in ("choice_id", "kind", "remaining_selections",
-                         "upgrade_transformed_cards", "source_relic_id"):
-                if name in pending:
-                    self.attribute(root, "pending_deck_choice." + name,
-                                   pending[name])
+            self.build_pending_deck_choice(
+                root, evt["pending_deck_choice"], context="event",
+            )
         value_by_id = {v["choice_id"]: v for v in evt.get("visible_choice_values") or []}
         choices = evt.get("offered_choice_ids")
         if choices is not None and not isinstance(choices, list):
@@ -555,7 +607,24 @@ class _GroundedMacro:
             target = self.shop.get(("potion", _int(payload, "OfferId")), -1)
             source = self.potion(_int(payload, "Slot"))
         elif kind in _DECK_CARD_ACTIONS:
-            target = self.deck(_int(payload, "CardInstanceId"))
+            card_ref = _int(payload, "CardInstanceId")
+            target = self.deck(card_ref)
+            pending_context = {
+                "choose_relic_deck_card": "reward",
+                "choose_shop_relic_deck_card": "shop",
+                "choose_event_deck_card": "event",
+            }.get(kind)
+            if pending_context is not None:
+                allowed = self.pending_deck_allowed.get(pending_context)
+                if allowed is None or card_ref not in allowed:
+                    raise ValueError(
+                        "Pending deck choice is absent or card is not a public candidate")
+                source = self.pending_deck_groups[pending_context]
+        elif kind == "finish_relic_deck_choice":
+            groups = tuple(self.pending_deck_groups.values())
+            if len(groups) != 1:
+                raise ValueError("Finish deck choice has no unique public context")
+            target = groups[0]
         elif kind == "take_reward_bundle":
             target = self.option("bundle", 0, _int(payload, "Index"))
         elif kind in _POTION_SLOT_ACTIONS or kind == "use_potion":
@@ -569,6 +638,10 @@ class _GroundedMacro:
                      if kind.endswith("_group") or kind == "reroll_reward_card"
                      else self.current_reward_group)
             target = self.group("card", group)
+            if (kind == "reroll_reward_card"
+                    and self.reward_reroll_groups is not None
+                    and group not in self.reward_reroll_groups):
+                raise ValueError("Reroll target is not a public available group")
         elif kind in ("take_reward_relic", "take_reward_extra_relic",
                       "skip_reward_extra_relic"):
             index = _int(payload, "Index")
