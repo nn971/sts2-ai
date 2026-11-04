@@ -14,7 +14,6 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 ORDER = (("A1", 1, 0), ("B1", 16, 4), ("B2", 16, 4), ("A2", 1, 0))
