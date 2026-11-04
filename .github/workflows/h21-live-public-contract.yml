@@ -7,6 +7,8 @@ on:
       - 'src/sts2_ai/training/h19_resource_codec.py'
       - 'src/sts2_ai/training/h20_map_graph_codec.py'
       - 'src/sts2_ai/training/h21_macro_offer_codec.py'
+      - 'src/sts2_ai/training/h21_stable_identity.py'
+      - 'src/sts2_ai/models/shared_macro_transformer_v2.py'
       - 'src/sts2_ai/training/h21_field_coverage.py'
       - 'tools/probe_h21_live_public.py'
       - 'tools/check_h21_public_source_schema.py'
