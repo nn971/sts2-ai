@@ -367,6 +367,18 @@ def main() -> None:
         "search_roots": sum(int(r["search_roots"]) for r in runs),
         "search_transitions": sum(int(r["search_transitions"]) for r in runs),
         "real_transitions": sum(int(r["real_transitions"]) for r in runs),
+        "p2_prefix_cache_diagnostics": {
+            metric: sum(
+                (float if metric == "receipt_seconds" else int)(
+                    run.get("p2_prefix_cache", {}).get(metric, 0)
+                ) for run in runs
+            )
+            for metric in (
+                "roots", "hits", "misses", "emulator_step_calls_avoided",
+                "receipt_calls", "receipt_seconds",
+                "skipped_capacity", "skipped_provider",
+            )
+        },
         "worker_elapsed_sum_seconds": worker_elapsed_sum,
         "worker_bridge_sum_seconds": bridge_sum,
         "worker_actor_inference_sum_seconds": actor_sum,
