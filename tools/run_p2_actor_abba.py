@@ -65,7 +65,7 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
     if args.macro_model is not None:
         common.extend(("--macro-model", str(args.macro_model)))
     experiment = getattr(args, "experiment", "batching")
-    if experiment not in ("batching", "actor-profile", "prefix-cache"):
+    if experiment not in ("batching", "actor-profile", "prefix-cache", "transport"):
         raise ValueError("Invalid actor A/B/B/A experiment")
     modes = (
         ORDER if experiment == "batching" else
@@ -88,6 +88,10 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
          "--p2-prefix-cache-handles",
          str(64 if experiment == "prefix-cache"
              and name in ("B1", "B2") else 0),
+         "--rollout-transport", (
+             "legacy" if experiment == "transport" and name in ("A1", "A2")
+             else "fused"
+         ),
          "--output", str(output)]
         for (name, max_batch, fixed_size), output in zip(
             modes, files, strict=True
@@ -97,7 +101,9 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
         "actor-profile-overhead-abba-report.json"
         if experiment == "actor-profile" else
         "p2-prefix-cache-abba-report.json"
-        if experiment == "prefix-cache" else "actor-abba-report.json"
+        if experiment == "prefix-cache" else
+        "p2-transport-abba-report.json"
+        if experiment == "transport" else "actor-abba-report.json"
     )
     calls.append([
         sys.executable, str(ROOT / "tools/report_p2_actor_abba.py"),
@@ -117,9 +123,9 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--execute", action="store_true",
                    help="Perform all four runs; otherwise preview commands")
-    p.add_argument("--experiment", choices=("batching", "actor-profile", "prefix-cache"),
+    p.add_argument("--experiment", choices=("batching", "actor-profile", "prefix-cache", "transport"),
                    default="batching",
-                   help="Batch-1 versus fixed4, or fixed4 actor profiling on/off")
+                   help="Batching, actor profile, exact prefix, or JSONL fused/legacy transport")
     p.add_argument("--ai-root", type=Path, default=ROOT)
     p.add_argument("--emulator-root", type=Path, required=True)
     p.add_argument("--emulator-revision", required=True)
@@ -165,6 +171,9 @@ def main() -> None:
             "P2.1 A1/A2 prefix cache off; B1/B2 bounded cache on; "
             "actor/search/wire profiling off; strict B/B replay"
             if args.experiment == "prefix-cache" else
+            "P2.2 A1/A2 legacy split JSONL; B1/B2 fused JSONL; "
+            "cache/actor/search/wire profiling off; exact teacher replay"
+            if args.experiment == "transport" else
             "actor/search/wire profiling disabled; strict B/B replay"
         ),
         "seed_count": len(args.seeds.split(",")) if args.seeds else args.seed_count,
