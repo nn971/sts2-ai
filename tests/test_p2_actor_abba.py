@@ -641,9 +641,9 @@ def test_h22_collator_abba_accepts_exact_h21_variable_shape_replay():
     (1, lambda p: p["shared_actor_metrics"].update({"p2_h21_collator": "reference"}),
      "actor collator receipt"),
     (2, lambda p: p["identity"].update({"actor_fixed_shape_batch_size": 4}),
-     "H21 variable-shape"),
+     "inconsistent actor mode"),
     (2, lambda p: p["identity"].update({"actor_max_batch": 16}),
-     "batch/transport"),
+     "inconsistent actor mode"),
     (2, lambda p: p["identity"].update({"rollout_transport": "legacy"}),
      "provenance drift"),
     (2, lambda p: p["identity"].update({"checkpoint_sha256": "wrong"}),
@@ -653,7 +653,7 @@ def test_h22_collator_abba_accepts_exact_h21_variable_shape_replay():
     (3, lambda p: p["seed_reports"][0]["runs"][0].update({"search_transitions": 1}),
      "paired work drift"),
     (1, lambda p: p["identity"].update({"wire_profile_only": True}),
-     "instrumentation"),
+     "unexpected wire-only profiling"),
 ])
 def test_h22_collator_abba_rejects_drift(arm, change, reason):
     data = h22_collator_cohorts()
