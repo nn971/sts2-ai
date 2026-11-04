@@ -342,3 +342,87 @@ def test_prefix_cache_report_surfaces_real_saved_steps_and_receipt_cost():
     del broken[1]["p2_prefix_cache_diagnostics"]
     with pytest.raises(ValueError, match="Partial P2 cache"):
         report_actor_abba(*broken, experiment="prefix-cache")
+
+
+def test_p2_transport_abba_keeps_exact_teacher_and_reports_rpc_counts():
+    data = [
+        cohort(wall, batch=16, fixed_shape=4)
+        for wall in (40.0, 27.0, 28.0, 41.0)
+    ]
+    for item, mode in zip(
+        data, ("legacy", "fused", "fused", "legacy"), strict=True,
+    ):
+        item["identity"]["rollout_transport"] = mode
+        for seed in item["seed_reports"]:
+            for run in seed["runs"]:
+                run["bridge"] = {
+                    "batch_rollout_step_frame" if mode == "fused"
+                    else "step": {
+                        "calls": 5, "total_seconds": 0.75,
+                    },
+                    **({
+                        "observe": {"calls": 5, "total_seconds": 0.33},
+                        "legal_actions": {"calls": 5, "total_seconds": 0.22},
+                    } if mode == "legacy" else {}),
+                }
+    report = report_actor_abba(*data, experiment="transport")
+    assert report["parity"]["passed"] is True
+    assert report["ratio_of_total_baseline_to_candidate_wall"] == pytest.approx(
+        81 / 55
+    )
+    assert report["configurations"]["A_legacy_fixed4"][
+        "rollout_transport"
+    ] == "legacy"
+    assert report["configurations"]["B_fused_fixed4"][
+        "rollout_transport"
+    ] == "fused"
+    stats = report["transport_bridge_operation_totals"]
+    assert stats[0]["operations"]["step"]["calls"] == 20
+    assert stats[1]["operations"]["batch_rollout_step_frame"]["calls"] == 20
+    assert "observe" not in stats[1]["operations"]
+    assert stats[0]["worker_summed_nonadditive_bridge_seconds"] > (
+        stats[1]["worker_summed_nonadditive_bridge_seconds"]
+    )
+
+    wrong = deepcopy(data)
+    wrong[2]["identity"]["rollout_transport"] = "legacy"
+    with pytest.raises(ValueError, match="legacy/fused/fused/legacy"):
+        report_actor_abba(*wrong, experiment="transport")
+
+    wrong = deepcopy(data)
+    wrong[1]["seed_reports"][0]["runs"][0]["bridge"]["observe"] = {
+        "calls": 1, "total_seconds": -1.0,
+    }
+    with pytest.raises(ValueError, match="invalid bridge calls/time"):
+        report_actor_abba(*wrong, experiment="transport")
+
+    wrong = deepcopy(data)
+    wrong[1]["seed_reports"][0]["trace_sha256"] = "different"
+    with pytest.raises(ValueError, match="teacher replay drift"):
+        report_actor_abba(*wrong, experiment="transport")
+
+
+def test_p2_transport_runner_stages_split_fused_fused_split(tmp_path):
+    args = Namespace(
+        experiment="transport",
+        seeds=None, seed_prefix="p2-transport", seed_count=2, workers=1,
+        max_decisions=80, max_searches=2, simulations=8, depth=8,
+        actor_max_delay_ms=2.0, horizon_lambda=0.411395,
+        macro_prior_weight=0.5, macro_model=Path("macro.json"),
+        ascension=0, ai_root=Path("/tmp/ai"), emulator_root=Path("/tmp/emu"),
+        emulator_revision="emulator-sha", checkpoint=Path("model.pt"),
+        actor_device="cuda", map_profile="generated", output_root=tmp_path,
+    )
+    calls, files = make_commands(args)
+    assert files[-1].name == "p2-transport-abba-report.json"
+    assert [call[call.index("--rollout-transport") + 1]
+            for call in calls[:4]] == ["legacy", "fused", "fused", "legacy"]
+    assert all("--no-episode-profile" in call for call in calls[:4])
+    assert all(
+        call[call.index("--p2-prefix-cache-handles") + 1] == "0"
+        for call in calls[:4]
+    )
+    assert all(
+        call[call.index("--actor-fixed-shape-batch-size") + 1] == "4"
+        for call in calls[:4]
+    )
