@@ -15,7 +15,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from tools.report_p2_cohort_comparison import SCHEMA, _rows
+if __package__:
+    from .report_p2_cohort_comparison import SCHEMA, _rows
+else:
+    from report_p2_cohort_comparison import SCHEMA, _rows
 
 REPORT_SCHEMA = "sts2-p2-profile-overhead-report-v1"
 ARMS = ("control_a", "profile_b1", "profile_b2", "control_a2")
