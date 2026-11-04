@@ -64,18 +64,36 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
     ]
     if args.macro_model is not None:
         common.extend(("--macro-model", str(args.macro_model)))
+    experiment = getattr(args, "experiment", "batching")
+    if experiment not in ("batching", "actor-profile"):
+        raise ValueError("Invalid actor A/B/B/A experiment")
+    modes = (
+        ORDER if experiment == "batching" else
+        (("A1", 16, 4), ("B1", 16, 4),
+         ("B2", 16, 4), ("A2", 16, 4))
+    )
     files = [
-        args.output_root / name / "profile.json" for name, _, _ in ORDER
+        args.output_root / name / "profile.json" for name, _, _ in modes
     ]
     calls = [
         [sys.executable, str(ROOT / "tools/profile_p2_parallel_cohort.py"),
          *common,
          "--actor-max-batch", str(max_batch),
          "--actor-fixed-shape-batch-size", str(fixed_size),
+         *(
+             ["--actor-profile"]
+             if experiment == "actor-profile" and name in ("B1", "B2")
+             else []
+         ),
          "--output", str(output)]
-        for (_, max_batch, fixed_size), output in zip(ORDER, files, strict=True)
+        for (name, max_batch, fixed_size), output in zip(
+            modes, files, strict=True
+        )
     ]
-    report = args.output_root / "actor-abba-report.json"
+    report = args.output_root / (
+        "actor-profile-overhead-abba-report.json"
+        if experiment == "actor-profile" else "actor-abba-report.json"
+    )
     calls.append([
         sys.executable, str(ROOT / "tools/report_p2_actor_abba.py"),
         *(
@@ -84,6 +102,7 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
                                   strict=True)
             for element in (flag, str(path))
         ),
+        "--experiment", experiment,
         "--output", str(report),
     ])
     return calls, [*files, report]
@@ -93,6 +112,9 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--execute", action="store_true",
                    help="Perform all four runs; otherwise preview commands")
+    p.add_argument("--experiment", choices=("batching", "actor-profile"),
+                   default="batching",
+                   help="Batch-1 versus fixed4, or fixed4 actor profiling on/off")
     p.add_argument("--ai-root", type=Path, default=ROOT)
     p.add_argument("--emulator-root", type=Path, required=True)
     p.add_argument("--emulator-revision", required=True)
@@ -130,7 +152,13 @@ def main() -> None:
             )
     print(json.dumps({
         "order": [a for a, _, _ in ORDER],
-        "instrumentation": "actor/search/wire profiling disabled; strict B/B replay",
+        "experiment": args.experiment,
+        "instrumentation": (
+            "A1/A2 actor profile off; B1/B2 actor profile on; "
+            "search/wire profile off; strict B/B replay"
+            if args.experiment == "actor-profile" else
+            "actor/search/wire profiling disabled; strict B/B replay"
+        ),
         "seed_count": len(args.seeds.split(",")) if args.seeds else args.seed_count,
         "commands": [shlex.join(call) for call in calls],
         "execute": args.execute,
