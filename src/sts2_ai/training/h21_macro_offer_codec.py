@@ -12,7 +12,6 @@ from dataclasses import replace
 from typing import Any
 
 from sts2_ai.models.shared_game_objects import (
-    ACTION_BUCKETS,
     IDENTITY_BUCKETS,
     KINDS,
     OWNER_ATTRIBUTE_KIND_V2,
@@ -27,6 +26,7 @@ from sts2_ai.models.shared_game_objects import (
 )
 from sts2_ai.training.h20_map_graph_codec import encode_h20_map_decision
 from sts2_ai.training.h21_field_coverage import audit_public_observation
+from sts2_ai.training.h21_stable_identity import H21StableIdentityHasher
 
 H21_OBJECT_SCHEMA = "sts2-h21-public-grounded-macro-v2"
 H21_CODEC = "h21-grounded-reward-shop-event-v2"
@@ -158,8 +158,12 @@ def _check_supported_payload(kind: str, payload: dict[str, Any]) -> None:
 
 
 class _GroundedMacro:
-    def __init__(self, state: dict[str, Any], base: EncodedDecision) -> None:
+    def __init__(
+        self, state: dict[str, Any], base: EncodedDecision,
+        identity_hasher: H21StableIdentityHasher,
+    ) -> None:
         self.state = state
+        self.identity_hasher = identity_hasher
         self.objects = list(base.objects)
         self.edges = list(base.relations)
         self.roots: dict[str, int] = {}
@@ -171,19 +175,12 @@ class _GroundedMacro:
         self.potion_refs: dict[int, int] = {}
         self.empty_potion_slots: dict[int, int] = {}
         self.event_potion_offer: int | None = None
-        self.identity_names: dict[tuple[int, int], str] = {}
         self._build_resource_refs()
 
     def identity(self, kind: int, label: str) -> int:
-        bucket = _bucket(label, IDENTITY_BUCKETS)
-        key = (kind, bucket)
-        previous = self.identity_names.get(key)
-        if previous is not None and previous != label:
-            raise ValueError(
-                "H21 public identity hash collision: "
-                + repr((previous, label)))
-        self.identity_names[key] = label
-        return bucket
+        # Kinds are embedded separately; identical public concepts can share
+        # their stable semantic identity across different entity kinds.
+        return self.identity_hasher(label)
 
     def add(self, kind: str, identity: str, zone: str,
             data: dict[str, Any] | None = None, *, owner: int = -1,
@@ -551,7 +548,7 @@ class _GroundedMacro:
         members = old.members
         # Action kinds are stable semantics. The target object's visible
         # contents, not its ephemeral index/ID, distinguish legal offers.
-        semantic = _bucket("macro_action:" + kind, IDENTITY_BUCKETS)
+        semantic = self.identity_hasher("macro_action:" + kind)
 
         if kind in _SIMPLE_SHOP_ACTIONS:
             target = self.shop.get((_SIMPLE_SHOP_ACTIONS[kind], _int(payload, "OfferId")), -1)
@@ -752,6 +749,7 @@ _H21_PUBLIC_CARD_ATTRIBUTES = (
 
 def _augment_visible_combat(
     state: dict[str, Any], base: EncodedDecision,
+    identity_hasher: H21StableIdentityHasher,
 ) -> EncodedDecision:
     """Publish visible play-pile, enemy move/minion and dialog attributes.
 
@@ -759,7 +757,7 @@ def _augment_visible_combat(
     and checkpoints are unchanged.
     """
     combat = state["combat"]
-    ctx = _GroundedMacro(state, base)
+    ctx = _GroundedMacro(state, base, identity_hasher)
     ctx.build_completed_history()
     visible_sources = _bind_visible_affliction_sources(ctx, state)
     players = [
@@ -826,27 +824,32 @@ def encode_h21_macro_decision(
     public_schema_id: str,
 ) -> EncodedDecision:
     audit_public_observation(state)
-    action_kind_buckets: dict[int, str] = {}
+    identity_hasher = H21StableIdentityHasher()
     for action in actions:
-        kind_bucket = _bucket(action.kind, ACTION_BUCKETS)
-        previous_kind = action_kind_buckets.get(kind_bucket)
-        if previous_kind is not None and previous_kind != action.kind:
-            raise ValueError("H21 action-kind hash collision")
-        action_kind_buckets[kind_bucket] = action.kind
+        identity_hasher("action_kind:" + action.kind)
     base = encode_h20_map_decision(
         state, actions, public_schema_id=public_schema_id,
         allow_affliction_source_relations=True,
+        identity_hasher=identity_hasher,
     )
     if base.phase == "combat":
-        return _augment_visible_combat(state, base)
-    ctx = _GroundedMacro(state, base)
-    ctx.build_global()
-    ctx.build_completed_history()
-    ctx.build_reward()
-    ctx.build_shop()
-    ctx.build_event()
-    converted = tuple(ctx.ground(action, old)
-                      for action, old in zip(actions, base.actions, strict=True))
-    return EncodedDecision(
-        H21_OBJECT_SCHEMA, base.phase, tuple(ctx.objects),
-        converted, tuple(ctx.edges))
+        encoded = _augment_visible_combat(state, base, identity_hasher)
+    else:
+        ctx = _GroundedMacro(state, base, identity_hasher)
+        ctx.build_global()
+        ctx.build_completed_history()
+        ctx.build_reward()
+        ctx.build_shop()
+        ctx.build_event()
+        converted = tuple(ctx.ground(action, old)
+                          for action, old in zip(actions, base.actions, strict=True))
+        encoded = EncodedDecision(
+            H21_OBJECT_SCHEMA, base.phase, tuple(ctx.objects),
+            converted, tuple(ctx.edges))
+    # H21 alone uses stable concept hashes for action kinds. Legacy H7/H16
+    # action indices and checkpoints retain their historical embeddings.
+    grounded = tuple(
+        replace(token, kind=identity_hasher("action_kind:" + action.kind))
+        for action, token in zip(actions, encoded.actions, strict=True)
+    )
+    return replace(encoded, actions=grounded)
