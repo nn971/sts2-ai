@@ -205,3 +205,56 @@ def test_jsonl_receipt_requires_versioned_valid_hashes_and_provider_flags():
         changed = {**receipt, field: invalid}
         with pytest.raises(JsonlBridgeError):
             fetch(changed)
+
+
+def test_h16_fused_native_profile_validates_schema_and_counters():
+    profile = {
+        "schemaId": "sts2-p2-h16-fused-native-profile-v1",
+        "enabled": False,
+        "operations": {
+            "fused.environment_step_frame": {
+                "count": 12, "totalSeconds": 0.2, "maxSeconds": 0.04,
+                "allocatedBytes": 4096,
+            },
+        },
+    }
+
+    class FakeBackend:
+        def __init__(self, reply):
+            self.reply = reply
+
+        def _request(self, op):
+            assert op == "p2_h16_fused_perf_stop"
+            return {"ok": True, "profile": self.reply}
+
+    def fetch(reply):
+        return JsonlEmulatorBackend.p2_h16_fused_native_profile_snapshot(
+            FakeBackend(reply), stop=True,
+        )
+
+    assert fetch(profile)["operations"]["fused.environment_step_frame"][
+        "allocatedBytes"
+    ] == 4096
+    for field, value in (
+        ("schemaId", "wrong-version"),
+        ("operations", []),
+    ):
+        with pytest.raises(JsonlBridgeError):
+            fetch({**profile, field: value})
+    for field, value in (
+        ("count", -1),
+        ("allocatedBytes", -1),
+        ("totalSeconds", -1.0),
+        ("maxSeconds", float("nan")),
+    ):
+        corrupt = {
+            **profile,
+            "operations": {
+                "fused.environment_step_frame": {
+                    **profile["operations"]["fused.environment_step_frame"],
+                    field: value,
+                },
+            },
+        }
+        with pytest.raises(JsonlBridgeError):
+            fetch(corrupt)
