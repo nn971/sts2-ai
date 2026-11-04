@@ -11,7 +11,7 @@ import json
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 SHARED_OBJECT_SCHEMA = "sts2-h7-public-shared-objects-v1"
 IDENTITY_BUCKETS = 4096
@@ -116,6 +116,7 @@ def encode_public_decision(
     object_limit: int = MAX_OBJECTS,
     schema_id: str = SHARED_OBJECT_SCHEMA,
     omit_affliction_source_reference: bool = False,
+    identity_hasher: Callable[[str], int] | None = None,
 ) -> EncodedDecision:
     """Encode only published game fields and currently legal action payloads.
 
@@ -141,7 +142,9 @@ def encode_public_decision(
         numeric, observed = _numbers(record)
         index = len(objects)
         objects.append(ObjectToken(
-            KINDS.index(kind), _bucket(identity, IDENTITY_BUCKETS),
+            KINDS.index(kind),
+            identity_hasher(identity) if identity_hasher is not None
+            else _bucket(identity, IDENTITY_BUCKETS),
             ZONES.index(zone), numeric, observed, owner,
         ))
         if owned_attributes and kind in ("state", "player", "card", "relic", "potion"):
@@ -364,6 +367,7 @@ def encode_public_decision(
         _append_owned_public_attributes(
             objects, attribute_sources, object_limit=object_limit,
             omit_affliction_source_reference=omit_affliction_source_reference,
+            identity_hasher=identity_hasher,
         )
     return EncodedDecision(schema_id, phase, tuple(objects), tuple(action_tokens))
 
@@ -424,6 +428,7 @@ def _append_owned_public_attributes(
     sources: list[tuple[int, str, str, dict[str, Any]]],
     *, object_limit: int,
     omit_affliction_source_reference: bool = False,
+    identity_hasher: Callable[[str], int] | None = None,
 ) -> None:
     for owner, kind, zone, record in sources:
         for field in _V2_RESOURCE_FIELDS[kind]:
@@ -450,7 +455,11 @@ def _append_owned_public_attributes(
                 numeric, observed = _numbers({"stacks": value})
                 objects.append(ObjectToken(
                     kind=OWNER_ATTRIBUTE_KIND_V2,
-                    identity=_bucket("attribute:" + identity, IDENTITY_BUCKETS),
+                    identity=(
+                        identity_hasher("attribute:" + identity)
+                        if identity_hasher is not None
+                        else _bucket("attribute:" + identity, IDENTITY_BUCKETS)
+                    ),
                     zone=ZONES.index(zone),
                     numeric=numeric,
                     observed=observed,
