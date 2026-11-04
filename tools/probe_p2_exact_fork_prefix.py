@@ -17,9 +17,9 @@ from pathlib import Path
 from typing import Any
 
 from sts2_ai.emulator import FAIR_POLICY_ID, InformationPolicy
+from sts2_ai.emulator.jsonl_backend import JsonlEmulatorBackend
 from sts2_ai.emulator.protocol import EmulatorBackend, StateHandle
 from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH, reset_training_run
-from sts2_ai.emulator.jsonl_backend import JsonlEmulatorBackend
 
 if __package__:
     from .profile_p2_joint_throughput import ROOT, dll_identity, git_head
