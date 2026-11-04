@@ -56,6 +56,24 @@ def test_unchanged_public_names_retain_their_full_hash_across_instances():
     assert stable_id("") == 0
 
 
+
+def test_stable_id_memoization_preserves_public_identity_and_collision_guards():
+    # Repeated concept strings are common across consecutive public decisions.
+    # Keep a bounded process-local SHA cache without disabling the per-frame
+    # full-hash and effective-embedding collision checks.
+    name = "h21.memoized.identity.unique.test.20261104"
+    stable_id.cache_clear()
+    before = stable_id.cache_info()
+    first = stable_id(name)
+    second = stable_id(name)
+    after = stable_id.cache_info()
+    assert first == second
+    assert after.misses == before.misses + 1
+    assert after.hits == before.hits + 1
+    assert H21StableIdentityHasher()(name) == first
+    assert H21StableIdentityHasher()(name) == second
+
+
 def test_multi_hash_neural_embedding_separates_colliding_legacy_cards():
     torch = pytest.importorskip("torch")
     from sts2_ai.models.shared_macro_transformer_v2 import H21StableEmbedding
