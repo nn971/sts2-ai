@@ -17,6 +17,9 @@ from sts2_ai.models.shared_game_objects import (
 from sts2_ai.training.h16_public_codec import _h16_actions
 
 EMULATOR_PUBLIC_SCHEMA_V1 = "prototype-ai-v1"
+# The v2 source contract is admitted only by H21's separate canonical
+# power schema. H19 direct/legacy checkpoints remain v1-exclusive.
+EMULATOR_PUBLIC_SCHEMA_V2 = "prototype-ai-v2"
 H19_RESOURCE_CODEC = "h19-public-owned-resources-v1"
 H19_OBJECT_SCHEMA = "sts2-h19-public-owned-resources-v1"
 H19_OBJECT_LIMIT = 1024
@@ -97,9 +100,14 @@ def encode_h19_resource_decision(
     observation JSON does not carry its framing schema ID. This prevents
     a silently changed H16/H18 input from sharing H19 checkpoint semantics.
     """
-    if public_schema_id != EMULATOR_PUBLIC_SCHEMA_V1:
+    if public_schema_id != EMULATOR_PUBLIC_SCHEMA_V1 and not (
+        public_schema_id == EMULATOR_PUBLIC_SCHEMA_V2
+        and allow_affliction_source_relations
+        and identity_hasher is not None
+    ):
         raise ValueError(
-            "H19 requires emulator prototype-ai-v1 observation frame")
+            "H19 requires emulator prototype-ai-v1, or opt-in H21 "
+            "prototype-ai-v2, observation frame")
     if not isinstance(state, dict):
         raise ValueError("H19 requires an object-valued public observation")
     for key in ("potion_slot_capacity", "potion_slots_occupied",

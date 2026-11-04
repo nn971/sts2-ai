@@ -23,11 +23,14 @@ from sts2_ai.models.shared_game_objects import (
     _public_attribute_leaves,
     _single_numeric,
 )
+from sts2_ai.training.h19_resource_codec import EMULATOR_PUBLIC_SCHEMA_V2
 from sts2_ai.training.h20_map_graph_codec import encode_h20_map_decision
 from sts2_ai.training.h21_field_coverage import audit_public_observation
 from sts2_ai.training.h21_stable_identity import H21StableIdentityHasher
 
 H21_OBJECT_SCHEMA = "sts2-h21-public-grounded-macro-v4"
+# Separate checkpoint identity for canonical enemy-effect powers.
+H21_POWER_OBJECT_SCHEMA = "sts2-h21-public-grounded-macro-v5"
 H21_CODEC = "h21-grounded-reward-shop-event-v4"
 H21_OBJECT_LIMIT = 1536
 OPTION_OF = 3
@@ -963,11 +966,53 @@ def _augment_visible_combat(
     )
 
 
+
+_CANONICAL_ENEMY_POWER_IDS = frozenset({
+    "proto.power.poison", "proto.power.weak", "proto.power.vulnerable",
+})
+
+
+def _audit_canonical_enemy_power_v2(state: dict[str, Any]) -> None:
+    """Enforce the distinct v2 public contract before model encoding.
+
+    V2 models must receive exactly one power token per enemy effect and
+    no legacy status tokens; the v1 codec remains unchanged.
+    """
+    combat = state.get("combat")
+    if not isinstance(combat, dict):
+        raise ValueError("prototype-ai-v2 requires a combat observation")
+    enemies = combat.get("enemies")
+    if not isinstance(enemies, list):
+        raise ValueError("prototype-ai-v2 requires visible enemy objects")
+    for enemy in enemies:
+        if not isinstance(enemy, dict):
+            raise ValueError("Malformed v2 public enemy object")
+        if enemy.get("statuses") != {}:
+            raise ValueError("prototype-ai-v2 contains legacy enemy statuses")
+        powers = enemy.get("powers")
+        if not isinstance(powers, list):
+            raise ValueError("prototype-ai-v2 requires enemy powers")
+        seen: set[str] = set()
+        for power in powers:
+            if not isinstance(power, dict):
+                raise ValueError("Malformed v2 public enemy power")
+            power_id = power.get("power_id")
+            if power_id not in _CANONICAL_ENEMY_POWER_IDS:
+                continue
+            if power_id in seen:
+                raise ValueError("Duplicate canonical enemy effect power")
+            seen.add(power_id)
+            if type(power.get("stacks")) is not int or power["stacks"] <= 0:
+                raise ValueError("Invalid canonical enemy effect stacks")
+
+
 def encode_h21_macro_decision(
     state: dict[str, Any], actions: Sequence[Any], *,
     public_schema_id: str,
 ) -> EncodedDecision:
     audit_public_observation(state)
+    if public_schema_id == EMULATOR_PUBLIC_SCHEMA_V2:
+        _audit_canonical_enemy_power_v2(state)
     identity_hasher = H21StableIdentityHasher()
     for action in actions:
         identity_hasher("action_kind:" + action.kind)
@@ -996,4 +1041,9 @@ def encode_h21_macro_decision(
         replace(token, kind=identity_hasher("action_kind:" + action.kind))
         for action, token in zip(actions, encoded.actions, strict=True)
     )
-    return replace(encoded, actions=grounded)
+    return replace(
+        encoded, actions=grounded,
+        schema=(H21_POWER_OBJECT_SCHEMA
+                if public_schema_id == EMULATOR_PUBLIC_SCHEMA_V2
+                else H21_OBJECT_SCHEMA),
+    )
