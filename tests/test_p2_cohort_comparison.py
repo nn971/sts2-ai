@@ -59,6 +59,8 @@ def test_valid_paired_cohorts_are_compared_by_wall_time():
     assert report["maximum_concurrently_active_seed_tasks"] == 2
     assert report["fifteen_workers"]["completed_episodes_per_second"] == 0.0
     assert report["one_worker"]["search_transitions_per_second"] == 40.0
+    assert any("Zero completed" in w for w in report["warnings"])
+    assert any("Fewer than 15" in w for w in report["warnings"])
 
 
 @pytest.mark.parametrize(("mutate", "message"), [
@@ -104,3 +106,17 @@ def test_shape_bucket_mode_must_match_in_comparison():
     b["identity"]["actor_fixed_shape_batch_size"] = 4
     with pytest.raises(ValueError, match="actor_fixed_shape_batch_size"):
         compare_cohorts(a, b)
+
+
+def test_cohort_warning_tracks_real_completion_count():
+    single, parallel = fixture(1), fixture(15)
+    for profile in (single, parallel):
+        for row in profile["seed_reports"]:
+            for run in row["runs"]:
+                run["complete"] = True
+                run["outcome"] = "act_clear"
+        profile["completed_episodes"] = 4
+        profile["censored_episodes"] = 0
+    report = compare_cohorts(single, parallel)
+    assert not any("Zero completed" in w for w in report["warnings"])
+    assert report["fifteen_workers"]["completed_episodes"] == 4
