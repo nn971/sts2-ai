@@ -20,7 +20,6 @@ import torch
 from torch.nn import functional as F
 
 from sts2_ai.emulator.protocol import LegalAction
-from sts2_ai.models.shared_transformer import collate_h7
 from sts2_ai.training.h16_episode_metrics import combat_results
 from sts2_ai.training.h16_joint_act_pilot import (
     JointActPilotNet,
@@ -29,7 +28,6 @@ from sts2_ai.training.h16_joint_act_pilot import (
     completed_room_hp,
     remaining_room_hp,
 )
-from sts2_ai.training.h16_public_codec import encode_h16_decision
 from sts2_ai.training.h17_adaptive import playable_card_types
 
 SCHEMA = "sts2-h17-supervised-replay-v1"
