@@ -21,6 +21,7 @@ from sts2_ai.training.h19_resource_codec import EMULATOR_PUBLIC_SCHEMA_V1
 from sts2_ai.training.h21_action_alias_audit import audit_h21_action_aliases
 from sts2_ai.training.h21_field_coverage import audit_public_observation
 from sts2_ai.training.h21_macro_offer_codec import encode_h21_macro_decision
+from sts2_ai.training.h21_stable_identity import stable_id
 
 FAIR_POLICY_ID = "prototype-fair-v0"
 
@@ -156,10 +157,13 @@ def main() -> int:
     equivalent_aliases = 0
     canonical_choices = 0
     encode_seconds: list[float] = []
+    codec_seconds = 0.0
+    alias_seconds = 0.0
     max_objects = 0
     max_relations = 0
     max_floor = 0
     chosen_map_room_types: Counter[str] = Counter()
+    stable_id.cache_clear()
     public = PublicJsonl(args.emulator_dll)
     try:
         hello = public.call("hello")
@@ -193,10 +197,14 @@ def main() -> int:
                 try:
                     report = audit_public_observation(observation)
                     gaps.update(report.gaps)
+                    codec_start = time.perf_counter()
                     encoding = encode_h21_macro_decision(
                         observation, actions, public_schema_id=view["schemaId"])
+                    codec_end = time.perf_counter()
+                    codec_seconds += codec_end - codec_start
                     alias_audit = audit_h21_action_aliases(
                         observation, actions, encoding)
+                    alias_seconds += time.perf_counter() - codec_end
                     equivalent_aliases += alias_audit.equivalent_aliases
                     canonical_choices += alias_audit.canonical_choices
                     max_objects = max(max_objects, len(encoding.objects))
@@ -244,6 +252,7 @@ def main() -> int:
     measured = sorted(encode_seconds)
     p95_index = max(0, (95 * len(measured) + 99) // 100 - 1)
     measured_total = sum(measured)
+    cache = stable_id.cache_info()
     print(json.dumps({
         "schema": EMULATOR_PUBLIC_SCHEMA_V1,
         "decisions": decisions, "seeds": seeds,
@@ -252,6 +261,11 @@ def main() -> int:
         "max_floor": max_floor,
         "chosen_map_room_types": dict(sorted(chosen_map_room_types.items())),
         "encoding_only_seconds": round(measured_total, 6),
+        "codec_only_seconds": round(codec_seconds, 6),
+        "alias_check_seconds": round(alias_seconds, 6),
+        "stable_hash_cache_hits": cache.hits,
+        "stable_hash_cache_misses": cache.misses,
+        "stable_hash_cache_size": cache.currsize,
         "encoding_only_decisions_per_second": (
             round(len(measured) / measured_total, 2) if measured_total else 0),
         "encoding_p95_ms": (
