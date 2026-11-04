@@ -28,6 +28,7 @@ class H16ActorTransport:
     requests: Any
     replies: tuple[Any, ...]
     slot_counter: Any
+    profile_actor: bool = False
 
     def allocate_slot(self) -> int:
         with self.slot_counter.get_lock():
@@ -53,7 +54,11 @@ class RemoteH16Actor:
         seq = self.sequence
         started = time.perf_counter()
         try:
-            self.transport.requests.put((self.slot, seq, encoded), timeout=self.timeout)
+            request = (
+                (self.slot, seq, encoded, started)
+                if self.transport.profile_actor else (self.slot, seq, encoded)
+            )
+            self.transport.requests.put(request, timeout=self.timeout)
             answer = self.transport.replies[self.slot].get(timeout=self.timeout)
         except (queue.Full, queue.Empty) as exc:
             raise RuntimeError("H16 shared actor request/reply stalled") from exc
@@ -76,6 +81,7 @@ def _serve(
     horizon_lambda: float, requests: Any, replies: tuple[Any, ...],
     startup: Any, statistics: Any,
     max_batch: int, max_delay_ms: float,
+    profile_actor: bool = False,
 ) -> None:
     stats: dict[str, Any] = {
         "device": device, "requests": 0, "batches": 0,
@@ -83,6 +89,28 @@ def _serve(
         "host_collate_seconds": 0.0, "transfer_seconds": 0.0,
         "forward_seconds": 0.0,
     }
+    # P2-only bounded samples; disabled in production H16 execution.
+    samples: dict[str, list[float]] = {
+        "actor_queue_delay_ms": [], "host_collate_ms": [],
+        "host_to_device_ms": [], "forward_sync_ms": [],
+    }
+    batch_histogram: dict[str, int] = {}
+
+    def observe(name: str, seconds: float) -> None:
+        if profile_actor and len(samples[name]) < 8192:
+            samples[name].append(seconds * 1000.0)
+
+    def distribution(values: list[float]) -> dict[str, float | int] | None:
+        if not values:
+            return None
+        sorted_values = sorted(values)
+        return {
+            "samples": len(sorted_values),
+            "p50_ms": sorted_values[int((len(sorted_values) - 1) * 0.50)],
+            "p95_ms": sorted_values[int((len(sorted_values) - 1) * 0.95)],
+            "max_ms": sorted_values[-1],
+        }
+
     try:
         torch.set_num_threads(1)
         started = time.perf_counter()
@@ -116,23 +144,41 @@ def _serve(
                     if any(not isinstance(item, EncodedDecision) for item in frames):
                         raise ValueError("H16 actor expects public EncodedDecision tokens")
                     started = time.perf_counter()
+                    if profile_actor:
+                        ready_at = started
+                        for entry in work:
+                            if len(entry) == 4:
+                                observe("actor_queue_delay_ms", ready_at - entry[3])
+                        count_key = str(len(work))
+                        batch_histogram[count_key] = batch_histogram.get(count_key, 0) + 1
                     host = prepare_h7_actor_packed(frames)
-                    stats["host_collate_seconds"] += time.perf_counter() - started
+                    host_elapsed = time.perf_counter() - started
+                    stats["host_collate_seconds"] += host_elapsed
+                    observe("host_collate_ms", host_elapsed)
                     started = time.perf_counter()
                     batch = host.to(device)
-                    stats["transfer_seconds"] += time.perf_counter() - started
+                    if profile_actor and device.startswith("cuda"):
+                        # Synchronize ONLY in the explicitly profiled arm to
+                        # separate transfer from model+readback latency.
+                        torch.cuda.synchronize(device)
+                    transfer_elapsed = time.perf_counter() - started
+                    stats["transfer_seconds"] += transfer_elapsed
+                    observe("host_to_device_ms", transfer_elapsed)
                     started = time.perf_counter()
                     logits, _, hp = model(batch, horizon_lambda=horizon_lambda)
                     # Read back once per batch to synchronize CUDA.
                     cpu_logits = logits.detach().float().cpu()
                     cpu_hp = hp.detach().float().cpu()
-                    stats["forward_seconds"] += time.perf_counter() - started
+                    forward_elapsed = time.perf_counter() - started
+                    stats["forward_seconds"] += forward_elapsed
+                    observe("forward_sync_ms", forward_elapsed)
                     stats["batches"] += 1
                     stats["requests"] += len(work)
                     stats["max_batch_observed"] = max(
                         stats["max_batch_observed"], len(work),
                     )
-                    for row, (slot, seq, encoded) in enumerate(work):
+                    for row, entry in enumerate(work):
+                        slot, seq, encoded = entry[:3]
                         count = len(encoded.actions)
                         replies[slot].put((
                             seq, "ok",
@@ -141,8 +187,18 @@ def _serve(
                         ))
                 except Exception:
                     error = traceback.format_exc()
-                    for slot, seq, _ in work:
+                    for entry in work:
+                        slot, seq = entry[:2]
                         replies[slot].put((seq, "error", error))
+        if profile_actor:
+            stats["p2_actor_distributions"] = {
+                key: distribution(values) for key, values in samples.items()
+            }
+            stats["p2_actor_sample_cap"] = 8192
+            stats["p2_batch_size_histogram"] = batch_histogram
+            if device.startswith("cuda"):
+                stats["p2_cuda_peak_allocated_bytes"] = torch.cuda.max_memory_allocated(device)
+                stats["p2_cuda_peak_reserved_bytes"] = torch.cuda.max_memory_reserved(device)
         statistics.put(("ok", stats))
     except BaseException:
         error = traceback.format_exc()
@@ -160,6 +216,7 @@ class SharedH16Service:
         self, *, checkpoint: Path, digest: str, workers: int,
         device: str, horizon_lambda: float,
         max_batch: int = 16, max_delay_ms: float = 2.0,
+        profile_actor: bool = False,
     ) -> None:
         if (workers < 1 or max_batch < 1 or max_delay_ms < 0
                 or not math.isfinite(max_delay_ms)
@@ -173,13 +230,13 @@ class SharedH16Service:
         self.startup = ctx.Queue(maxsize=2)
         self.statistics = ctx.Queue(maxsize=2)
         self.transport = H16ActorTransport(
-            self.requests, self.replies, ctx.Value("i", 0),
+            self.requests, self.replies, ctx.Value("i", 0), profile_actor,
         )
         self.process = ctx.Process(
             target=_serve,
             args=(str(checkpoint), digest, device, horizon_lambda,
                   self.requests, self.replies, self.startup, self.statistics,
-                  max_batch, max_delay_ms),
+                  max_batch, max_delay_ms, profile_actor),
             daemon=True,
         )
         self.metrics: dict[str, Any] = {}
