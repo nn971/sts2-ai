@@ -187,7 +187,8 @@ def main() -> int:
     parser.add_argument("--strict", action="store_true")
     parser.add_argument(
         "--require-executed-any", action="append", default=[], metavar="KIND[,KIND...]",
-        help="Require at least one actually executed action from each comma-separated group",
+        help=("Require at least one actually executed action from each "
+              "comma-separated group"),
     )
     parser.add_argument(
         "--continuation-coverage", action="store_true",
