@@ -82,6 +82,7 @@ def _serve(
     startup: Any, statistics: Any,
     max_batch: int, max_delay_ms: float,
     profile_actor: bool = False,
+    verify_batch_parity: bool = False,
 ) -> None:
     stats: dict[str, Any] = {
         "device": device, "requests": 0, "batches": 0,
@@ -95,6 +96,20 @@ def _serve(
         "host_to_device_ms": [], "forward_sync_ms": [],
     }
     batch_histogram: dict[str, int] = {}
+    # Explicit P2 diagnostic: the same decision evaluated alone versus in
+    # the original variable-shaped mixed batch. Only recorded when requested;
+    # extra GPU forwards invalidate this run as a throughput measurement.
+    parity: dict[str, Any] = {
+        "schema": "sts2-p2-actor-batch-numerical-parity-v1",
+        "samples": 0,
+        "changed_logits": 0,
+        "changed_value": 0,
+        "changed_argmax": 0,
+        "max_abs_logit_difference": 0.0,
+        "max_abs_value_difference": 0.0,
+        "examples": [],
+        "limit": 256,
+    }
 
     def observe(name: str, seconds: float) -> None:
         if profile_actor and len(samples[name]) < 8192:
@@ -172,6 +187,55 @@ def _serve(
                     forward_elapsed = time.perf_counter() - started
                     stats["forward_seconds"] += forward_elapsed
                     observe("forward_sync_ms", forward_elapsed)
+                    if verify_batch_parity and len(work) > 1 and (
+                        parity["samples"] < parity["limit"]
+                    ):
+                        # Use the same frozen model/encoded tokens on the
+                        # same GPU. Differing batch shape and padding are
+                        # the only intended variables.
+                        sample = frames[0]
+                        single = prepare_h7_actor_packed([sample]).to(device)
+                        single_logits, _, single_hp = model(
+                            single, horizon_lambda=horizon_lambda,
+                        )
+                        count = len(sample.actions)
+                        reference_logits = (
+                            single_logits[0, :count].detach().float().cpu()
+                        )
+                        reference_hp = float(single_hp[0].detach().float().cpu())
+                        mixed_logits = cpu_logits[0, :count]
+                        mixed_hp = float(cpu_hp[0])
+                        logit_delta = float(
+                            torch.max(torch.abs(reference_logits - mixed_logits))
+                        )
+                        value_delta = abs(reference_hp - mixed_hp)
+                        argmax_changed = (
+                            int(torch.argmax(reference_logits))
+                            != int(torch.argmax(mixed_logits))
+                        )
+                        parity["samples"] += 1
+                        parity["changed_logits"] += int(logit_delta != 0)
+                        parity["changed_value"] += int(value_delta != 0)
+                        parity["changed_argmax"] += int(argmax_changed)
+                        parity["max_abs_logit_difference"] = max(
+                            parity["max_abs_logit_difference"], logit_delta,
+                        )
+                        parity["max_abs_value_difference"] = max(
+                            parity["max_abs_value_difference"], value_delta,
+                        )
+                        if len(parity["examples"]) < 12 and (
+                            logit_delta or value_delta
+                        ):
+                            parity["examples"].append({
+                                "batch_size": len(frames),
+                                "objects": len(sample.objects),
+                                "actions": count,
+                                "batch_objects": int(batch.kinds.shape[1]),
+                                "batch_actions": int(batch.action_kinds.shape[1]),
+                                "max_abs_logit_difference": logit_delta,
+                                "abs_value_difference": value_delta,
+                                "argmax_changed": argmax_changed,
+                            })
                     stats["batches"] += 1
                     stats["requests"] += len(work)
                     stats["max_batch_observed"] = max(
@@ -190,6 +254,8 @@ def _serve(
                     for entry in work:
                         slot, seq = entry[:2]
                         replies[slot].put((seq, "error", error))
+        if verify_batch_parity:
+            stats["p2_batch_numerical_parity"] = parity
         if profile_actor:
             stats["p2_actor_distributions"] = {
                 key: distribution(values) for key, values in samples.items()
@@ -217,12 +283,14 @@ class SharedH16Service:
         device: str, horizon_lambda: float,
         max_batch: int = 16, max_delay_ms: float = 2.0,
         profile_actor: bool = False,
+        verify_batch_parity: bool = False,
     ) -> None:
         if (workers < 1 or max_batch < 1 or max_delay_ms < 0
                 or not math.isfinite(max_delay_ms)
                 or not math.isfinite(horizon_lambda)
                 or not 0 <= horizon_lambda <= 1
-                or not (device == "cpu" or device.startswith("cuda"))):
+                or not (device == "cpu" or device.startswith("cuda"))
+                or (verify_batch_parity and not profile_actor)):
             raise ValueError("Invalid H16 shared actor configuration")
         ctx = multiprocessing.get_context("spawn")
         self.requests = ctx.Queue(maxsize=workers * 4)
@@ -236,7 +304,8 @@ class SharedH16Service:
             target=_serve,
             args=(str(checkpoint), digest, device, horizon_lambda,
                   self.requests, self.replies, self.startup, self.statistics,
-                  max_batch, max_delay_ms, profile_actor),
+                  max_batch, max_delay_ms, profile_actor,
+                  verify_batch_parity),
             daemon=True,
         )
         self.metrics: dict[str, Any] = {}
