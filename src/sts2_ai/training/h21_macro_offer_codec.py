@@ -12,7 +12,6 @@ from dataclasses import replace
 from typing import Any
 
 from sts2_ai.models.shared_game_objects import (
-    IDENTITY_BUCKETS,
     KINDS,
     OWNER_ATTRIBUTE_KIND_V2,
     ZONES,
@@ -20,7 +19,6 @@ from sts2_ai.models.shared_game_objects import (
     EncodedDecision,
     ObjectToken,
     RelationToken,
-    _bucket,
     _numbers,
     _public_attribute_leaves,
 )
