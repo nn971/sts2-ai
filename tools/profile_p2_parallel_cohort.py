@@ -171,6 +171,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--actor-batch-parity-probe", action="store_true",
                         help="Diagnostic only: re-evaluate singleton inside mixed batch; "
                              "extra inference invalidates throughput timing")
+    parser.add_argument("--actor-fixed-shape-batch-size", type=int, default=0,
+                        help="Opt-in fixed-row, shape-bucketed actor microbatches "
+                             "(0 = existing dynamic batching)")
     parser.add_argument("--ascension", type=int, default=0)
     parser.add_argument("--map-profile", choices=["generated", "fixed-route"],
                         default="generated")
@@ -206,6 +209,12 @@ def main() -> None:
         or (a.actor_batch_parity_probe and (
             not a.actor_profile or a.actor_inference != "shared"
         ))
+        or (a.actor_fixed_shape_batch_size < 0
+            or a.actor_fixed_shape_batch_size > a.actor_max_batch
+            or (a.actor_fixed_shape_batch_size > 0
+                and a.actor_inference != "shared")
+            or (a.actor_fixed_shape_batch_size > 0
+                and a.actor_batch_parity_probe))
     ):
         raise SystemExit("Invalid P2 parallel profiler configuration")
     if a.actor_inference == "local" and a.actor_device != "cpu":
@@ -240,6 +249,7 @@ def main() -> None:
         "actor_max_batch": a.actor_max_batch,
         "actor_device": a.actor_device,
         "actor_batch_parity_probe": a.actor_batch_parity_probe,
+        "actor_fixed_shape_batch_size": a.actor_fixed_shape_batch_size,
         "replay_diagnostics_dir": str(
             a.output.resolve().parent / "replay-mismatches"
         ),
@@ -254,6 +264,7 @@ def main() -> None:
             max_batch=a.actor_max_batch, max_delay_ms=a.actor_max_delay_ms,
             profile_actor=a.actor_profile,
             verify_batch_parity=a.actor_batch_parity_probe,
+            fixed_shape_batch_size=a.actor_fixed_shape_batch_size,
         )
         if a.actor_inference == "shared" else nullcontext(None)
     )
@@ -310,6 +321,7 @@ def main() -> None:
             "actor_max_delay_ms": a.actor_max_delay_ms,
             "actor_profile": a.actor_profile,
             "actor_batch_parity_probe": a.actor_batch_parity_probe,
+            "actor_fixed_shape_batch_size": a.actor_fixed_shape_batch_size,
             "torch": torch.__version__,
             "cpu_count": os.cpu_count(),
             "platform": platform.platform(),
@@ -348,6 +360,11 @@ def main() -> None:
             *(
                 ["Batch parity probe adds GPU forwards: timing is NOT a throughput benchmark"]
                 if a.actor_batch_parity_probe else []
+            ),
+            *(
+                ["Experimental fixed-row batching pads each shape bucket; "
+                 "compare exact replay and its physical-row overhead before acceptance"]
+                if a.actor_fixed_shape_batch_size else []
             ),
         ],
     }
