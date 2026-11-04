@@ -159,3 +159,26 @@ def test_report_inputs_are_not_mutated():
     original = deepcopy(profiles)
     compare_actor_candidate(*profiles)
     assert profiles == original
+
+
+def test_actor_profile_overhead_is_a_separate_opt_in_experiment():
+    profiles = [cohort(workers=w) for w in (1, 15, 1, 15)]
+    for profile in profiles[2:]:
+        profile["identity"]["actor_profile"] = False
+        profile["cohort_wall_seconds"] = 16.0
+    with pytest.raises(ValueError, match="actor_profile"):
+        compare_actor_candidate(*profiles)
+    report = compare_actor_candidate(*profiles, experiment="actor-profile")
+    assert report["experiment"] == "actor-profile"
+    assert report["baseline"]["actor_profile"] is True
+    assert report["candidate"]["actor_profile"] is False
+    assert report["parity"]["cross_configuration"] is True
+
+
+def test_actor_profile_experiment_rejects_batching_change():
+    profiles = [cohort(workers=w) for w in (1, 15, 1, 15)]
+    for p in profiles[2:]:
+        p["identity"]["actor_profile"] = False
+        p["identity"]["actor_max_batch"] = 4
+    with pytest.raises(ValueError, match="actor_max_batch"):
+        compare_actor_candidate(*profiles, experiment="actor-profile")
