@@ -168,6 +168,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--actor-max-delay-ms", type=float, default=2.0)
     parser.add_argument("--actor-profile", action="store_true",
                         help="Collect bounded queue/batch/forward distributions")
+    parser.add_argument("--actor-batch-parity-probe", action="store_true",
+                        help="Diagnostic only: re-evaluate singleton inside mixed batch; "
+                             "extra inference invalidates throughput timing")
     parser.add_argument("--ascension", type=int, default=0)
     parser.add_argument("--map-profile", choices=["generated", "fixed-route"],
                         default="generated")
@@ -200,6 +203,9 @@ def main() -> None:
         or a.macro_prior_weight < 0
         or (a.macro_prior_weight > 0 and a.macro_model is None)
         or a.actor_max_batch < 1 or a.actor_max_delay_ms < 0
+        or (a.actor_batch_parity_probe and (
+            not a.actor_profile or a.actor_inference != "shared"
+        ))
     ):
         raise SystemExit("Invalid P2 parallel profiler configuration")
     if a.actor_inference == "local" and a.actor_device != "cpu":
@@ -233,6 +239,7 @@ def main() -> None:
         "profile_overhead": a.profile_overhead,
         "actor_max_batch": a.actor_max_batch,
         "actor_device": a.actor_device,
+        "actor_batch_parity_probe": a.actor_batch_parity_probe,
         "replay_diagnostics_dir": str(
             a.output.resolve().parent / "replay-mismatches"
         ),
@@ -246,17 +253,34 @@ def main() -> None:
             horizon_lambda=a.horizon_lambda,
             max_batch=a.actor_max_batch, max_delay_ms=a.actor_max_delay_ms,
             profile_actor=a.actor_profile,
+            verify_batch_parity=a.actor_batch_parity_probe,
         )
         if a.actor_inference == "shared" else nullcontext(None)
     )
     started = time.perf_counter()
-    with service as actor:
-        transport = actor.transport if actor is not None else None
-        with ProcessPoolExecutor(
-            max_workers=a.workers, mp_context=multiprocessing.get_context("spawn"),
-            initializer=_worker_init, initargs=(config, transport),
-        ) as pool:
-            seed_reports = list(pool.map(_worker_seed, seeds, chunksize=1))
+    actor = None
+    try:
+        with service as actor:
+            transport = actor.transport if actor is not None else None
+            with ProcessPoolExecutor(
+                max_workers=a.workers, mp_context=multiprocessing.get_context("spawn"),
+                initializer=_worker_init, initargs=(config, transport),
+            ) as pool:
+                seed_reports = list(pool.map(_worker_seed, seeds, chunksize=1))
+    except Exception:
+        # An exact replay mismatch aborts before normal report generation.
+        # Keep standalone-vs-batched model statistics to diagnose it.
+        if (a.actor_batch_parity_probe and actor is not None
+                and actor.metrics.get("p2_batch_numerical_parity") is not None):
+            probe_path = (
+                a.output.resolve().parent / "actor-batch-numerical-parity.json"
+            )
+            probe_path.parent.mkdir(parents=True, exist_ok=True)
+            probe_path.write_text(json.dumps(
+                actor.metrics["p2_batch_numerical_parity"],
+                indent=2, sort_keys=True,
+            ) + "\n", encoding="utf-8")
+        raise
     cohort_wall = time.perf_counter() - started
     runs = [row for seed in seed_reports for row in seed["runs"]]
     profile_runs = [r for r in runs if r["arm"].startswith("profile_")]
@@ -285,6 +309,7 @@ def main() -> None:
             "actor_max_batch": a.actor_max_batch,
             "actor_max_delay_ms": a.actor_max_delay_ms,
             "actor_profile": a.actor_profile,
+            "actor_batch_parity_probe": a.actor_batch_parity_probe,
             "torch": torch.__version__,
             "cpu_count": os.cpu_count(),
             "platform": platform.platform(),
@@ -320,6 +345,10 @@ def main() -> None:
             "Opt-in actor queue samples are capped at the first 8192 values",
             "CUDA transfer synchronization is enabled only with --actor-profile",
             "This diagnostic is not a 50+ completed-combats-per-second claim",
+            *(
+                ["Batch parity probe adds GPU forwards: timing is NOT a throughput benchmark"]
+                if a.actor_batch_parity_probe else []
+            ),
         ],
     }
     a.output.parent.mkdir(parents=True, exist_ok=True)
