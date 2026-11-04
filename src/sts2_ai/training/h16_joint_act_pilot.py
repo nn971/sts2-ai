@@ -33,7 +33,8 @@ from sts2_ai.emulator.run_environment import (
 )
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.models.shared_macro_transformer_v2 import (
-    H21GroundedMacroTransformer, collate_h21,
+    H21GroundedMacroTransformer,
+    collate_h21,
 )
 from sts2_ai.models.shared_transformer import (
     H7Config,
@@ -61,7 +62,9 @@ from sts2_ai.training.h17_adaptive import AdaptiveSearch, choose_budget
 from sts2_ai.training.h19_resource_codec import EMULATOR_PUBLIC_SCHEMA_V1
 from sts2_ai.training.h21_action_alias_audit import audit_h21_action_aliases
 from sts2_ai.training.h21_macro_offer_codec import (
-    H21_CODEC, H21_OBJECT_SCHEMA, encode_h21_macro_decision,
+    H21_CODEC,
+    H21_OBJECT_SCHEMA,
+    encode_h21_macro_decision,
 )
 
 SCHEMA = "sts2-h16-act1-geometric-horizon-every-combat-puct-v5"
@@ -456,7 +459,8 @@ class PilotPolicy:
             raise ValueError("Invalid combat win/loss progress weighting")
         if (model is None) == (remote_actor is None):
             raise ValueError("H16 policy needs exactly one local or remote actor")
-        if representation not in ("h16", "h21") or (model is not None and model.representation != representation):
+        if (representation not in ("h16", "h21")
+                or (model is not None and model.representation != representation)):
             raise ValueError("Joint policy representation/model mismatch")
         self.representation = representation
         self.model = model.eval() if model is not None else None
