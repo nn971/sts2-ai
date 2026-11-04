@@ -256,24 +256,23 @@ def main() -> None:
         },
         "seed_reports": seed_reports,
         "cohort_wall_seconds": cohort_wall,
-        "completed_episodes": sum(
-            int(r["complete"]) for r in profile_runs
-        ),
-        "censored_episodes": sum(
-            int(not r["complete"]) for r in profile_runs
-        ),
-        "search_roots": sum(int(r["search_roots"]) for r in profile_runs),
-        "search_transitions": sum(int(r["search_transitions"]) for r in profile_runs),
-        "real_transitions": sum(int(r["real_transitions"]) for r in profile_runs),
+        # Cohort throughput includes every actually executed A/B/B/A arm.
+        # Profile-only worker resource sums are reported separately below.
+        "completed_episodes": sum(int(r["complete"]) for r in runs),
+        "censored_episodes": sum(int(not r["complete"]) for r in runs),
+        "profiled_completed_episodes": sum(int(r["complete"]) for r in profile_runs),
+        "search_roots": sum(int(r["search_roots"]) for r in runs),
+        "search_transitions": sum(int(r["search_transitions"]) for r in runs),
+        "real_transitions": sum(int(r["real_transitions"]) for r in runs),
         "worker_elapsed_sum_seconds": worker_elapsed_sum,
         "worker_bridge_sum_seconds": bridge_sum,
         "worker_actor_inference_sum_seconds": actor_sum,
         "sequential_worker_wall_attribution": profile_diagnostics,
         "measured_full_cohort_completed_episodes_per_second": (
-            sum(int(r["complete"]) for r in profile_runs) / cohort_wall
+            sum(int(r["complete"]) for r in runs) / cohort_wall
         ),
         "measured_full_cohort_search_transitions_per_second": (
-            sum(int(r["search_transitions"]) for r in profile_runs) / cohort_wall
+            sum(int(r["search_transitions"]) for r in runs) / cohort_wall
         ),
         "shared_actor_metrics": (actor.metrics if a.actor_inference == "shared" else None),
         "warnings": [
