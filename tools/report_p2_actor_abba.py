@@ -221,13 +221,17 @@ def report_actor_abba(
             "exact_search_and_episode_work": True,
         },
         "configurations": {
-            "A_batch1": {
+            ("A_unprofiled_fixed4" if experiment == "actor-profile"
+             else "A_batch1"): {
                 "actor_max_batch": identities[0]["actor_max_batch"],
                 "fixed_shape_batch_size": identities[0]["actor_fixed_shape_batch_size"],
+                "actor_profile": identities[0]["actor_profile"],
             },
-            "B_fixed_shape": {
+            ("B_profiled_fixed4" if experiment == "actor-profile"
+             else "B_fixed_shape"): {
                 "actor_max_batch": identities[1]["actor_max_batch"],
                 "fixed_shape_batch_size": identities[1]["actor_fixed_shape_batch_size"],
+                "actor_profile": identities[1]["actor_profile"],
             },
         },
         "order": list(ORDER),
