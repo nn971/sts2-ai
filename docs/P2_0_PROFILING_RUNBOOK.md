@@ -238,6 +238,49 @@ To measure real multi-request batching, use the production actor's normal
 Do not claim strict replay parity or an accepted optimization speedup
 from a failed paired condition.
 
+**Observed diagnostic on 2026-11-04:** eight A0 seeds, 16 simulations,
+depth 8, two roots, 80 decisions, paired runs:
+- shared CUDA `--actor-max-batch 1`: exact parity at both 1 and 15 workers;
+  22.8734 s vs 18.1051 s, respectively (1.263× diagnostic wall speedup,
+  only eight concurrent seed tasks at most, all 16 arms censored).
+- shared CUDA `--actor-max-batch 16`: at 15 workers, first mismatches
+  were at `$.actions[3].teacher_policy[6]` and other root teachers,
+  all differing by `1/16 = 0.0625`, i.e. one PUCT simulation.
+  The associated first public observation/actions were identical.
+  GPU batch-shape-dependent logits are the leading **unconfirmed** cause.
+
+To test this directly, update the P2 AI branch, then run the **actor-only
+numerical comparison** with the same parameters as the failing 15-worker
+cohort, adding `--actor-batch-parity-probe` alongside `--actor-profile`,
+and using a *new* output path:
+
+```fish
+python tools/profile_p2_parallel_cohort.py \
+  --emulator-root $emu_p2 --emulator-revision $rev \
+  --checkpoint $ckpt --macro-model $macro \
+  --macro-prior-weight 0.5 --horizon-lambda 0.411395 \
+  --workers 15 --actor-inference shared --actor-device cuda \
+  --actor-max-batch 16 --actor-profile --actor-batch-parity-probe \
+  --seeds $seeds --ascension 0 --map-profile generated \
+  --simulations 16 --depth 8 --max-searches 2 --max-decisions 80 \
+  --paired --output results/p2-batch16-parity-w15/profile.json --execute
+```
+
+The actor repeats the *first encoded input of up to 256 mixed-request
+batches* as singleton model forwards on the same device and reports
+bitwise logit/value differences, maximum absolute deviations, changes
+to the top-ranked action, and example shape differences. It does not
+change the actor's responses to workers or touch search logic. Even
+if paired replay fails, the actor writes
+`results/p2-batch16-parity-w15/actor-batch-numerical-parity.json`.
+That file distinguishes an actual numerical batch-shape effect from
+other potential nondeterminism. **This diagnostic adds GPU forwards and
+invalidates its elapsed time as throughput evidence**; the matched
+speedup comparator rejects numerical-probe runs.
+
+Keep separate output directories for batch-1 and batch-16 runs. An
+overwritten 1-worker profile cannot be recovered from a later report.
+
 ## Offline 1-worker versus 15-worker replay/scalability comparison
 
 Once both cohort JSON reports exist, validate **matching AI/emulator/model SHA,
