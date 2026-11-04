@@ -237,6 +237,26 @@ def test_event_queue_and_deck_choice_future_affordances_are_distinct():
 
 
 
+
+def test_event_overlay_in_combat_does_not_lose_public_continuation():
+    observation = state()
+    observation["combat"] = {
+        "turn": 1, "energy": 3, "player_block": 0,
+        "draw_pile_count": 0, "hand": [], "discard_pile": [],
+        "exhaust_pile": [], "play_pile": [], "enemies": [],
+        "player_powers": [], "history": {"cards_played_this_turn": 0},
+    }
+    observation["event"] = {
+        "event_id": "native.event",
+        "queued_potion_ids": ["proto.potion.healing"],
+    }
+    current = encode(observation, [action("end_turn")])
+    changed = copy.deepcopy(observation)
+    changed["event"]["queued_potion_ids"] = ["proto.potion.energy"]
+    assert encode(changed, [action("end_turn")]) != current
+
+
+
 def test_exact_public_macro_phase_is_not_collapsed_to_one_class():
     original = state()
     original["phase"] = 5  # reward enum value from public v1
