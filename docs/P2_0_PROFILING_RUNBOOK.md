@@ -931,3 +931,57 @@ full public combat-progress history, exact teacher parity and a
 separate Nature/fair-sampling bypass. The retained-state prototype
 must fail closed until those invariants are established; it is not
 enabled by either preflight.
+
+
+## P2.1 opt-in exact-prefix cache: staged correctness and throughput audit
+
+The first bounded, per-root, **Native root-conditioned only** cache is
+in `src/sts2_ai/search/p2_exact_prefix_cache.py`. The standard
+`p2_prefix_cache_handles=0` keeps the existing H16 sampler behavior.
+Positive caps retain at most that many immutable emulator states per
+PUCT root, then release every retained handle on search teardown.
+A cache hit validates the **live parent stochastic receipt** and the
+**retained child stochastic receipt**, full action path and public
+combat-history frame; a changed root receipt fails at the beginning
+of each simulation. Provider-private Nature/semantic flags fail
+closed. Cached combat histories include the data required for
+`enemy_hp_progress`. This is an experimental optimization only.
+
+The CPU integration tests compare 8/16/64 PUCT simulations with
+cache off/on at depth 8 and full-combat search, requiring exact
+teacher visits, values, simulation counts and search transitions;
+they check real step elimination and complete handle cleanup.
+
+**First local test** on the pinned emulator with the versioned
+`p2_exact_continuation_receipt` endpoint (H16 PR #242,
+emulator SHA `0937456588d563b48e9810290b7382f64d30d5a7`
+or explicitly updated compatible SHA):
+
+```fish
+cd ~/projects/sts2-ai
+git pull --ff-only
+
+python tools/run_p2_actor_abba.py \
+    --experiment prefix-cache \
+    --emulator-root $emu_p2 --emulator-revision $rev \
+    --checkpoint $ckpt --macro-model $macro \
+    --macro-prior-weight 0.5 --horizon-lambda 0.411395 \
+    --workers 1 --actor-device cuda \
+    --seed-prefix p2-native-prefix-smoke-20261104 \
+    --seed-count 2 \
+    --simulations 8 --depth 8 --max-searches 2 \
+    --max-decisions 80 \
+    --output-root results/p2-native-prefix-smoke-v1 \
+    --execute
+```
+
+The script stages baseline cache-off A1/A2 versus bounded-cache-on
+B1/B2, all with fixed-shape batch 4. The strict offline reporter
+refuses action/teacher replay drift, inconsistent search work,
+changed outcomes or mismatched provenance. The smoke is **not**
+a 15-worker throughput conclusion. If it passes, repeat on
+**8/16/64 simulations**, paired roots, and a 15-worker ≥32-seed
+order-balanced throughput cohort with profiling disabled. Report
+negative or negligible gains explicitly; receipt RPC overhead may
+outweigh saved emulator steps. Never enable this cache in
+independently sampled Nature or fair-history-conditioned search.
