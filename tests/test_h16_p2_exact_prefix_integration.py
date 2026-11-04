@@ -149,4 +149,7 @@ def test_exact_cached_puct_preserves_teacher_and_reduces_real_steps(
     assert cached.terminal_evaluations == ordinary.terminal_evaluations
     assert cached_steps < ordinary_steps
     assert metrics is not None and metrics["hits"] > 0
+    assert metrics["emulator_step_calls_avoided"] == metrics["hits"]
+    assert metrics["receipt_calls"] >= 2 * metrics["hits"]
+    assert metrics["receipt_seconds"] >= 0
     assert metrics["retained_handles"] <= 8
