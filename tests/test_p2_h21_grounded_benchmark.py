@@ -184,3 +184,86 @@ def test_h21_v5_canonical_power_schema_cannot_reuse_v4_collator(tmp_path):
             altered, sample_count=2, repeats=1, warmups=0,
             batch_size=2, stage="collate", device="cpu", checkpoint=None,
         )
+
+
+def test_h21_packed_collation_exact_tensor_parity_variable_shapes():
+    """No changed object/action/edge semantics or padding in P2 candidate."""
+    import torch
+    from dataclasses import replace
+
+    from sts2_ai.models.shared_game_objects import (
+        ActionToken, EncodedDecision, NUMERIC_FIELDS, ObjectToken, RelationToken,
+    )
+    from sts2_ai.models.shared_macro_transformer_v2 import (
+        collate_h21, collate_h21_packed,
+    )
+    from sts2_ai.training.h21_macro_offer_codec import H21_OBJECT_SCHEMA
+
+    def sample(nobjects: int, nactions: int, nedges: int, phase: str):
+        size = len(NUMERIC_FIELDS)
+        objects = tuple(ObjectToken(
+            kind=i % 4, identity=(1 << 40) + i, zone=i % 3,
+            numeric=(0.25 + i,) + (0.0,) * (size - 1),
+            observed=(1,) + (0,) * (size - 1),
+            owner=i - 1,
+        ) for i in range(nobjects))
+        actions = tuple(ActionToken(
+            kind=100 + i, semantic=(1 << 39) + i,
+            source=i % nobjects, target=(i + 1) % nobjects,
+            members=tuple(range(min(i + 1, nobjects))),
+        ) for i in range(nactions))
+        relations = tuple(RelationToken(
+            relation_type=i % 8, source=i % nobjects,
+            target=(i + 1) % nobjects,
+        ) for i in range(nedges))
+        return EncodedDecision(H21_OBJECT_SCHEMA, phase, objects, actions, relations)
+
+    cases = [
+        [sample(2, 1, 0, "macro")],
+        [sample(2, 1, 0, "macro"), sample(5, 3, 8, "combat")],
+        [sample(10, 7, 25, "combat"), sample(3, 2, 1, "macro")],
+    ]
+    for decisions in cases:
+        before = collate_h21(decisions)
+        after = collate_h21_packed(decisions)
+        assert vars(before).keys() == vars(after).keys()
+        for name in type(before).__dataclass_fields__:
+            assert torch.equal(getattr(before, name), getattr(after, name)), name
+            assert getattr(before, name).dtype == getattr(after, name).dtype
+
+    bad_edge = replace(cases[0][0], relations=(RelationToken(8, 0, 1),))
+    with pytest.raises(ValueError, match="relation"):
+        collate_h21_packed([bad_edge])
+    bad_member = replace(
+        cases[0][0],
+        actions=(replace(cases[0][0].actions[0], members=(1000,)),),
+    )
+    with pytest.raises(ValueError, match="pointer"):
+        collate_h21_packed([bad_member])
+
+
+def test_p2_benchmark_packed_candidate_same_public_encoding(tmp_path):
+    corpus = fake_corpus(tmp_path)
+    baseline = benchmark(
+        corpus, sample_count=3, repeats=1, warmups=0,
+        batch_size=2, stage="collate", device="cpu", checkpoint=None,
+        collator="reference",
+    )
+    candidate = benchmark(
+        corpus, sample_count=3, repeats=1, warmups=0,
+        batch_size=2, stage="collate", device="cpu", checkpoint=None,
+        collator="packed",
+    )
+    assert (
+        baseline["benchmark_workload"]["public_encoding_sha256"]
+        == candidate["benchmark_workload"]["public_encoding_sha256"]
+    )
+    assert candidate["relational_collation"]["implementation"] == "packed"
+    assert baseline["relational_collation"]["implementation"] == "reference"
+    assert candidate["relational_collation"]["work_units"] == 3
+    with pytest.raises(ValueError, match="Invalid P2"):
+        benchmark(
+            corpus, sample_count=1, repeats=1, warmups=0,
+            batch_size=1, stage="codec", device="cpu", checkpoint=None,
+            collator="packed",
+        )
