@@ -88,6 +88,7 @@ def _public_room_name(room_type: Any) -> str:
 def choose(
     actions: list[dict[str, Any]], *, public_state: dict[str, Any] | None = None,
     seed: str = "", step: int = 0, route_variant: int = 0,
+    continuation_coverage: bool = False,
 ) -> dict[str, Any]:
     """Deterministic coverage policy using only the published observation."""
     priorities = {
@@ -99,6 +100,38 @@ def choose(
             "rest_upgrade", "rest_train", "use_potion", "play_card", "end_turn",
         ))
     }
+    if continuation_coverage:
+        # Exercise actual reward/shop/event/rest continuations, rather than
+        # simply inspecting their menus before choosing leave_shop.
+        # Keep the original smoke/throughput policy untouched.
+        preferred = [
+            "start_run", "choose_event_deck_card",
+            "choose_shop_relic_deck_card", "choose_relic_deck_card",
+            "finish_relic_deck_choice", "replace_shop_potion",
+            "buy_relic", "buy_potion", "buy_card", "remove_card",
+            "replace_reward_extra_potion", "take_reward_extra_potion",
+            "replace_reward_potion", "take_reward_potion",
+            "take_event_potion", "replace_event_potion", "skip_event_potion",
+            "take_reward_extra_relic", "take_reward_relic",
+            "take_reward_bundle", "take_reward_card_group",
+            "take_reward_card", "take_reward_extra_gold",
+            "take_reward_gold", "skip_reward_extra_relic",
+            "skip_reward_extra_potion", "skip_reward_card_group",
+            "skip_reward_card", "reroll_reward_card",
+            "trade_future_potion", "throw_foul_potion_at_merchant",
+            "rest_cook", "rest_upgrade", "rest_dig",
+            "rest_lift", "rest_clone", "rest_heal",
+            "rest_kindle", "rest_hatch", "rest_train",
+            "event_choice", "continue_event",
+            "leave_reward", "leave_shop", "choose_map_node",
+            "select_cards", "use_potion", "play_card", "end_turn",
+        ]
+        if route_variant % 2:
+            # Also exercise optional early completion, while even variants
+            # pick a candidate before finishing their deck selection.
+            preferred.remove("finish_relic_deck_choice")
+            preferred.insert(1, "finish_relic_deck_choice")
+        priorities = {kind: n for n, kind in enumerate(preferred)}
     if public_state is None:
         # Keep the short 2-seed smoke policy exactly reproducible.
         return min(actions, key=lambda a: (
@@ -139,6 +172,10 @@ def main() -> int:
     parser.add_argument("--max-decisions", type=int, default=55)
     parser.add_argument("--strict", action="store_true")
     parser.add_argument(
+        "--continuation-coverage", action="store_true",
+        help="Prefer purchasing/choosing exceptional player continuations",
+    )
+    parser.add_argument(
         "--profile-codec-out", type=Path,
         help="Write cProfile cumulative-time report for the H21 encoder only",
     )
@@ -156,6 +193,7 @@ def main() -> int:
     start = time.perf_counter()
     phases: Counter[str] = Counter()
     action_kinds: Counter[str] = Counter()
+    executed_action_kinds: Counter[str] = Counter()
     gaps: Counter[str] = Counter()
     partials: Counter[str] = Counter()
     errors: list[dict[str, Any]] = []
@@ -237,9 +275,11 @@ def main() -> int:
                     selected = choose(
                         menu, public_state=observation, seed=seed,
                         step=step, route_variant=seed_index,
+                        continuation_coverage=args.continuation_coverage,
                     )
                 else:
                     selected = choose(menu)
+                executed_action_kinds.update([selected["kind"]])
                 if selected["kind"] == "choose_map_node":
                     selected_payload = json.loads(selected["payloadJson"])
                     selected_node = selected_payload.get(
@@ -281,6 +321,8 @@ def main() -> int:
         "decisions": decisions, "seeds": seeds,
         "elapsed_seconds": round(time.perf_counter() - start, 3),
         "diverse_route": args.diverse_route,
+        "continuation_coverage": args.continuation_coverage,
+        "executed_action_kinds": dict(sorted(executed_action_kinds.items())),
         "max_floor": max_floor,
         "chosen_map_room_types": dict(sorted(chosen_map_room_types.items())),
         "encoding_only_seconds": round(measured_total, 6),
