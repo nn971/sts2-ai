@@ -2,8 +2,8 @@
 """Live H22 Python JSONL public-v1 codec, model and fused Act-loop preflight.
 
 Runs a tiny random H21 network through the real emulator's generated-map
-interface with public-v1 observations. Does not train, search, or use a local
-R79 checkpoint. Exercises the actual H22 adapter that a long run will call.
+interface with public-v1 observations and one bounded combat PUCT root.
+Does not train or use a local R79 checkpoint. Exercises the actual H22 adapter.
 """
 from __future__ import annotations
 
@@ -53,8 +53,8 @@ def main() -> None:
         episode = collect_act_episode(
             backend, policy, seed="h22-h21-v1-bridge-ci-20261105",
             ascension=0, max_decisions=args.max_decisions,
-            search_probability=0.0, max_searches=0,
-            simulations=16, search_depth=8, rng=random.Random(22),
+            search_probability=1.0, max_searches=1,
+            simulations=4, search_depth=2, rng=random.Random(22),
             map_profile_id=None, compact_card_selection=True,
             rollout_transport="fused",
         )
@@ -68,6 +68,8 @@ def main() -> None:
     }
     if phases["macro"] < 2 or phases["combat"] < 1:
         raise RuntimeError("H22 preflight did not traverse both macro and combat")
+    if episode.searches != 1 or episode.search_transitions < 1:
+        raise RuntimeError("H22 preflight did not execute a real combat PUCT root")
     print(json.dumps({
         "schema": "sts2-h22-h21-live-python-bridge-v1",
         "emulator_revision": rev,
@@ -75,6 +77,7 @@ def main() -> None:
         "phases": phases,
         "outcome": episode.outcome,
         "searches": episode.searches,
+        "search_transitions": episode.search_transitions,
         "representation": "h21",
         "observation_schema": "prototype-ai-v1",
     }, sort_keys=True))
