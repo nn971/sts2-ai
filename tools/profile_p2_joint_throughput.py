@@ -132,6 +132,7 @@ def run_episode(
     remote = policy.remote_actor
     remote_wait_before = remote.wait_seconds if remote is not None else 0.0
     roots: list[dict[str, object]] = []
+    cache_roots: list[dict[str, object]] = []
     from sts2_ai.emulator.run_environment import EXPERIMENTAL_FIXED_ROUTE_PROFILE
     start = time.perf_counter()
     episode = collect_act_episode(
@@ -153,6 +154,7 @@ def run_episode(
         rollout_transport=rollout_transport,
         search_profiles=(roots if profile_search else None),
         p2_prefix_cache_handles=p2_prefix_cache_handles,
+        p2_cache_report=(cache_roots if p2_prefix_cache_handles else None),
     )
     elapsed = time.perf_counter() - start
     ops = backend.operation_profile()
@@ -178,6 +180,26 @@ def run_episode(
         ),
         "search_instrumentation": profile_search,
         "p2_prefix_cache_handles": p2_prefix_cache_handles,
+        "p2_prefix_cache": {
+            "roots": len(cache_roots),
+            "hits": sum(int(row["hits"]) for row in cache_roots),
+            "misses": sum(int(row["misses"]) for row in cache_roots),
+            "emulator_step_calls_avoided": sum(
+                int(row["emulator_step_calls_avoided"]) for row in cache_roots
+            ),
+            "receipt_calls": sum(
+                int(row["receipt_calls"]) for row in cache_roots
+            ),
+            "receipt_seconds": sum(
+                float(row["receipt_seconds"]) for row in cache_roots
+            ),
+            "skipped_capacity": sum(
+                int(row["skipped_capacity"]) for row in cache_roots
+            ),
+            "skipped_provider": sum(
+                int(row["skipped_provider"]) for row in cache_roots
+            ),
+        },
         "wire_instrumentation": profile_wire,
         "native_instrumentation": native_profile,
         "search_transitions": episode.search_transitions,
