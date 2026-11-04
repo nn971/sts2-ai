@@ -37,6 +37,7 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
         or (args.macro_prior_weight and args.macro_model is None)
         or not 0 <= args.ascension <= 10
         or not args.seed_prefix.strip()
+        or getattr(args, "h21_max_batch", 4) not in (1, 4, 8, 16)
     ):
         raise ValueError("Invalid P2 A/B/B/A benchmark configuration")
     all_seeds = ",".join(seeds)
@@ -66,12 +67,16 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
         common.extend(("--macro-model", str(args.macro_model)))
     experiment = getattr(args, "experiment", "batching")
     if experiment not in ("batching", "actor-profile", "prefix-cache",
-                        "transport", "wire-profile", "native-fused-profile"):
+                        "transport", "wire-profile", "native-fused-profile",
+                        "h21-collator"):
         raise ValueError("Invalid actor A/B/B/A experiment")
     modes = (
         ORDER if experiment == "batching" else
-        (("A1", 16, 4), ("B1", 16, 4),
-         ("B2", 16, 4), ("A2", 16, 4))
+        ((("A1", args.h21_max_batch, 0), ("B1", args.h21_max_batch, 0),
+          ("B2", args.h21_max_batch, 0), ("A2", args.h21_max_batch, 0))
+         if experiment == "h21-collator" else
+         (("A1", 16, 4), ("B1", 16, 4),
+          ("B2", 16, 4), ("A2", 16, 4)))
     )
     files = [
         args.output_root / name / "profile.json" for name, _, _ in modes
@@ -81,6 +86,11 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
          *common,
          "--actor-max-batch", str(max_batch),
          "--actor-fixed-shape-batch-size", str(fixed_size),
+         *(
+             ["--representation", "h21", "--actor-h21-collator",
+              "packed" if name in ("B1", "B2") else "reference"]
+             if experiment == "h21-collator" else []
+         ),
          *(
              ["--actor-profile"]
              if experiment == "actor-profile" and name in ("B1", "B2")
@@ -119,6 +129,8 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
         if experiment == "wire-profile" else
         "p2-native-fused-profile-abba-report.json"
         if experiment == "native-fused-profile"
+        else "p2-h22-collator-abba-report.json"
+        if experiment == "h21-collator"
         else "actor-abba-report.json"
     )
     calls.append([
@@ -141,7 +153,7 @@ def main() -> None:
                    help="Perform all four runs; otherwise preview commands")
     p.add_argument("--experiment", choices=("batching", "actor-profile", "prefix-cache",
                             "transport", "wire-profile",
-                            "native-fused-profile"),
+                            "native-fused-profile", "h21-collator"),
                    default="batching",
                    help="Batching, actor profile, exact prefix, or JSONL fused/legacy transport")
     p.add_argument("--ai-root", type=Path, default=ROOT)
@@ -154,6 +166,8 @@ def main() -> None:
     p.add_argument("--workers", type=int, default=15)
     p.add_argument("--actor-device", choices=("cuda", "cpu"), default="cuda")
     p.add_argument("--actor-max-delay-ms", type=float, default=2.0)
+    p.add_argument("--h21-max-batch", type=int, choices=(1, 4, 8, 16),
+                   default=4, help="Matched H21 dynamic actor batch cap")
     p.add_argument("--seeds",
                    help="Optional comma-separated independent seed cohort")
     p.add_argument("--seed-prefix", default="p2-a0-abba-independent-20261104")
@@ -198,6 +212,10 @@ def main() -> None:
             "P2.2 fused in all arms: A1/A2 native profiler off; "
             "B1/B2 C# fused-only timers on; wire/actor/PUCT profiling off"
             if args.experiment == "native-fused-profile" else
+            "H22 public-v1 reference/packed/packed/reference H21 collation; "
+            "dynamic shape, same actor batch cap and checkpoint; "
+            "all profiling disabled; strict public/teacher replay"
+            if args.experiment == "h21-collator" else
             "actor/search/wire profiling disabled; strict B/B replay"
         ),
         "seed_count": len(args.seeds.split(",")) if args.seeds else args.seed_count,
