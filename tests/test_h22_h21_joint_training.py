@@ -10,9 +10,12 @@ from sts2_ai.emulator.protocol import LegalAction, Observation
 from sts2_ai.models.shared_macro_transformer_v2 import H21GroundedMacroTransformer
 from sts2_ai.models.shared_transformer import H7Config, H20Batch, SharedObjectTransformer
 from sts2_ai.training.h16_joint_act_pilot import (
-    H22_SCHEMA, JointActPilotNet, PilotPolicy, encode_joint_decision,
+    H22_SCHEMA,
+    JointActPilotNet,
+    PilotPolicy,
+    encode_joint_decision,
 )
-from sts2_ai.training.h21_macro_offer_codec import H21_OBJECT_SCHEMA, H21_CODEC
+from sts2_ai.training.h21_macro_offer_codec import H21_CODEC, H21_OBJECT_SCHEMA
 
 
 def _state() -> dict:
