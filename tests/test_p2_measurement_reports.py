@@ -105,7 +105,9 @@ def test_actor_ab_requires_exact_cross_config_replay():
     result = compare_actor_candidate(a1, a15, b1, b15)
     assert result["parity"]["cross_configuration"] is True
     assert result["wall_speedup_baseline_over_candidate_15_workers"] == pytest.approx(14 / 12)
-    assert result["search_throughput_ratio_candidate_over_baseline_15_workers"] == pytest.approx(14 / 12)
+    assert result[
+        "search_throughput_ratio_candidate_over_baseline_15_workers"
+    ] == pytest.approx(14 / 12)
     assert result["candidate"]["fixed_shape_batch_size"] == 4
 
 
