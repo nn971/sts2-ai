@@ -12,7 +12,7 @@ and semantic action kind. An `OfferId`, `InstanceId`, `NodeId`, or group index
 is only a **within-frame join key**. Those opaque values never enter an identity
 embedding or numeric feature.
 
-The H21 v1 input is gated on emulator `prototype-ai-v1` and the H21 object
+The H21 v3 input is gated on emulator `prototype-ai-v1` and the H21 object
 schema `sts2-h21-public-grounded-macro-v3`. H7/H16/H18/H19/H20 models retain
 their previous checkpoint formats. H21 has a distinct model checkpoint and
 eight typed edge families (including chronological room history). No pretrained weights are silently reused.
@@ -55,7 +55,7 @@ rewards use the emulator's `ChooseGoldRewardPayload.GroupIndex` field.
 
 ## Affliction source relations
 
-H21 v2 adds a typed `AFFLICTION_SOURCE` edge from each visible afflicted
+H21 v2 introduced a typed `AFFLICTION_SOURCE` edge from each visible afflicted
 card class to its source enemy, when that enemy is currently visible.
 `source_enemy_instance_id` is used only for the within-frame join: it is
 omitted from learned numeric attributes and learned identity hashes. Two
@@ -68,8 +68,49 @@ The emulator public-v1 projection redacts a source reference when the source
 enemy is absent from the visible encounter. H19 and H20 default codecs
 continue rejecting non-null affliction source IDs; the permissive path is
 available only to H21 with the matching typed edges. H21 model/codec
-versions are bumped to v2 because the relation vocabulary has expanded from
-seven to eight. No prior H21 checkpoint should be loaded into v2.
+versions were bumped to v2 for the additional source relation. H21 v3
+further changes identity embeddings as described below. Prior H21 v1/v2
+checkpoints cannot be loaded into v3.
+
+## Stable public concept identities (H21 v3)
+
+The eight-seed live probe found a real collision in H7/H19's 4,096-bucket
+identity vocabulary: `proto.silent.piercing_wail` and
+`proto.silent.dagger_spray` shared a bucket. This is a fatal distinction
+for candidate rewards. H21 v3 solves it with SHA-256-derived, deterministic,
+**63-bit public concept IDs** and four separate 4,096-way embedding tables,
+covering an effective 48-bit neural lookup key. New card, relic, power,
+resource attribute, room and macro choice identity features all use the
+stable identifiers. Action kind identity is upgraded similarly.
+
+A per-decision identity registry checks for both full 63-bit collisions
+and any two different public labels having the same effective 48-bit
+neural embedding key. A collision fails explicitly; no contextual
+rehashing or arbitrary instance ID breaks the semantic identity invariant.
+The known Piercing Wail/Dagger Spray collision is a permanent regression.
+Only H21 opts into this identity encoder and model: H7/H16/H19/H20
+checkpoint formats and embeddings are unchanged.
+
+These changes require a new **H21 v3** object, codec and checkpoint
+version. The live integration must be rerun because neither the v1
+two-seed pass nor the v2 focused pass validates these new embeddings.
+
+## Eight-seed live probe and outstanding results
+
+The initial eight-seed Overgrowth A0 live sweep inspected 1,364 public
+decisions and 5,815 canonical legal choices (including 107 verified
+equivalent aliases). It found four failed frames: two due to
+`use_potion` actions outside combat, and two due to the above card hash
+collision. There were no emulator stepping failures. Macro potion actions
+now point to their existing inventory slot, with enemy-target variants
+explicitly rejected outside combat.
+
+The pre-v3 encoder-only pilot measured approximately 320.49 decisions/s
+and 4.546 ms p95 per decision, with maxima of 376 objects and 202 typed
+relations; these numbers exclude neural inference and tree search.
+The next eight-seed run must confirm that both failure classes are
+eliminated and remeasure v3 encoding overhead. The initial two-seed
+110-decision integration pass remains independently verified.
 
 ## Field-coverage audit
 
