@@ -97,6 +97,24 @@ def _single_numeric(
     return _ZERO_NUMERIC_VALUES, _ZERO_NUMERIC_MASKS
 
 
+def _numbers_h21(record: dict[str, Any]) -> tuple[tuple[float, ...], tuple[int, ...]]:
+    """H21-only sparse numeric projection, exactly equivalent to _numbers.
+
+    Most public objects carry zero or one numeric field. Iterating the
+    record's entries avoids 16 dictionary lookups and list appends per
+    object. Multi-feature records use the existing implementation.
+    """
+    matched: str | None = None
+    for field in record:
+        if field in _SINGLE_NUMERIC_INDEX:
+            if matched is not None:
+                return _numbers(record)
+            matched = field
+    if matched is None:
+        return _ZERO_NUMERIC_VALUES, _ZERO_NUMERIC_MASKS
+    return _single_numeric(matched, record[matched])
+
+
 @dataclass(frozen=True)
 class ObjectToken:
     kind: int
@@ -166,7 +184,10 @@ def encode_public_decision(
             *, owner: int = -1, ref: tuple[str, object] | None = None) -> int:
         if len(objects) >= object_limit:
             raise ValueError("Public object cap exceeded: do not drop referenced targets")
-        numeric, observed = _numbers(record)
+        numeric, observed = (
+            _numbers_h21(record) if identity_hasher is not None
+            else _numbers(record)
+        )
         index = len(objects)
         objects.append(ObjectToken(
             KINDS.index(kind),
