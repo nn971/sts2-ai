@@ -22,6 +22,7 @@ from sts2_ai.models.shared_game_objects import (
     RelationToken,
     _bucket,
     _numbers,
+    _single_numeric,
 )
 from sts2_ai.training.h19_resource_codec import encode_h19_resource_decision
 
@@ -70,7 +71,11 @@ def encode_h20_map_decision(
         node_by_id[node_id] = idx
         # Override H7's string-only _entry_id: native room types may be enums.
         # Raw NodeIds never appear in either the learned identity or numerics.
-        numeric, observed = _numbers({"floor": node["floor"]})
+        numeric, observed = (
+            _single_numeric("floor", node["floor"])
+            if identity_hasher is not None
+            else _numbers({"floor": node["floor"]})
+        )
         objects[idx] = ObjectToken(
             NODE_KIND,
             (identity_hasher("room_type:" + str(node["room_type"]))
@@ -79,7 +84,11 @@ def encode_h20_map_decision(
             MAP_ZONE, numeric, observed,
         )
         for field, value in (("act", node["act"]),):
-            num, mask = _numbers({"stacks": value})
+            num, mask = (
+                _single_numeric("stacks", value)
+                if identity_hasher is not None
+                else _numbers({"stacks": value})
+            )
             objects.append(ObjectToken(
                 OWNER_ATTRIBUTE_KIND_V2,
                 (identity_hasher("map_node." + field)
