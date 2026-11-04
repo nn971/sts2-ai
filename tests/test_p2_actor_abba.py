@@ -609,7 +609,12 @@ def h22_collator_cohorts() -> list[dict]:
             "codec": "h21-grounded-reward-shop-event-v4",
             "actor_h21_collator": collator,
         })
-        record["shared_actor_metrics"] = {"p2_h21_collator": collator}
+        record["shared_actor_metrics"] = {
+            "p2_h21_collator": collator,
+            "requests": 32, "batches": 16,
+            "host_collate_seconds": 0.4 if collator == "packed" else 4.0,
+            "transfer_seconds": 0.05, "forward_seconds": 1.3,
+        }
     return data
 
 
@@ -627,6 +632,10 @@ def test_h22_collator_abba_accepts_exact_h21_variable_shape_replay():
         37 / 25,
     )
     assert result["candidate_faster_in_both_pairs"]
+    assert [x["single_actor_process_seconds"]["host_collate_seconds"]
+            for x in result["h21_shared_actor_stages"]] == [
+                4.0, 0.4, 0.4, 4.0,
+            ]
     assert result["configurations"]["A_H21_reference"]["h21_collator"] == "reference"
     assert result["configurations"]["B_H21_packed"]["h21_collator"] == "packed"
 
@@ -654,6 +663,10 @@ def test_h22_collator_abba_accepts_exact_h21_variable_shape_replay():
      "paired work drift"),
     (1, lambda p: p["identity"].update({"wire_profile_only": True}),
      "unexpected wire-only profiling"),
+    (1, lambda p: p["shared_actor_metrics"].update({"host_collate_seconds": -1}),
+     "invalid H21 actor stage"),
+    (1, lambda p: p["shared_actor_metrics"].update({"requests": 0}),
+     "missing H21 actor requests"),
 ])
 def test_h22_collator_abba_rejects_drift(arm, change, reason):
     data = h22_collator_cohorts()
