@@ -40,6 +40,7 @@ from sts2_ai.search.combat_puct import (
     H16_EXPERIMENTAL_ROOT_CONDITIONED_CAPABILITY,
     CombatFrame,
     CombatPuct,
+    CombatSearchProfile,
 )
 from sts2_ai.training.h16_episode_metrics import (
     combat_results,
@@ -554,6 +555,8 @@ def local_combat_puct(
     simulations: int, depth: int | None, seed: int,
     rollout_transport: str = "fused",
     max_simulation_steps: int = 512,
+    search_profile: CombatSearchProfile | None = None,
+    search_report: list[dict[str, object]] | None = None,
 ) -> tuple[tuple[float, ...], int]:
     """Combat PUCT: capped depth or full search to combat termination.
 
@@ -578,7 +581,9 @@ def local_combat_puct(
         tree_expansion_mode="full_depth", leaf_mode="value", seed=seed,
         free_card_selection_steps=True,
         max_simulation_steps=max_simulation_steps,
-    ).search(root, simulations=simulations)
+    ).search(root, simulations=simulations, profile=search_profile)
+    if search_profile is not None and search_report is not None:
+        search_report.append(search_profile.snapshot(result))
     return result.policy, result.transitions
 
 
@@ -610,6 +615,7 @@ def collect_act_episode(
     card_exposure: Mapping[str, int] | None = None,
     map_profile_id: str | None = EXPERIMENTAL_FIXED_ROUTE_PROFILE,
     compact_card_selection: bool = False,
+    search_profiles: list[dict[str, object]] | None = None,
 ) -> PilotEpisode:
     if not (0 <= search_probability <= 1 and max_searches >= 0
             and max_decisions > 0 and simulations > 0
@@ -668,12 +674,16 @@ def collect_act_episode(
             else:
                 budget = 0
             if budget:
+                search_profile = (
+                    CombatSearchProfile() if search_profiles is not None else None
+                )
                 search_policy, count = local_combat_puct(
                     backend, state, observation, actions, policy,
                     simulations=budget, depth=search_depth,
                     seed=rng.randrange(2**63),
                     rollout_transport=rollout_transport,
                     max_simulation_steps=max_simulation_steps,
+                    search_profile=search_profile, search_report=search_profiles,
                 )
                 search_transitions += count
                 searches += 1
