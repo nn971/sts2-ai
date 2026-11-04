@@ -507,3 +507,92 @@ def test_p2_wire_only_runner_toggles_just_jsonl_instrumentation(tmp_path):
         c[c.index("--p2-prefix-cache-handles") + 1] == "0"
         for c in calls[:4]
     )
+
+
+def test_p2_native_fused_abba_validates_versioned_timing_and_teacher_replay():
+    data = [
+        cohort(wall, batch=16, fixed_shape=4)
+        for wall in (40.0, 42.0, 43.0, 41.0)
+    ]
+    for index, cohort_data in enumerate(data):
+        enabled = index in (1, 2)
+        cohort_data["identity"]["native_fused_profile_only"] = enabled
+        for seed in cohort_data["seed_reports"]:
+            for run in seed["runs"]:
+                run["h16_native_fused_instrumentation"] = enabled
+                run["h16_native_fused"] = ({
+                    "schemaId": "sts2-p2-h16-fused-native-profile-v1",
+                    "enabled": False,
+                    "operations": {
+                        "fused.environment_step_frame": {
+                            "count": 100, "totalSeconds": 0.25,
+                            "maxSeconds": 0.01, "allocatedBytes": 2048,
+                        },
+                    },
+                } if enabled else None)
+    report = report_actor_abba(*data, experiment="native-fused-profile")
+    assert report["parity"]["passed"] is True
+    assert report["native_fused_profile_overhead_fraction"] == pytest.approx(
+        85 / 81 - 1,
+    )
+    diagnostics = report["native_fused_diagnostics"]
+    assert diagnostics[0]["operations"] == {}
+    assert diagnostics[1]["operations"]["fused.environment_step_frame"][
+        "count"
+    ] == 400
+    assert diagnostics[1]["operations"]["fused.environment_step_frame"][
+        "allocatedBytes"
+    ] == 8192
+
+    wrong = deepcopy(data)
+    wrong[2]["identity"]["native_fused_profile_only"] = False
+    with pytest.raises(ValueError, match="unexpected native-fused"):
+        report_actor_abba(*wrong, experiment="native-fused-profile")
+
+    wrong = deepcopy(data)
+    wrong[1]["seed_reports"][0]["runs"][0]["h16_native_fused"][
+        "schemaId"
+    ] = "incompatible-v2"
+    with pytest.raises(ValueError, match="missing versioned native profile"):
+        report_actor_abba(*wrong, experiment="native-fused-profile")
+
+    wrong = deepcopy(data)
+    wrong[1]["seed_reports"][0]["runs"][0]["h16_native_fused"][
+        "operations"
+    ]["fused.environment_step_frame"]["totalSeconds"] = -0.1
+    with pytest.raises(ValueError, match="invalid native timer"):
+        report_actor_abba(*wrong, experiment="native-fused-profile")
+
+    wrong = deepcopy(data)
+    wrong[3]["seed_reports"][1]["trace_sha256"] = "drift"
+    with pytest.raises(ValueError, match="teacher replay drift"):
+        report_actor_abba(*wrong, experiment="native-fused-profile")
+
+
+def test_p2_native_fused_runner_only_toggles_native_timing(tmp_path):
+    args = Namespace(
+        experiment="native-fused-profile",
+        seeds=None, seed_prefix="p2-native", seed_count=4, workers=1,
+        max_decisions=80, max_searches=2, simulations=16, depth=8,
+        actor_max_delay_ms=2.0, horizon_lambda=0.411395,
+        macro_prior_weight=0.5, macro_model=Path("macro.json"),
+        ascension=0, ai_root=Path("/tmp/ai"), emulator_root=Path("/tmp/emu"),
+        emulator_revision="emulator-sha", checkpoint=Path("model.pt"),
+        actor_device="cuda", map_profile="generated", output_root=tmp_path,
+    )
+    calls, files = make_commands(args)
+    assert files[-1].name == "p2-native-fused-profile-abba-report.json"
+    assert [
+        "--native-fused-profile-only" in call for call in calls[:4]
+    ] == [False, True, True, False]
+    assert all("--no-episode-profile" in call for call in calls[:4])
+    assert all("--wire-profile-only" not in call for call in calls[:4])
+    assert all("--actor-profile" not in call for call in calls[:4])
+    assert all(
+        call[call.index("--rollout-transport") + 1] == "fused"
+        for call in calls[:4]
+    )
+    assert all(
+        call[call.index("--p2-prefix-cache-handles") + 1] == "0"
+        for call in calls[:4]
+    )
