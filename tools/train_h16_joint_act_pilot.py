@@ -41,8 +41,8 @@ from sts2_ai.training.h16_episode_metrics import (
     summarize_floor_progress,
 )
 from sts2_ai.training.h16_joint_act_pilot import (
-    SCHEMA,
     H22_SCHEMA,
+    SCHEMA,
     JointActPilotNet,
     PilotEpisode,
     PilotPolicy,
