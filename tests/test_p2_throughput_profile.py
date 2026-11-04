@@ -11,6 +11,7 @@ import pytest
 
 from sts2_ai.emulator.jsonl_backend import JsonlEmulatorBackend
 from sts2_ai.emulator.protocol import LegalAction, Observation
+from sts2_ai.training.h16_public_codec import encode_h16_decision
 from sts2_ai.search.combat_puct import (
     FAIR_COMBAT_CAPABILITY,
     H16_EXPERIMENTAL_ROOT_CONDITIONED_CAPABILITY,
@@ -241,3 +242,31 @@ def test_generated_map_probe_never_enables_fixed_route_only_compact_selection():
     )
     assert isinstance(compact, ast.Constant)
     assert compact.value is False
+
+
+def test_generated_map_draw_pile_selection_uses_public_prompt_candidates():
+    """H16 must resolve cards revealed in a selection dialog, not hidden draw order."""
+    public = {
+        "hp": 70, "max_hp": 70, "gold": 0, "deck": [],
+        "combat": {
+            "hand": [], "discard_pile": [], "exhaust_pile": [],
+            "draw_pile_count": 3, "pending_choice_id": "select_cards",
+            "selection_candidates": [
+                {
+                    "instance_id": 15, "card_id": "proto.silent.strike",
+                    "upgrade_level": 0, "is_temporary": False, "state": {},
+                },
+            ],
+        },
+    }
+    action = LegalAction("choose-15", "select_cards", '{"CardInstanceIds":[15]}')
+    encoded = encode_h16_decision(public, (action,))
+    assert len(encoded.actions) == 1
+    (member,) = encoded.actions[0].members
+    assert encoded.objects[member].zone == 10  # public reward/choice zone
+    assert member >= 0
+    # The dialog is the disclosure boundary: without a candidate record,
+    # the action must fail rather than silently alias another card.
+    public["combat"]["selection_candidates"] = []
+    with pytest.raises(ValueError, match="candidate missing"):
+        encode_h16_decision(public, (action,))
