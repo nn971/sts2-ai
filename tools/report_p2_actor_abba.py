@@ -101,7 +101,7 @@ def report_actor_abba(
     b2: Mapping[str, Any], a2: Mapping[str, Any], *,
     experiment: str = "batching",
 ) -> dict[str, Any]:
-    if experiment not in ("batching", "actor-profile"):
+    if experiment not in ("batching", "actor-profile", "prefix-cache"):
         raise ValueError("Unsupported A/B/B/A experiment")
     profiles = (a1, b1, b2, a2)
     verified = [
@@ -114,6 +114,15 @@ def report_actor_abba(
     ]
     identities = [p["identity"] for p in verified]
     reference = identities[0]
+    cache_caps = [identity.get("p2_prefix_cache_handles", 0)
+                  for identity in identities]
+    if any(type(cap) is not int or cap < 0 or cap > 128
+           for cap in cache_caps):
+        raise ValueError("Invalid exact-prefix cache handle cap")
+    if experiment == "prefix-cache" and any(
+        "p2_prefix_cache_handles" not in identity for identity in identities
+    ):
+        raise ValueError("Missing P2.1 cache provenance")
     for label, identity in zip(ORDER[1:], identities[1:], strict=True):
         for field in (*MATCH_FIELDS, "ai_sha", "emulator_cli", "worker_count",
                       "torch", "platform", "cpu_count"):
@@ -132,6 +141,10 @@ def report_actor_abba(
         for field in CHANGE_FIELDS:
             if left.get(field) != right.get(field):
                 raise ValueError(f"{name}: inconsistent actor mode: {field}")
+    if cache_caps[0] != cache_caps[3] or cache_caps[1] != cache_caps[2]:
+        raise ValueError("Inconsistent P2 prefix cache caps within A/B arms")
+    if experiment != "prefix-cache" and any(cache_caps):
+        raise ValueError("Unexpected P2 prefix cache in non-cache experiment")
     if experiment == "batching":
         if all(
             identities[0].get(field) == identities[1].get(field)
@@ -152,12 +165,16 @@ def report_actor_abba(
         for field in CHANGE_FIELDS:
             if identities[0].get(field) != identities[1].get(field):
                 raise ValueError(
-                    f"Actor profiling experiment changed batching: {field}"
+                    f"{experiment} experiment changed batching: {field}"
                 )
         if identities[0].get("actor_fixed_shape_batch_size") != 4:
-            raise ValueError("Actor profile overhead targets fixed-shape batch 4")
+            raise ValueError("P2 control targets fixed-shape batch 4")
         if identities[0].get("actor_max_batch") != 16:
-            raise ValueError("Actor profile overhead targets max batch 16")
+            raise ValueError("P2 control targets max batch 16")
+        if experiment == "prefix-cache" and (
+            cache_caps[0] != 0 or cache_caps[1] < 1
+        ):
+            raise ValueError("P2 prefix-cache control requires off/on cache arms")
     first_rows = verified[0]["rows"]
     for label, compared in zip(ORDER[1:], verified[1:], strict=True):
         rows = compared["rows"]
@@ -192,6 +209,9 @@ def report_actor_abba(
         "evidence_level": (
             "order-balanced actor-profile overhead diagnostic"
             if experiment == "actor-profile" else
+            "order-balanced P2.1 experimental exact-root-conditioned "
+            "prefix reuse diagnostic; fair Nature acceptance separate"
+            if experiment == "prefix-cache" else
             "order-balanced uninstrumented P2.5 actor candidate; "
             "full episode/RNG acceptance separate"
         ),
@@ -222,16 +242,20 @@ def report_actor_abba(
         },
         "configurations": {
             ("A_unprofiled_fixed4" if experiment == "actor-profile"
+             else "A_uncached_fixed4" if experiment == "prefix-cache"
              else "A_batch1"): {
                 "actor_max_batch": identities[0]["actor_max_batch"],
                 "fixed_shape_batch_size": identities[0]["actor_fixed_shape_batch_size"],
                 "actor_profile": identities[0]["actor_profile"],
+                "p2_prefix_cache_handles": cache_caps[0],
             },
             ("B_profiled_fixed4" if experiment == "actor-profile"
+             else "B_cached_fixed4" if experiment == "prefix-cache"
              else "B_fixed_shape"): {
                 "actor_max_batch": identities[1]["actor_max_batch"],
                 "fixed_shape_batch_size": identities[1]["actor_fixed_shape_batch_size"],
                 "actor_profile": identities[1]["actor_profile"],
+                "p2_prefix_cache_handles": cache_caps[1],
             },
         },
         "order": list(ORDER),
@@ -266,6 +290,12 @@ def report_actor_abba(
                  "Signed overhead may be negative due to scheduling noise"]
                 if experiment == "actor-profile" else []
             ),
+            *(
+                ["P2.1 cache is experimental root-conditioned Native only; "
+                 "separate fair-history and Nature sampling bypass required",
+                 "Per-root private receipt verification can dominate short prefixes"]
+                if experiment == "prefix-cache" else []
+            ),
             "Independent-seed confirmation and P2.1/P2.2 gates remain separate",
         ],
     }
@@ -275,7 +305,7 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     for name in ("a1", "b1", "b2", "a2"):
         p.add_argument(f"--{name}", type=Path, required=True)
-    p.add_argument("--experiment", choices=("batching", "actor-profile"),
+    p.add_argument("--experiment", choices=("batching", "actor-profile", "prefix-cache"),
                    default="batching")
     p.add_argument("--output", type=Path, required=True)
     args = p.parse_args()
