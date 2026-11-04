@@ -13,7 +13,7 @@ is only a **within-frame join key**. Those opaque values never enter an identity
 embedding or numeric feature.
 
 The H21 v1 input is gated on emulator `prototype-ai-v1` and the H21 object
-schema `sts2-h21-public-grounded-macro-v2`. H7/H16/H18/H19/H20 models retain
+schema `sts2-h21-public-grounded-macro-v3`. H7/H16/H18/H19/H20 models retain
 their previous checkpoint formats. H21 has a distinct model checkpoint and
 eight typed edge families (including chronological room history). No pretrained weights are silently reused.
 
