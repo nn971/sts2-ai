@@ -138,7 +138,10 @@ def run_episode(
         seed=seed,
         ascension=ascension,
         map_profile_id=(EXPERIMENTAL_FIXED_ROUTE_PROFILE if fixed_route else None),
-        compact_card_selection=not fixed_route,
+        # The H16-compatible emulator only allows compact selection on
+        # the experimental fixed route. Preserve the ordinary generated-map
+        # action contract in this benchmark (also the default on fixed route).
+        compact_card_selection=False,
         max_decisions=max_decisions,
         search_probability=1.0 if search_enabled else 0.0,
         max_searches=max_searches,
