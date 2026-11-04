@@ -57,6 +57,7 @@ def _verify_record(record: Any) -> None:
         raise ValueError("Malformed H21 public corpus record")
     if (not isinstance(record["seed"], str) or not record["seed"]
             or type(record["step"]) is not int or record["step"] < 0
+            or not isinstance(record["public_schema_id"], str)
             or record["public_schema_id"] not in _PUBLIC_SCHEMAS
             or not isinstance(record["frame"], dict)
             or not isinstance(record["actions"], list)
