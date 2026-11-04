@@ -101,7 +101,7 @@ def report_actor_abba(
     b2: Mapping[str, Any], a2: Mapping[str, Any], *,
     experiment: str = "batching",
 ) -> dict[str, Any]:
-    if experiment not in ("batching", "actor-profile", "prefix-cache"):
+    if experiment not in ("batching", "actor-profile", "prefix-cache", "transport"):
         raise ValueError("Unsupported A/B/B/A experiment")
     profiles = (a1, b1, b2, a2)
     verified = [
@@ -126,9 +126,9 @@ def report_actor_abba(
     for label, identity in zip(ORDER[1:], identities[1:], strict=True):
         for field in (*MATCH_FIELDS, "ai_sha", "emulator_cli", "worker_count",
                       "torch", "platform", "cpu_count"):
-            if field in CHANGE_FIELDS or (
-                field == "actor_profile" and experiment == "actor-profile"
-            ):
+            if (field in CHANGE_FIELDS or
+                (field == "actor_profile" and experiment == "actor-profile") or
+                (field == "rollout_transport" and experiment == "transport")):
                 continue
             if field not in reference or field not in identity:
                 raise ValueError(f"{label}: missing provenance {field}")
@@ -175,6 +175,16 @@ def report_actor_abba(
             cache_caps[0] != 0 or cache_caps[1] < 1
         ):
             raise ValueError("P2 prefix-cache control requires off/on cache arms")
+        if experiment == "transport" and (
+            (identities[0]["rollout_transport"],
+             identities[1]["rollout_transport"],
+             identities[2]["rollout_transport"],
+             identities[3]["rollout_transport"])
+            != ("legacy", "fused", "fused", "legacy")
+        ):
+            raise ValueError(
+                "P2 transport control requires legacy/fused/fused/legacy"
+            )
     first_rows = verified[0]["rows"]
     for label, compared in zip(ORDER[1:], verified[1:], strict=True):
         rows = compared["rows"]
@@ -235,6 +245,42 @@ def report_actor_abba(
                 ):
                     raise ValueError(f"{arm}: uncached arm performed cache work")
                 cache_diagnostics.append({"arm": arm, **stats})
+    transport_bridge: list[dict[str, Any]] | None = None
+    if experiment == "transport":
+        transport_bridge = []
+        for arm, verified_profile in zip(ORDER, verified, strict=True):
+            by_operation: dict[str, dict[str, float | int]] = {}
+            for row in verified_profile["rows"].values():
+                for run in row["runs"]:
+                    per_operation = run.get("bridge")
+                    if not isinstance(per_operation, Mapping):
+                        raise ValueError(f"{arm}: missing JSONL bridge operation profile")
+                    for operation, stats in per_operation.items():
+                        if not isinstance(stats, Mapping):
+                            raise ValueError(f"{arm}: invalid bridge stat for {operation}")
+                        calls = stats.get("calls")
+                        seconds = stats.get("total_seconds")
+                        if (
+                            type(calls) is not int or calls < 0
+                            or isinstance(seconds, bool)
+                            or not isinstance(seconds, (int, float))
+                            or not math.isfinite(seconds) or seconds < 0
+                        ):
+                            raise ValueError(
+                                f"{arm}: invalid bridge calls/time for {operation}"
+                            )
+                        bucket = by_operation.setdefault(
+                            operation, {"calls": 0, "total_seconds": 0.0}
+                        )
+                        bucket["calls"] += calls
+                        bucket["total_seconds"] += seconds
+            transport_bridge.append({
+                "arm": arm,
+                "worker_summed_nonadditive_bridge_seconds": sum(
+                    item["total_seconds"] for item in by_operation.values()
+                ),
+                "operations": dict(sorted(by_operation.items())),
+            })
     return {
         "schema": REPORT_SCHEMA,
         "experiment": experiment,
@@ -244,6 +290,9 @@ def report_actor_abba(
             "order-balanced P2.1 experimental exact-root-conditioned "
             "prefix reuse diagnostic; fair Nature acceptance separate"
             if experiment == "prefix-cache" else
+            "order-balanced P2.2 existing legacy-vs-fused JSONL comparison; "
+            "transport metrics are worker-summed, cohort wall is authoritative"
+            if experiment == "transport" else
             "order-balanced uninstrumented P2.5 actor candidate; "
             "full episode/RNG acceptance separate"
         ),
@@ -275,18 +324,22 @@ def report_actor_abba(
         "configurations": {
             ("A_unprofiled_fixed4" if experiment == "actor-profile"
              else "A_uncached_fixed4" if experiment == "prefix-cache"
+             else "A_legacy_fixed4" if experiment == "transport"
              else "A_batch1"): {
                 "actor_max_batch": identities[0]["actor_max_batch"],
                 "fixed_shape_batch_size": identities[0]["actor_fixed_shape_batch_size"],
                 "actor_profile": identities[0]["actor_profile"],
+                "rollout_transport": identities[0]["rollout_transport"],
                 "p2_prefix_cache_handles": cache_caps[0],
             },
             ("B_profiled_fixed4" if experiment == "actor-profile"
              else "B_cached_fixed4" if experiment == "prefix-cache"
+             else "B_fused_fixed4" if experiment == "transport"
              else "B_fixed_shape"): {
                 "actor_max_batch": identities[1]["actor_max_batch"],
                 "fixed_shape_batch_size": identities[1]["actor_fixed_shape_batch_size"],
                 "actor_profile": identities[1]["actor_profile"],
+                "rollout_transport": identities[1]["rollout_transport"],
                 "p2_prefix_cache_handles": cache_caps[1],
             },
         },
@@ -298,6 +351,10 @@ def report_actor_abba(
         **(
             {"prefix_cache_diagnostics": cache_diagnostics}
             if cache_diagnostics is not None else {}
+        ),
+        **(
+            {"transport_bridge_operation_totals": transport_bridge}
+            if transport_bridge is not None else {}
         ),
         "ratio_of_total_baseline_to_candidate_wall": a_wall / b_wall,
         "wall_reduction_fraction": 1 - b_wall / a_wall,
@@ -332,6 +389,13 @@ def report_actor_abba(
                  "Per-root private receipt verification can dominate short prefixes"]
                 if experiment == "prefix-cache" else []
             ),
+            *(
+                ["Legacy split versus already-existing fused calls are an "
+                 "infrastructure baseline, not a new protocol optimization",
+                 "Worker-summed bridge times overlap at multiple workers; "
+                 "never substitute them for measured cohort wall"]
+                if experiment == "transport" else []
+            ),
             "Independent-seed confirmation and P2.1/P2.2 gates remain separate",
         ],
     }
@@ -341,7 +405,7 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     for name in ("a1", "b1", "b2", "a2"):
         p.add_argument(f"--{name}", type=Path, required=True)
-    p.add_argument("--experiment", choices=("batching", "actor-profile", "prefix-cache"),
+    p.add_argument("--experiment", choices=("batching", "actor-profile", "prefix-cache", "transport"),
                    default="batching")
     p.add_argument("--output", type=Path, required=True)
     args = p.parse_args()
