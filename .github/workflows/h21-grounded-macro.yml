@@ -8,6 +8,7 @@ on:
       - 'src/sts2_ai/training/h21_field_coverage.py'
       - 'src/sts2_ai/models/shared_macro_transformer_v2.py'
       - 'tests/test_h21_macro_offers.py'
+      - 'tests/test_h21_pending_continuations.py'
       - 'tests/test_h21_stable_identity.py'
       - 'tests/test_h21_single_numeric.py'
       - 'tests/test_h21_field_coverage.py'
@@ -40,7 +41,7 @@ jobs:
           python -m pip install -e '.[dev]'
       - name: Lint grounded macro implementation and tests
         run: |
-          python -m ruff check src/sts2_ai/training/h21_macro_offer_codec.py src/sts2_ai/training/h21_stable_identity.py tests/test_h21_stable_identity.py tests/test_h21_single_numeric.py src/sts2_ai/training/h21_field_coverage.py src/sts2_ai/models/shared_macro_transformer_v2.py tests/test_h21_macro_offers.py tests/test_h21_field_coverage.py tests/test_h21_action_alias_audit.py tests/test_h21_live_probe.py tools/probe_h21_live_public.py tests/test_h21_affliction_sources.py tests/test_h21_source_contract.py tools/check_h21_public_source_schema.py src/sts2_ai/training/h21_action_alias_audit.py
+          python -m ruff check src/sts2_ai/training/h21_macro_offer_codec.py tests/test_h21_pending_continuations.py src/sts2_ai/training/h21_stable_identity.py tests/test_h21_stable_identity.py tests/test_h21_single_numeric.py src/sts2_ai/training/h21_field_coverage.py src/sts2_ai/models/shared_macro_transformer_v2.py tests/test_h21_macro_offers.py tests/test_h21_field_coverage.py tests/test_h21_action_alias_audit.py tests/test_h21_live_probe.py tools/probe_h21_live_public.py tests/test_h21_affliction_sources.py tests/test_h21_source_contract.py tools/check_h21_public_source_schema.py src/sts2_ai/training/h21_action_alias_audit.py
       - name: Grounding regression and inherited version compatibility
         run: |
-          python -m pytest -q tests/test_h21_macro_offers.py tests/test_h21_stable_identity.py tests/test_h21_single_numeric.py tests/test_h21_field_coverage.py tests/test_h21_action_alias_audit.py tests/test_h21_live_probe.py tests/test_h21_affliction_sources.py tests/test_h21_source_contract.py tests/test_h20_map_graph.py tests/test_h19_owner_resources.py tests/test_h19_owner_model.py tests/test_h16_deck_multiplicity.py tests/test_shared_transformer_h7.py
+          python -m pytest -q tests/test_h21_macro_offers.py tests/test_h21_pending_continuations.py tests/test_h21_stable_identity.py tests/test_h21_single_numeric.py tests/test_h21_field_coverage.py tests/test_h21_action_alias_audit.py tests/test_h21_live_probe.py tests/test_h21_affliction_sources.py tests/test_h21_source_contract.py tests/test_h20_map_graph.py tests/test_h19_owner_resources.py tests/test_h19_owner_model.py tests/test_h16_deck_multiplicity.py tests/test_shared_transformer_h7.py
