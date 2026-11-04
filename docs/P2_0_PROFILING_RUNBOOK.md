@@ -204,6 +204,40 @@ profile-on/off A/B/B/A overhead comparison is available with
 `--profile-overhead`, but it is diagnostic and includes profiling overhead
 by construction.
 
+## Diagnosing mixed CUDA-batch replay drift
+
+Strict `--paired` replay compares the complete observed public action menu,
+executed action, PUCT teacher distribution and final public frame, **exactly**.
+At 15 workers, the shared CUDA actor may batch a given decision with
+different peers on repeated runs; GPU floating-point results can depend on
+batch shapes. A small difference can alter a PUCT root's visits or even a
+sampled player action. This is a hypothesis until the first mismatch is
+inspected.
+
+A replay mismatch fails closed and writes a compact diagnostic to
+`results/p2-h16-a0-w15/replay-mismatches/<seed-hash>-<arm>.json`. The error
+message also gives the first divergent JSON path and values. For example,
+`$.actions[0].teacher_policy[2]` indicates a changed PUCT teacher entry,
+whereas `$.actions[12].action_id` indicates a changed executed action.
+The comparison is deliberately **not** made tolerant to floating-point
+drift without validating the effects on the actual policy.
+
+To isolate cross-request microbatch effects, run the same matched
+1-/15-worker cohort using **`--actor-max-batch 1` for both worker counts**,
+keeping `--paired`. This serializes actor inference *inside the shared
+service* but retains 15 independent emulator workers and proves a
+reproducible control if all exact traces match. It is a distinct, no-batching
+condition, **not** a measurement of production microbatch throughput. The
+matched-cohort comparator correctly rejects a 1-worker batch-16 versus a
+15-worker batch-1 report. Report the baseline batch-16 failure and
+single-batch diagnostic separately; rerun both worker-count reports after
+changing source revisions, too.
+
+To measure real multi-request batching, use the production actor's normal
+`--actor-max-batch 16` and preserve divergent traces as a fidelity blocker.
+Do not claim strict replay parity or an accepted optimization speedup
+from a failed paired condition.
+
 ## Offline 1-worker versus 15-worker replay/scalability comparison
 
 Once both cohort JSON reports exist, validate **matching AI/emulator/model SHA,
