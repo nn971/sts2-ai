@@ -134,6 +134,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--actor-device", choices=["cpu", "cuda"], default="cpu")
     parser.add_argument("--actor-max-batch", type=int, default=16)
     parser.add_argument("--actor-max-delay-ms", type=float, default=2.0)
+    parser.add_argument("--actor-profile", action="store_true",
+                        help="Collect bounded queue/batch/forward distributions")
     parser.add_argument("--ascension", type=int, default=0)
     parser.add_argument("--map-profile", choices=["generated", "fixed-route"],
                         default="generated")
@@ -206,6 +208,7 @@ def main() -> None:
             workers=a.workers, device=a.actor_device,
             horizon_lambda=a.horizon_lambda,
             max_batch=a.actor_max_batch, max_delay_ms=a.actor_max_delay_ms,
+            profile_actor=a.actor_profile,
         )
         if a.actor_inference == "shared" else nullcontext(None)
     )
@@ -244,6 +247,7 @@ def main() -> None:
             "actor_device": a.actor_device,
             "actor_max_batch": a.actor_max_batch,
             "actor_max_delay_ms": a.actor_max_delay_ms,
+            "actor_profile": a.actor_profile,
             "torch": torch.__version__,
             "cpu_count": os.cpu_count(),
             "platform": platform.platform(),
@@ -277,6 +281,8 @@ def main() -> None:
             "Worker-summed times overlap; never add them or use as cohort wall",
             "Generated-map native-structure RNG is not installed-game calibrated",
             "Actor model forward/codec remain H16; H21 joint forward not measured",
+            "Opt-in actor queue samples are capped at the first 8192 values",
+            "CUDA transfer synchronization is enabled only with --actor-profile",
             "This diagnostic is not a 50+ completed-combats-per-second claim",
         ],
     }
