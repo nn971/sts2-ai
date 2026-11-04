@@ -178,3 +178,29 @@ across workers; the report never treats their sum as the critical path. A
 profile-on/off A/B/B/A overhead comparison is available with
 `--profile-overhead`, but it is diagnostic and includes profiling overhead
 by construction.
+
+## Offline 1-worker versus 15-worker replay/scalability comparison
+
+Once both cohort JSON reports exist, validate **matching AI/emulator/model SHA,
+frozen search configuration, per-seed public/teacher replay digests, legal
+decision counts, search work and outcomes** before interpreting wall time:
+
+```fish
+python tools/report_p2_cohort_comparison.py \
+  --single results/p2-h16-a0-w1/profile.json \
+  --parallel results/p2-h16-a0-w15/profile.json \
+  --output results/p2-h16-a0-matched/comparison.json
+```
+
+The script reports cohort wall speedup, parallel efficiency relative to 15
+workers, separate completed-episode, actual-transition and search-transition
+rates, and the maximum active seed tasks. It fails closed on incompatible
+configuration, mismatched replay digests, drifted gameplay/search work or
+missing/duplicate seed identities. With only eight seeds, the 15-worker
+pool is underfilled; the resulting speedup measures **up to eight concurrent
+seed tasks**, rather than saturated 15-worker scaling.
+
+The comparison is **diagnostic**: profiling overhead and frozen-checkpoint
+search work are held fixed, and no production optimization is being
+compared. Runs with zero completed episodes cannot substantiate a
+completed-episodes/s claim. Censored episodes remain censored.
