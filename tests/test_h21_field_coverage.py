@@ -8,6 +8,7 @@ import pytest
 from sts2_ai.training.h21_field_coverage import (
     AUXILIARY,
     ENCODED,
+    GAP,
     PARTIAL,
     PUBLIC_V1_FIELD_CONTRACT,
     REFERENCE,
@@ -58,11 +59,12 @@ def test_gaps_and_references_are_reported_by_specific_field_path():
     assert ("observation.combat.enemies[0].hp", ENCODED) in report.classified
     assert ("observation.deck[0].affliction.source_enemy_instance_id",
             REFERENCE) in report.classified
-    assert ("observation.combat", PARTIAL) in report.classified
+    assert ("observation.combat", ENCODED) in report.classified
     assert ("observation.combat.play_pile", ENCODED) in report.classified
     assert ("observation.decision_index", AUXILIARY) in report.classified
     assert ("observation.completed_rooms", ENCODED) in report.classified
-    assert not report.fully_encoded
+    assert report.fully_encoded
+    assert report.gaps == report.partial == ()
 
 
 def test_unknown_public_fields_fail_at_every_audited_structural_layer():
@@ -123,7 +125,7 @@ def test_nested_reward_shop_event_fields_are_audited_recursively():
         audit_public_observation(mutated)
 
 
-def test_contract_declares_unrepresented_high_priority_fields():
+def test_contract_classifies_all_known_public_v1_fields():
     root = PUBLIC_V1_FIELD_CONTRACT["observation"]
     combat = PUBLIC_V1_FIELD_CONTRACT["combat"]
     enemy = PUBLIC_V1_FIELD_CONTRACT["enemy"]
@@ -132,3 +134,16 @@ def test_contract_declares_unrepresented_high_priority_fields():
     assert combat["play_pile"] == ENCODED
     assert enemy["move_id"] == ENCODED
     assert enemy["is_minion"] == ENCODED
+    assert all(
+        status not in (GAP, PARTIAL)
+        for layer in PUBLIC_V1_FIELD_CONTRACT.values()
+        for status in layer.values()
+    )
+    assert root["event_id"] == ENCODED
+    assert root["reward"] == ENCODED
+    assert root["shop"] == ENCODED
+    assert root["event"] == ENCODED
+    assert PUBLIC_V1_FIELD_CONTRACT["reward"]["pending_deck_choice"] == ENCODED
+    assert PUBLIC_V1_FIELD_CONTRACT["shop"]["pending_deck_choice"] == ENCODED
+    assert PUBLIC_V1_FIELD_CONTRACT["event"]["pending_deck_choice"] == ENCODED
+    assert PUBLIC_V1_FIELD_CONTRACT["event"]["pending_potion_replacement"] == ENCODED
