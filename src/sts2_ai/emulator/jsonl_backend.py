@@ -86,6 +86,7 @@ class JsonlEmulatorBackend:
         dotnet: str = "dotnet",
         build: bool = True,
         profile_wire: bool = False,
+        expected_public_schema_id: str = OBSERVATION_SCHEMA_ID,
     ) -> None:
         self._repo_root = (
             repo_root.resolve()
@@ -115,6 +116,9 @@ class JsonlEmulatorBackend:
                 "Emulator checkout does not match the sts2-ai pin: "
                 f"expected {pinned}, found {actual}."
             )
+        if expected_public_schema_id not in (OBSERVATION_SCHEMA_ID, "prototype-ai-v1"):
+            raise ValueError("Unsupported public observation schema selection")
+        self._observation_schema_id = expected_public_schema_id
         self._emulator_revision = actual
         self._dotnet = dotnet
         self._next_request_id = 1
@@ -180,7 +184,7 @@ class JsonlEmulatorBackend:
         hello = self._request("hello")
         expected = {
             "wireSchemaId": WIRE_SCHEMA_ID,
-            "aiSchemaId": OBSERVATION_SCHEMA_ID,
+            "aiSchemaId": self._observation_schema_id,
             "rulesetId": RULESET_ID,
             "fairPolicyId": FAIR_POLICY_ID,
         }
@@ -236,7 +240,7 @@ class JsonlEmulatorBackend:
         if manifest.get("rulesetId") != RULESET_ID:
             self._terminate()
             raise JsonlBridgeError("Bridge manifest ruleset does not match handshake")
-        if manifest.get("aiSchemaId") != OBSERVATION_SCHEMA_ID:
+        if manifest.get("aiSchemaId") != self._observation_schema_id:
             self._terminate()
             raise JsonlBridgeError("Bridge manifest observation schema does not match handshake")
         self._manifest = cast(dict[str, Any], manifest)
@@ -909,10 +913,10 @@ class JsonlEmulatorBackend:
                 raise JsonlBridgeError("batch_step_frame action order does not match request")
 
             schema_id = self._require_string(raw, "schemaId")
-            if schema_id != OBSERVATION_SCHEMA_ID:
+            if schema_id != self._observation_schema_id:
                 raise JsonlBridgeError(
                     f"Unexpected observation schema {schema_id!r}; "
-                    f"expected {OBSERVATION_SCHEMA_ID!r}"
+                    f"expected {self._observation_schema_id!r}"
                 )
             response_policy = self._require_string(raw, "policyId")
             if response_policy != policy.policy_id:
@@ -987,10 +991,10 @@ class JsonlEmulatorBackend:
                     "batch_rollout_step_frame terminal is not boolean"
                 )
             schema_id = self._require_string(raw, "schemaId")
-            if schema_id != OBSERVATION_SCHEMA_ID:
+            if schema_id != self._observation_schema_id:
                 raise JsonlBridgeError(
                     f"Unexpected observation schema {schema_id!r}; "
-                    f"expected {OBSERVATION_SCHEMA_ID!r}"
+                    f"expected {self._observation_schema_id!r}"
                 )
             response_policy = self._require_string(raw, "policyId")
             if response_policy != policy.policy_id:
@@ -1130,10 +1134,10 @@ class JsonlEmulatorBackend:
             policy_id=policy.policy_id,
         )
         schema_id = self._require_string(response, "schemaId")
-        if schema_id != OBSERVATION_SCHEMA_ID:
+        if schema_id != self._observation_schema_id:
             raise JsonlBridgeError(
                 f"Unexpected observation schema {schema_id!r}; "
-                f"expected {OBSERVATION_SCHEMA_ID!r}"
+                f"expected {self._observation_schema_id!r}"
             )
         response_policy = self._require_string(response, "policyId")
         if response_policy != policy.policy_id:
@@ -1166,10 +1170,10 @@ class JsonlEmulatorBackend:
             if raw.get("stateHandle") != expected_state:
                 raise JsonlBridgeError("batch_observe state order does not match request")
             schema_id = self._require_string(raw, "schemaId")
-            if schema_id != OBSERVATION_SCHEMA_ID:
+            if schema_id != self._observation_schema_id:
                 raise JsonlBridgeError(
                     f"Unexpected observation schema {schema_id!r}; "
-                    f"expected {OBSERVATION_SCHEMA_ID!r}"
+                    f"expected {self._observation_schema_id!r}"
                 )
             response_policy = self._require_string(raw, "policyId")
             if response_policy != policy.policy_id:
