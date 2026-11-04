@@ -262,6 +262,11 @@ class JsonlEmulatorBackend:
         self._operation_profile.clear()
         self._wire_profile.clear()
 
+    def set_p2_wire_profile(self, enabled: bool) -> None:
+        """Switch only diagnostic JSONL framing counters between matched runs."""
+        self._profile_wire = enabled
+        self._wire_profile.clear()
+
     def wire_operation_profile(self) -> Mapping[str, BridgeWireStats]:
         """Detailed bridge transport accounting when profile_wire=True.
 
