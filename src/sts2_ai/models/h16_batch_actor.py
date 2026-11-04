@@ -19,8 +19,8 @@ from typing import Any
 import torch
 
 from sts2_ai.models.packed_actor_collation import prepare_h7_actor_packed
-from sts2_ai.models.shared_macro_transformer_v2 import collate_h21
 from sts2_ai.models.shared_game_objects import EncodedDecision
+from sts2_ai.models.shared_macro_transformer_v2 import collate_h21
 from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet
 
 
