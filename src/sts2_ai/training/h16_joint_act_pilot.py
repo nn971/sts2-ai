@@ -59,6 +59,7 @@ from sts2_ai.training.h16_public_codec import (
 )
 from sts2_ai.training.h17_adaptive import AdaptiveSearch, choose_budget
 from sts2_ai.training.h19_resource_codec import EMULATOR_PUBLIC_SCHEMA_V1
+from sts2_ai.training.h21_action_alias_audit import audit_h21_action_aliases
 from sts2_ai.training.h21_macro_offer_codec import (
     H21_CODEC, H21_OBJECT_SCHEMA, encode_h21_macro_decision,
 )
@@ -430,9 +431,11 @@ def encode_joint_decision(
     if representation == "h16":
         return encode_h16_decision(state, actions)
     if representation == "h21":
-        return encode_h21_macro_decision(
+        encoded = encode_h21_macro_decision(
             state, actions, public_schema_id=EMULATOR_PUBLIC_SCHEMA_V1,
         )
+        audit_h21_action_aliases(state, actions, encoded)
+        return encoded
     raise ValueError("Unknown joint public representation")
 
 
