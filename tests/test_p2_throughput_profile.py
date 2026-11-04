@@ -1,9 +1,11 @@
 """P2.0 diagnostic profiling contract: no teacher or stochastic drift."""
 from __future__ import annotations
 
+import ast
 import io
 import json
 import random
+from pathlib import Path
 
 import pytest
 
@@ -214,3 +216,28 @@ def test_p2_native_profile_rejects_malformed_handle_counts():
     }) + "\n")
     with pytest.raises(Exception, match="Malformed C# P2"):
         backend.p2_native_profile_snapshot(stop=True)
+
+
+def test_generated_map_probe_never_enables_fixed_route_only_compact_selection():
+    """Lightweight source contract; the profiler imports torch only at runtime.
+
+    A previously inverted `not fixed_route` passed compact selection to the
+    generated-map reset. The pinned H16 emulator correctly rejects that flag.
+    """
+    profiler = Path(__file__).resolve().parents[1] / "tools/profile_p2_joint_throughput.py"
+    module = ast.parse(profiler.read_text(encoding="utf-8"))
+    runner = next(
+        node for node in module.body
+        if isinstance(node, ast.FunctionDef) and node.name == "run_episode"
+    )
+    episode_call = next(
+        node for node in ast.walk(runner)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        and node.func.id == "collect_act_episode"
+    )
+    compact = next(
+        keyword.value for keyword in episode_call.keywords
+        if keyword.arg == "compact_card_selection"
+    )
+    assert isinstance(compact, ast.Constant)
+    assert compact.value is False
