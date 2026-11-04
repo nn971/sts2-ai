@@ -1036,6 +1036,52 @@ class JsonlEmulatorBackend:
         response = self._request("exact_hash", state_handle=state)
         return self._require_string(response, "exactHash")
 
+    def exact_continuation_receipt(
+        self, state: StateHandle,
+    ) -> dict[str, str | bool | None]:
+        """P2.1 diagnostic-only fingerprints of full provider-private RNG owners.
+
+        This is NOT a public observation. Only preflight/fidelity diagnostics
+        may call it. The independent Nature/fair-history continuation laws are
+        not certified merely by these hashes; no cache is enabled here.
+        """
+        response = self._request(
+            "p2_exact_continuation_receipt", state_handle=state,
+        )
+        if (
+            response.get("schemaId")
+            != "sts2-p2-exact-continuation-receipt-v1"
+            or response.get("hashAlgorithm") != "sha256-canonical-json"
+        ):
+            raise JsonlBridgeError(
+                "P2.1 exact-continuation receipt is unavailable or has "
+                "an unsupported version/algorithm"
+            )
+        fingerprints = (
+            "exactHash", "runStochasticHash",
+            "worldStochasticHash", "combatNativeRngHash",
+        )
+        flags = (
+            "referenceNaturePresent", "semanticOtherChancePresent",
+            "semanticRewardAuditPresent",
+        )
+        for key in fingerprints:
+            value = response.get(key)
+            if value is None and key in (
+                "worldStochasticHash", "combatNativeRngHash",
+            ):
+                continue
+            if (
+                not isinstance(value, str) or len(value) != 64
+                or any(char not in "0123456789abcdef" for char in value)
+            ):
+                raise JsonlBridgeError(
+                    f"P2.1 receipt has invalid canonical SHA-256: {key}"
+                )
+        if any(type(response.get(key)) is not bool for key in flags):
+            raise JsonlBridgeError("P2.1 receipt is missing provider-present flags")
+        return {key: response[key] for key in (*fingerprints, *flags)}
+
     def observe(self, state: StateHandle, policy: InformationPolicy) -> Observation:
         response = self._request(
             "observe",
