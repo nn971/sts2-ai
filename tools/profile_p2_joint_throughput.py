@@ -117,6 +117,7 @@ def run_episode(
     native_fused_profile: bool = False,
     search_enabled: bool = True,
     p2_prefix_cache_handles: int = 0,
+    compact_card_selection: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     # The H16 policy and emulator streams have stable per-episode seed owners.
     set_h16_rollout_seed(seed)
@@ -146,7 +147,7 @@ def run_episode(
         # The H16-compatible emulator only allows compact selection on
         # the experimental fixed route. Preserve the ordinary generated-map
         # action contract in this benchmark (also the default on fixed route).
-        compact_card_selection=False,
+        compact_card_selection=compact_card_selection,
         max_decisions=max_decisions,
         search_probability=1.0 if search_enabled else 0.0,
         max_searches=max_searches,
