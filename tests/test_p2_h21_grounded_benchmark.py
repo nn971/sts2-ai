@@ -188,14 +188,20 @@ def test_h21_v5_canonical_power_schema_cannot_reuse_v4_collator(tmp_path):
 
 def test_h21_packed_collation_exact_tensor_parity_variable_shapes():
     """No changed object/action/edge semantics or padding in P2 candidate."""
-    import torch
     from dataclasses import replace
 
+    import torch
+
     from sts2_ai.models.shared_game_objects import (
-        ActionToken, EncodedDecision, NUMERIC_FIELDS, ObjectToken, RelationToken,
+        NUMERIC_FIELDS,
+        ActionToken,
+        EncodedDecision,
+        ObjectToken,
+        RelationToken,
     )
     from sts2_ai.models.shared_macro_transformer_v2 import (
-        collate_h21, collate_h21_packed,
+        collate_h21,
+        collate_h21_packed,
     )
     from sts2_ai.training.h21_macro_offer_codec import H21_OBJECT_SCHEMA
 
