@@ -111,12 +111,19 @@ def run_episode(
     max_decisions: int, max_searches: int, simulations: int,
     search_depth: int | None, max_simulation_steps: int,
     rollout_transport: str,
+    profile_search: bool = True,
+    profile_wire: bool = True,
+    native_profile: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     # The H16 policy and emulator streams have stable per-episode seed owners.
     set_h16_rollout_seed(seed)
     rng_seed = int(hashlib.sha256(
         (seed + "/p2-profile-player-v1").encode()
     ).hexdigest()[:16], 16)
+    backend.set_p2_wire_profile(profile_wire)
+    if native_profile:
+        backend.p2_native_profile_reset()
+    # Exclude the profiler-control RPC itself from episode accounting.
     backend.reset_operation_profile()
     policy.inference_calls = 0
     policy.inference_seconds = 0.0
@@ -137,11 +144,14 @@ def run_episode(
         max_simulation_steps=max_simulation_steps,
         rng=random.Random(rng_seed),
         rollout_transport=rollout_transport,
-        search_profiles=roots,
+        search_profiles=(roots if profile_search else None),
     )
     elapsed = time.perf_counter() - start
     ops = backend.operation_profile()
     wire = backend.wire_operation_profile()
+    csharp = (
+        backend.p2_native_profile_snapshot(stop=True) if native_profile else None
+    )
     bridge_wall = sum(op.total_seconds for op in ops.values())
     actor_wall = policy.inference_seconds
     report = {
@@ -154,8 +164,13 @@ def run_episode(
              if type(f.get("floor")) is int),
             default=0,
         ),
-        "search_roots": len(roots),
-        "search_simulations": sum(int(r["simulations"]) for r in roots),
+        "search_roots": episode.searches,
+        "search_simulations": sum(
+            decision.search_simulations for decision in episode.decisions
+        ),
+        "search_instrumentation": profile_search,
+        "wire_instrumentation": profile_wire,
+        "native_instrumentation": native_profile,
         "search_transitions": episode.search_transitions,
         "real_transitions": len(episode.decisions),
         "real_transitions_per_second": len(episode.decisions) / elapsed,
@@ -177,13 +192,14 @@ def run_episode(
             "note": "CPU/public codec and forward are combined in PilotPolicy.infer",
         },
         "search": roots,
+        "native_csharp": csharp,
         "critical_path_shares": critical_path_shares(
             elapsed, bridge_wall, actor_wall,
         ),
         "nested_search_wall_seconds": sum(float(r["wall_seconds"]) for r in roots),
         "diagnostic_missing": [
-            "C# self-time and allocations", "retained-handle bytes",
-            "worker contention and queue histograms",
+            *([] if native_profile else ["C# self-time and allocations"]),
+            "retained-handle bytes", "worker contention and queue histograms",
             "GPU synchronization-specific timings (when using CUDA)",
         ],
     }
@@ -217,6 +233,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--rollout-transport", choices=["fused", "legacy"], default="fused")
     p.add_argument("--paired", action="store_true",
                    help="Repeat each episode and demand identical public/teacher traces")
+    p.add_argument("--native-profile", action="store_true",
+                   help="Opt into C# p2_perf_* commands (requires emulator PR #241)")
+    p.add_argument("--profile-overhead", action="store_true",
+                   help="Paired profile-off/on/on/off (A/B/B/A) replay+overhead audit")
     p.add_argument("--output", type=Path, required=True)
     return p.parse_args()
 
@@ -278,21 +298,61 @@ def main() -> None:
                 "max_simulation_steps": a.max_simulation_steps,
                 "rollout_transport": a.rollout_transport,
             }
-            first, signature = run_episode(backend, policy, **options)
-            reports.append(first)
-            if a.paired:
-                second, second_signature = run_episode(backend, policy, **options)
-                if signature != second_signature:
-                    raise RuntimeError(f"Public replay/teacher mismatch: seed={seed}")
-                # Timing varies; compare deterministic root visits/teacher only.
-                for left, right in zip(first["search"], second["search"], strict=True):
-                    for field in ("root_visits", "teacher_policy", "transitions"):
-                        if left[field] != right[field]:
-                            raise RuntimeError(
-                                f"PUCT mismatch: {field} seed={seed}"
-                            )
-                paired_checks.append({"seed": seed, "public_teacher_parity": True})
+            if a.profile_overhead:
+                # Controls execute the *same* search/actor policy, with only
+                # diagnostic counters toggled. Compare complete public traces.
+                series = ("control_a", "profile_b1", "profile_b2", "control_a2")
+            else:
+                series = ("profile_b1", "profile_b2") if a.paired else ("profile_b1",)
+            reference_signature = None
+            reference_teachers = None
+            per_seed = []
+            for arm in series:
+                enabled = arm.startswith("profile_")
+                run, signature = run_episode(
+                    backend, policy, **options,
+                    profile_search=enabled,
+                    profile_wire=enabled,
+                    native_profile=a.native_profile and enabled,
+                )
+                run["arm"] = arm
+                reports.append(run)
+                teachers = [
+                    [d["teacher_policy"] for d in signature["actions"]
+                     if d["teacher_policy"] is not None]
+                ]
+                if reference_signature is None:
+                    reference_signature = signature
+                    reference_teachers = teachers
+                elif signature != reference_signature or teachers != reference_teachers:
+                    raise RuntimeError(
+                        f"Public action/teacher replay mismatch: seed={seed} arm={arm}"
+                    )
+                per_seed.append({"arm": arm, "elapsed_seconds": run["episode_wall_seconds"]})
+            if len(series) > 1:
+                paired_checks.append({
+                    "seed": seed, "public_teacher_parity": True,
+                    "arms": per_seed,
+                    "profile_overhead_ratio": (
+                        (
+                            sum(float(r["elapsed_seconds"]) for r in per_seed
+                                if r["arm"].startswith("profile_")) / 2
+                        ) / (
+                            sum(float(r["elapsed_seconds"]) for r in per_seed
+                                if r["arm"].startswith("control_")) / 2
+                        )
+                    ) if a.profile_overhead else None,
+                })
 
+    profiled_reports = [r for r in reports if str(r["arm"]).startswith("profile_")]
+    profiled_wall = sum(float(r["episode_wall_seconds"]) for r in profiled_reports)
+    profiled_bridge = sum(
+        float(op["total_seconds"]) for r in profiled_reports
+        for op in r["bridge"].values()
+    )
+    profiled_actor = sum(
+        float(r["actor"]["inference_seconds"]) for r in profiled_reports
+    )
     result = {
         "schema": SCHEMA,
         "evidence": "diagnostic single-worker measured probe; no training/optimization",
@@ -309,6 +369,8 @@ def main() -> None:
             "ascension": a.ascension,
             "seeds": seeds,
             "worker_count": 1,
+            "native_profile": a.native_profile,
+            "profile_overhead": a.profile_overhead,
             "search_simulations": a.simulations,
             "search_depth": None if a.depth == 0 else a.depth,
             "max_searches": a.max_searches,
@@ -321,12 +383,15 @@ def main() -> None:
         },
         "runs": reports,
         "paired_checks": paired_checks,
+        "aggregate_sequential_wall_contributors": critical_path_shares(
+            profiled_wall, profiled_bridge, profiled_actor,
+        ),
         "cuda_peak_allocated_bytes": (
             torch.cuda.max_memory_allocated() if a.device == "cuda" else None
         ),
         "warnings": [
             "Source-generated map RNG is experimental and uncalibrated",
-            "Profile-off paired A/B/A and 15-worker contention still pending",
+            "15-worker contention still pending; A/B/B/A is diagnostic only",
             "Search timing is nested within bridge/actor workload; never sum overlapping times",
         ],
     }
