@@ -227,6 +227,41 @@ def test_event_potion_uses_one_offer_and_explicit_destination_slot():
         encode(wrong, [act("take_event_potion", Slot=0)])
 
 
+def test_macro_potion_choice_points_to_its_visible_inventory_slot():
+    frame = state()
+    actions = [
+        act("use_potion", Slot=1, TargetEnemyId=None),
+        act("leave_reward"),
+    ]
+    decision = encode(frame, actions)
+    source = decision.actions[0].source
+    assert source >= 0
+    assert decision.objects[source].kind == KINDS.index("potion")
+    assert decision.objects[source].zone == ZONES.index("inventory")
+    assert decision.actions[0].target == -1
+    assert decision.actions[0].kind != decision.actions[1].kind
+    with pytest.raises(ValueError, match="ungrounded enemy target"):
+        encode(frame, [act("use_potion", Slot=1, TargetEnemyId=12)])
+
+
+def test_known_silent_card_hash_collision_is_resolved_in_reward_options():
+    frame = state()
+    frame["reward"] = {
+        "card_options": [
+            "proto.silent.piercing_wail", "proto.silent.dagger_spray",
+        ],
+    }
+    actions = [
+        act("take_reward_card", Index=0),
+        act("take_reward_card", Index=1),
+    ]
+    encoded = encode(frame, actions)
+    ids = [encoded.objects[token.target].identity for token in encoded.actions]
+    assert len(set(ids)) == 2
+    assert encoded.actions[0].kind == encoded.actions[1].kind
+    assert encoded.actions[0].target != encoded.actions[1].target
+
+
 def test_unbound_offers_and_unknown_payloads_fail_closed():
     frame = state()
     frame["shop"] = {"card_offers": [
