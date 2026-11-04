@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Callable
 
 from sts2_ai.models.shared_game_objects import (
     EncodedDecision,
@@ -89,6 +89,7 @@ def encode_h19_resource_decision(
     *,
     public_schema_id: str,
     allow_affliction_source_relations: bool = False,
+    identity_hasher: Callable[[str], int] | None = None,
 ) -> EncodedDecision:
     """Encode only explicitly versioned public data, preserving H16 action IDs.
 
@@ -163,6 +164,7 @@ def encode_h19_resource_decision(
         owned_attributes=True, object_limit=H19_OBJECT_LIMIT,
         schema_id=H19_OBJECT_SCHEMA,
         omit_affliction_source_reference=allow_affliction_source_relations,
+        identity_hasher=identity_hasher,
     )
     encoded_actions = _h16_actions(base, state, actions)
     return EncodedDecision(
