@@ -177,6 +177,7 @@ class _GroundedMacro:
         self.pending_deck_groups: dict[str, int] = {}
         self.pending_deck_allowed: dict[str, frozenset[int]] = {}
         self.reward_reroll_groups: frozenset[int] | None = None
+        self.relic_reward_group: int | None = None
         self._build_resource_refs()
 
     def identity(self, kind: int, label: str) -> int:
@@ -434,9 +435,15 @@ class _GroundedMacro:
                 owner=self.root("reward"))
         relics = reward.get("relic_options") or (
             [reward["relic_option"]] if reward.get("relic_option") else [])
+        if relics:
+            self.relic_reward_group = self.add(
+                "event_choice", "reward:relic_group", "reward",
+                {"count": len(relics)}, owner=reward_root,
+            )
         for i, relic_id in enumerate(relics):
             self.reward_options[("relic", 0, i)] = self.add(
-                "relic", relic_id, "reward", owner=self.root("reward"))
+                "relic", relic_id, "reward", owner=self.relic_reward_group,
+                edge_type=GROUP_OPTION)
         for item in reward.get("pending_extra_relic_rewards") or []:
             pos = self.add("relic", item["relic_id"], "reward",
                            owner=self.root("reward"))
@@ -706,6 +713,14 @@ class _GroundedMacro:
             target = self.option("extra_potion", _int(payload, "GroupIndex"))
             if kind == "replace_reward_extra_potion":
                 source = self.potion(_int(payload, "Slot"))
+        elif kind == "skip_reward_relic":
+            if self.relic_reward_group is None:
+                raise ValueError("Skip relic reward has no visible group")
+            target = self.relic_reward_group
+        elif kind == "skip_event_potion":
+            if self.event_potion_offer is None:
+                raise ValueError("Skip event potion has no visible offer")
+            target = self.event_potion_offer
         elif kind == "take_reward_gold":
             target = self.option("gold", 0)
         elif kind == "take_reward_extra_gold":
