@@ -121,6 +121,7 @@ class ExactRootPrefixCache:
         key = (*self._path, action_id)
         if self._enabled and key in self._entries:
             raise ValueError("P2 attempted to replace a retained prefix")
+        at_root = not self._path
         self._path = key
         if not self._enabled:
             self.skipped_provider += 1
@@ -131,9 +132,12 @@ class ExactRootPrefixCache:
         parent_receipt = self.backend.exact_continuation_receipt(parent_handle)
         receipt = self.backend.exact_continuation_receipt(handle)
         if not self._allowed(parent_receipt) or not self._allowed(receipt):
+            # Once an incompatible private provider appears, descendant
+            # prefixes cannot inherit the root-conditioned authorization.
+            self._enabled = False
             self.skipped_provider += 1
             return False
-        if not self._path and parent_receipt != self._root_receipt:
+        if at_root and parent_receipt != self._root_receipt:
             raise ValueError(
                 "P2 recorded child from changed private search root"
             )
