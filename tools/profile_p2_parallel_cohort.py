@@ -102,7 +102,7 @@ def _worker_seed(seed: str) -> dict[str, Any]:
             report, signature = run_episode(
                 backend, policy, **opts,
                 profile_search=instrumented,
-                profile_wire=instrumented,
+                profile_wire=instrumented or cfg["wire_profile_only"],
                 native_profile=cfg["native_profile"] and instrumented,
             )
         except Exception as exc:
@@ -203,6 +203,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--p2-prefix-cache-handles", type=int, default=0,
                         help="P2.1 opt-in Native root-conditioned prefix cache; "
                              "0 = no cache, positive = max retained handles/root")
+    parser.add_argument("--wire-profile-only", action="store_true",
+                        help="Wire JSONL byte/encode/pipe/decode timings only; "
+                             "requires --no-episode-profile, no PUCT profiler")
     parser.add_argument("--no-episode-profile", action="store_true",
                         help="Disable per-root PUCT and JSONL-wire profiling "
                              "while retaining exact B/B public+teacher replay")
@@ -233,6 +236,10 @@ def main() -> None:
         or (a.macro_prior_weight > 0 and a.macro_model is None)
         or a.actor_max_batch < 1 or a.actor_max_delay_ms < 0
         or (a.no_episode_profile and (a.profile_overhead or a.native_profile))
+        or (a.wire_profile_only and (
+            not a.no_episode_profile or a.profile_overhead
+            or a.native_profile or a.actor_profile
+        ))
         or (a.actor_batch_parity_probe and (
             not a.actor_profile or a.actor_inference != "shared"
         ))
@@ -275,6 +282,7 @@ def main() -> None:
         "paired": a.paired,
         "profile_overhead": a.profile_overhead,
         "episode_profile": not a.no_episode_profile,
+        "wire_profile_only": a.wire_profile_only,
         "actor_max_batch": a.actor_max_batch,
         "actor_device": a.actor_device,
         "actor_batch_parity_probe": a.actor_batch_parity_probe,
