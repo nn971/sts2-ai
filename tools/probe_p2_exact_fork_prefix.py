@@ -21,7 +21,10 @@ from sts2_ai.emulator.protocol import EmulatorBackend, StateHandle
 from sts2_ai.emulator.run_environment import NATIVE_OVERGROWTH, reset_training_run
 from sts2_ai.emulator.jsonl_backend import JsonlEmulatorBackend
 
-from profile_p2_joint_throughput import ROOT, dll_identity, git_head
+if __package__:
+    from .profile_p2_joint_throughput import ROOT, dll_identity, git_head
+else:
+    from profile_p2_joint_throughput import ROOT, dll_identity, git_head
 
 SCHEMA = "sts2-p2-root-conditioned-exact-prefix-preflight-v1"
 POLICY = InformationPolicy(FAIR_POLICY_ID)
