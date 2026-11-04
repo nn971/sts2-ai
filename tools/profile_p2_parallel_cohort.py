@@ -104,6 +104,7 @@ def _worker_seed(seed: str) -> dict[str, Any]:
                 profile_search=instrumented,
                 profile_wire=instrumented or cfg["wire_profile_only"],
                 native_profile=cfg["native_profile"] and instrumented,
+                native_fused_profile=cfg["native_fused_profile_only"],
             )
         except Exception as exc:
             raise RuntimeError(
@@ -203,6 +204,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--p2-prefix-cache-handles", type=int, default=0,
                         help="P2.1 opt-in Native root-conditioned prefix cache; "
                              "0 = no cache, positive = max retained handles/root")
+    parser.add_argument("--native-fused-profile-only", action="store_true",
+                        help="Opt-in H16/v0 C# fused mechanics/serialization "
+                             "timings, without PUCT/actor/JSONL-wire profiling")
     parser.add_argument("--wire-profile-only", action="store_true",
                         help="Wire JSONL byte/encode/pipe/decode timings only; "
                              "requires --no-episode-profile, no PUCT profiler")
@@ -237,6 +241,11 @@ def main() -> None:
         or a.actor_max_batch < 1 or a.actor_max_delay_ms < 0
         or (a.no_episode_profile and (a.profile_overhead or a.native_profile))
         or (a.wire_profile_only and (
+            not a.no_episode_profile or a.profile_overhead
+            or a.native_profile or a.actor_profile
+            or a.native_fused_profile_only
+        ))
+        or (a.native_fused_profile_only and (
             not a.no_episode_profile or a.profile_overhead
             or a.native_profile or a.actor_profile
         ))
@@ -283,6 +292,7 @@ def main() -> None:
         "profile_overhead": a.profile_overhead,
         "episode_profile": not a.no_episode_profile,
         "wire_profile_only": a.wire_profile_only,
+        "native_fused_profile_only": a.native_fused_profile_only,
         "actor_max_batch": a.actor_max_batch,
         "actor_device": a.actor_device,
         "actor_batch_parity_probe": a.actor_batch_parity_probe,
