@@ -77,3 +77,18 @@ jobs:
             --output h22-ci-packed-public-v1.json
           python -c 'import json; from pathlib import Path; p = json.loads(Path("h22-ci-packed-public-v1.json").read_text()); assert p["shared_actor_metrics"]["p2_h21_collator"] == "packed"; assert p["search_roots"] > 0; assert all(x["public_teacher_parity"] is True for x in p["seed_reports"]); print(json.dumps({"h22_packed_actor_ci": "pass", "search_roots": p["search_roots"], "transitions": p["search_transitions"], "cohort_wall_seconds": p["cohort_wall_seconds"], "actor_collate_seconds": p["shared_actor_metrics"]["host_collate_seconds"]}, sort_keys=True))'
 
+      - name: Check H22 frozen reference-packed-packed-reference real PUCT parity
+        run: |
+          python tools/run_p2_actor_abba.py \
+            --execute --experiment h21-collator \
+            --emulator-root emulator-v1 \
+            --emulator-revision "$(git -C emulator-v1 rev-parse HEAD)" \
+            --checkpoint h22-ci-frozen-untrained.pt --macro-prior-weight 0 \
+            --workers 1 --actor-device cpu --h21-max-batch 4 \
+            --seeds h22-h21-v1-bridge-ci-20261105 \
+            --simulations 8 --depth 2 --max-searches 1 \
+            --max-decisions 80 \
+            --output-root results/p2-h22-ci-collator-abba
+          python -c 'import json; from pathlib import Path; r = json.loads(Path("results/p2-h22-ci-collator-abba/p2-h22-collator-abba-report.json").read_text()); assert r["parity"]["passed"]; assert r["workload"]["search_transitions_per_run"] > 0; print(json.dumps({"h22_abba_contract": "pass", "matched_seed_count": r["parity"]["seed_count"], "wall_ratio_cpu_untrained_diagnostic": r["ratio_of_total_baseline_to_candidate_wall"], "candidate_faster_in_both_pairs": r["candidate_faster_in_both_pairs"]}, sort_keys=True))'
+
+
