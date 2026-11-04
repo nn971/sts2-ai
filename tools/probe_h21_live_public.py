@@ -165,12 +165,30 @@ def choose(
     return min(actions, key=order)
 
 
+def missing_executed_action_groups(
+    executed: Counter[str], required_groups: list[str],
+) -> list[str]:
+    """Find required OR-groups with no actions actually executed in the run."""
+    missing = []
+    for group in required_groups:
+        alternatives = [kind.strip() for kind in group.split(",")]
+        if not all(alternatives) or len(set(alternatives)) != len(alternatives):
+            raise ValueError(f"Invalid required action group: {group!r}")
+        if not any(executed.get(kind, 0) for kind in alternatives):
+            missing.append(",".join(alternatives))
+    return missing
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--emulator-dll", type=Path, required=True)
     parser.add_argument("--seed", action="append", dest="seeds")
     parser.add_argument("--max-decisions", type=int, default=55)
     parser.add_argument("--strict", action="store_true")
+    parser.add_argument(
+        "--require-executed-any", action="append", default=[], metavar="KIND[,KIND...]",
+        help="Require at least one actually executed action from each comma-separated group",
+    )
     parser.add_argument(
         "--continuation-coverage", action="store_true",
         help="Prefer purchasing/choosing exceptional player continuations",
@@ -189,6 +207,8 @@ def main() -> int:
         parser.error("--max-decisions must be positive")
     if not args.emulator_dll.is_file():
         parser.error("emulator DLL not found")
+    if args.continuation_coverage and not args.diverse_route:
+        parser.error("--continuation-coverage requires --diverse-route")
 
     start = time.perf_counter()
     phases: Counter[str] = Counter()
@@ -316,6 +336,9 @@ def main() -> int:
     p95_index = max(0, (95 * len(measured) + 99) // 100 - 1)
     measured_total = sum(measured)
     cache = stable_id.cache_info()
+    missing_required = missing_executed_action_groups(
+        executed_action_kinds, args.require_executed_any,
+    )
     print(json.dumps({
         "schema": EMULATOR_PUBLIC_SCHEMA_V1,
         "decisions": decisions, "seeds": seeds,
@@ -323,6 +346,8 @@ def main() -> int:
         "diverse_route": args.diverse_route,
         "continuation_coverage": args.continuation_coverage,
         "executed_action_kinds": dict(sorted(executed_action_kinds.items())),
+        "required_executed_action_groups": args.require_executed_any,
+        "missing_required_executed_groups": missing_required,
         "max_floor": max_floor,
         "chosen_map_room_types": dict(sorted(chosen_map_room_types.items())),
         "encoding_only_seconds": round(measured_total, 6),
@@ -349,6 +374,9 @@ def main() -> int:
     }, sort_keys=True, indent=2), flush=True)
     if decisions < len(seeds):
         raise AssertionError("Insufficient live public decisions")
+    if missing_required:
+        raise AssertionError(
+            "Unexercised required public continuations: " + repr(missing_required))
     if args.strict and (errors or step_errors or gaps or partials):
         raise AssertionError(
             f"Live v1 probe: {len(errors)} H21 frame failures, "
