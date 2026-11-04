@@ -9,6 +9,7 @@ label is public (card/item/event/attribute kind), never an instance ID.
 from __future__ import annotations
 
 import hashlib
+from functools import lru_cache
 
 H21_IDENTITY_COMPONENT_BUCKETS = 4096
 H21_IDENTITY_COMPONENTS = 4
@@ -16,6 +17,7 @@ H21_EMBEDDING_MODULUS = H21_IDENTITY_COMPONENT_BUCKETS ** H21_IDENTITY_COMPONENT
 H21_FULL_ID_MODULUS = (1 << 63) - 1
 
 
+@lru_cache(maxsize=65536)
 def stable_id(label: str) -> int:
     """Deterministic, positive int64-safe public concept identity."""
     if not label:
