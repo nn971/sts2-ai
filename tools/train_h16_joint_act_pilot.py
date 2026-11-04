@@ -183,7 +183,7 @@ def collect(
 ) -> list[PilotEpisode]:
     cfg = {
         "checkpoint": str(checkpoint.resolve()),
-        "representation": args.representation,
+        "representation": getattr(args, "representation", "h16"),
         "checkpoint_sha256": sha256(checkpoint),
         "macro_model": str(args.macro_model.resolve()) if args.macro_model else None,
         "ai_root": str(args.ai_root.resolve()),
