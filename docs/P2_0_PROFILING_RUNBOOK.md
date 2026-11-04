@@ -363,3 +363,115 @@ The comparison is **diagnostic**: profiling overhead and frozen-checkpoint
 search work are held fixed, and no production optimization is being
 compared. Runs with zero completed episodes cannot substantiate a
 completed-episodes/s claim. Censored episodes remain censored.
+
+## 2026-11-04 measured P2.0 checkpoint and staged closure
+
+The recorded fixed-shape-4 H16 cohort at AI `270c129882d6cb86b16eca06538a374edf9aef10`,
+emulator `9fcd75a8a856e67a20f95c7caad0cc8ae255590f`,
+used eight A0 generated-map seeds, 16 simulations, depth 8,
+two roots and 80 real decisions. Its **strict exact public/teacher replay**
+passed within all eight seeds and between 1 and 15 worker counts.
+The 1-worker run took 32.862 seconds (132.49 search transitions/s);
+the 15-worker run 17.212 seconds (252.97 search transitions/s).
+Both executed 4,354 search transitions. The 15-worker shared GPU actor
+served 3,018 requests using 5,576 physical rows (54.1% utilization)
+and had p50/p95 queue delays of 11.23/23.73 ms. All 16 arms were
+**censored**, so completed-run throughput is unknown.
+
+P2.0 remains **open**: the 15-worker pool was supplied only eight
+independent tasks, actor-profile-on overhead is not bounded, C# v1
+allocation measurements are separate from the H16 v0 run, H21 inference
+is not schema-compatible with the frozen H16 checkpoint, and exact
+stochastic receipts are not yet attached to node-state reuse tests.
+
+### Next paired 32-seed actor comparison (fish)
+
+Use a fresh output directory and the same AI SHA and emulator DLL in
+all four cohorts. This is a *diagnostic* comparison, not yet P2.5
+optimization acceptance. Preserve `--paired` exact replay; the new
+`report_p2_actor_ab.py` verifies cross-*configuration* public/teacher
+hashes as well as within-configuration replay. **If a candidate produces
+different teacher traces, the reporter refuses to publish a speedup.**
+
+```fish
+cd ~/projects/sts2-ai
+git pull --ff-only
+set seeds32 (seq 0 31 | string replace -r '^' 'p2-a0-diagnostic-' | string join ',')
+set out results/p2-a0-confirm-32-v1
+
+for mode in batch1 fixed4
+    switch $mode
+        case batch1
+            set maxbatch 1
+            set fixedshape 0
+        case fixed4
+            set maxbatch 16
+            set fixedshape 4
+    end
+    for workers in 1 15
+        python tools/profile_p2_parallel_cohort.py \
+            --emulator-root $emu_p2 --emulator-revision $rev \
+            --checkpoint $ckpt --macro-model $macro \
+            --macro-prior-weight 0.5 --horizon-lambda 0.411395 \
+            --workers $workers --actor-inference shared --actor-device cuda \
+            --actor-max-batch $maxbatch \
+            --actor-fixed-shape-batch-size $fixedshape \
+            --actor-profile --seeds $seeds32 \
+            --ascension 0 --map-profile generated \
+            --simulations 16 --depth 8 \
+            --max-searches 2 --max-decisions 80 --paired \
+            --output $out/$mode-w$workers/profile.json --execute
+    end
+end
+
+python tools/report_p2_actor_ab.py \
+    --baseline-one $out/batch1-w1/profile.json \
+    --baseline-fifteen $out/batch1-w15/profile.json \
+    --candidate-one $out/fixed4-w1/profile.json \
+    --candidate-fifteen $out/fixed4-w15/profile.json \
+    --output $out/actor-ab-report.json
+```
+
+Do not quietly replace the seed list, model, map, reward, device,
+profiling mode, or source revision between conditions. The zero-run
+limit, 64-simulation and full-combat cases are later independent
+stages; do not launch every Cartesian combination at once.
+
+### Profile-on/off overhead (fish)
+
+The existing `--profile-overhead` option runs
+control-A/profile-B1/profile-B2/control-A2 **within every seed**, and
+checks complete public actions and teachers. The new report verifies
+each toggle and produces paired wall ratios:
+
+```fish
+set seeds8 (seq 0 7 | string replace -r '^' 'p2-a0-diagnostic-' | string join ',')
+python tools/profile_p2_parallel_cohort.py \
+    --emulator-root $emu_p2 --emulator-revision $rev \
+    --checkpoint $ckpt --macro-model $macro \
+    --macro-prior-weight 0.5 --horizon-lambda 0.411395 \
+    --workers 1 --actor-inference shared --actor-device cuda \
+    --actor-max-batch 1 --actor-profile --seeds $seeds8 \
+    --ascension 0 --map-profile generated \
+    --simulations 16 --depth 8 --max-searches 2 --max-decisions 80 \
+    --paired --profile-overhead \
+    --output results/p2-overhead-8-v1/profile.json --execute
+
+python tools/report_p2_profile_overhead.py \
+    --profile results/p2-overhead-8-v1/profile.json \
+    --output results/p2-overhead-8-v1/report.json
+```
+
+**Scope:** this estimates PUCT/JSONL episode instrumentation overhead.
+`--actor-profile` is a **cohort-wide** shared-service setting, so the
+four arms cannot estimate actor-service profiling overhead. To measure
+that separately, repeat matched complete cohorts with actor profiling
+off/on at the same revision and compare wall, using the recorded actor
+configuration in the profile identity. Only after overhead is bounded
+should a speedup claim use instrumentation-neutral wall times.
+
+**Further P2.0 gate work:** native v1 C# fork/rollout/serialization
+allocations and handle audits; H16 codec parsing attribution;
+PUCT 0/16/64 and depth-8/full-combat comparisons with a fixed
+stochastic law; profile-off baseline; independently reproduced full
+run outcomes, rather than only capped episodes.
