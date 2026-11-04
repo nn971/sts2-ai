@@ -17,7 +17,7 @@ MATCH_FIELDS = (
     "depth", "max_simulation_steps", "max_searches", "max_decisions",
     "rollout_transport", "native_profile", "paired", "profile_overhead",
     "actor_inference", "actor_device", "actor_max_batch", "actor_max_delay_ms",
-    "actor_profile", "seeds",
+    "actor_profile", "actor_batch_parity_probe", "seeds",
 )
 
 
@@ -83,6 +83,11 @@ def compare_cohorts(single: Mapping[str, Any], parallel: Mapping[str, Any]) -> d
         raise ValueError("Missing cohort identity")
     if a.get("worker_count") != 1 or b.get("worker_count") != 15:
         raise ValueError("Expected exactly 1-worker and 15-worker profiles in that order")
+    if a.get("actor_batch_parity_probe") or b.get("actor_batch_parity_probe"):
+        raise ValueError(
+            "Actor batch numerical probe adds extra forwards: "
+            "cannot report a measured throughput speedup"
+        )
     for field in MATCH_FIELDS:
         if field not in a or field not in b or a[field] != b[field]:
             raise ValueError(f"Cohort identity mismatch: {field}")
