@@ -157,6 +157,11 @@ def run_episode(
         "search_roots": len(roots),
         "search_simulations": sum(int(r["simulations"]) for r in roots),
         "search_transitions": episode.search_transitions,
+        "real_transitions": len(episode.decisions),
+        "real_transitions_per_second": len(episode.decisions) / elapsed,
+        "all_transitions_per_second": (
+            len(episode.decisions) + episode.search_transitions
+        ) / elapsed,
         "episode_wall_seconds": elapsed,
         "completed_runs_per_second": (1 / elapsed if episode.complete else 0.0),
         "search_transitions_per_second": episode.search_transitions / elapsed,
@@ -279,14 +284,13 @@ def main() -> None:
                 second, second_signature = run_episode(backend, policy, **options)
                 if signature != second_signature:
                     raise RuntimeError(f"Public replay/teacher mismatch: seed={seed}")
-                if first["search"] != second["search"]:
-                    # Timing fields vary; compare root teachers/visit counts only.
-                    for left, right in zip(first["search"], second["search"], strict=True):
-                        for field in ("root_visits", "teacher_policy", "transitions"):
-                            if left[field] != right[field]:
-                                raise RuntimeError(
-                                    f"PUCT mismatch: {field} seed={seed}"
-                                )
+                # Timing varies; compare deterministic root visits/teacher only.
+                for left, right in zip(first["search"], second["search"], strict=True):
+                    for field in ("root_visits", "teacher_policy", "transitions"):
+                        if left[field] != right[field]:
+                            raise RuntimeError(
+                                f"PUCT mismatch: {field} seed={seed}"
+                            )
                 paired_checks.append({"seed": seed, "public_teacher_parity": True})
 
     result = {
