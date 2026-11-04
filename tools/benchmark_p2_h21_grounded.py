@@ -18,10 +18,6 @@ from pathlib import Path
 from statistics import median
 from typing import Any
 
-if __package__:
-    from .p2_h21_public_corpus import load_public_corpus, public_digest
-else:
-    from p2_h21_public_corpus import load_public_corpus, public_digest
 from sts2_ai.emulator.protocol import LegalAction
 from sts2_ai.training.h19_resource_codec import EMULATOR_PUBLIC_SCHEMA_V1
 from sts2_ai.training.h21_action_alias_audit import audit_h21_action_aliases
@@ -32,6 +28,11 @@ from sts2_ai.training.h21_macro_offer_codec import (
     H21_POWER_OBJECT_SCHEMA,
     encode_h21_macro_decision,
 )
+
+if __package__:
+    from .p2_h21_public_corpus import load_public_corpus, public_digest
+else:
+    from p2_h21_public_corpus import load_public_corpus, public_digest
 
 REPORT_SCHEMA = "sts2-p2-h21-grounded-relational-baseline-v1"
 ROOT = Path(__file__).resolve().parents[1]
@@ -325,7 +326,8 @@ def main() -> None:
             "Public-frame-only replay: no PUCT search or complete-run timing",
             "H16 and H21 inputs/models are not interchangeable",
             "Untrained-model inference is architecture timing, not policy quality",
-            "Sampling preserves order but its frequency distribution is not a training distribution",
+            "Sampling preserves order; its frequency distribution "
+            "is not a training distribution",
         ],
     })
     args.output.parent.mkdir(parents=True, exist_ok=True)
