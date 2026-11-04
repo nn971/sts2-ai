@@ -578,10 +578,12 @@ class NativeRootConditionedSampler:
         )
 
     def close(self) -> None:
-        if self._active is not None:
-            self.end_simulation()
-        if self._prefix_cache is not None:
-            self._prefix_cache.close()
+        try:
+            if self._active is not None:
+                self.end_simulation()
+        finally:
+            if self._prefix_cache is not None:
+                self._prefix_cache.close()
 
     def end_simulation(self) -> None:
         try:
