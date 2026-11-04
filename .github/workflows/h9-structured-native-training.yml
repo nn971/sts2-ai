@@ -4,7 +4,18 @@ on:
     branches:
       - research/h9-structured-combat-training-20261028
   pull_request:
+    paths:
+      - 'src/sts2_ai/nature/research_combat_fixtures.py'
+      - 'tools/benchmark_h8_h7_policy_pilot.py'
+      - 'tools/train_h7_reference_combat.py'
+      - 'tools/evaluate_h7_reference_combat.py'
+      - 'tests/test_h8_structured_curriculum.py'
+      - '.github/workflows/h9-structured-native-training.yml'
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   structural-census:

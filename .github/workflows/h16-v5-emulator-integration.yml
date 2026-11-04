@@ -11,6 +11,10 @@ on:
       - 'src/sts2_ai/emulator/jsonl_backend.py'
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   cpu-cross-repository-training-smoke:
     runs-on: ubuntu-latest

@@ -26,6 +26,10 @@ on:
       - '.github/workflows/h21-grounded-macro.yml'
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   h21-macro-grounding:
     runs-on: ubuntu-latest
@@ -35,6 +39,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - name: Install CPU Torch and test dependencies
         run: |
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu

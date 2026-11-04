@@ -2,6 +2,8 @@ name: nature-h2-contextual-draw
 
 on:
   push:
+    branches:
+      - main
     paths:
       - 'src/sts2_ai/nature/contextual_draw.py'
       - 'src/sts2_ai/nature/draw_only_p0.py'
@@ -14,7 +16,22 @@ on:
       - 'emulator'
       - '.github/workflows/nature-h2-contextual-draw.yml'
   pull_request:
+    paths:
+      - 'src/sts2_ai/nature/contextual_draw.py'
+      - 'src/sts2_ai/nature/draw_only_p0.py'
+      - 'src/sts2_ai/nature/draw_only_episode.py'
+      - 'src/sts2_ai/nature/two_site_opponent.py'
+      - 'src/sts2_ai/nature/draw_only_workers.py'
+      - 'tools/train_draw_only_nature_h1.py'
+      - 'tools/probe_nature_h2_combat_profiles.py'
+      - 'tests/test_nature_contextual_draw.py'
+      - 'emulator'
+      - '.github/workflows/nature-h2-contextual-draw.yml'
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   contextual-draw:

@@ -2,6 +2,8 @@ name: nature-h3-reference-importance-ppo
 
 on:
   push:
+    branches:
+      - main
     paths:
       - 'src/sts2_ai/nature/joint_player_ppo.py'
       - 'src/sts2_ai/nature/reference_importance.py'
@@ -14,7 +16,22 @@ on:
       - 'tests/test_nature_h3_reference_importance.py'
       - '.github/workflows/nature-h3-joint-ppo.yml'
   pull_request:
+    paths:
+      - 'src/sts2_ai/nature/joint_player_ppo.py'
+      - 'src/sts2_ai/nature/reference_importance.py'
+      - 'src/sts2_ai/nature/draw_only_p0.py'
+      - 'src/sts2_ai/nature/draw_only_episode.py'
+      - 'src/sts2_ai/training/phase_split_ppo_batch.py'
+      - 'src/sts2_ai/nature/draw_only_workers.py'
+      - 'tools/train_joint_player_nature_h3.py'
+      - 'tests/test_nature_h3_joint_player.py'
+      - 'tests/test_nature_h3_reference_importance.py'
+      - '.github/workflows/nature-h3-joint-ppo.yml'
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   joint-smoke:

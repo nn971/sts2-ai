@@ -2,6 +2,8 @@ name: h15-experimental-conditioning
 
 on:
   push:
+    branches:
+      - main
     paths:
       - 'src/sts2_ai/emulator/h15_public_protocol.py'
       - 'src/sts2_ai/emulator/h15_experimental_posterior.py'
@@ -12,7 +14,20 @@ on:
       - 'tools/probe_h15_experimental_conditioning.py'
       - '.github/workflows/h15-experimental-conditioning.yml'
   pull_request:
+    paths:
+      - 'src/sts2_ai/emulator/h15_public_protocol.py'
+      - 'src/sts2_ai/emulator/h15_experimental_posterior.py'
+      - 'src/sts2_ai/training/h15_experimental_rollout.py'
+      - 'tests/test_h15_experimental_posterior.py'
+      - 'tests/test_h15_experimental_rollout.py'
+      - 'tests/test_h15_controlled_turn_protocol.py'
+      - 'tools/probe_h15_experimental_conditioning.py'
+      - '.github/workflows/h15-experimental-conditioning.yml'
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   public-history-contract:

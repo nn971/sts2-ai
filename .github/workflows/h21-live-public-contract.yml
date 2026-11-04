@@ -15,6 +15,10 @@ on:
       - '.github/workflows/h21-live-public-contract.yml'
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   h21-live-public-v1:
     runs-on: ubuntu-latest
