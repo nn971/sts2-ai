@@ -6,7 +6,9 @@ independent exact forks for each traversed prefix and applies the same legal
 action to both. It verifies canonical exact state hash, public observation,
 legal menu and terminal state before proceeding. Handles are released even
 when a check fails. It NEVER retains a continuation for another Nature draw,
-never caches a node, and does not certify a standalone RNG receipt.
+never caches a node. Its versioned stochastic-envelope receipt checks internal
+provider state that may be absent from the flat RunState hash, but remains a
+local diagnostic rather than authorization for fair-history caching.
 """
 from __future__ import annotations
 
@@ -72,6 +74,11 @@ def verify_exact_fork_prefix(
             root_hash = backend.exact_hash(current)
             if not isinstance(root_hash, str) or not root_hash:
                 raise ValueError("Missing canonical exact state hash")
+            root_receipt = backend.exact_continuation_receipt(current)
+            if root_receipt["exactHash"] != root_hash:
+                raise ValueError(
+                    f"P2.1 receipt does not match parent exact hash at depth={depth}"
+                )
             root_signature = _frame_signature(backend, current)
             if root_signature[2]:
                 break
@@ -88,6 +95,10 @@ def verify_exact_fork_prefix(
                 if backend.exact_hash(handle) != root_hash:
                     raise ValueError(
                         f"Exact state/RNG prefix hash diverged on fork at depth={depth}"
+                    )
+                if backend.exact_continuation_receipt(handle) != root_receipt:
+                    raise ValueError(
+                        f"Stochastic-envelope receipt diverged on fork at depth={depth}"
                     )
                 if _frame_signature(backend, handle) != root_signature:
                     raise ValueError(
@@ -115,6 +126,16 @@ def verify_exact_fork_prefix(
                 raise ValueError(
                     f"Exact state/RNG prefix hash diverged after action at depth={depth}"
                 )
+            receipt_a = backend.exact_continuation_receipt(first.transition.child)
+            receipt_b = backend.exact_continuation_receipt(second.transition.child)
+            if receipt_a["exactHash"] != hash_a or receipt_b["exactHash"] != hash_b:
+                raise ValueError(
+                    f"P2.1 receipt does not match child exact hash at depth={depth}"
+                )
+            if receipt_a != receipt_b:
+                raise ValueError(
+                    f"Stochastic-envelope receipt diverged after action at depth={depth}"
+                )
             if (
                 first.observation != second.observation
                 or first.legal_actions != second.legal_actions
@@ -134,6 +155,10 @@ def verify_exact_fork_prefix(
                 "action_id": action.action_id,
                 "parent_exact_hash": root_hash,
                 "child_exact_hash": hash_a,
+                "parent_run_stochastic_hash": root_receipt["runStochasticHash"],
+                "child_run_stochastic_hash": receipt_a["runStochasticHash"],
+                "child_world_stochastic_hash": receipt_a["worldStochasticHash"],
+                "child_combat_native_rng_hash": receipt_a["combatNativeRngHash"],
                 "public_observation_hash": first.observation.observation_hash,
                 "legal_action_count": len(first.legal_actions),
                 "terminal": first.transition.terminal,
@@ -158,12 +183,16 @@ def verify_exact_fork_prefix(
         "owned_handles_released": released,
         "verified": True,
         "independent_rng_receipt_available": False,
+        "stochastic_envelope_receipt_schema":
+            "sts2-p2-exact-continuation-receipt-v1",
+        "stochastic_envelope_receipts_match": True,
         "continuation_cache_enabled": False,
         "ready_for_p2_1_caching": False,
         "trace": visited,
         "limitations": [
-            "Canonical exact-state hashes are checked but a separately exposed "
-            "RNG/Nature receipt has not been certified",
+            "Canonical exact-state hashes and a versioned complete run "
+            "stochastic-envelope fingerprint agree on this fixed path, but "
+            "independent RNG/Nature sampling provenance is not certified",
             "Exact forks from one root do not license reuse across independently "
             "sampled Nature/fair-history continuations",
             "Only a bounded single deterministic first-legal-action path is covered",
