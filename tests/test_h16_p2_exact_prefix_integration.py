@@ -43,9 +43,10 @@ class FrozenNativeBackend:
 
     def exact_continuation_receipt(self, state):
         path = self.states[state]
-        digest = lambda suffix: hashlib.sha256(
-            json.dumps([path, suffix]).encode()
-        ).hexdigest()
+        def digest(suffix):
+            return hashlib.sha256(
+                json.dumps([path, suffix]).encode()
+            ).hexdigest()
         return {
             "exactHash": digest("run-state"),
             "runStochasticHash": digest("rng-state"),
