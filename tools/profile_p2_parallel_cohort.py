@@ -35,6 +35,7 @@ from sts2_ai.emulator.jsonl_backend import JsonlEmulatorBackend
 from sts2_ai.models.h16_batch_actor import RemoteH16Actor, SharedH16Service
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet, PilotPolicy
+from sts2_ai.training.h16_public_codec import H16_CODEC
 from sts2_ai.training.h21_macro_offer_codec import H21_CODEC
 
 SCHEMA = "sts2-p2-parallel-cohort-profile-v1"
@@ -388,7 +389,7 @@ def main() -> None:
             "actor_h21_collator": a.actor_h21_collator,
             "representation": a.representation,
             "public_schema_id": config["public_schema_id"],
-            "codec": H21_CODEC if a.representation == "h21" else "h16-public-persistent-subset-multiset-v3",
+            "codec": H21_CODEC if a.representation == "h21" else H16_CODEC,
             "torch": torch.__version__,
             "cpu_count": os.cpu_count(),
             "platform": platform.platform(),
