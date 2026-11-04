@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 
-from tools.probe_h21_live_public import choose
+from tools.probe_h21_live_public import choose, missing_executed_action_groups
 
 
 def _action(node: str) -> dict:
@@ -80,3 +81,17 @@ def test_continuation_policy_exercises_both_deck_pick_and_optional_finish():
     assert choose(actions, public_state={"map": []},
                   route_variant=1, continuation_coverage=True
                   )["actionId"] == "finish"
+
+
+def test_continuation_acceptance_requires_actual_purchase_not_just_legal_menu():
+    purchase = "buy_card,buy_potion,buy_relic"
+    # A purchase that was merely offered does not satisfy the live-rollout gate.
+    assert missing_executed_action_groups(
+        Counter({"leave_shop": 3, "event_choice": 2}), [purchase],
+    ) == [purchase]
+    assert missing_executed_action_groups(
+        Counter({"leave_shop": 2, "buy_potion": 1}), [purchase],
+    ) == []
+    assert missing_executed_action_groups(
+        Counter({"buy_card": 1}), [purchase, "event_choice,continue_event"],
+    ) == ["event_choice,continue_event"]
