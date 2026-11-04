@@ -639,10 +639,11 @@ If complete episodes remain rare, adjust the observation horizon or
 use a representative complete-combat cohort with unchanged search
 budgets, rather than counting censored episodes as wins or losses.
 
-**P2.5 remains open** pending the complete-workload evidence,
-actor profiling-overhead measurements and native state/RNG fidelity
-gates needed for P2.1 caching. The independent-seed order-balanced
-actor confirmation has passed as recorded below.
+**P2.5 remains open** pending actor profiling-overhead measurements,
+larger representative complete-episode throughput confirmation, and
+native state/RNG fidelity gates needed for P2.1 caching.
+The independent-seed order-balanced actor confirmation and an 8-seed
+completed-episode pilot have both passed as recorded below.
 
 ### Measured independent-seed A/B/B/A result — 2026-11-04
 
@@ -684,3 +685,47 @@ and keep H16/public-v0 versus P1/public-v1 C# fidelity evidence
 separate. Do not claim a complete-Act improvement or a native
 state/RNG parity certificate from this report. Next actionable
 workload is the independent `--max-decisions 600` pilot above.
+
+
+### Measured 8-seed completed-episode A/B/B/A pilot — 2026-11-04
+
+User-supplied `actor-abba-report(1).json`, schema
+`sts2-p2-actor-abba-acceptance-v1`; AI source
+`2359c8c33a820b66d4676c628df1f5665a8698c1`,
+H16/public-v0 emulator source
+`9fcd75a8a856e67a20f95c7caad0cc8ae255590f`;
+pinned emulator binary digest `f307eeb672b42c47d329fd4bb4307696f0342639d77bb0f85592913bc021335d`.
+The fresh 8-seed Silent A0 generated-map pilot used 15 configured
+workers, 16 PUCT simulations, depth 8, at most 2 search roots, and
+`--max-decisions 600`, with optional episode/actor profiling disabled.
+**Each of A1/B1/B2/A2 reached a terminal outcome in all 16 repeated
+episode executions (8 seeds × 2); none were censored.** The report
+does not distinguish clear from defeat counts, so this is a
+*completion-throughput* result, not a win-rate result.
+
+| Arm | Batch mode | Wall (s) | Search transitions/s | Completed |
+|---|---|---:|---:|---:|
+| A1 | Single-row batch 1 | 42.289 | 105.608 | 16 |
+| B1 | Fixed-shape batch 4 | 28.826 | 154.932 | 16 |
+| B2 | Fixed-shape batch 4 | 30.065 | 148.546 | 16 |
+| A2 | Single-row batch 1 | 39.549 | 112.924 | 16 |
+
+Each cohort did **4,466 search transitions and 3,146 real
+transitions**. The reporter's exact **within-run and cross-run
+public-action/teacher replay and work parity passed** for all eight
+seeds. A1/B1 = **1.46705×**, A2/B2 = **1.31546×**; order-balanced
+`(42.2886428+39.5488610)/(28.8256153+30.0647034)`
+= **1.38966×** or **28.04% less wall time**.
+
+**Interpretation:** This resolves the *completed-episode coverage*
+objection to the earlier capped 80-decision benchmark: the actor
+optimization survives a terminal-outcome workload, without relaxing
+public-teacher replay. The cohort has **8 independent seeds** and can
+have at most eight simultaneously active seed tasks, despite the
+15-worker setting. Follow with a saturated (≥15 seed) complete-episode
+cohort if full-Act scalability is a production criterion.
+
+**Remaining:** optional actor profiling overhead is still not
+independently quantified; native hidden-state/RNG receipts and P1
+public-v1 fidelity do not follow from H16 public replay.
+P2.1 exact-state reuse requires its separate state/RNG tests.
