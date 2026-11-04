@@ -277,6 +277,32 @@ class JsonlEmulatorBackend:
             for op, v in sorted(self._wire_profile.items())
         }
 
+    def p2_native_profile_reset(self) -> None:
+        """Opt-in C# JSONL allocation/timing counters on the pinned P2 emulator."""
+        response = self._request("p2_perf_reset")
+        if response.get("schemaId") != "sts2-p2-jsonl-performance-v1":
+            raise JsonlBridgeError("P2 profiler schema mismatch")
+
+    def p2_native_profile_snapshot(self, *, stop: bool = False) -> dict[str, Any]:
+        """Read C# operation/handle counts; stop first to exclude the read RPC."""
+        response = self._request("p2_perf_stop" if stop else "p2_perf_read")
+        profile = response.get("profile")
+        live = response.get("liveStateHandles")
+        peak = response.get("peakStateHandles")
+        if (
+            not isinstance(profile, dict)
+            or profile.get("schemaId") != "sts2-p2-jsonl-performance-v1"
+            or not isinstance(profile.get("operations"), dict)
+            or type(live) is not int or type(peak) is not int
+            or live < 0 or peak < live
+        ):
+            raise JsonlBridgeError("Malformed C# P2 JSONL profile response")
+        return {
+            "profile": profile,
+            "live_state_handles": live,
+            "peak_state_handles": peak,
+        }
+
     @property
     def pristine_reward_proposal_schema(self) -> str | None:
         """Capability to propose independent pristine reward RNG states."""
