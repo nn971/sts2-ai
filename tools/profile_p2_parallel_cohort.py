@@ -127,7 +127,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--macro-prior-weight", type=float, default=0.0)
     parser.add_argument("--horizon-lambda", type=float, default=0.25)
     parser.add_argument("--seeds", default=",".join(
-        f"p2-a0-diagnostic-{i}" for i in range(8),
+        f"p2-a0-diagnostic-{i}" for i in range(8)
     ))
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--actor-inference", choices=["shared", "local"], default="shared")
