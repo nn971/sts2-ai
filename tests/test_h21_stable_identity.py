@@ -74,6 +74,42 @@ def test_stable_id_memoization_preserves_public_identity_and_collision_guards():
     assert H21StableIdentityHasher()(name) == second
 
 
+
+def test_sparse_h21_numeric_projection_matches_original_all_field_shapes():
+    import math
+
+    from sts2_ai.models.shared_game_objects import (
+        NUMERIC_FIELDS, _numbers, _numbers_h21,
+    )
+
+    examples = [
+        {},
+        {"identity": "non-numeric", "state": {}, "enabled": True},
+        {"stacks": 0},
+        {"floor": 16},
+        {"energy": 3, "turn": 12},
+        {"hp": 56, "max_hp": 80, "block": 0},
+        {"gold": 0, "cost": float("nan")},
+        {"cost": float("inf")},
+        {"cost": -5.0},
+        {"stacks": False},
+        {"stacks": "two"},
+        {"count": 1000000000},
+        {"hp": None, "floor": 2},
+    ]
+    for field in NUMERIC_FIELDS:
+        examples.extend([
+            {field: 0},
+            {field: -13.5},
+            {field: True},
+            {field: math.nan},
+            {field: math.inf},
+        ])
+    for record in examples:
+        assert _numbers_h21(record) == _numbers(record), record
+
+
+
 def test_multi_hash_neural_embedding_separates_colliding_legacy_cards():
     torch = pytest.importorskip("torch")
     from sts2_ai.models.shared_macro_transformer_v2 import H21StableEmbedding
