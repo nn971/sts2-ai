@@ -108,6 +108,12 @@ Consider copy-on-write/structural sharing for **provably immutable** objects, sa
 
 **Acceptance:** defensible whole-workload improvement at equivalent experience with no search/fidelity drift. A practical optimization should normally show at least `~15–20%` repeated end-to-end wall-time reduction or remove a dominant cost supported by profiler evidence; don't hard-code this as a universal exclusion for small, valuable, low-risk fixes. If 50+ completed source combats/s or 50+ transitions/s is discussed, define the **unit and workload** explicitly; search transitions/s, combat clears/s and runs/s are different.
 
+## Recorded implementation trackers
+
+- [AI issue #166](https://github.com/nn971/sts2-ai/issues/166) — profile PUCT/bridge/actor, safe search-state reuse, A/B/B/A acceptance.
+- [Emulator issue #240](https://github.com/nn971/sts2-emulator/issues/240) — C# fork/handle/JSONL profiling, native state cache support and mechanics/allocation parity.
+- [Documentation PR #165](https://github.com/nn971/sts2-ai/pull/165) — this plan, stacked on the existing H21 P0 branch.
+
 ## PR/issue breakdown and stop/go rules
 
 Suggested implementation slices:
