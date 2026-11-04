@@ -985,3 +985,88 @@ order-balanced throughput cohort with profiling disabled. Report
 negative or negligible gains explicitly; receipt RPC overhead may
 outweigh saved emulator steps. Never enable this cache in
 independently sampled Nature or fair-history-conditioned search.
+
+
+## P2.1 experimental opt-in Native prefix cache (after receipt preflight)
+
+User-supplied `report(20261104-151839).json` on AI
+`f0cc1aa86f7c4dc173209c8f9dd5498574719b5d` and emulator
+`0937456588d563b48e9810290b7382f64d30d5a7` **passed**
+eight deterministic first-action transitions, 16 exact forks,
+32/32 temporary-handle releases and
+`stochastic_envelope_receipts_match=true`. This is one bounded
+first-legal-action path, not a complete game-search parity certificate.
+The explicit report correctly retains
+`independent_rng_receipt_available=false` and
+`ready_for_p2_1_caching=false` for arbitrary Nature continuations.
+
+The new **opt-in research-only** H16 local PUCT cache is confined to
+`H16_EXPERIMENTAL_ROOT_CONDITIONED_CAPABILITY`. It uses the full
+action path under a specific run root and requires the versioned
+canonical state plus run/world/combat stochastic envelope receipt
+at insertion and on reuse; it also verifies the **live parent receipt**
+so equal public histories with changed private RNG cannot alias.
+On any incompatible reference Nature/semantic provider transition,
+it disables subsequent reuse in that search. Each search owns its
+cached handles (hard cap 64 in the benchmark) and releases them on
+normal exit or exception. The cached public combat-history list is
+restored exactly for enemy-damage credit. Default
+`p2_prefix_cache_handles=0` preserves the existing search behavior.
+
+**Mandatory initial CPU smoke** against the new rebuilt
+emulator with the P2.1 receipt endpoint:
+
+```fish
+cd ~/projects/sts2-ai
+git pull --ff-only
+set rev (git -C $emu_p2 rev-parse HEAD)
+python tools/run_p2_actor_abba.py \
+    --experiment prefix-cache \
+    --emulator-root $emu_p2 --emulator-revision $rev \
+    --checkpoint $ckpt --macro-model $macro \
+    --macro-prior-weight 0.5 --horizon-lambda 0.411395 \
+    --workers 1 --actor-device cpu \
+    --seed-prefix p2-a0-prefix-smoke-20261104 \
+    --seed-count 2 --simulations 8 --depth 8 \
+    --max-searches 2 --max-decisions 80 \
+    --output-root results/p2-a0-prefix-smoke-2-v1 --execute
+```
+
+The strict report compares A1 (zero cached handles), B1/B2
+(64 retained handles per root), A2 (zero cached handles), all with
+shared fixed-shape batch 4. It requires exact public and teacher
+digests, terminal outcomes, PUCT search-work counts, source/CLI/model
+provenance and unchanged actor settings. Both arms retain the
+`--no-episode-profile` setting so wall is instrumentation-neutral.
+
+**Only if CPU smoke passes**, use the saturated 15-worker measurement:
+
+```fish
+python tools/run_p2_actor_abba.py \
+    --experiment prefix-cache \
+    --emulator-root $emu_p2 --emulator-revision $rev \
+    --checkpoint $ckpt --macro-model $macro \
+    --macro-prior-weight 0.5 --horizon-lambda 0.411395 \
+    --workers 15 --actor-device cuda \
+    --seed-prefix p2-a0-prefix-confirm-20261104 \
+    --seed-count 32 --simulations 16 --depth 8 \
+    --max-searches 2 --max-decisions 80 \
+    --output-root results/p2-a0-prefix-confirm-32-v1 --execute
+```
+
+Output: `p2-prefix-cache-abba-report.json`. Run at 64
+simulations and full-combat depth separately only after the short
+workload proves exact replay. The P2.1 provisional performance
+decision threshold remains **at least 20% lower matched search-heavy
+wall**, not a prediction. If opt-in prefix reuse does not improve
+wall time, preserve the negative result and move to bridge/serialization
+work without changing PUCT search settings. Cache use across fair
+history-conditioned Nature samples remains prohibited until separately
+certified stochastic-provider provenance exists.
+
+CPU-only cache tests exercise private-receipt drift, provider bypass,
+bounded handle ownership, exception cleanup and compatibility guards.
+The optional PyTorch H16 integration tests compare PUCT teachers,
+visits and values at 8/16/64 simulations in both depth-8 and
+full-combat modes. **No live emulator benchmark of the cache has been
+completed yet.**
