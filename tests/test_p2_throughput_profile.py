@@ -7,8 +7,8 @@ import random
 
 import pytest
 
-from sts2_ai.emulator.protocol import LegalAction, Observation
 from sts2_ai.emulator.jsonl_backend import JsonlEmulatorBackend
+from sts2_ai.emulator.protocol import LegalAction, Observation
 from sts2_ai.search.combat_puct import (
     FAIR_COMBAT_CAPABILITY,
     H16_EXPERIMENTAL_ROOT_CONDITIONED_CAPABILITY,
