@@ -127,6 +127,27 @@ def test_unseen_enemy_source_and_legacy_h19_both_fail_closed():
         encode(state)
 
 
+
+def test_combat_selection_cardinality_uses_stable_semantics():
+    from sts2_ai.training.h21_stable_identity import stable_id
+
+    state = visible_combat()
+    state["combat"]["selection_candidates"] = [
+        copy.deepcopy(card) for card in state["combat"]["hand"]
+    ]
+    choices = (
+        LegalAction("pick1", "select_cards", '{"CardInstanceIds":[100]}'),
+        LegalAction("pick2", "select_cards", '{"CardInstanceIds":[100,101]}'),
+    )
+    encoded = encode_h21_macro_decision(
+        state, choices, public_schema_id=EMULATOR_PUBLIC_SCHEMA_V1,
+    )
+    assert encoded.actions[0].semantic == stable_id("select_cards:count=1")
+    assert encoded.actions[1].semantic == stable_id("select_cards:count=2")
+    assert encoded.actions[0].semantic != encoded.actions[1].semantic
+
+
+
 def test_selection_pool_source_relationship_is_preserved():
     state = visible_combat()
     candidate = copy.deepcopy(state["combat"]["hand"][0])
