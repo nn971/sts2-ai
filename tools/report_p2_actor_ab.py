@@ -23,8 +23,9 @@ else:
     )
 
 REPORT_SCHEMA = "sts2-p2-actor-candidate-comparison-v1"
-ALLOWED_DIFFERENCES = {
-    "actor_max_batch", "actor_fixed_shape_batch_size",
+ALLOWED_BY_EXPERIMENT = {
+    "batching": {"actor_max_batch", "actor_fixed_shape_batch_size"},
+    "actor-profile": {"actor_profile"},
 }
 SAME_RUN_FIELDS = (
     "outcome", "complete", "decisions", "max_floor", "search_roots",
@@ -35,7 +36,11 @@ SAME_RUN_FIELDS = (
 def compare_actor_candidate(
     baseline_one: Mapping[str, Any], baseline_many: Mapping[str, Any],
     candidate_one: Mapping[str, Any], candidate_many: Mapping[str, Any],
+    *, experiment: str = "batching",
 ) -> dict[str, Any]:
+    if experiment not in ALLOWED_BY_EXPERIMENT:
+        raise ValueError("Unsupported actor A/B experiment")
+    allowed_differences = ALLOWED_BY_EXPERIMENT[experiment]
     base = compare_cohorts(baseline_one, baseline_many)
     trial = compare_cohorts(candidate_one, candidate_many)
     ids = [p["identity"] for p in (
@@ -51,7 +56,7 @@ def compare_actor_candidate(
     ):
         a, b = original["identity"], changed["identity"]
         for key in (*MATCH_FIELDS, "ai_sha", "emulator_cli", "worker_count"):
-            if key in ALLOWED_DIFFERENCES:
+            if key in allowed_differences:
                 continue
             if key not in a or key not in b or a[key] != b[key]:
                 raise ValueError(f"Actor candidate identity mismatch: {key}")
@@ -79,12 +84,14 @@ def compare_actor_candidate(
     old_many, new_many = base["fifteen_workers"], trial["fifteen_workers"]
     return {
         "schema": REPORT_SCHEMA,
+        "experiment": experiment,
         "evidence_level": "same-revision exact-replay actor diagnostic, not P2.5 acceptance",
         "parity": {
             "passed": True, "seed_count": base["parity"]["seed_count"],
             "within_configuration": True, "cross_configuration": True,
         },
         "baseline": {
+            "actor_profile": ids[0]["actor_profile"],
             "actor_max_batch": ids[0]["actor_max_batch"],
             "fixed_shape_batch_size": ids[0]["actor_fixed_shape_batch_size"],
             "one_worker": base["one_worker"],
@@ -92,6 +99,7 @@ def compare_actor_candidate(
             "actor": base["actor"],
         },
         "candidate": {
+            "actor_profile": ids[2]["actor_profile"],
             "actor_max_batch": ids[2]["actor_max_batch"],
             "fixed_shape_batch_size": ids[2]["actor_fixed_shape_batch_size"],
             "one_worker": trial["one_worker"],
@@ -122,6 +130,8 @@ def main() -> None:
     for flag in ("baseline-one", "baseline-fifteen",
                  "candidate-one", "candidate-fifteen"):
         p.add_argument(f"--{flag}", type=Path, required=True)
+    p.add_argument("--experiment", choices=tuple(ALLOWED_BY_EXPERIMENT),
+                   default="batching")
     p.add_argument("--output", type=Path, required=True)
     args = p.parse_args()
     paths = (
@@ -129,7 +139,7 @@ def main() -> None:
         args.candidate_one, args.candidate_fifteen,
     )
     inputs = [json.loads(path.read_text(encoding="utf-8")) for path in paths]
-    report = compare_actor_candidate(*inputs)
+    report = compare_actor_candidate(*inputs, experiment=args.experiment)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     print(json.dumps({
