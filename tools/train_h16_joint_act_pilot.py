@@ -222,6 +222,7 @@ def collect(
             max_batch=args.actor_max_batch,
             max_delay_ms=args.actor_max_delay_ms,
             fixed_shape_batch_size=args.actor_fixed_shape_batch_size,
+            h21_collator=args.actor_h21_collator,
         )
         if args.actor_inference == "shared" else nullcontext(None)
     )
@@ -438,6 +439,11 @@ def main() -> None:
     p.add_argument("--actor-max-batch", type=int, default=16)
     p.add_argument("--actor-max-delay-ms", type=float, default=2.0)
     p.add_argument(
+        "--actor-h21-collator", choices=("reference", "packed"),
+        default="reference",
+        help="Opt-in packed H21 shared-actor CPU collation; historical default remains reference.",
+    )
+    p.add_argument(
         "--actor-fixed-shape-batch-size", type=int, default=0,
         help="Opt-in P2 fixed-shape shared actor bucket (0 preserves historical "
              "H16/H17 behavior; H18 performance stage uses 4).",
@@ -502,6 +508,8 @@ def main() -> None:
             or (args.actor_fixed_shape_batch_size > 0
                 and args.actor_inference != "shared")
             or (args.representation == "h21" and args.actor_fixed_shape_batch_size != 0)
+            or (args.actor_h21_collator == "packed" and
+                (args.representation != "h21" or args.actor_inference != "shared"))
             or not (args.actor_device == "cpu"
                     or args.actor_device.startswith("cuda"))
             or not math.isfinite(args.horizon_tau_rounds)
@@ -552,6 +560,8 @@ def main() -> None:
                 "execute", "resume", "output_root", "initial_h9",
                 "initial_h16", "macro_model", "emulator_root", "ai_root", "device",
             ) and (key != "actor_fixed_shape_batch_size" or value != 0) and (
+                key != "actor_h21_collator" or value != "reference"
+            ) and (
                 key != "representation" or value != "h16"
             ) and (
                 key not in ("ascension", "map_profile")
