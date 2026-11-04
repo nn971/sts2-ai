@@ -85,11 +85,14 @@ def _worker_seed(seed: str) -> dict[str, Any]:
         "rollout_transport": cfg["rollout_transport"],
         "search_enabled": not cfg["no_search"],
     }
-    arms = (
-        ("control_a", "profile_b1", "profile_b2", "control_a2")
-        if cfg["profile_overhead"] else ("profile_b1", "profile_b2")
-        if cfg["paired"] else ("profile_b1",)
-    )
+    if cfg["profile_overhead"]:
+        arms = ("control_a", "profile_b1", "profile_b2", "control_a2")
+    elif cfg["episode_profile"]:
+        arms = ("profile_b1", "profile_b2") if cfg["paired"] else ("profile_b1",)
+    else:
+        # Two *unprofiled* repetitions still certify exact action/teacher
+        # replay; they must be counted in full cohort wall/throughput.
+        arms = ("control_a", "control_a2") if cfg["paired"] else ("control_a",)
     signature0: dict[str, Any] | None = None
     runs = []
     for arm in arms:
@@ -196,6 +199,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--native-profile", action="store_true")
     parser.add_argument("--paired", action="store_true")
     parser.add_argument("--profile-overhead", action="store_true")
+    parser.add_argument("--no-episode-profile", action="store_true",
+                        help="Disable per-root PUCT and JSONL-wire profiling "
+                             "while retaining exact B/B public+teacher replay")
     parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args()
 
@@ -220,6 +226,7 @@ def main() -> None:
         or a.macro_prior_weight < 0
         or (a.macro_prior_weight > 0 and a.macro_model is None)
         or a.actor_max_batch < 1 or a.actor_max_delay_ms < 0
+        or (a.no_episode_profile and (a.profile_overhead or a.native_profile))
         or (a.actor_batch_parity_probe and (
             not a.actor_profile or a.actor_inference != "shared"
         ))
@@ -260,6 +267,7 @@ def main() -> None:
         "native_profile": a.native_profile,
         "paired": a.paired,
         "profile_overhead": a.profile_overhead,
+        "episode_profile": not a.no_episode_profile,
         "actor_max_batch": a.actor_max_batch,
         "actor_device": a.actor_device,
         "actor_batch_parity_probe": a.actor_batch_parity_probe,
@@ -370,6 +378,10 @@ def main() -> None:
             "Actor model forward/codec remain H16; H21 joint forward not measured",
             "Opt-in actor queue samples are capped at the first 8192 values",
             "CUDA transfer synchronization is enabled only with --actor-profile",
+            *(
+                ["PUCT/JSONL instrumentation disabled; public/teacher replay retained"]
+                if a.no_episode_profile else []
+            ),
             "This diagnostic is not a 50+ completed-combats-per-second claim",
             *(
                 ["Batch parity probe adds GPU forwards: timing is NOT a throughput benchmark"]
