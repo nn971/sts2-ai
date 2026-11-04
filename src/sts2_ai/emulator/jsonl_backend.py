@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import subprocess
 import time
 from collections.abc import Mapping, Sequence
@@ -307,6 +308,46 @@ class JsonlEmulatorBackend:
             "live_state_handles": live,
             "peak_state_handles": peak,
         }
+
+    def p2_h16_fused_native_profile_reset(self) -> None:
+        """Opt-in C# timing on H16/public-v0 fused rollout; never changes game state."""
+        response = self._request("p2_h16_fused_perf_reset")
+        if response.get("schemaId") != "sts2-p2-h16-fused-native-profile-v1":
+            raise JsonlBridgeError("Unsupported H16 fused native timing schema")
+
+    def p2_h16_fused_native_profile_snapshot(
+        self, *, stop: bool = False,
+    ) -> dict[str, Any]:
+        """Return versioned native self-time/allocation data; requires new H16 CLI."""
+        response = self._request(
+            "p2_h16_fused_perf_stop" if stop else "p2_h16_fused_perf_read"
+        )
+        profile = response.get("profile")
+        if (
+            not isinstance(profile, dict)
+            or profile.get("schemaId") != "sts2-p2-h16-fused-native-profile-v1"
+            or not isinstance(profile.get("operations"), dict)
+            or type(profile.get("enabled")) is not bool
+        ):
+            raise JsonlBridgeError("Malformed H16 fused native timing response")
+        for name, entry in profile["operations"].items():
+            if not isinstance(name, str) or not isinstance(entry, dict):
+                raise JsonlBridgeError("Invalid H16 native operation entry")
+            if (
+                type(entry.get("count")) is not int or entry["count"] < 0
+                or type(entry.get("allocatedBytes")) is not int
+                or entry["allocatedBytes"] < 0
+            ):
+                raise JsonlBridgeError("Invalid H16 native count/allocation")
+            for timer in ("totalSeconds", "maxSeconds"):
+                value = entry.get(timer)
+                if (
+                    isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or value < 0
+                ):
+                    raise JsonlBridgeError("Invalid H16 native timing")
+        return profile
 
     @property
     def pristine_reward_proposal_schema(self) -> str | None:
