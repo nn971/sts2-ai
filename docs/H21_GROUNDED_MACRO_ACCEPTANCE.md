@@ -131,6 +131,27 @@ Two inherited H19/H20 jobs on the first v3 revision failed only at Ruff's
 `UP035` import check for `Callable`; the imports have been corrected.
 No inference-speed or full-Act success claim follows from these codec passes.
 
+## Later-floor acceptance and numeric profiling
+
+A subsequent generated-route sweep, [run 41770444023](https://github.com/nn971/sts2-ai/actions/runs/41770444023),
+passed **1,721 decisions** with **7,708 canonical options**, **169
+observationally equivalent action aliases**, and **zero** encoding and
+emulator-step failures. It reached floor **16**, with three boss map
+selections, three elite map selections, shops, rests, rewards, and events.
+Peak representation size was 429 objects and 230 relations. Focused H21,
+legacy H19/H20 and H16 compatibility, and public-v1 contract gates
+also all passed on that revision.
+
+Pure end-to-end encode/audit throughput was **193.28 decisions/s**,
+p95 **7.795 ms**. The H21 v3 stable-hash cache recorded 603,834 hits
+and 450 misses; profiling singled out repeated 16-field `_numbers`
+construction as a significant CPU cost. An H21-specific sparse numeric
+encoder now handles empty and single-field records while falling back to
+the original implementation for multi-field records; randomized/edge
+equivalence tests keep all legacy H7/H16/H19/H20 semantics unchanged.
+The optimized branch is pending rerun; these passing figures describe
+the pre-optimization revision, **not** a measured speedup.
+
 ## Field-coverage audit
 
 `audit_public_observation()` classifies each known v1 field path as
