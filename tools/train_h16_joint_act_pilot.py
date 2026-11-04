@@ -222,7 +222,7 @@ def collect(
             max_batch=args.actor_max_batch,
             max_delay_ms=args.actor_max_delay_ms,
             fixed_shape_batch_size=args.actor_fixed_shape_batch_size,
-            h21_collator=args.actor_h21_collator,
+            h21_collator=getattr(args, "actor_h21_collator", "reference"),
         )
         if args.actor_inference == "shared" else nullcontext(None)
     )
