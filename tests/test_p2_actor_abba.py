@@ -245,3 +245,60 @@ def test_actor_profile_overhead_runner_preserves_mode_and_replay(tmp_path):
     assert all("--no-episode-profile" in call for call in calls[:4])
     assert all("--paired" in call for call in calls[:4])
     assert calls[-1][calls[-1].index("--experiment") + 1] == "actor-profile"
+
+
+def test_prefix_cache_abba_requires_fixed4_and_exact_teacher_replay():
+    data = [
+        cohort(wall, batch=16, fixed_shape=4)
+        for wall in (40.0, 34.0, 35.0, 41.0)
+    ]
+    for row, cap in zip(data, (0, 64, 64, 0), strict=True):
+        row["identity"]["p2_prefix_cache_handles"] = cap
+    report = report_actor_abba(*data, experiment="prefix-cache")
+    assert report["parity"]["passed"]
+    assert report["experiment"] == "prefix-cache"
+    assert report["configurations"]["A_uncached_fixed4"][
+        "p2_prefix_cache_handles"
+    ] == 0
+    assert report["configurations"]["B_cached_fixed4"][
+        "p2_prefix_cache_handles"
+    ] == 64
+    assert report["ratio_of_total_baseline_to_candidate_wall"] == pytest.approx(
+        81 / 69
+    )
+    wrong = deepcopy(data)
+    wrong[2]["identity"]["p2_prefix_cache_handles"] = 32
+    with pytest.raises(ValueError, match="Inconsistent P2 prefix cache"):
+        report_actor_abba(*wrong, experiment="prefix-cache")
+    wrong = deepcopy(data)
+    wrong[1]["seed_reports"][0]["trace_sha256"] = "divergent"
+    with pytest.raises(ValueError, match="teacher replay"):
+        report_actor_abba(*wrong, experiment="prefix-cache")
+    wrong = deepcopy(data)
+    wrong[1]["identity"]["actor_profile"] = True
+    with pytest.raises(ValueError, match="measurement instrumentation"):
+        report_actor_abba(*wrong, experiment="prefix-cache")
+
+
+def test_prefix_cache_abba_runner_only_toggles_retained_handle_cap(tmp_path):
+    args = Namespace(
+        experiment="prefix-cache",
+        seeds=None, seed_prefix="p2-prefix", seed_count=8, workers=15,
+        max_decisions=80, max_searches=2, simulations=16, depth=8,
+        actor_max_delay_ms=2.0, horizon_lambda=0.411395,
+        macro_prior_weight=0.5, macro_model=Path("macro.json"),
+        ascension=0, ai_root=Path("/tmp/ai"), emulator_root=Path("/tmp/emu"),
+        emulator_revision="emulator-sha", checkpoint=Path("model.pt"),
+        actor_device="cuda", map_profile="generated", output_root=tmp_path,
+    )
+    calls, files = make_commands(args)
+    assert files[-1].name == "p2-prefix-cache-abba-report.json"
+    assert [int(call[call.index("--p2-prefix-cache-handles") + 1])
+            for call in calls[:4]] == [0, 64, 64, 0]
+    assert all("--paired" in call for call in calls[:4])
+    assert all("--no-episode-profile" in call for call in calls[:4])
+    assert all("--actor-profile" not in call for call in calls[:4])
+    assert all(int(call[call.index("--actor-max-batch") + 1]) == 16
+               for call in calls[:4])
+    assert all(int(call[call.index("--actor-fixed-shape-batch-size") + 1]) == 4
+               for call in calls[:4])
