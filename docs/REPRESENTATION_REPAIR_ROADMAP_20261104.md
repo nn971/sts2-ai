@@ -1,6 +1,6 @@
 # H18 follow-up: public entity/action representation repair roadmap
 
-Status: **proposed / not implemented**. Date: 2026-11-04.
+Status: **implementation in progress; P0 acceptance pending**. Date: 2026-11-04.
 Owners: sts2-emulator (source mechanics and fair observations); sts2-ai (codec, model, rollout, audits).
 Baseline: sts2-ai branch research/h18-a0-generated-map-20261103; sts2-emulator branch research/h18-generated-compact-selection-20261103.
 Training decision: pause further *large* H18/H19 outcome comparisons until P0 repairs and their tests pass. Short, deterministic smoke tests and profiling are appropriate.
@@ -113,3 +113,33 @@ The actor must see each strategically relevant distinction that the player can o
 - Emulator issue #237: versioned fair observation coverage and migration of Poison/Weak/Vulnerable into powers (open, implementation umbrella).
 - AI-owned work: schema coverage audit, owner-linked attributes, relational macro action/map encoder, collision diagnostics, exact variant/selection equivalence, model/checkpoint versioning.
 - Make P0 steps independent reviewable PRs (observation schema and fixtures; card/resource codec; macro objects and graph); then power-system consolidation, collision/overflow hardening and controlled evaluation.
+
+## Implementation checkpoint (2026-11-04)
+
+This roadmap remains the source of acceptance criteria. Implementation is split
+across separate, **draft** branches rather than directly implemented in this
+documentation PR:
+
+| Slice | Branch / PR | Evidence and gate |
+| --- | --- | --- |
+| P0 fair public schema | [emulator #238](https://github.com/nn971/sts2-emulator/pull/238) | `prototype-ai-v1` exports visible card modifiers, cost, play history and potion capacity; minimum-required deck choices added. Native parity and full source/AI contract acceptance still required. |
+| P0 owned attributes | [AI #160](https://github.com/nn971/sts2-ai/pull/160) | H19 v1-gated owner-linked card/relic/potion state; backward-compatible legacy checkpoint path. |
+| P0 map graph | [AI #161](https://github.com/nn971/sts2-ai/pull/161) | H20 typed map edges, reachable targets, reference renaming tests. |
+| P0 macro and field completeness | [AI #162](https://github.com/nn971/sts2-ai/pull/162) | H21 v4 option objects, pending deck choices and exceptional continuation cases; all **published** v1 fields classified. Fresh focused, live public and continuation CI remain unverified. |
+| P1 status/power consolidation | [emulator #237](https://github.com/nn971/sts2-emulator/issues/237) | Poison/Weak/Vulnerable migration still to be implemented after P0 gates. |
+
+The last verified H21 v3 real-emulator eight-seed sweep reached floor 16:
+1,721 decisions, 7,708 canonical legal choices, 169 intentional equivalent
+aliases, zero codec/step failures. The identical-seed sparse-numeric follow-up
+benchmarked **279.42 CPU codec+audit decisions/s**, p95 **5.033 ms**
+([run 41770972529](https://github.com/nn971/sts2-ai/actions/runs/41770972529)).
+These measurements exclude inference/search and predate v4.
+
+H21 v4 introduces new published-field and nested-continuation handling.
+The live continuation CI now requires an **actually executed** shop purchase,
+rather than just a legal shop menu. Its queued workflow must complete before
+these new changes can be declared accepted. Real native observation fidelity,
+rare event branches and controlled retraining remain separate gates.
+
+**Decision:** retain the training pause until the fresh P0 checks pass; avoid
+conflating published DTO completeness with native game fidelity.
