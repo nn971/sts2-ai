@@ -13,11 +13,14 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from tools.report_p2_cohort_comparison import (
-    MATCH_FIELDS,
-    _rows,
-    compare_cohorts,
-)
+if __package__:
+    from .report_p2_cohort_comparison import (
+        MATCH_FIELDS, _rows, compare_cohorts,
+    )
+else:
+    from report_p2_cohort_comparison import (
+        MATCH_FIELDS, _rows, compare_cohorts,
+    )
 
 REPORT_SCHEMA = "sts2-p2-actor-candidate-comparison-v1"
 ALLOWED_DIFFERENCES = {
