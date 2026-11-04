@@ -96,6 +96,8 @@ def _check_supported_payload(kind: str, payload: dict[str, Any]) -> None:
         names = {"OfferId"}
     elif kind == "replace_shop_potion":
         names = {"OfferId", "Slot"}
+    elif kind == "use_potion":
+        names = {"Slot", "TargetEnemyId"}
     elif kind in _DECK_CARD_ACTIONS:
         names = {"CardInstanceId"}
     elif kind in _POTION_SLOT_ACTIONS:
@@ -140,7 +142,7 @@ def _check_supported_payload(kind: str, payload: dict[str, Any]) -> None:
     if "TargetEnemyId" in names:
         target = _field(payload, "TargetEnemyId", optional=True)
         if target is not None:
-            raise ValueError("Event potion action has an ungrounded enemy target")
+            raise ValueError("Macro potion action has an ungrounded enemy target")
     if kind in {"take_reward_extra_potion", "skip_reward_extra_potion"}:
         slot = _int(payload, "Slot", optional=True)
         if slot not in (None, -1):
@@ -560,7 +562,7 @@ class _GroundedMacro:
             target = self.deck(_int(payload, "CardInstanceId"))
         elif kind == "take_reward_bundle":
             target = self.option("bundle", 0, _int(payload, "Index"))
-        elif kind in _POTION_SLOT_ACTIONS:
+        elif kind in _POTION_SLOT_ACTIONS or kind == "use_potion":
             source = self.potion(_int(payload, "Slot"))
         elif kind in _REWARD_CARD_ACTIONS:
             group = (_int(payload, "GroupIndex") if kind.endswith("_group")
