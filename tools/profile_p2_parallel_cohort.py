@@ -35,6 +35,7 @@ from sts2_ai.emulator.jsonl_backend import JsonlEmulatorBackend
 from sts2_ai.models.h16_batch_actor import RemoteH16Actor, SharedH16Service
 from sts2_ai.models.phase_split import PhaseSplitNeuralModel
 from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet, PilotPolicy
+from sts2_ai.training.h21_macro_offer_codec import H21_CODEC
 
 SCHEMA = "sts2-p2-parallel-cohort-profile-v1"
 _WORKER: dict[str, Any] = {}
@@ -58,12 +59,14 @@ def _worker_init(config: dict[str, Any], transport: Any) -> None:
         macro_teacher=macro,
         macro_prior_weight=config["macro_prior_weight"],
         remote_actor=remote,
+        representation=config["representation"],
     )
     backend = JsonlEmulatorBackend(
         repo_root=Path(config["ai_root"]),
         emulator_root=Path(config["emulator_root"]),
         expected_emulator_revision=config["emulator_revision"],
         build=False, profile_wire=False,
+        expected_public_schema_id=config["public_schema_id"],
     )
     global _WORKER
     _WORKER = {"config": config, "policy": policy, "backend": backend}
@@ -83,6 +86,7 @@ def _worker_seed(seed: str) -> dict[str, Any]:
         "search_depth": None if cfg["depth"] == 0 else cfg["depth"],
         "max_simulation_steps": cfg["max_simulation_steps"],
         "rollout_transport": cfg["rollout_transport"],
+        "compact_card_selection": cfg["representation"] == "h21",
         "search_enabled": not cfg["no_search"],
         "p2_prefix_cache_handles": cfg["p2_prefix_cache_handles"],
     }
@@ -188,6 +192,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--actor-fixed-shape-batch-size", type=int, default=0,
                         help="Opt-in fixed-row, shape-bucketed actor microbatches "
                              "(0 = existing dynamic batching)")
+    parser.add_argument("--representation", choices=("h16", "h21"), default="h16")
+    parser.add_argument("--actor-h21-collator",
+                        choices=("reference", "packed"), default="reference")
     parser.add_argument("--ascension", type=int, default=0)
     parser.add_argument("--map-profile", choices=["generated", "fixed-route"],
                         default="generated")
@@ -239,6 +246,9 @@ def main() -> None:
         or a.macro_prior_weight < 0
         or (a.macro_prior_weight > 0 and a.macro_model is None)
         or a.actor_max_batch < 1 or a.actor_max_delay_ms < 0
+        or (a.representation == "h21" and a.actor_fixed_shape_batch_size != 0)
+        or (a.actor_h21_collator == "packed" and
+            (a.representation != "h21" or a.actor_inference != "shared"))
         or (a.no_episode_profile and (a.profile_overhead or a.native_profile))
         or (a.wire_profile_only and (
             not a.no_episode_profile or a.profile_overhead
@@ -287,6 +297,10 @@ def main() -> None:
         "max_searches": a.max_searches,
         "max_decisions": a.max_decisions,
         "rollout_transport": a.rollout_transport,
+        "representation": a.representation,
+        "public_schema_id": (
+            "prototype-ai-v1" if a.representation == "h21" else "prototype-ai-v0"
+        ),
         "native_profile": a.native_profile,
         "paired": a.paired,
         "profile_overhead": a.profile_overhead,
@@ -297,6 +311,7 @@ def main() -> None:
         "actor_device": a.actor_device,
         "actor_batch_parity_probe": a.actor_batch_parity_probe,
         "actor_fixed_shape_batch_size": a.actor_fixed_shape_batch_size,
+        "actor_h21_collator": a.actor_h21_collator,
         "replay_diagnostics_dir": str(
             a.output.resolve().parent / "replay-mismatches"
         ),
@@ -312,6 +327,7 @@ def main() -> None:
             profile_actor=a.actor_profile,
             verify_batch_parity=a.actor_batch_parity_probe,
             fixed_shape_batch_size=a.actor_fixed_shape_batch_size,
+            h21_collator=a.actor_h21_collator,
         )
         if a.actor_inference == "shared" else nullcontext(None)
     )
@@ -369,6 +385,10 @@ def main() -> None:
             "actor_profile": a.actor_profile,
             "actor_batch_parity_probe": a.actor_batch_parity_probe,
             "actor_fixed_shape_batch_size": a.actor_fixed_shape_batch_size,
+            "actor_h21_collator": a.actor_h21_collator,
+            "representation": a.representation,
+            "public_schema_id": config["public_schema_id"],
+            "codec": H21_CODEC if a.representation == "h21" else "h16-public-persistent-subset-multiset-v3",
             "torch": torch.__version__,
             "cpu_count": os.cpu_count(),
             "platform": platform.platform(),
@@ -412,7 +432,9 @@ def main() -> None:
             "Same seed cohort must be run separately at 1 and 15 workers",
             "Worker-summed times overlap; never add them or use as cohort wall",
             "Generated-map native-structure RNG is not installed-game calibrated",
-            "Actor model forward/codec remain H16; H21 joint forward not measured",
+            ("Pinned H21 public-v1 grounded model and relation graph"
+             if a.representation == "h21" else
+             "Actor model forward/codec remain H16; H21 joint forward not measured"),
             "Opt-in actor queue samples are capped at the first 8192 values",
             "CUDA transfer synchronization is enabled only with --actor-profile",
             *(
