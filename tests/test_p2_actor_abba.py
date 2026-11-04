@@ -302,3 +302,43 @@ def test_prefix_cache_abba_runner_only_toggles_retained_handle_cap(tmp_path):
                for call in calls[:4])
     assert all(int(call[call.index("--actor-fixed-shape-batch-size") + 1]) == 4
                for call in calls[:4])
+
+
+def test_prefix_cache_report_surfaces_real_saved_steps_and_receipt_cost():
+    data = [
+        cohort(wall, batch=16, fixed_shape=4)
+        for wall in (40.0, 44.0, 45.0, 41.0)
+    ]
+    for index, profile in enumerate(data):
+        cached = index in (1, 2)
+        profile["identity"]["p2_prefix_cache_handles"] = 64 if cached else 0
+        profile["p2_prefix_cache_diagnostics"] = {
+            "roots": 4 if cached else 0,
+            "hits": 9 if cached else 0,
+            "misses": 25 if cached else 0,
+            "emulator_step_calls_avoided": 9 if cached else 0,
+            "receipt_calls": 55 if cached else 0,
+            "receipt_seconds": 1.25 if cached else 0.0,
+            "skipped_capacity": 0, "skipped_provider": 0,
+        }
+    report = report_actor_abba(*data, experiment="prefix-cache")
+    assert [entry["hits"] for entry in report["prefix_cache_diagnostics"]] == [
+        0, 9, 9, 0,
+    ]
+    assert report["prefix_cache_diagnostics"][1]["receipt_calls"] == 55
+    assert report["prefix_cache_diagnostics"][2]["receipt_seconds"] == 1.25
+
+    broken = deepcopy(data)
+    broken[2]["p2_prefix_cache_diagnostics"]["emulator_step_calls_avoided"] = 8
+    with pytest.raises(ValueError, match="invalid cache step/receipt"):
+        report_actor_abba(*broken, experiment="prefix-cache")
+
+    broken = deepcopy(data)
+    broken[0]["p2_prefix_cache_diagnostics"]["receipt_calls"] = 1
+    with pytest.raises(ValueError, match="uncached arm"):
+        report_actor_abba(*broken, experiment="prefix-cache")
+
+    broken = deepcopy(data)
+    del broken[1]["p2_prefix_cache_diagnostics"]
+    with pytest.raises(ValueError, match="Partial P2 cache"):
+        report_actor_abba(*broken, experiment="prefix-cache")
