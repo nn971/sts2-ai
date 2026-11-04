@@ -113,7 +113,7 @@ def report_actor_abba(
 ) -> dict[str, Any]:
     if experiment not in (
         "batching", "actor-profile", "prefix-cache", "transport",
-        "wire-profile", "native-fused-profile",
+        "wire-profile", "native-fused-profile", "actor-delay",
     ):
         raise ValueError("Unsupported A/B/B/A experiment")
     profiles = (a1, b1, b2, a2)
@@ -145,7 +145,8 @@ def report_actor_abba(
                       "torch", "platform", "cpu_count"):
             if (field in CHANGE_FIELDS or
                 (field == "actor_profile" and experiment == "actor-profile") or
-                (field == "rollout_transport" and experiment == "transport")):
+                (field == "rollout_transport" and experiment == "transport") or
+                (field == "actor_max_delay_ms" and experiment == "actor-delay")):
                 continue
             if field not in reference or field not in identity:
                 raise ValueError(f"{label}: missing provenance {field}")
@@ -155,7 +156,10 @@ def report_actor_abba(
         (identities[0], identities[3], "A1/A2"),
         (identities[1], identities[2], "B1/B2"),
     ):
-        for field in CHANGE_FIELDS:
+        for field in (
+            *CHANGE_FIELDS,
+            *(("actor_max_delay_ms",) if experiment == "actor-delay" else ()),
+        ):
             if left.get(field) != right.get(field):
                 raise ValueError(f"{name}: inconsistent actor mode: {field}")
     if cache_caps[0] != cache_caps[3] or cache_caps[1] != cache_caps[2]:
@@ -188,6 +192,20 @@ def report_actor_abba(
             raise ValueError("P2 control targets fixed-shape batch 4")
         if identities[0].get("actor_max_batch") != 16:
             raise ValueError("P2 control targets max batch 16")
+        if experiment == "actor-delay":
+            delays = [item.get("actor_max_delay_ms") for item in identities]
+            if (
+                any(isinstance(v, bool) or not isinstance(v, (int, float))
+                    or not math.isfinite(v) or not 0 <= v <= 4
+                    for v in delays)
+                or delays[0] != 2.0
+                or delays[1] == delays[0]
+                or delays[0] != delays[3]
+                or delays[1] != delays[2]
+            ):
+                raise ValueError(
+                    "P2 actor delay requires control 2ms and matched candidate 0-4ms"
+                )
         if experiment == "prefix-cache" and (
             cache_caps[0] != 0 or cache_caps[1] < 1
         ):
@@ -421,6 +439,9 @@ def report_actor_abba(
             "order-balanced source-versioned H16 native fused C# "
             "environment/serialization self-time diagnostic"
             if experiment == "native-fused-profile" else
+            "order-balanced P2.3 shared actor fixed4 scheduler delay trial; "
+            "same model, seeds, max batch, PUCT and exact teacher replay"
+            if experiment == "actor-delay" else
             "order-balanced uninstrumented P2.5 actor candidate; "
             "full episode/RNG acceptance separate"
         ),
@@ -453,9 +474,11 @@ def report_actor_abba(
             ("A_unprofiled_fixed4" if experiment == "actor-profile"
              else "A_uncached_fixed4" if experiment == "prefix-cache"
              else "A_legacy_fixed4" if experiment == "transport"
+             else "A_fixed4_delay2ms" if experiment == "actor-delay"
              else "A_batch1"): {
                 "actor_max_batch": identities[0]["actor_max_batch"],
                 "fixed_shape_batch_size": identities[0]["actor_fixed_shape_batch_size"],
+                "actor_max_delay_ms": identities[0]["actor_max_delay_ms"],
                 "actor_profile": identities[0]["actor_profile"],
                 "rollout_transport": identities[0]["rollout_transport"],
                 "p2_prefix_cache_handles": cache_caps[0],
@@ -463,9 +486,11 @@ def report_actor_abba(
             ("B_profiled_fixed4" if experiment == "actor-profile"
              else "B_cached_fixed4" if experiment == "prefix-cache"
              else "B_fused_fixed4" if experiment == "transport"
+             else "B_fixed4_candidate_delay" if experiment == "actor-delay"
              else "B_fixed_shape"): {
                 "actor_max_batch": identities[1]["actor_max_batch"],
                 "fixed_shape_batch_size": identities[1]["actor_fixed_shape_batch_size"],
+                "actor_max_delay_ms": identities[1]["actor_max_delay_ms"],
                 "actor_profile": identities[1]["actor_profile"],
                 "rollout_transport": identities[1]["rollout_transport"],
                 "p2_prefix_cache_handles": cache_caps[1],
@@ -528,6 +553,12 @@ def report_actor_abba(
                 if experiment == "prefix-cache" else []
             ),
             *(
+                ["A/B controls use fixed4/max16; only actor max delay changes",
+                 "Queue occupancy and GPU utilization must be separately "
+                 "verified before promoting a candidate to training"]
+                if experiment == "actor-delay" else []
+            ),
+            *(
                 ["Native C# profiling is H16/public-v0 only, not native-v1",
                  "B1/B2 enable C# fused-only timers. Self-time excludes "
                  "Python actor and scheduling; compare to full cohort wall"]
@@ -558,7 +589,7 @@ def main() -> None:
         p.add_argument(f"--{name}", type=Path, required=True)
     p.add_argument("--experiment", choices=("batching", "actor-profile", "prefix-cache",
                             "transport", "wire-profile",
-                            "native-fused-profile"),
+                            "native-fused-profile", "actor-delay"),
                    default="batching")
     p.add_argument("--output", type=Path, required=True)
     args = p.parse_args()

@@ -1457,3 +1457,103 @@ Check for missing C# schema/version and any PUCT teacher divergence
 before interpreting timings. A favorable subcost bound, not merely
 the existence of large JSON payloads, should drive further P2.2
 optimization.
+
+
+## 2026-11-05 P2.2 closed: native C# fused self-time
+
+User-supplied `p2-native-fused-profile-abba-report.json` on AI
+`b25c778215d9b1f820b1624a6136b8265b301d9b`,
+H16/public-v0 emulator `12733097c85bc111926d9ab53fe9a664c823b80a`
+and frozen model/macro. Four independent generated-map A0 seeds, one
+CUDA actor worker, fixed-shape batch 4, 16 PUCT simulations/depth 8,
+two search roots, 80-decision cap, two exact replays per seed.
+**Exact within-seed and cross-cohort public-action/PUCT teacher/work
+parity passed**: 2,222 search transitions, 640 real transitions,
+8 censored episodes and zero completed in each arm.
+
+| Arm | H16 C# profiler | Cohort wall (s) |
+|---|---|---:|
+| A1 | Off | 20.85387 |
+| B1 | On | 19.76482 |
+| B2 | On | 19.60144 |
+| A2 | Off | 19.20516 |
+
+Signed profiler overhead `(B1+B2)/(A1+A2)-1` = **-1.729%**.
+The pairs disagree in direction, so this cannot establish a
+profiling speedup. B1/B2 each performed 2,862 instrumented fused
+steps. Average per-profiler-cohort C# self time and managed allocations:
+
+| C# scope | Time (s) | Allocations |
+|---|---:|---:|
+| Environment step + public frame | 0.729 | 339 MB |
+| Canonical observation JSON | 0.492 | 460 MB |
+| Outer response JSON | 0.098 | 108 MB |
+| JSON write + flush | 0.157 | ~0 MB |
+| Child handle + legal actions | 0.020 | 14 MB |
+
+The ~**1.50s** measured C# fused time and ~**921 MB**
+allocations are real subcosts but only a fraction of the ~20s
+one-worker capped cohort wall. The canonical serializer accounts
+for the largest allocation volume, **not** a demonstrated
+whole-run bottleneck with enough verified upside to justify a
+pre-training native refactor. Keep the fused protocol and the
+reference serializer. P2.1 cache remains **off** due to negative
+end-to-end measurements. Close this diagnostic and proceed to
+the actor scheduler in P2.3.
+
+## P2.3 — Order-balanced actor queue-delay trial
+
+The accepted 15-worker fixed4/max16 CUDA actor and fused
+transport form the control. The next experiment changes only
+`SharedH16Service.max_delay_ms`: A1/A2 retain **2 ms**, B1/B2
+use a candidate from **0, 1 or 4 ms**. The existing actor
+implementation and weights remain unchanged. The A/B/B/A
+report fails closed if source SHA, model, emulator, legal work,
+search budgets, public actions, exact PUCT teachers, or other
+configuration differs, including actor batching, cap and
+instrumentation. Profilers and experimental prefix cache are off.
+Order-balanced wall is authoritative; each episode's two replay
+executions are included in the denominator.
+
+Pilot first at 16 generated A0 seeds and 15 workers, so all 15
+workers can potentially contribute (eight seeds would underfill
+the worker pool):
+
+```fish
+cd ~/projects/sts2-ai
+git fetch origin
+git switch perf/p2-3-actor-scheduling-abba-20261105
+git pull --ff-only
+
+python tools/run_p2_actor_abba.py \
+    --experiment actor-delay \
+    --emulator-root $emu_p2 --emulator-revision $rev \
+    --checkpoint $ckpt --macro-model $macro \
+    --workers 15 --actor-device cuda \
+    --actor-max-delay-ms 2 \
+    --candidate-actor-max-delay-ms 0 \
+    --seed-prefix p2-a0-actor-delay-20261105 \
+    --seed-count 16 \
+    --simulations 16 --depth 8 --max-searches 2 \
+    --max-decisions 80 \
+    --output-root results/p2-actor-delay0-smoke-v1 \
+    --execute
+```
+
+This uses the pinned H16-compatible emulator/source and diagnostic
+checkpoint from P2.0, not an unverified H18/H21 artifact. It does
+not automatically change the H18 trainer (see stacked training PR
+#168, which retains accepted 2 ms). If exact teacher replay passes
+and candidate delay decreases wall in both order pairs, repeat with
+an independent cohort of at least 32 seeds (all four runs must
+remain independently paired), and separately examine 1 ms and 4 ms
+only if warranted by the first result. Check complete episodes
+and 64/full-combat budgets before accepting for H18 training.
+If candidate fails teacher replay or increases wall, record
+the negative result and keep 2 ms.
+
+Actor wait may trade better batch occupancy for queue latency:
+a smaller delay is **not** automatically faster. Actor
+profiling itself previously had ~7.50% measured overhead; do not
+enable it in the throughput A/B/B/A run. Separate instrumentation
+can measure arrival/batch histogram after the wall test.
