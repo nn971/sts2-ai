@@ -61,3 +61,19 @@ jobs:
         run: |
           python tools/probe_h22_joint_bridge.py \
             --emulator-root emulator-v1 --max-decisions 80
+      - name: Smoke frozen H22 packed shared actor with real public-v1 PUCT
+        run: |
+          python -c 'from pathlib import Path; from sts2_ai.models.shared_macro_transformer_v2 import H21GroundedMacroTransformer; from sts2_ai.models.shared_transformer import H7Config; from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet; JointActPilotNet(H21GroundedMacroTransformer(H7Config(width=32, layers=1, heads=4, feedforward=64))).save(Path("h22-ci-frozen-untrained.pt"))'
+          python tools/profile_p2_parallel_cohort.py \
+            --execute --emulator-root emulator-v1 \
+            --emulator-revision "$(git -C emulator-v1 rev-parse HEAD)" \
+            --checkpoint h22-ci-frozen-untrained.pt \
+            --representation h21 --actor-h21-collator packed \
+            --actor-inference shared --actor-device cpu \
+            --actor-max-batch 2 --workers 1 \
+            --seeds h22-h21-v1-bridge-ci-20261105 \
+            --simulations 8 --depth 2 --max-searches 1 \
+            --max-decisions 80 --no-episode-profile --paired \
+            --output h22-ci-packed-public-v1.json
+          python -c 'import json; from pathlib import Path; p = json.loads(Path("h22-ci-packed-public-v1.json").read_text()); assert p["shared_actor_metrics"]["p2_h21_collator"] == "packed"; assert p["search_roots"] > 0; assert all(x["public_teacher_parity"] is True for x in p["seed_reports"]); print(json.dumps({"h22_packed_actor_ci": "pass", "search_roots": p["search_roots"], "transitions": p["search_transitions"], "cohort_wall_seconds": p["cohort_wall_seconds"], "actor_collate_seconds": p["shared_actor_metrics"]["host_collate_seconds"]}, sort_keys=True))'
+
