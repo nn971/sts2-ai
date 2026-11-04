@@ -604,6 +604,7 @@ def local_combat_puct(
     search_profile: CombatSearchProfile | None = None,
     search_report: list[dict[str, object]] | None = None,
     p2_prefix_cache_handles: int = 0,
+    p2_cache_report: list[dict[str, object]] | None = None,
 ) -> tuple[tuple[float, ...], int]:
     """Combat PUCT: capped depth or full search to combat termination.
 
@@ -632,6 +633,8 @@ def local_combat_puct(
             max_simulation_steps=max_simulation_steps,
         ).search(root, simulations=simulations, profile=search_profile)
         cache_stats = adapter.prefix_cache_metrics()
+        if p2_cache_report is not None and cache_stats is not None:
+            p2_cache_report.append(dict(cache_stats))
         if search_profile is not None and search_report is not None:
             snapshot = search_profile.snapshot(result)
             if cache_stats is not None:
@@ -672,6 +675,7 @@ def collect_act_episode(
     compact_card_selection: bool = False,
     search_profiles: list[dict[str, object]] | None = None,
     p2_prefix_cache_handles: int = 0,
+    p2_cache_report: list[dict[str, object]] | None = None,
 ) -> PilotEpisode:
     if not (0 <= search_probability <= 1 and max_searches >= 0
             and max_decisions > 0 and simulations > 0
@@ -743,6 +747,7 @@ def collect_act_episode(
                     max_simulation_steps=max_simulation_steps,
                     search_profile=search_profile, search_report=search_profiles,
                     p2_prefix_cache_handles=p2_prefix_cache_handles,
+                    p2_cache_report=p2_cache_report,
                 )
                 search_transitions += count
                 searches += 1
