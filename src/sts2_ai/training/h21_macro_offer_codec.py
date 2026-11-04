@@ -330,7 +330,7 @@ class _GroundedMacro:
 
     def build_global(self) -> None:
         # Macro context independent of opaque map node IDs.
-        for name in ("act", "act_one_region", "act_one_boss_encounter_id",
+        for name in ("phase", "act", "act_one_region", "act_one_boss_encounter_id",
                      "map_generation_profile_id", "character_id", "ruleset_id",
                      "event_id"):
             if name in self.state and self.state[name] is not None:
