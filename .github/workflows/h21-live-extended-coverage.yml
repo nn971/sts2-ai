@@ -58,6 +58,7 @@ jobs:
             --seed h21-continue-event-c --seed h21-continue-rest-d \
             --seed h21-continue-shop-e --seed h21-continue-event-f \
             --max-decisions 250 --diverse-route --continuation-coverage --strict \
+            --require-executed-any buy_card,buy_potion,buy_relic \
             > h21-live-continuation-coverage.json
           result=$?
           cat h21-live-continuation-coverage.json
