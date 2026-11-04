@@ -164,6 +164,13 @@ Use `--no-search` for the PUCT-zero cohort, `--simulations 64` for high
 search load, or `--depth 0` for full-combat mode. Treat each as a separately
 identified matched condition.
 
+Add `--actor-profile` for opt-in queue p50/p95, batch-size histograms,
+host collation, synchronized transfer/forward timing, and CUDA peak memory.
+Actor profiling applies to the **whole cohort**, including all A/B/B/A arms.
+CUDA transfer synchronization is intentionally limited to this diagnostic
+mode; benchmark its overhead rather than comparing it as an uninstrumented
+production run. Queue/latency samples are bounded at 8,192 observations.
+
 **Interpretation:** `cohort_wall_seconds` is the full startup-to-teardown
 denominator for parallel throughput. `worker_bridge_sum_seconds`,
 `worker_actor_inference_sum_seconds` and individual root times overlap
