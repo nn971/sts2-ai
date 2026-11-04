@@ -10,7 +10,12 @@ import torch
 
 from sts2_ai.emulator import FAIR_POLICY_ID
 from sts2_ai.emulator.protocol import LegalAction, Observation
-from sts2_ai.models.h16_batch_actor import RemoteH16Actor, SharedH16Service
+from sts2_ai.models.h16_batch_actor import (
+    RemoteH16Actor,
+    SharedH16Service,
+    _stable_shape_bucket,
+)
+from sts2_ai.models.packed_actor_collation import prepare_h7_actor_packed
 from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
 from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet, PilotPolicy
 from sts2_ai.training.h16_public_codec import encode_h16_decision
@@ -174,4 +179,80 @@ def test_h16_batch_probe_must_be_explicitly_profiled(tmp_path):
             checkpoint=tmp_path / "missing.pt", digest="unused",
             workers=2, device="cpu", horizon_lambda=0.25,
             verify_batch_parity=True, profile_actor=False,
+        )
+
+
+def test_h16_fixed_shape_bucket_preserves_real_token_masks():
+    state = public_frame(combat=True)
+    menu = (LegalAction("end", "end_turn"),
+            LegalAction("skip", "skip"))
+    token = encode_h16_decision(state, menu)
+    phase, objects, actions, members = _stable_shape_bucket(token)
+    assert phase == "combat"
+    assert objects >= len(token.objects)
+    assert actions >= len(token.actions)
+    ordinary = prepare_h7_actor_packed([token]).to("cpu")
+    stable = prepare_h7_actor_packed(
+        [token, token], pad_objects=objects, pad_actions=actions,
+        pad_members=members,
+    ).to("cpu")
+    assert stable.kinds.shape == (2, objects)
+    assert stable.action_kinds.shape == (2, actions)
+    assert stable.action_members.shape == (2, actions, members)
+    assert torch.equal(
+        stable.kinds[0, :len(token.objects)], ordinary.kinds[0])
+    assert torch.equal(
+        stable.action_kinds[0, :len(token.actions)],
+        ordinary.action_kinds[0])
+    assert stable.object_mask[0].sum().item() == len(token.objects)
+    assert stable.action_mask[0].sum().item() == len(token.actions)
+    with pytest.raises(ValueError, match="underflows"):
+        prepare_h7_actor_packed([token], pad_objects=1)
+
+
+def test_h16_fixed_shape_actor_exact_replay_under_changed_peer_batch(tmp_path):
+    """Same frame is bitwise-stable alone and with a different active peer."""
+    torch.manual_seed(97)
+    torch.set_num_threads(1)
+    model = JointActPilotNet(SharedObjectTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64),
+    )).eval()
+    ckpt = tmp_path / "fixed-shape.pt"
+    model.save(ckpt)
+    digest = hashlib.sha256(ckpt.read_bytes()).hexdigest()
+    target = encode_h16_decision(
+        public_frame(combat=True),
+        (LegalAction("end", "end_turn"), LegalAction("skip", "skip")),
+    )
+    peer = encode_h16_decision(
+        {**public_frame(combat=True), "hp": 31},
+        (LegalAction("pass", "end_turn"), LegalAction("play", "other_legal")),
+    )
+    assert _stable_shape_bucket(target) == _stable_shape_bucket(peer)
+    with SharedH16Service(
+        checkpoint=ckpt, digest=digest, workers=2, device="cpu",
+        horizon_lambda=0.3, max_batch=2, max_delay_ms=100,
+        fixed_shape_batch_size=2, profile_actor=True,
+    ) as service:
+        a, b = (RemoteH16Actor(service.transport) for _ in range(2))
+        solo = a.infer(target)
+        for _ in range(3):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                same = pool.submit(a.infer, target)
+                other = pool.submit(b.infer, peer)
+                assert same.result(timeout=30) == solo
+                assert other.result(timeout=30)[0]
+    assert service.metrics["requests"] == 7
+    assert service.metrics["p2_fixed_shape_batch_size"] == 2
+    assert service.metrics["p2_fixed_shape_physical_rows"] >= 7
+    assert service.metrics["p2_fixed_shape_bucket_forwards"] >= 4
+
+
+def test_fixed_shape_actor_rejects_conflicting_numerical_probe(tmp_path):
+    with pytest.raises(ValueError, match="configuration"):
+        SharedH16Service(
+            checkpoint=tmp_path / "missing.pt", digest="unused",
+            workers=2, device="cpu", horizon_lambda=0.25,
+            verify_batch_parity=True, profile_actor=True,
+            fixed_shape_batch_size=2,
         )
