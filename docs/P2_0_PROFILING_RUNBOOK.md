@@ -1345,3 +1345,115 @@ the next meaningful decomposition requires H16/v0-compatible,
 versioned C# timing around mechanics, DTO projection and JSON
 serialization, with a separately measured instrumentation overhead.
 Keep independent Nature/fair-history continuation semantics intact.
+
+
+### 2026-11-04 P2.2 fused wire result — profile overhead negligible at this scale
+
+User-supplied `p2-wire-profile-abba-report.json`, AI SHA
+`d81861788a5cb6c69879d5e15613ad498d078e01`, emulator
+`0937456588d563b48e9810290b7382f64d30d5a7`,
+four independent A0 generated-map seeds, one CUDA actor worker,
+fixed-shape batch 4, 16 simulations, depth eight, capped at two
+searches and 80 decisions, paired replay. Fused protocol was used
+in **every** arm. A1/A2 disabled wire instrumentation, B1/B2 enabled
+wire-only Python timings. **Exact within-seed and cross-arm public
+action/PUCT teacher/work parity passed**. Each arm performed 2,176
+logical search transitions and 640 real transitions, with 8 censored
+and zero completed episode executions.
+
+| Arm | Wire instrumentation | Cohort wall (s) |
+|---|---|---:|
+| A1 | Off | 19.65914 |
+| B1 | On | 18.01333 |
+| B2 | On | 18.65512 |
+| A2 | Off | 18.33593 |
+
+The order-balanced measured wall ratio (A1+A2)/(B1+B2) was
+**1.03618×**, or **-3.4915% signed profiling overhead**. Since the
+two pairs disagree in direction (A1/B1 1.09137× and A2/B2
+0.98289×), this reflects scheduling/measurement noise rather than a
+demonstrated profiling speedup. Existing fused performance remains
+the relevant production baseline.
+
+The wire-only B1/B2 totals (one worker, including both replay
+executions and all eight runs) were:
+
+| Component | B1 seconds | B2 seconds |
+|---|---:|---:|
+| Python JSON request encode | 0.03419 | 0.03510 |
+| Request write + native work + output pipe read | 1.88634 | 2.07820 |
+| Python JSON response decode/validation | 0.08917 | 0.08995 |
+| Measured wire subtotal | 2.00971 | 2.20325 |
+| Fused step-frame response bytes | 48,093,501 | 48,093,501 |
+| All response bytes | 48,397,910 | 48,397,910 |
+
+Thus **93.9–94.3%** of measured wire time is pipe interval, and
+**99.37%** of response bytes arise from the **2,816** fused step-frame
+calls per cohort, **17.08 KB response per fused call**. Python
+encode/decode together take only 0.123–0.125 seconds per cohort,
+approximately **0.7% of total cohort wall**. The 1.89–2.08s
+native+pipe interval accounts for roughly 10–11% of cohort wall,
+and even eliminating it entirely on this small one-worker
+censored workload would fall short of the P2.2 provisional 15%
+end-to-end acceptance threshold. Larger/parallel searches can have
+a different allocation.
+
+**P2.2 decision:** preserve fused transport and defer Python JSON
+micro-optimizations. Source-audit C# mechanics/public frame
+projection/serialization before changing the 48 MB response format;
+the Python pipe interval cannot separate those C# costs. Any
+compact/delta protocol requires a versioned action+observation
+reconstruction proof and all existing fair/native fidelity gates.
+
+### Next native v0 fused profiler — opt-in, bounded evidence
+
+A separate versioned, disabled-by-default C# native profiler was
+added on the H16-compatible emulator PR #242. It records
+`fused.environment_step_frame`,
+`fused.store_child_handle`,
+`fused.canonical_observation_json`,
+`fused.legal_action_projection`,
+`fused.outer_json_serialize`, and
+`fused.write_flush`, including self time and allocated bytes.
+The existing H16 v0 gameplay reply format and Nature semantics are
+unchanged. It requires a rebuilt **H16-compatible** emulator
+containing `p2_h16_fused_perf_reset/read/stop`; the older pinned
+DLL in the wire report does not contain these diagnostic commands.
+
+The new `--experiment native-fused-profile` runner holds the
+existing fused transport, fixed-shape actor batch 4, frozen
+model/macro and PUCT settings constant; A1/A2 disable native
+instrumentation, B1/B2 enable C# fused-only instrumentation, with
+PUCT/actor/Python-wire profiling all disabled. Both within-seed
+and cross-arm public/teacher/work parity are required; the
+reporter validates the native timer schema and sums per-op
+self time/allocations. Report signed profiler overhead separately.
+
+```fish
+cd ~/projects/sts2-ai
+git pull --ff-only
+git -C $emu_p2 fetch origin
+git -C $emu_p2 switch --detach origin/fix/p2-h16-selection-public-projection-20261104
+set rev (git -C $emu_p2 rev-parse HEAD)
+dotnet build $emu_p2/src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj -c Release -m:1
+
+python tools/run_p2_actor_abba.py \
+    --experiment native-fused-profile \
+    --emulator-root $emu_p2 --emulator-revision $rev \
+    --checkpoint $ckpt --macro-model $macro \
+    --workers 1 --actor-device cuda \
+    --seed-prefix p2-native-fused-a0-20261104 \
+    --seed-count 4 \
+    --simulations 16 --depth 8 --max-searches 2 \
+    --max-decisions 80 \
+    --output-root results/p2-native-fused-a0-smoke-v1 \
+    --execute
+```
+
+Output: `results/p2-native-fused-a0-smoke-v1/p2-native-fused-profile-abba-report.json`,
+field `native_fused_diagnostics`. Treat these native timers as
+instrumented self-time rather than additive whole-cohort savings.
+Check for missing C# schema/version and any PUCT teacher divergence
+before interpreting timings. A favorable subcost bound, not merely
+the existence of large JSON payloads, should drive further P2.2
+optimization.
