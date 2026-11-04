@@ -66,7 +66,7 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
         common.extend(("--macro-model", str(args.macro_model)))
     experiment = getattr(args, "experiment", "batching")
     if experiment not in ("batching", "actor-profile", "prefix-cache",
-                        "transport", "wire-profile"):
+                        "transport", "wire-profile", "native-fused-profile"):
         raise ValueError("Invalid actor A/B/B/A experiment")
     modes = (
         ORDER if experiment == "batching" else
@@ -91,6 +91,11 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
              if experiment == "wire-profile" and name in ("B1", "B2")
              else []
          ),
+         *(
+             ["--native-fused-profile-only"]
+             if experiment == "native-fused-profile"
+             and name in ("B1", "B2") else []
+         ),
          "--p2-prefix-cache-handles",
          str(64 if experiment == "prefix-cache"
              and name in ("B1", "B2") else 0),
@@ -111,7 +116,10 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
         "p2-transport-abba-report.json"
         if experiment == "transport" else
         "p2-wire-profile-abba-report.json"
-        if experiment == "wire-profile" else "actor-abba-report.json"
+        if experiment == "wire-profile" else
+        "p2-native-fused-profile-abba-report.json"
+        if experiment == "native-fused-profile"
+        else "actor-abba-report.json"
     )
     calls.append([
         sys.executable, str(ROOT / "tools/report_p2_actor_abba.py"),
@@ -132,7 +140,8 @@ def main() -> None:
     p.add_argument("--execute", action="store_true",
                    help="Perform all four runs; otherwise preview commands")
     p.add_argument("--experiment", choices=("batching", "actor-profile", "prefix-cache",
-                            "transport", "wire-profile"),
+                            "transport", "wire-profile",
+                            "native-fused-profile"),
                    default="batching",
                    help="Batching, actor profile, exact prefix, or JSONL fused/legacy transport")
     p.add_argument("--ai-root", type=Path, default=ROOT)
@@ -186,6 +195,9 @@ def main() -> None:
             "P2.2 fused in all arms: A1/A2 wire profiling off; B1/B2 "
             "wire-only breakdown on; actor/PUCT profiling off"
             if args.experiment == "wire-profile" else
+            "P2.2 fused in all arms: A1/A2 native profiler off; "
+            "B1/B2 C# fused-only timers on; wire/actor/PUCT profiling off"
+            if args.experiment == "native-fused-profile" else
             "actor/search/wire profiling disabled; strict B/B replay"
         ),
         "seed_count": len(args.seeds.split(",")) if args.seeds else args.seed_count,
