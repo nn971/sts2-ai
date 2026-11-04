@@ -20,7 +20,7 @@ import torch
 
 from sts2_ai.models.packed_actor_collation import prepare_h7_actor_packed
 from sts2_ai.models.shared_game_objects import EncodedDecision
-from sts2_ai.models.shared_macro_transformer_v2 import collate_h21
+from sts2_ai.models.shared_macro_transformer_v2 import collate_h21, collate_h21_packed
 from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet
 
 
@@ -118,6 +118,7 @@ def _serve(
     profile_actor: bool = False,
     verify_batch_parity: bool = False,
     fixed_shape_batch_size: int = 0,
+    h21_collator: str = "reference",
 ) -> None:
     stats: dict[str, Any] = {
         "device": device, "requests": 0, "batches": 0,
@@ -173,6 +174,12 @@ def _serve(
         model = JointActPilotNet.load(Path(checkpoint), device=device).eval()
         if model.representation == "h21" and fixed_shape_batch_size:
             raise ValueError("H21 relation batching is not fixed-shape certified; use batch size 0")
+        if (h21_collator not in ("reference", "packed")
+                or (model.representation != "h21" and h21_collator != "reference")):
+            raise ValueError("Packed H21 collator requires H21 actor representation")
+        h21_collate = collate_h21 if h21_collator == "reference" else collate_h21_packed
+        if model.representation == "h21":
+            stats["p2_h21_collator"] = h21_collator
         stats["model_load_seconds"] = time.perf_counter() - started
         startup.put(("ready", None))
         stopping = False
@@ -235,7 +242,7 @@ def _serve(
                             batch_histogram[count_key] = (
                                 batch_histogram.get(count_key, 0) + 1
                             )
-                        host = (collate_h21(frames) if model.representation == "h21"
+                        host = (h21_collate(frames) if model.representation == "h21"
                                 else prepare_h7_actor_packed(frames, **padding))
                         host_elapsed = time.perf_counter() - started
                         stats["host_collate_seconds"] += host_elapsed
@@ -259,7 +266,7 @@ def _serve(
                         if (verify_batch_parity and len(actual_work) > 1
                                 and parity["samples"] < parity["limit"]):
                             sample = real_frames[0]
-                            single = (collate_h21([sample]) if model.representation == "h21"
+                            single = (h21_collate([sample]) if model.representation == "h21"
                                       else prepare_h7_actor_packed([sample])).to(device)
                             single_logits, _, single_hp = model(
                                 single, horizon_lambda=horizon_lambda,
@@ -355,6 +362,7 @@ class SharedH16Service:
         profile_actor: bool = False,
         verify_batch_parity: bool = False,
         fixed_shape_batch_size: int = 0,
+        h21_collator: str = "reference",
     ) -> None:
         if (workers < 1 or max_batch < 1 or max_delay_ms < 0
                 or not math.isfinite(max_delay_ms)
@@ -364,7 +372,8 @@ class SharedH16Service:
                 or (verify_batch_parity and not profile_actor)
                 or fixed_shape_batch_size < 0
                 or fixed_shape_batch_size > max_batch
-                or (verify_batch_parity and fixed_shape_batch_size > 0)):
+                or (verify_batch_parity and fixed_shape_batch_size > 0)
+                or h21_collator not in ("reference", "packed")):
             raise ValueError("Invalid H16 shared actor configuration")
         ctx = multiprocessing.get_context("spawn")
         self.requests = ctx.Queue(maxsize=workers * 4)
@@ -379,7 +388,7 @@ class SharedH16Service:
             args=(str(checkpoint), digest, device, horizon_lambda,
                   self.requests, self.replies, self.startup, self.statistics,
                   max_batch, max_delay_ms, profile_actor,
-                  verify_batch_parity, fixed_shape_batch_size),
+                  verify_batch_parity, fixed_shape_batch_size, h21_collator),
             daemon=True,
         )
         self.metrics: dict[str, Any] = {}
