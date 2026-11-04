@@ -113,7 +113,7 @@ def report_actor_abba(
 ) -> dict[str, Any]:
     if experiment not in (
         "batching", "actor-profile", "prefix-cache", "transport",
-        "wire-profile", "native-fused-profile",
+        "wire-profile", "native-fused-profile", "h21-collator",
     ):
         raise ValueError("Unsupported A/B/B/A experiment")
     profiles = (a1, b1, b2, a2)
@@ -158,6 +158,34 @@ def report_actor_abba(
         for field in CHANGE_FIELDS:
             if left.get(field) != right.get(field):
                 raise ValueError(f"{name}: inconsistent actor mode: {field}")
+    if experiment == "h21-collator":
+        expected = ("reference", "packed", "packed", "reference")
+        for arm, profile, identity, collator in zip(
+            ORDER, profiles, identities, expected, strict=True,
+        ):
+            if (identity.get("representation") != "h21"
+                    or identity.get("public_schema_id") != "prototype-ai-v1"
+                    or identity.get("codec") != "h21-grounded-reward-shop-event-v4"
+                    or identity.get("actor_h21_collator") != collator):
+                raise ValueError(f"{arm}: wrong H21 public schema/collator")
+            actor = profile.get("shared_actor_metrics")
+            if not isinstance(actor, dict) or actor.get("p2_h21_collator") != collator:
+                raise ValueError(f"{arm}: missing actual actor collator receipt")
+            for field in ("representation", "public_schema_id", "codec"):
+                if identity.get(field) != reference.get(field):
+                    raise ValueError(f"{arm}: H21 provenance drift: {field}")
+            if identity.get("native_fused_profile_only", False) or identity.get(
+                "wire_profile_only", False
+            ):
+                raise ValueError(f"{arm}: instrumentation enabled")
+        if any(i.get("actor_fixed_shape_batch_size") != 0 for i in identities):
+            raise ValueError("H21 variable-shape actor must use fixed size 0")
+        if any(i.get("actor_max_batch") not in (1, 4, 8, 16) for i in identities):
+            raise ValueError("Unexpected H21 actor batch cap")
+        if (any(i.get("actor_max_batch") != reference.get("actor_max_batch")
+                for i in identities)
+                or any(i.get("rollout_transport") != "fused" for i in identities)):
+            raise ValueError("H21 batch/transport changed across arms")
     if cache_caps[0] != cache_caps[3] or cache_caps[1] != cache_caps[2]:
         raise ValueError("Inconsistent P2 prefix cache caps within A/B arms")
     if experiment != "prefix-cache" and any(cache_caps):
@@ -184,10 +212,11 @@ def report_actor_abba(
                 raise ValueError(
                     f"{experiment} experiment changed batching: {field}"
                 )
-        if identities[0].get("actor_fixed_shape_batch_size") != 4:
-            raise ValueError("P2 control targets fixed-shape batch 4")
-        if identities[0].get("actor_max_batch") != 16:
-            raise ValueError("P2 control targets max batch 16")
+        if experiment != "h21-collator":
+            if identities[0].get("actor_fixed_shape_batch_size") != 4:
+                raise ValueError("P2 control targets fixed-shape batch 4")
+            if identities[0].get("actor_max_batch") != 16:
+                raise ValueError("P2 control targets max batch 16")
         if experiment == "prefix-cache" and (
             cache_caps[0] != 0 or cache_caps[1] < 1
         ):
@@ -421,6 +450,9 @@ def report_actor_abba(
             "order-balanced source-versioned H16 native fused C# "
             "environment/serialization self-time diagnostic"
             if experiment == "native-fused-profile" else
+            "order-balanced H22 public-v1 frozen checkpoint "
+            "reference/packed collation, exact public/PUCT teacher replay"
+            if experiment == "h21-collator" else
             "order-balanced uninstrumented P2.5 actor candidate; "
             "full episode/RNG acceptance separate"
         ),
@@ -453,8 +485,10 @@ def report_actor_abba(
             ("A_unprofiled_fixed4" if experiment == "actor-profile"
              else "A_uncached_fixed4" if experiment == "prefix-cache"
              else "A_legacy_fixed4" if experiment == "transport"
+             else "A_H21_reference" if experiment == "h21-collator"
              else "A_batch1"): {
                 "actor_max_batch": identities[0]["actor_max_batch"],
+                "h21_collator": identities[0].get("actor_h21_collator"),
                 "fixed_shape_batch_size": identities[0]["actor_fixed_shape_batch_size"],
                 "actor_profile": identities[0]["actor_profile"],
                 "rollout_transport": identities[0]["rollout_transport"],
@@ -463,8 +497,10 @@ def report_actor_abba(
             ("B_profiled_fixed4" if experiment == "actor-profile"
              else "B_cached_fixed4" if experiment == "prefix-cache"
              else "B_fused_fixed4" if experiment == "transport"
+             else "B_H21_packed" if experiment == "h21-collator"
              else "B_fixed_shape"): {
                 "actor_max_batch": identities[1]["actor_max_batch"],
+                "h21_collator": identities[1].get("actor_h21_collator"),
                 "fixed_shape_batch_size": identities[1]["actor_fixed_shape_batch_size"],
                 "actor_profile": identities[1]["actor_profile"],
                 "rollout_transport": identities[1]["rollout_transport"],
@@ -495,6 +531,12 @@ def report_actor_abba(
             if native_fused_diagnostics is not None else {}
         ),
         "ratio_of_total_baseline_to_candidate_wall": a_wall / b_wall,
+        **(
+            {"public_schema_id": reference["public_schema_id"],
+             "actor_collation_ratio_source": "matched unprofiled full cohort wall",
+             "actor_h21_collators": [i["actor_h21_collator"] for i in identities]}
+            if experiment == "h21-collator" else {}
+        ),
         "wall_reduction_fraction": 1 - b_wall / a_wall,
         **(
             {
@@ -511,6 +553,12 @@ def report_actor_abba(
             "The replay checksum covers public actions/teachers, not hidden "
             "RNG receipts or native source fidelity",
             "Startup, warm-up and teardown contribute to each cohort wall",
+            *(
+                ["H21 model, search and emulator are frozen; "
+                 "only shared-actor CPU collation changes",
+                 "Offline 10.43x collation gain is not a full-cohort prediction"]
+                if experiment == "h21-collator" else []
+            ),
             *(
                 ["Censored executions prevent complete-run-rate inference"]
                 if first["censored_episodes"] else []
