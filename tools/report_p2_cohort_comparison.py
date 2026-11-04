@@ -17,7 +17,8 @@ MATCH_FIELDS = (
     "depth", "max_simulation_steps", "max_searches", "max_decisions",
     "rollout_transport", "native_profile", "paired", "profile_overhead",
     "actor_inference", "actor_device", "actor_max_batch", "actor_max_delay_ms",
-    "actor_profile", "actor_batch_parity_probe", "seeds",
+    "actor_profile", "actor_batch_parity_probe",
+    "actor_fixed_shape_batch_size", "seeds",
 )
 
 
