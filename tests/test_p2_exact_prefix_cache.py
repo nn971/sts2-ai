@@ -77,15 +77,15 @@ def test_repeated_action_path_reuses_only_exact_receipt_and_full_history():
     initial = [{"combat": {"turn": 1}, "hp": 70}]
     after = [*initial, {"combat": {"turn": 1}, "hp": 69}]
     c.begin_simulation()
-    assert c.lookup(parent, "a", initial) is None
-    assert c.record(parent, "a", child, "c1", initial, after)
-    assert c.lookup(child, "end", after) is None
-    assert c.record(child, "end", final, "c2", after, after)
+    assert c.lookup(parent, "a", initial, "root") is None
+    assert c.record(parent, "a", child, "c1", initial, after, "root")
+    assert c.lookup(child, "end", after, "c1") is None
+    assert c.record(child, "end", final, "c2", after, after, "c1")
     c.begin_simulation()
-    entry = c.lookup(parent, "a", initial)
+    entry = c.lookup(parent, "a", initial, "root")
     assert entry is not None and entry.handle == "c1"
     assert list(entry.child_history) == after
-    assert c.lookup(child, "end", after).handle == "c2"
+    assert c.lookup(child, "end", after, "c1").handle == "c2"
     assert c.metrics()["hits"] == 2
     assert c.metrics()["retained_handles"] == 2
     c.close()
@@ -103,12 +103,12 @@ def test_distinct_action_path_and_capacity_limit_never_steal_handle():
     start, child, _ = frames()
     initial = [{"combat": {"turn": 1}}]
     c.begin_simulation()
-    assert c.record(start, "a", child, "c1", initial, initial)
-    assert not c.record(child, "end", child, "c2", initial, initial)
+    assert c.record(start, "a", child, "c1", initial, initial, "root")
+    assert not c.record(child, "end", child, "c2", initial, initial, "c1")
     assert c.metrics()["skipped_capacity"] == 1
     c.begin_simulation()
-    assert c.lookup(start, "b", initial) is None
-    assert c.lookup(start, "a", initial).handle == "c1"
+    assert c.lookup(start, "b", initial, "root") is None
+    assert c.lookup(start, "a", initial, "root").handle == "c1"
     c.close()
     assert backend.released == ["c1"]
     assert "c2" in backend.hidden  # caller still owns unretained child
@@ -122,7 +122,7 @@ def test_private_provider_guard_bypasses_entire_cache(provider):
     parent, child, _ = frames()
     initial = [{"combat": {}}]
     c.begin_simulation()
-    assert not c.record(parent, "a", child, "c1", initial, initial)
+    assert not c.record(parent, "a", child, "c1", initial, initial, "root")
     assert c.metrics()["retained_handles"] == 0
     assert c.metrics()["skipped_provider"] == 1
     c.close()
@@ -135,7 +135,7 @@ def test_new_private_provider_state_cannot_be_cached():
     c = cache(backend)
     parent, child, _ = frames()
     c.begin_simulation()
-    assert not c.record(parent, "a", child, "c1", [], [])
+    assert not c.record(parent, "a", child, "c1", [], [], "root")
     assert c.metrics()["retained_handles"] == 0
     c.close()
 
@@ -145,14 +145,14 @@ def test_private_rng_receipt_mutation_fails_closed_even_if_public_same():
     c = cache(backend)
     parent, child, _ = frames()
     c.begin_simulation()
-    assert c.record(parent, "a", child, "c1", [], [])
+    assert c.record(parent, "a", child, "c1", [], [], "root")
     c.begin_simulation()
     backend.hidden["c1"] = ("state-1", "rng-mutated")
     assert backend.exact_continuation_receipt("c1")["exactHash"] == hashlib.sha256(
         b"state-1"
     ).hexdigest()
     with pytest.raises(ValueError, match="changed stochastic continuation"):
-        c.lookup(parent, "a", [])
+        c.lookup(parent, "a", [], "root")
     c.close()
     assert backend.released == ["c1"]
 
@@ -162,12 +162,12 @@ def test_public_history_and_frame_mismatch_fail_closed():
     c = cache(backend)
     parent, child, _ = frames()
     c.begin_simulation()
-    assert c.record(parent, "a", child, "c1", [], [])
+    assert c.record(parent, "a", child, "c1", [], [], "root")
     c.begin_simulation()
     with pytest.raises(ValueError, match="conflicts"):
-        c.lookup(parent, "a", [{"different": True}])
+        c.lookup(parent, "a", [{"different": True}], "root")
     with pytest.raises(ValueError, match="conflicts"):
-        c.lookup(child, "a", [])
+        c.lookup(child, "a", [], "c1")
     c.close()
 
 
@@ -180,3 +180,21 @@ def test_rejects_unsupported_sampler_capability_and_bad_handle_limit():
     for limit in (0, -1, True, 1.5):
         with pytest.raises(ValueError, match="positive handle cap"):
             cache(backend, max_handles=limit)
+
+
+def test_current_parent_rng_drift_fails_even_with_unchanged_cached_child():
+    backend = StubBackend()
+    c = cache(backend)
+    parent, child, _ = frames()
+    c.begin_simulation()
+    assert c.record(parent, "a", child, "c1", [], [], "root")
+    c.begin_simulation()
+    backend.hidden["root"] = ("state-root", "rng-diverged")
+    with pytest.raises(ValueError, match="search root changed private"):
+        c.begin_simulation()
+    # An already-started simulation also checks the actual live parent
+    # rather than trusting a public key and a retained child receipt.
+    with pytest.raises(ValueError, match="current parent changed private"):
+        c.lookup(parent, "a", [], "root")
+    c.close()
+    assert backend.released == ["c1"]
