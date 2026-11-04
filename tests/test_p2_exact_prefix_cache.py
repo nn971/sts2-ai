@@ -19,7 +19,6 @@ class StubBackend:
             "root": ("state-root", "rng-0"),
             "c1": ("state-1", "rng-1"),
             "c2": ("state-2", "rng-2"),
-            "c3": ("state-3", "rng-3"),
         }
         self.present_flags = {}
         self.released = []
