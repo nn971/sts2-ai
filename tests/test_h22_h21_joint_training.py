@@ -14,8 +14,11 @@ from sts2_ai.models.shared_transformer import H7Config, H20Batch, SharedObjectTr
 from sts2_ai.training.h16_joint_act_pilot import (
     H22_SCHEMA,
     JointActPilotNet,
+    PilotDecision,
+    PilotEpisode,
     PilotPolicy,
     encode_joint_decision,
+    train_joint_cohort,
 )
 from sts2_ai.training.h17_replay import fit_replay
 from sts2_ai.training.h21_macro_offer_codec import H21_CODEC, H21_OBJECT_SCHEMA
@@ -177,3 +180,27 @@ def test_h22_entrypoint_defaults_stay_schema_isolated():
     assert last("--actor-max-batch") == "4"
     assert last("--map-profile") == "generated"
     assert last("--rollout-transport") == "fused"
+
+
+def test_h22_joint_optimizer_updates_h21_macro_graph():
+    torch.manual_seed(5)
+    state = _state()
+    frame = Observation("prototype-fair-v0", json.dumps(state), "macro-hash")
+    actions = _actions()
+    chosen = PilotDecision(frame, actions, 0, (0.0, 0.0))
+    terminal = {**state, "hp": 0, "floor": 6}
+    episode = PilotEpisode(
+        "h22-synthetic-macro", (chosen,), (state, terminal),
+        "defeat", searches=0, search_transitions=0,
+    )
+    model = JointActPilotNet(H21GroundedMacroTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64)))
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
+    report = train_joint_cohort(
+        model, optimizer, [episode], horizon_lambda=0.42,
+        epochs=1, minibatch=1, hp_reference=100,
+    )
+    assert report["macro_decisions"] == 1
+    assert report["combat_decisions"] == 0
+    assert report["optimizer_steps"] == 1
+    assert report["loss"] == pytest.approx(float(report["loss"]))
