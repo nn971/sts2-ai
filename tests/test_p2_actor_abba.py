@@ -703,3 +703,26 @@ def test_h22_collator_abba_runner_changes_only_collator(tmp_path):
         assert "--execute" in command
         assert command[command.index("--rollout-transport") + 1] == "fused"
     assert calls[-1][calls[-1].index("--experiment") + 1] == "h21-collator"
+
+
+def test_h22_report_cli_accepts_h21_collator_mode(tmp_path):
+    """Exercise the CLI parser, not just the Python report function."""
+    import subprocess
+    import sys
+
+    script = Path(__file__).resolve().parents[1] / "tools/report_p2_actor_abba.py"
+    result = subprocess.run(
+        [
+            sys.executable, str(script),
+            "--a1", str(tmp_path / "a1.json"),
+            "--b1", str(tmp_path / "b1.json"),
+            "--b2", str(tmp_path / "b2.json"),
+            "--a2", str(tmp_path / "a2.json"),
+            "--experiment", "h21-collator",
+            "--output", str(tmp_path / "report.json"),
+        ],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 1
+    assert "Missing successful P2 A/B/B/A profiles" in result.stderr
+    assert "invalid choice" not in result.stderr
