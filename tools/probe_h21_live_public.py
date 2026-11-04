@@ -19,6 +19,14 @@ from pathlib import Path
 from typing import Any
 
 from sts2_ai.emulator.protocol import LegalAction
+from sts2_ai.training.h19_resource_codec import (
+    EMULATOR_PUBLIC_SCHEMA_V1,
+    EMULATOR_PUBLIC_SCHEMA_V2,
+)
+from sts2_ai.training.h21_action_alias_audit import audit_h21_action_aliases
+from sts2_ai.training.h21_field_coverage import audit_public_observation
+from sts2_ai.training.h21_macro_offer_codec import encode_h21_macro_decision
+from sts2_ai.training.h21_stable_identity import stable_id
 
 if __package__:
     from .p2_h21_public_corpus import (
@@ -32,14 +40,6 @@ else:
         make_public_record,
         write_public_corpus,
     )
-from sts2_ai.training.h19_resource_codec import (
-    EMULATOR_PUBLIC_SCHEMA_V1,
-    EMULATOR_PUBLIC_SCHEMA_V2,
-)
-from sts2_ai.training.h21_action_alias_audit import audit_h21_action_aliases
-from sts2_ai.training.h21_field_coverage import audit_public_observation
-from sts2_ai.training.h21_macro_offer_codec import encode_h21_macro_decision
-from sts2_ai.training.h21_stable_identity import stable_id
 
 FAIR_POLICY_ID = "prototype-fair-v0"
 _ENEMY_EFFECT_POWER_IDS = frozenset({
