@@ -87,6 +87,9 @@ def test_repeated_action_path_reuses_only_exact_receipt_and_full_history():
     assert list(entry.child_history) == after
     assert c.lookup(child, "end", after, "c1").handle == "c2"
     assert c.metrics()["hits"] == 2
+    assert c.metrics()["emulator_step_calls_avoided"] == 2
+    assert c.metrics()["receipt_calls"] == 10
+    assert c.metrics()["receipt_seconds"] >= 0
     assert c.metrics()["retained_handles"] == 2
     c.close()
     c.close()
