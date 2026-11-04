@@ -143,11 +143,18 @@ def compare_cohorts(single: Mapping[str, Any], parallel: Mapping[str, Any]) -> d
         "single_worker_critical_path": single.get("sequential_worker_wall_attribution"),
         "warnings": [
             "Speedup includes actor/process startup, warm-up and teardown",
-            "A/B/B/A arms contribute equally; this compares worker count, not an optimization",
+            "Repeated replay arms contribute equally; this compares worker count, "
+            "not an optimization",
             "Worker-summed RPC, actor and search durations overlap",
-            "Fewer than 15 independent seeds cannot saturate the 15-worker pool",
+            *(
+                ["Fewer than 15 independent seeds cannot saturate the 15-worker pool"]
+                if len(left) < 15 else []
+            ),
             "Search transitions/s, real transitions/s and completed episodes/s are distinct",
-            "Zero completed episodes yields no completed-run throughput estimate",
+            *(
+                ["Zero completed episodes yields no completed-run throughput estimate"]
+                if c1["completed_episodes"] == 0 else []
+            ),
         ],
     }
 
