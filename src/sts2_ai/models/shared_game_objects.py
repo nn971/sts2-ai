@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -70,6 +70,51 @@ def _numbers(record: dict[str, Any]) -> tuple[tuple[float, ...], tuple[int, ...]
     return tuple(values), tuple(masks)
 
 
+# H21-only fast path. The inherited H7/H16/H19/H20 public numeric encoder
+# remains byte-for-byte unchanged. An owner-linked leaf supplies exactly one
+# numeric feature, so avoid scanning all 16 fields for every attribute.
+_ZERO_NUMERIC_VALUES = (0.0,) * len(NUMERIC_FIELDS)
+_ZERO_NUMERIC_MASKS = (0,) * len(NUMERIC_FIELDS)
+_SINGLE_NUMERIC_INDEX = {name: idx for idx, name in enumerate(NUMERIC_FIELDS)}
+_SINGLE_NUMERIC_MASKS = tuple(
+    tuple(int(i == j) for j in range(len(NUMERIC_FIELDS)))
+    for i in range(len(NUMERIC_FIELDS))
+)
+
+
+def _single_numeric(
+    field: str, raw: Any,
+) -> tuple[tuple[float, ...], tuple[int, ...]]:
+    """Return exactly _numbers({field: raw}) without a full field scan."""
+    index = _SINGLE_NUMERIC_INDEX[field]
+    if isinstance(raw, (float, int)) and not isinstance(raw, bool) and math.isfinite(raw):
+        value = math.tanh(float(raw) / NUMERIC_SCALES[index])
+        return (
+            _ZERO_NUMERIC_VALUES[:index] + (value,)
+            + _ZERO_NUMERIC_VALUES[index + 1:],
+            _SINGLE_NUMERIC_MASKS[index],
+        )
+    return _ZERO_NUMERIC_VALUES, _ZERO_NUMERIC_MASKS
+
+
+def _numbers_h21(record: dict[str, Any]) -> tuple[tuple[float, ...], tuple[int, ...]]:
+    """H21-only sparse numeric projection, exactly equivalent to _numbers.
+
+    Most public objects carry zero or one numeric field. Iterating the
+    record's entries avoids 16 dictionary lookups and list appends per
+    object. Multi-feature records use the existing implementation.
+    """
+    matched: str | None = None
+    for field in record:
+        if field in _SINGLE_NUMERIC_INDEX:
+            if matched is not None:
+                return _numbers(record)
+            matched = field
+    if matched is None:
+        return _ZERO_NUMERIC_VALUES, _ZERO_NUMERIC_MASKS
+    return _single_numeric(matched, record[matched])
+
+
 @dataclass(frozen=True)
 class ObjectToken:
     kind: int
@@ -115,6 +160,8 @@ def encode_public_decision(
     owned_attributes: bool = False,
     object_limit: int = MAX_OBJECTS,
     schema_id: str = SHARED_OBJECT_SCHEMA,
+    omit_affliction_source_reference: bool = False,
+    identity_hasher: Callable[[str], int] | None = None,
 ) -> EncodedDecision:
     """Encode only published game fields and currently legal action payloads.
 
@@ -137,10 +184,15 @@ def encode_public_decision(
             *, owner: int = -1, ref: tuple[str, object] | None = None) -> int:
         if len(objects) >= object_limit:
             raise ValueError("Public object cap exceeded: do not drop referenced targets")
-        numeric, observed = _numbers(record)
+        numeric, observed = (
+            _numbers_h21(record) if identity_hasher is not None
+            else _numbers(record)
+        )
         index = len(objects)
         objects.append(ObjectToken(
-            KINDS.index(kind), _bucket(identity, IDENTITY_BUCKETS),
+            KINDS.index(kind),
+            identity_hasher(identity) if identity_hasher is not None
+            else _bucket(identity, IDENTITY_BUCKETS),
             ZONES.index(zone), numeric, observed, owner,
         ))
         if owned_attributes and kind in ("state", "player", "card", "relic", "potion"):
@@ -355,13 +407,17 @@ def encode_public_decision(
             members = tuple(sorted(selected))
             # Stable across instance IDs/runs; the selected card embeddings
             # encode content while cardinality distinguishes empty vs 1 vs 2.
-            semantic = _bucket(f"select_cards:count={len(members)}", IDENTITY_BUCKETS)
+            label = f"select_cards:count={len(members)}"
+            semantic = (identity_hasher(label) if identity_hasher is not None
+                        else _bucket(label, IDENTITY_BUCKETS))
         action_tokens.append(ActionToken(
             _bucket(kind, ACTION_BUCKETS), semantic, source, target, members,
         ))
     if owned_attributes:
         _append_owned_public_attributes(
             objects, attribute_sources, object_limit=object_limit,
+            omit_affliction_source_reference=omit_affliction_source_reference,
+            identity_hasher=identity_hasher,
         )
     return EncodedDecision(schema_id, phase, tuple(objects), tuple(action_tokens))
 
@@ -421,23 +477,43 @@ def _append_owned_public_attributes(
     objects: list[ObjectToken],
     sources: list[tuple[int, str, str, dict[str, Any]]],
     *, object_limit: int,
+    omit_affliction_source_reference: bool = False,
+    identity_hasher: Callable[[str], int] | None = None,
 ) -> None:
     for owner, kind, zone, record in sources:
         for field in _V2_RESOURCE_FIELDS[kind]:
             # Missing stays distinct from an explicit zero/false/null.
             if field not in record:
                 continue
+            field_value = record[field]
+            if (omit_affliction_source_reference and field == "affliction"
+                    and isinstance(field_value, dict)):
+                # An enemy instance ID is a within-frame reference only.
+                # Keep it for card-class grouping and explicit graph joins,
+                # while excluding it from all learned numeric/identity fields.
+                field_value = {
+                    key: value for key, value in field_value.items()
+                    if key != "source_enemy_instance_id"
+                }
             for identity, value in _public_attribute_leaves(
-                record[field], field,
+                field_value, field,
             ):
                 if len(objects) >= object_limit:
                     raise ValueError(
                         "Public owner-linked attribute cap exceeded: "
                         "no resource or attribute may be silently dropped")
-                numeric, observed = _numbers({"stacks": value})
+                numeric, observed = (
+                    _single_numeric("stacks", value)
+                    if identity_hasher is not None
+                    else _numbers({"stacks": value})
+                )
                 objects.append(ObjectToken(
                     kind=OWNER_ATTRIBUTE_KIND_V2,
-                    identity=_bucket("attribute:" + identity, IDENTITY_BUCKETS),
+                    identity=(
+                        identity_hasher("attribute:" + identity)
+                        if identity_hasher is not None
+                        else _bucket("attribute:" + identity, IDENTITY_BUCKETS)
+                    ),
                     zone=ZONES.index(zone),
                     numeric=numeric,
                     observed=observed,

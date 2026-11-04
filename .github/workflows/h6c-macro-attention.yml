@@ -2,6 +2,8 @@ name: h6c-macro-attention
 
 on:
   push:
+    branches:
+      - main
     paths:
       - 'src/sts2_ai/models/macro_objects.py'
       - 'src/sts2_ai/models/neural.py'
@@ -13,7 +15,21 @@ on:
       - 'tests/test_h6c_macro_attention.py'
       - '.github/workflows/h6c-macro-attention.yml'
   pull_request:
+    paths:
+      - 'src/sts2_ai/models/macro_objects.py'
+      - 'src/sts2_ai/models/neural.py'
+      - 'src/sts2_ai/models/phase_split.py'
+      - 'src/sts2_ai/training/macro_attention.py'
+      - 'src/sts2_ai/training/phase_split_selfplay.py'
+      - 'src/sts2_ai/training/phase_split_ppo_batch.py'
+      - 'tools/train_phase_split.py'
+      - 'tests/test_h6c_macro_attention.py'
+      - '.github/workflows/h6c-macro-attention.yml'
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   macro-attention:

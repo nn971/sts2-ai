@@ -1,0 +1,32 @@
+name: workflow-scope-lint
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/**'
+      - 'tools/check_ci_workflow_scope.py'
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - 'tools/check_ci_workflow_scope.py'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install YAML parser
+        run: python -m pip install PyYAML==6.0.2
+      - name: Validate workflow trigger scopes and YAML
+        run: python tools/check_ci_workflow_scope.py

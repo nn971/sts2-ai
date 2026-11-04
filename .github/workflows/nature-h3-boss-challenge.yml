@@ -2,12 +2,22 @@ name: nature-h3-boss-challenge-smoke
 
 on:
   push:
+    branches:
+      - main
     paths:
       - 'src/sts2_ai/nature/combat_scenarios.py'
       - 'tests/test_nature_h3_boss_profiles.py'
       - '.github/workflows/nature-h3-boss-challenge.yml'
   pull_request:
+    paths:
+      - 'src/sts2_ai/nature/combat_scenarios.py'
+      - 'tests/test_nature_h3_boss_profiles.py'
+      - '.github/workflows/nature-h3-boss-challenge.yml'
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   boss-smoke:

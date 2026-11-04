@@ -11,6 +11,10 @@ on:
       - '.github/workflows/h20-relational-map.yml'
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   h20-map-graph-contract:
     runs-on: ubuntu-latest
@@ -20,6 +24,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - name: Install CPU Torch and research tests
         run: |
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu

@@ -2,6 +2,8 @@ name: h15-reference-search-training
 
 on:
   push:
+    branches:
+      - main
     paths:
       - 'tools/train_h15_reference_rounds.py'
       - 'tools/audit_h15_reference_search.py'
@@ -26,7 +28,34 @@ on:
       - 'src/sts2_ai/search/h15_public_combat_adapter.py'
       - '.github/workflows/h15-reference-search-training.yml'
   pull_request:
+    paths:
+      - 'tools/train_h15_reference_rounds.py'
+      - 'tools/audit_h15_reference_search.py'
+      - 'tools/probe_h15_reference_search_budget.py'
+      - 'tools/probe_h15_final_turn.py'
+      - 'tools/run_h15_h8_feedback_cycle.py'
+      - 'tools/train_h15_search_distill.py'
+      - 'src/sts2_ai/training/h15_native_search_collector.py'
+      - 'src/sts2_ai/training/h15_search_supervision.py'
+      - 'src/sts2_ai/emulator/h15_h8_reference.py'
+      - 'tests/test_h15_feedback_cycle.py'
+      - 'tests/test_h15_native_search_collector.py'
+      - 'tests/test_h15_reference_search_audit.py'
+      - 'tests/test_h15_reference_search_budget.py'
+      - 'tests/test_h15_final_turn_probe.py'
+      - 'tests/test_h15_late_value_training.py'
+      - 'tests/test_h15_root_conditioned_search.py'
+      - 'tests/test_h15_m17_reward_search.py'
+      - 'tests/test_h15_m18_every_decision.py'
+      - 'src/sts2_ai/nature/h4_reward.py'
+      - 'src/sts2_ai/search/combat_puct.py'
+      - 'src/sts2_ai/search/h15_public_combat_adapter.py'
+      - '.github/workflows/h15-reference-search-training.yml'
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   reference-contract:

@@ -1,0 +1,90 @@
+name: h21-live-extended-coverage
+
+on:
+  pull_request:
+    paths:
+      - 'src/sts2_ai/training/h21_macro_offer_codec.py'
+      - 'src/sts2_ai/training/h21_stable_identity.py'
+      - 'src/sts2_ai/models/shared_macro_transformer_v2.py'
+      - 'src/sts2_ai/training/h21_action_alias_audit.py'
+      - 'src/sts2_ai/training/h21_field_coverage.py'
+      - 'tools/probe_h21_live_public.py'
+      - '.github/workflows/h21-live-extended-coverage.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  h21-diverse-overgrowth-a0:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: fix/h18-public-observation-v1-20261104
+          path: emulator-v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Install H21 public codec
+        run: python -m pip install -e .
+      - name: Build matching emulator public v1
+        run: |
+          dotnet build emulator-v1/src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj -c Release
+      - name: Explore multiple generated maps and measure encoding speed
+        run: |
+          set +e
+          python tools/probe_h21_live_public.py \
+            --emulator-dll emulator-v1/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --seed h21-route-shop-a --seed h21-route-elite-b \
+            --seed h21-route-unknown-c --seed h21-route-rest-d \
+            --seed h21-route-event-e --seed h21-route-shop-f \
+            --seed h21-route-elite-g --seed h21-route-event-h \
+            --max-decisions 350 --diverse-route --strict \
+            > h21-live-extended-coverage.json
+          result=$?
+          cat h21-live-extended-coverage.json
+          exit "$result"
+      - name: Execute public shop, reward and event continuation branches
+        if: success()
+        run: |
+          set +e
+          python tools/probe_h21_live_public.py \
+            --emulator-dll emulator-v1/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --seed h21-continue-shop-a --seed h21-continue-elite-b \
+            --seed h21-continue-event-c --seed h21-continue-rest-d \
+            --seed h21-continue-shop-e --seed h21-continue-event-f \
+            --max-decisions 250 --diverse-route --continuation-coverage --strict \
+            --require-executed-any buy_card,buy_potion,buy_relic \
+            > h21-live-continuation-coverage.json
+          result=$?
+          cat h21-live-continuation-coverage.json
+          exit "$result"
+      - name: Profile the real H21 public encoder separately from throughput
+        if: success()
+        run: |
+          python tools/probe_h21_live_public.py \
+            --emulator-dll emulator-v1/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
+            --seed h21-route-shop-a --seed h21-route-elite-b \
+            --seed h21-route-unknown-c \
+            --max-decisions 170 --diverse-route --strict \
+            --profile-codec-out h21-codec-profile.txt \
+            > h21-codec-profile-run.json
+          head -n 72 h21-codec-profile.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: h21-live-extended-coverage
+          path: |
+            h21-live-extended-coverage.json
+            h21-live-continuation-coverage.json
+            h21-codec-profile-run.json
+            h21-codec-profile.txt
+          if-no-files-found: warn

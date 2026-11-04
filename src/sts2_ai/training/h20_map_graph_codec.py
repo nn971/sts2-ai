@@ -7,7 +7,7 @@ edges. Every choose_map_node action points at its true map object.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from typing import Any
 
@@ -22,6 +22,7 @@ from sts2_ai.models.shared_game_objects import (
     RelationToken,
     _bucket,
     _numbers,
+    _single_numeric,
 )
 from sts2_ai.training.h19_resource_codec import encode_h19_resource_decision
 
@@ -38,9 +39,14 @@ MAP_ZONE = ZONES.index("map")
 def encode_h20_map_decision(
     state: dict[str, Any], actions: Sequence[Any], *,
     public_schema_id: str,
+    allow_affliction_source_relations: bool = False,
+    identity_hasher: Callable[[str], int] | None = None,
 ) -> EncodedDecision:
     base = encode_h19_resource_decision(
-        state, actions, public_schema_id=public_schema_id)
+        state, actions, public_schema_id=public_schema_id,
+        allow_affliction_source_relations=allow_affliction_source_relations,
+        identity_hasher=identity_hasher,
+    )
     nodes = state.get("map")
     if not isinstance(nodes, list):
         raise ValueError("H20 requires a visible map node list")
@@ -65,17 +71,29 @@ def encode_h20_map_decision(
         node_by_id[node_id] = idx
         # Override H7's string-only _entry_id: native room types may be enums.
         # Raw NodeIds never appear in either the learned identity or numerics.
-        numeric, observed = _numbers({"floor": node["floor"]})
+        numeric, observed = (
+            _single_numeric("floor", node["floor"])
+            if identity_hasher is not None
+            else _numbers({"floor": node["floor"]})
+        )
         objects[idx] = ObjectToken(
             NODE_KIND,
-            _bucket("room_type:" + str(node["room_type"]), IDENTITY_BUCKETS),
+            (identity_hasher("room_type:" + str(node["room_type"]))
+             if identity_hasher is not None
+             else _bucket("room_type:" + str(node["room_type"]), IDENTITY_BUCKETS)),
             MAP_ZONE, numeric, observed,
         )
         for field, value in (("act", node["act"]),):
-            num, mask = _numbers({"stacks": value})
+            num, mask = (
+                _single_numeric("stacks", value)
+                if identity_hasher is not None
+                else _numbers({"stacks": value})
+            )
             objects.append(ObjectToken(
                 OWNER_ATTRIBUTE_KIND_V2,
-                _bucket("map_node." + field, IDENTITY_BUCKETS),
+                (identity_hasher("map_node." + field)
+                 if identity_hasher is not None
+                 else _bucket("map_node." + field, IDENTITY_BUCKETS)),
                 MAP_ZONE, num, mask, owner=idx,
             ))
     relations = []
@@ -114,7 +132,9 @@ def encode_h20_map_decision(
         # Payload hash is no longer the sole action feature.
         action_tokens.append(replace(
             old,
-            semantic=_bucket("choose_map_node", IDENTITY_BUCKETS),
+            semantic=(identity_hasher("choose_map_node")
+                      if identity_hasher is not None
+                      else _bucket("choose_map_node", IDENTITY_BUCKETS)),
             source=current_idx, target=target,
         ))
         relations.append(RelationToken(REACHABLE_EDGE, 0, target))

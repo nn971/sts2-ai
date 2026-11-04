@@ -1,0 +1,54 @@
+name: h21-grounded-macro
+
+on:
+  pull_request:
+    paths:
+      - 'src/sts2_ai/training/h21_macro_offer_codec.py'
+      - 'src/sts2_ai/training/h21_stable_identity.py'
+      - 'src/sts2_ai/training/h21_field_coverage.py'
+      - 'src/sts2_ai/models/shared_macro_transformer_v2.py'
+      - 'tests/test_h21_macro_offers.py'
+      - 'tests/test_h21_enemy_powers_v2.py'
+      - 'tests/test_h21_pending_continuations.py'
+      - 'tests/test_h21_stable_identity.py'
+      - 'tests/test_h21_single_numeric.py'
+      - 'tests/test_h21_field_coverage.py'
+      - 'tests/test_h21_source_contract.py'
+      - 'tests/test_h21_action_alias_audit.py'
+      - 'tests/test_h21_live_probe.py'
+      - 'tools/probe_h21_live_public.py'
+      - 'tests/test_h21_affliction_sources.py'
+      - 'src/sts2_ai/training/h19_resource_codec.py'
+      - 'src/sts2_ai/training/h20_map_graph_codec.py'
+      - 'src/sts2_ai/training/h21_action_alias_audit.py'
+      - 'tools/check_h21_public_source_schema.py'
+      - 'src/sts2_ai/models/shared_game_objects.py'
+      - 'src/sts2_ai/models/shared_transformer.py'
+      - '.github/workflows/h21-grounded-macro.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  h21-macro-grounding:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install CPU Torch and test dependencies
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e '.[dev]'
+      - name: Lint grounded macro implementation and tests
+        run: |
+          python -m ruff check src/sts2_ai/training/h21_macro_offer_codec.py tests/test_h21_pending_continuations.py src/sts2_ai/training/h21_stable_identity.py tests/test_h21_stable_identity.py tests/test_h21_single_numeric.py src/sts2_ai/training/h21_field_coverage.py src/sts2_ai/models/shared_macro_transformer_v2.py tests/test_h21_macro_offers.py tests/test_h21_enemy_powers_v2.py tests/test_h21_field_coverage.py tests/test_h21_action_alias_audit.py tests/test_h21_live_probe.py tools/probe_h21_live_public.py tests/test_h21_affliction_sources.py tests/test_h21_source_contract.py tools/check_h21_public_source_schema.py src/sts2_ai/training/h21_action_alias_audit.py
+      - name: Grounding regression and inherited version compatibility
+        run: |
+          python -m pytest -q tests/test_h21_macro_offers.py tests/test_h21_enemy_powers_v2.py tests/test_h21_pending_continuations.py tests/test_h21_stable_identity.py tests/test_h21_single_numeric.py tests/test_h21_field_coverage.py tests/test_h21_action_alias_audit.py tests/test_h21_live_probe.py tests/test_h21_affliction_sources.py tests/test_h21_source_contract.py tests/test_h20_map_graph.py tests/test_h19_owner_resources.py tests/test_h19_owner_model.py tests/test_h16_deck_multiplicity.py tests/test_shared_transformer_h7.py
