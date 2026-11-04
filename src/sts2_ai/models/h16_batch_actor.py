@@ -19,6 +19,7 @@ from typing import Any
 import torch
 
 from sts2_ai.models.packed_actor_collation import prepare_h7_actor_packed
+from sts2_ai.models.shared_macro_transformer_v2 import collate_h21
 from sts2_ai.models.shared_game_objects import EncodedDecision
 from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet
 
@@ -170,6 +171,8 @@ def _serve(
         if hashlib.sha256(Path(checkpoint).read_bytes()).hexdigest() != checkpoint_sha:
             raise ValueError("H16 shared actor checkpoint SHA256 mismatch")
         model = JointActPilotNet.load(Path(checkpoint), device=device).eval()
+        if model.representation == "h21" and fixed_shape_batch_size:
+            raise ValueError("H21 relation batching is not fixed-shape certified; use batch size 0")
         stats["model_load_seconds"] = time.perf_counter() - started
         startup.put(("ready", None))
         stopping = False
@@ -232,7 +235,8 @@ def _serve(
                             batch_histogram[count_key] = (
                                 batch_histogram.get(count_key, 0) + 1
                             )
-                        host = prepare_h7_actor_packed(frames, **padding)
+                        host = (collate_h21(frames) if model.representation == "h21"
+                                else prepare_h7_actor_packed(frames, **padding))
                         host_elapsed = time.perf_counter() - started
                         stats["host_collate_seconds"] += host_elapsed
                         observe("host_collate_ms", host_elapsed)
@@ -255,9 +259,8 @@ def _serve(
                         if (verify_batch_parity and len(actual_work) > 1
                                 and parity["samples"] < parity["limit"]):
                             sample = real_frames[0]
-                            single = prepare_h7_actor_packed([sample]).to(
-                                device,
-                            )
+                            single = (collate_h21([sample]) if model.representation == "h21"
+                                      else prepare_h7_actor_packed([sample])).to(device)
                             single_logits, _, single_hp = model(
                                 single, horizon_lambda=horizon_lambda,
                             )
