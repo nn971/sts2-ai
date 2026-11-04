@@ -84,8 +84,18 @@ class H7PackedHost:
         return contiguous_actor_metadata(result) if contiguous_metadata else result
 
 
-def prepare_h7_actor_packed(decisions: list[EncodedDecision]) -> H7PackedHost:
-    """Build packed CPU tensors, independently of a GPU execution stream."""
+def prepare_h7_actor_packed(
+    decisions: list[EncodedDecision], *,
+    pad_objects: int | None = None,
+    pad_actions: int | None = None,
+    pad_members: int | None = None,
+) -> H7PackedHost:
+    """Build packed CPU tensors, optionally padding to fixed bucket dimensions.
+
+    A stable-shape GPU actor passes bucket-aligned dimensions here. The
+    effective tokens, masks and action order remain exactly unchanged.
+    Ordinary production inference still uses actual dimensions by default.
+    """
     if not decisions or any(d.schema != SHARED_OBJECT_SCHEMA for d in decisions):
         raise ValueError("Need nonempty same-version H7 decisions")
     if any(not d.objects or not d.actions for d in decisions):
@@ -95,7 +105,20 @@ def prepare_h7_actor_packed(decisions: list[EncodedDecision]) -> H7PackedHost:
 
     nobjects = max(len(d.objects) for d in decisions)
     nactions = max(len(d.actions) for d in decisions)
-    max_members = max(1, max((len(action.members) for d in decisions for action in d.actions), default=0))
+    max_members = max(
+        1, max((len(action.members) for d in decisions for action in d.actions),
+               default=0),
+    )
+    for label, requested, actual in (
+        ("objects", pad_objects, nobjects),
+        ("actions", pad_actions, nactions),
+        ("members", pad_members, max_members),
+    ):
+        if requested is not None and requested < actual:
+            raise ValueError(f"Fixed actor bucket underflows {label}")
+    nobjects = pad_objects if pad_objects is not None else nobjects
+    nactions = pad_actions if pad_actions is not None else nactions
+    max_members = pad_members if pad_members is not None else max_members
     nfeatures = len(NUMERIC_FIELDS)
     zero_features = (0.0,) * nfeatures
     zero_observed = (0,) * nfeatures
