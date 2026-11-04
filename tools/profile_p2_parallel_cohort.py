@@ -94,12 +94,18 @@ def _worker_seed(seed: str) -> dict[str, Any]:
     runs = []
     for arm in arms:
         instrumented = arm.startswith("profile_")
-        report, signature = run_episode(
-            backend, policy, **opts,
-            profile_search=instrumented,
-            profile_wire=instrumented,
-            native_profile=cfg["native_profile"] and instrumented,
-        )
+        try:
+            report, signature = run_episode(
+                backend, policy, **opts,
+                profile_search=instrumented,
+                profile_wire=instrumented,
+                native_profile=cfg["native_profile"] and instrumented,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"P2 cohort episode failed: seed={seed}, arm={arm}, "
+                f"simulations={cfg['simulations']}, depth={cfg['depth']}"
+            ) from exc
         report["arm"] = arm
         if signature0 is None:
             signature0 = signature
