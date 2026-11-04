@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
+from p2_replay_diagnostics import first_trace_difference
 from profile_p2_joint_throughput import (
     ROOT,
     critical_path_shares,
@@ -103,7 +104,38 @@ def _worker_seed(seed: str) -> dict[str, Any]:
         if signature0 is None:
             signature0 = signature
         elif signature != signature0:
-            raise RuntimeError(f"P2 public action/teacher mismatch: seed={seed}, arm={arm}")
+            # Fail closed, but preserve the location/type of the first drift.
+            # Mixed GPU batch shapes may change numerical logits enough to
+            # alter PUCT teachers or sampled actions. Do not silently round
+            # teacher distributions or accept a changed action trajectory.
+            difference = first_trace_difference(signature0, signature)
+            assert difference is not None
+            diagnostic = {
+                "schema": "sts2-p2-public-replay-mismatch-v1",
+                "seed": seed, "arm": arm,
+                "actor_max_batch": cfg["actor_max_batch"],
+                "actor_device": cfg["actor_device"],
+                "first_difference": difference,
+                "expected_trace_sha256": hashlib.sha256(
+                    json.dumps(signature0, sort_keys=True).encode()
+                ).hexdigest(),
+                "actual_trace_sha256": hashlib.sha256(
+                    json.dumps(signature, sort_keys=True).encode()
+                ).hexdigest(),
+            }
+            path = Path(cfg["replay_diagnostics_dir"]) / (
+                hashlib.sha256(seed.encode()).hexdigest()[:12]
+                + "-" + arm + ".json"
+            )
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(diagnostic, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            raise RuntimeError(
+                f"P2 public action/teacher mismatch: seed={seed}, arm={arm}, "
+                f"first={difference}, diagnostics={path}"
+            )
         runs.append(report)
     assert signature0 is not None
     return {
@@ -199,6 +231,11 @@ def main() -> None:
         "native_profile": a.native_profile,
         "paired": a.paired,
         "profile_overhead": a.profile_overhead,
+        "actor_max_batch": a.actor_max_batch,
+        "actor_device": a.actor_device,
+        "replay_diagnostics_dir": str(
+            a.output.resolve().parent / "replay-mismatches"
+        ),
     }
     # Measure process startup, actor checkpoint load, all episodes, and teardown
     # in the cohort denominator. Worker sums below are intentionally overlapping.
