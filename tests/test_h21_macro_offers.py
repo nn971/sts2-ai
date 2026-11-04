@@ -280,7 +280,7 @@ def test_opaque_instance_renaming_does_not_change_owned_card_action():
 
 
 def test_hash_collisions_raise_diagnostics_instead_of_aliasing(monkeypatch):
-    import sts2_ai.training.h21_macro_offer_codec as codec
+    import sts2_ai.training.h21_stable_identity as identities
 
     frame = state()
     frame["shop"] = {
@@ -291,16 +291,26 @@ def test_hash_collisions_raise_diagnostics_instead_of_aliasing(monkeypatch):
              "price": 45, "sold": False},
         ],
     }
-    monkeypatch.setattr(codec, "_bucket", lambda _name, _mod: 7)
-    with pytest.raises(ValueError, match="public identity hash collision"):
+    original = identities.stable_id
+
+    def collide(name):
+        return 7 if name in {"silent.strike", "silent.defend"} else original(name)
+
+    monkeypatch.setattr(identities, "stable_id", collide)
+    with pytest.raises(ValueError, match="stable full identity collision"):
         encode(frame, [act("buy_card", OfferId=1)])
 
 
 def test_action_kind_collision_fails_explicitly(monkeypatch):
-    import sts2_ai.training.h21_macro_offer_codec as codec
+    import sts2_ai.training.h21_stable_identity as identities
 
-    monkeypatch.setattr(codec, "_bucket", lambda _name, _mod: 7)
-    with pytest.raises(ValueError, match="action-kind hash collision"):
+    original = identities.stable_id
+
+    def collide(name):
+        return 7 if name.startswith("action_kind:") else original(name)
+
+    monkeypatch.setattr(identities, "stable_id", collide)
+    with pytest.raises(ValueError, match="stable full identity collision"):
         encode(state(), [act("start_run"), act("leave_reward")])
 
 
