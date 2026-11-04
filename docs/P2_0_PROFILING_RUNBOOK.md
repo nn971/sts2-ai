@@ -1251,3 +1251,49 @@ apply to any new protocol behavior. The default fused transport
 is unchanged; this trial only measures it against the legacy
 control. Gate P2.2 on measured relevant end-to-end improvement,
 rather than extrapolating from raw RPC counts.
+
+
+### 2026-11-04 P2.2 four-seed legacy/fused transport diagnostic — passed
+
+User-supplied `p2-transport-abba-report.json` compared pinned H16 AI
+`63e3c7ce06c11479a44f89024c12b6636ccf0302` with H16/public-v0
+emulator `0937456588d563b48e9810290b7382f64d30d5a7`. Four
+independent A0 generated-map seeds, one worker, fixed-shape actor batch
+4, 16 PUCT simulations, depth 8, max two search roots, 80 decisions,
+two within-seed replays, actor/PUCT/wire extra profiling off. A1/A2
+are legacy `step + observe + legal_actions`; B1/B2 use the already
+existing fused `batch_rollout_step_frame`. **Public-action and exact
+PUCT-teacher replay, search work, and outcomes matched across all
+arms.** Each arm had 2,112 logical search transitions, 640 real
+transitions, eight censored executions and zero completed.
+
+| Arm | Transport | Cohort wall (s) | JSONL calls | Python bridge wall (s) |
+|---|---|---:|---:|---:|
+| A1 | Legacy split | 26.75546 | 10,088 | 6.28535 |
+| B1 | Fused | 20.68190 | 3,952 | 1.97766 |
+| B2 | Fused | 20.80203 | 3,952 | 1.93585 |
+| A2 | Legacy split | 24.80414 | 10,088 | 6.09963 |
+
+The order-balanced combined ratio `(A1+A2)/(B1+B2)` is
+**1.24288×**, a **19.5418% reduction in wall**; both pair
+comparisons favor the fused interface (`1.29367×`, `1.19239×`).
+The request count falls by **6,136 JSONL calls per cohort**,
+primarily because 2,752 separate `step` calls and nearly all
+`observe`/`legal_actions` RPCs become 2,752 fused step-frame
+calls. On this single-worker experiment, across two A/B pairs, Python
+bridge operation time falls from **12.3850s to 3.9135s** (a
+**68.40% reduction**) out of a total cohort-wall reduction
+of **10.0757s**. Bridge timing contains nested mechanics,
+serialization, and pipe wait. Its reduction plausibly accounts for
+most, but not all, of measured elapsed savings.
+
+**Interpretation:** Fused transport is already the default and this
+experiment confirms its value; it is **not** a new P2.2 speedup
+claim. Four seeds / one worker / censored outcomes do not establish
+15-worker full-episode effect. The next P2.2 candidate is a
+profiling-controlled *fused-only* wire decomposition, measuring
+JSON encode/decode, request/response bytes, and pipe interval
+separately before attempting schema changes or additional server
+commands. If pipe wait dominates, the client alone cannot separate
+C# mechanics, DTO/JSON serialization and scheduling; a compatible
+C# profiler/receipt is needed for that split.
