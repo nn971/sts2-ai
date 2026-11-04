@@ -142,6 +142,12 @@ def main() -> None:
         args.baseline_one, args.baseline_fifteen,
         args.candidate_one, args.candidate_fifteen,
     )
+    missing = [str(path) for path in paths if not path.is_file()]
+    if missing:
+        raise SystemExit(
+            "P2 actor comparison requires four successful cohort profiles. "
+            "Missing: " + ", ".join(missing)
+        )
     inputs = [json.loads(path.read_text(encoding="utf-8")) for path in paths]
     report = compare_actor_candidate(*inputs, experiment=args.experiment)
     args.output.parent.mkdir(parents=True, exist_ok=True)
