@@ -31,7 +31,9 @@ CHANGE_FIELDS = {"actor_max_batch", "actor_fixed_shape_batch_size"}
 RUN_ARMS = ("control_a", "control_a2")
 
 
-def _verified_profile(profile: Mapping[str, Any], arm: str) -> dict[str, Any]:
+def _verified_profile(
+    profile: Mapping[str, Any], arm: str, *, actor_profile: bool = False,
+) -> dict[str, Any]:
     if profile.get("schema") != SCHEMA:
         raise ValueError(f"{arm}: unexpected P2 cohort schema")
     identity = profile.get("identity")
@@ -39,7 +41,7 @@ def _verified_profile(profile: Mapping[str, Any], arm: str) -> dict[str, Any]:
         raise ValueError(f"{arm}: missing identity")
     if any(identity.get(flag) is not flag_value for flag, flag_value in (
         ("paired", True),
-        ("actor_profile", False),
+        ("actor_profile", actor_profile),
         ("profile_overhead", False),
         ("actor_batch_parity_probe", False),
         ("native_profile", False),
@@ -96,11 +98,18 @@ def _verified_profile(profile: Mapping[str, Any], arm: str) -> dict[str, Any]:
 
 def report_actor_abba(
     a1: Mapping[str, Any], b1: Mapping[str, Any],
-    b2: Mapping[str, Any], a2: Mapping[str, Any],
+    b2: Mapping[str, Any], a2: Mapping[str, Any], *,
+    experiment: str = "batching",
 ) -> dict[str, Any]:
+    if experiment not in ("batching", "actor-profile"):
+        raise ValueError("Unsupported A/B/B/A experiment")
     profiles = (a1, b1, b2, a2)
     verified = [
-        _verified_profile(profile, label)
+        _verified_profile(
+            profile, label,
+            actor_profile=(experiment == "actor-profile"
+                           and label in ("B1", "B2")),
+        )
         for label, profile in zip(ORDER, profiles, strict=True)
     ]
     identities = [p["identity"] for p in verified]
@@ -108,7 +117,9 @@ def report_actor_abba(
     for label, identity in zip(ORDER[1:], identities[1:], strict=True):
         for field in (*MATCH_FIELDS, "ai_sha", "emulator_cli", "worker_count",
                       "torch", "platform", "cpu_count"):
-            if field in CHANGE_FIELDS:
+            if field in CHANGE_FIELDS or (
+                field == "actor_profile" and experiment == "actor-profile"
+            ):
                 continue
             if field not in reference or field not in identity:
                 raise ValueError(f"{label}: missing provenance {field}")
@@ -121,21 +132,32 @@ def report_actor_abba(
         for field in CHANGE_FIELDS:
             if left.get(field) != right.get(field):
                 raise ValueError(f"{name}: inconsistent actor mode: {field}")
-    if all(
-        identities[0].get(field) == identities[1].get(field)
-        for field in CHANGE_FIELDS
-    ):
-        raise ValueError("A/B actor configurations are identical")
-    if identities[0].get("actor_fixed_shape_batch_size") != 0:
-        raise ValueError("Baseline A must use ordinary single-row inference")
-    if identities[0].get("actor_max_batch") != 1:
-        raise ValueError("Baseline A must use --actor-max-batch 1")
-    if not (
-        identities[1].get("actor_fixed_shape_batch_size", 0) > 0
-        and identities[1].get("actor_max_batch", 0)
-        >= identities[1]["actor_fixed_shape_batch_size"]
-    ):
-        raise ValueError("Candidate B must use opt-in fixed-shape batching")
+    if experiment == "batching":
+        if all(
+            identities[0].get(field) == identities[1].get(field)
+            for field in CHANGE_FIELDS
+        ):
+            raise ValueError("A/B actor configurations are identical")
+        if identities[0].get("actor_fixed_shape_batch_size") != 0:
+            raise ValueError("Baseline A must use ordinary single-row inference")
+        if identities[0].get("actor_max_batch") != 1:
+            raise ValueError("Baseline A must use --actor-max-batch 1")
+        if not (
+            identities[1].get("actor_fixed_shape_batch_size", 0) > 0
+            and identities[1].get("actor_max_batch", 0)
+            >= identities[1]["actor_fixed_shape_batch_size"]
+        ):
+            raise ValueError("Candidate B must use opt-in fixed-shape batching")
+    else:
+        for field in CHANGE_FIELDS:
+            if identities[0].get(field) != identities[1].get(field):
+                raise ValueError(
+                    f"Actor profiling experiment changed batching: {field}"
+                )
+        if identities[0].get("actor_fixed_shape_batch_size") != 4:
+            raise ValueError("Actor profile overhead targets fixed-shape batch 4")
+        if identities[0].get("actor_max_batch") != 16:
+            raise ValueError("Actor profile overhead targets max batch 16")
     first_rows = verified[0]["rows"]
     for label, compared in zip(ORDER[1:], verified[1:], strict=True):
         rows = compared["rows"]
@@ -166,8 +188,13 @@ def report_actor_abba(
     a_wall, b_wall = wall[0] + wall[3], wall[1] + wall[2]
     return {
         "schema": REPORT_SCHEMA,
-        "evidence_level": "order-balanced uninstrumented P2.5 actor candidate; "
-                          "full episode/RNG acceptance separate",
+        "experiment": experiment,
+        "evidence_level": (
+            "order-balanced actor-profile overhead diagnostic"
+            if experiment == "actor-profile" else
+            "order-balanced uninstrumented P2.5 actor candidate; "
+            "full episode/RNG acceptance separate"
+        ),
         "source": {
             "ai_sha": reference["ai_sha"],
             "emulator_sha": reference["emulator_sha"],
@@ -210,6 +237,12 @@ def report_actor_abba(
         ],
         "ratio_of_total_baseline_to_candidate_wall": a_wall / b_wall,
         "wall_reduction_fraction": 1 - b_wall / a_wall,
+        **(
+            {
+                "actor_profiled_to_unprofiled_wall_ratio": b_wall / a_wall,
+                "actor_profile_overhead_fraction": b_wall / a_wall - 1,
+            } if experiment == "actor-profile" else {}
+        ),
         "order_pair_speedup_A1_over_B1": wall[0] / wall[1],
         "order_pair_speedup_A2_over_B2": wall[3] / wall[2],
         "candidate_faster_in_both_pairs": wall[1] < wall[0] and wall[2] < wall[3],
@@ -223,6 +256,12 @@ def report_actor_abba(
                 ["Censored executions prevent complete-run-rate inference"]
                 if first["censored_episodes"] else []
             ),
+            *(
+                ["B1/B2 enable actor service profiling with extra GPU "
+                 "synchronizations; A1/A2 disable it",
+                 "Signed overhead may be negative due to scheduling noise"]
+                if experiment == "actor-profile" else []
+            ),
             "Independent-seed confirmation and P2.1/P2.2 gates remain separate",
         ],
     }
@@ -232,15 +271,18 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     for name in ("a1", "b1", "b2", "a2"):
         p.add_argument(f"--{name}", type=Path, required=True)
+    p.add_argument("--experiment", choices=("batching", "actor-profile"),
+                   default="batching")
     p.add_argument("--output", type=Path, required=True)
     args = p.parse_args()
     paths = (args.a1, args.b1, args.b2, args.a2)
     missing = [str(path) for path in paths if not path.is_file()]
     if missing:
         raise SystemExit("Missing successful P2 A/B/B/A profiles: " + ", ".join(missing))
-    report = report_actor_abba(*[
-        json.loads(path.read_text(encoding="utf-8")) for path in paths
-    ])
+    report = report_actor_abba(
+        *[json.loads(path.read_text(encoding="utf-8")) for path in paths],
+        experiment=args.experiment,
+    )
     if args.output.exists():
         raise SystemExit(f"Refusing to overwrite A/B/B/A evidence: {args.output}")
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -248,8 +290,14 @@ def main() -> None:
     print(json.dumps({
         "output": str(args.output),
         "parity": report["parity"],
-        "speedup": report["ratio_of_total_baseline_to_candidate_wall"],
-        "wall_reduction_fraction": report["wall_reduction_fraction"],
+        "experiment": args.experiment,
+        **(
+            {"actor_profile_overhead_fraction": report["actor_profile_overhead_fraction"]}
+            if args.experiment == "actor-profile" else {
+                "speedup": report["ratio_of_total_baseline_to_candidate_wall"],
+                "wall_reduction_fraction": report["wall_reduction_fraction"],
+            }
+        ),
     }, indent=2))
 
 
