@@ -32,6 +32,7 @@ class CachedPrefix:
     child_frame: CombatFrame
     parent_history: tuple[dict[str, Any], ...]
     child_history: tuple[dict[str, Any], ...]
+    parent_receipt: dict[str, str | bool | None]
     receipt: dict[str, str | bool | None]
 
 
@@ -71,15 +72,19 @@ class ExactRootPrefixCache:
     def begin_simulation(self) -> None:
         if self._closed:
             raise RuntimeError("P2 cache was closed")
+        receipt = self.backend.exact_continuation_receipt(self.root)
         if self._root_receipt is None:
-            receipt = self.backend.exact_continuation_receipt(self.root)
             self._root_receipt = receipt
             self._enabled = self._allowed(receipt)
+        elif receipt != self._root_receipt:
+            raise ValueError(
+                "P2 search root changed private stochastic continuation"
+            )
         self._path = ()
 
     def lookup(
         self, parent: CombatFrame, action_id: str,
-        history: list[dict[str, Any]],
+        history: list[dict[str, Any]], parent_handle: StateHandle,
     ) -> CachedPrefix | None:
         if self._closed:
             raise RuntimeError("P2 cache was closed")
@@ -90,6 +95,13 @@ class ExactRootPrefixCache:
             return None
         if entry.parent_frame != parent or entry.parent_history != tuple(history):
             raise ValueError("P2 retained prefix conflicts with public parent/history")
+        if (
+            self.backend.exact_continuation_receipt(parent_handle)
+            != entry.parent_receipt
+        ):
+            raise ValueError(
+                "P2 current parent changed private stochastic continuation"
+            )
         if self.backend.exact_continuation_receipt(entry.handle) != entry.receipt:
             raise ValueError("P2 retained prefix changed stochastic continuation")
         self._path = key
@@ -101,6 +113,7 @@ class ExactRootPrefixCache:
         child: CombatFrame, handle: StateHandle,
         parent_history: list[dict[str, Any]],
         child_history: list[dict[str, Any]],
+        parent_handle: StateHandle,
     ) -> bool:
         """Return True iff handle ownership was transferred into the cache."""
         if self._closed:
@@ -115,14 +128,19 @@ class ExactRootPrefixCache:
         if len(self._entries) >= self.max_handles:
             self.skipped_capacity += 1
             return False
+        parent_receipt = self.backend.exact_continuation_receipt(parent_handle)
         receipt = self.backend.exact_continuation_receipt(handle)
-        if not self._allowed(receipt):
+        if not self._allowed(parent_receipt) or not self._allowed(receipt):
             self.skipped_provider += 1
             return False
+        if not self._path and parent_receipt != self._root_receipt:
+            raise ValueError(
+                "P2 recorded child from changed private search root"
+            )
         self._entries[key] = CachedPrefix(
             handle, parent, child,
             tuple(deepcopy(parent_history)), tuple(deepcopy(child_history)),
-            receipt,
+            parent_receipt, receipt,
         )
         return True
 
