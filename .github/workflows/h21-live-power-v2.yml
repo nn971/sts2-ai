@@ -41,6 +41,8 @@ jobs:
           python tools/probe_h21_live_public.py \
             --emulator-dll emulator-p1/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
             --canonical-enemy-powers --strict \
+            --prefer-enemy-debuff-cards \
+            --require-observed-enemy-power proto.power.weak \
             --seed p1-power-v2-coverage-a --seed p1-power-v2-coverage-b \
             --max-decisions 100 > h21-live-power-v2.json
           cat h21-live-power-v2.json
@@ -49,6 +51,7 @@ jobs:
           python tools/check_h21_v2_observation_parity.py \
             --emulator-dll emulator-p1/src/Sts2Emulator.Cli/bin/Release/net9.0/Sts2Emulator.Cli.dll \
             --seed p1-power-v2-coverage-a --seed p1-power-v2-coverage-b \
+            --snapshot-every 13 \
             --max-decisions 100 > h21-v2-observation-parity.json
           cat h21-v2-observation-parity.json
       - uses: actions/upload-artifact@v4

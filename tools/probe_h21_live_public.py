@@ -29,6 +29,52 @@ from sts2_ai.training.h21_macro_offer_codec import encode_h21_macro_decision
 from sts2_ai.training.h21_stable_identity import stable_id
 
 FAIR_POLICY_ID = "prototype-fair-v0"
+_ENEMY_EFFECT_POWER_IDS = frozenset({
+    "proto.power.poison", "proto.power.weak", "proto.power.vulnerable",
+})
+_DEBUFF_COVERAGE_CARDS = frozenset({
+    "proto.silent.neutralize", "proto.silent.deadly_poison",
+    "proto.silent.bouncing_flask", "proto.silent.crippling_cloud",
+})
+
+
+def observed_canonical_enemy_effects(observation: dict[str, Any]) -> set[str]:
+    """Identify effects positively present in an actual public v2 frame."""
+    combat = observation.get("combat")
+    if not isinstance(combat, dict):
+        return set()
+    return {
+        power["power_id"]
+        for enemy in combat.get("enemies", [])
+        for power in enemy.get("powers", [])
+        if isinstance(power, dict)
+        and power.get("power_id") in _ENEMY_EFFECT_POWER_IDS
+        and type(power.get("stacks")) is int and power["stacks"] > 0
+    }
+
+
+def preferred_debuff_card_action(
+    actions: list[dict[str, Any]], observation: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Favor legal debuff cards using only the visible hand and action payloads."""
+    combat = observation.get("combat")
+    if not isinstance(combat, dict):
+        return None
+    candidates = {
+        card.get("instance_id")
+        for card in combat.get("hand", [])
+        if isinstance(card, dict)
+        and card.get("card_id") in _DEBUFF_COVERAGE_CARDS
+    }
+    matching = []
+    for action in actions:
+        if action.get("kind") != "play_card":
+            continue
+        payload = json.loads(action["payloadJson"])
+        if payload.get("CardInstanceId", payload.get("card_instance_id")) in candidates:
+            matching.append(action)
+    return min(matching, key=lambda action: (
+        action["kind"], action["payloadJson"])) if matching else None
 
 
 class PublicJsonl:
@@ -92,8 +138,13 @@ def choose(
     actions: list[dict[str, Any]], *, public_state: dict[str, Any] | None = None,
     seed: str = "", step: int = 0, route_variant: int = 0,
     continuation_coverage: bool = False,
+    prefer_enemy_debuff_cards: bool = False,
 ) -> dict[str, Any]:
     """Deterministic coverage policy using only the published observation."""
+    if prefer_enemy_debuff_cards and public_state is not None:
+        preferred = preferred_debuff_card_action(actions, public_state)
+        if preferred is not None:
+            return preferred
     priorities = {
         kind: n for n, kind in enumerate((
             "start_run", "take_reward_gold", "take_reward_relic",
@@ -198,6 +249,15 @@ def main() -> int:
               "comma-separated group"),
     )
     parser.add_argument(
+        "--prefer-enemy-debuff-cards", action="store_true",
+        help="Prefer legal visible Neutralize/Poison cards in v2 acceptance",
+    )
+    parser.add_argument(
+        "--require-observed-enemy-power", action="append", default=[],
+        choices=sorted(_ENEMY_EFFECT_POWER_IDS),
+        help="Require a positive instance of this canonical enemy power in a live v2 frame",
+    )
+    parser.add_argument(
         "--continuation-coverage", action="store_true",
         help="Prefer purchasing/choosing exceptional player continuations",
     )
@@ -217,11 +277,14 @@ def main() -> int:
         parser.error("emulator DLL not found")
     if args.continuation_coverage and not args.diverse_route:
         parser.error("--continuation-coverage requires --diverse-route")
+    if args.require_observed_enemy_power and not args.canonical_enemy_powers:
+        parser.error("--require-observed-enemy-power requires --canonical-enemy-powers")
 
     start = time.perf_counter()
     phases: Counter[str] = Counter()
     action_kinds: Counter[str] = Counter()
     executed_action_kinds: Counter[str] = Counter()
+    observed_enemy_effect_frames: Counter[str] = Counter()
     gaps: Counter[str] = Counter()
     partials: Counter[str] = Counter()
     errors: list[dict[str, Any]] = []
@@ -267,6 +330,9 @@ def main() -> int:
                 if view.get("schemaId") != required_schema:
                     raise ValueError("Unexpected public frame schema at decision")
                 seen_schema_ids[required_schema] += 1
+                if required_schema == EMULATOR_PUBLIC_SCHEMA_V2:
+                    observed_enemy_effect_frames.update(
+                        observed_canonical_enemy_effects(observation))
                 current_floor = observation.get("floor")
                 if type(current_floor) is int:
                     max_floor = max(max_floor, current_floor)
@@ -316,6 +382,12 @@ def main() -> int:
                         menu, public_state=observation, seed=seed,
                         step=step, route_variant=seed_index,
                         continuation_coverage=args.continuation_coverage,
+                        prefer_enemy_debuff_cards=args.prefer_enemy_debuff_cards,
+                    )
+                elif args.prefer_enemy_debuff_cards:
+                    selected = choose(
+                        menu, public_state=observation, seed=seed, step=step,
+                        prefer_enemy_debuff_cards=True,
                     )
                 else:
                     selected = choose(menu)
@@ -364,6 +436,8 @@ def main() -> int:
                    if args.canonical_enemy_powers else EMULATOR_PUBLIC_SCHEMA_V1),
         "seen_schema_ids": dict(sorted(seen_schema_ids.items())),
         "canonical_enemy_powers": args.canonical_enemy_powers,
+        "observed_enemy_power_frames": dict(sorted(observed_enemy_effect_frames.items())),
+        "required_observed_enemy_powers": args.require_observed_enemy_power,
         "decisions": decisions, "seeds": seeds,
         "elapsed_seconds": round(time.perf_counter() - start, 3),
         "diverse_route": args.diverse_route,
@@ -400,6 +474,13 @@ def main() -> int:
     if missing_required:
         raise AssertionError(
             "Unexercised required public continuations: " + repr(missing_required))
+    missing_effects = [
+        power for power in args.require_observed_enemy_power
+        if observed_enemy_effect_frames[power] == 0
+    ]
+    if missing_effects:
+        raise AssertionError(
+            "No positive live canonical enemy effect instances: " + repr(missing_effects))
     if (args.canonical_enemy_powers
             and seen_schema_ids[EMULATOR_PUBLIC_SCHEMA_V2] == 0):
         raise AssertionError("Canonical probe did not visit any v2 combat frames")

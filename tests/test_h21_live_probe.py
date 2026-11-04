@@ -95,3 +95,37 @@ def test_continuation_acceptance_requires_actual_purchase_not_just_legal_menu():
     assert missing_executed_action_groups(
         Counter({"buy_card": 1}), [purchase, "event_choice,continue_event"],
     ) == ["event_choice,continue_event"]
+
+
+def test_debuff_coverage_prefers_only_visible_legal_debuff_cards():
+    public = {
+        "combat": {"hand": [
+            {"instance_id": 12, "card_id": "proto.silent.strike"},
+            {"instance_id": 13, "card_id": "proto.silent.neutralize"},
+        ]},
+    }
+    actions = [
+        {"actionId": "strike", "kind": "play_card",
+         "payloadJson": json.dumps({"CardInstanceId": 12, "TargetEnemyId": 1})},
+        {"actionId": "neutralize", "kind": "play_card",
+         "payloadJson": json.dumps({"CardInstanceId": 13, "TargetEnemyId": 1})},
+    ]
+    assert choose(actions, public_state=public,
+                  prefer_enemy_debuff_cards=True)["actionId"] == "neutralize"
+    # No invented action: the preference only reorders genuinely legal moves.
+    assert choose(actions[:1], public_state=public,
+                  prefer_enemy_debuff_cards=True)["actionId"] == "strike"
+
+
+def test_observed_enemy_effects_require_positive_public_power_stacks():
+    from tools.probe_h21_live_public import observed_canonical_enemy_effects
+
+    frame = {"combat": {"enemies": [
+        {"powers": [
+            {"power_id": "proto.power.poison", "stacks": 3},
+            {"power_id": "proto.power.weak", "stacks": 0},
+            {"power_id": "proto.power.strength", "stacks": 12},
+        ]},
+    ]}}
+    assert observed_canonical_enemy_effects(frame) == {"proto.power.poison"}
+    assert observed_canonical_enemy_effects({"combat": None}) == set()

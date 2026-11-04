@@ -90,12 +90,20 @@ def main() -> int:
     parser.add_argument("--emulator-dll", type=Path, required=True)
     parser.add_argument("--seed", action="append", dest="seeds")
     parser.add_argument("--max-decisions", type=int, default=100)
+    parser.add_argument(
+        "--snapshot-every", type=int, default=0,
+        help="Periodically save/load and replay the same next public action",
+    )
     args = parser.parse_args()
     if args.max_decisions < 1:
         parser.error("--max-decisions must be positive")
+    if args.snapshot_every < 0:
+        parser.error("--snapshot-every must be nonnegative")
     seeds = args.seeds or ["p1-v2-parity-a"]
     checked = 0
     canonical_frames = 0
+    snapshot_roundtrips = 0
+    snapshot_replayed_actions = 0
     highest_floor = 0
     errors: list[dict[str, Any]] = []
     public = PublicJsonl(args.emulator_dll)
@@ -151,11 +159,58 @@ def main() -> int:
                 action = choose(
                     old_actions, public_state=legacy_observation,
                     seed=seed, step=step, route_variant=seed_index)
+                replay_handles: list[tuple[str, str]] = []
+                if args.snapshot_every and step % args.snapshot_every == 0:
+                    for handle, frame, actions in (
+                        (first, old, old_actions),
+                        (second, new, new_actions),
+                    ):
+                        saved = public.call("save_snapshot", state_handle=handle)
+                        loaded = public.call(
+                            "load_snapshot", snapshot=saved["snapshot"])
+                        restored_handle = loaded["stateHandle"]
+                        roundtrip = public.call(
+                            "save_snapshot", state_handle=restored_handle)
+                        if saved["snapshot"] != roundtrip["snapshot"]:
+                            raise AssertionError(
+                                "RunSnapshot save/load/save bytes differ")
+                        replay_frame = public.call(
+                            "observe", state_handle=restored_handle,
+                            policy_id=FAIR_POLICY_ID)
+                        replay_actions = public.call(
+                            "legal_actions", state_handle=restored_handle)["actions"]
+                        if (replay_frame["schemaId"] != frame["schemaId"]
+                                or replay_frame["payloadJson"] != frame["payloadJson"]
+                                or replay_actions != actions):
+                            raise AssertionError(
+                                "RunSnapshot roundtrip changed the public frame/actions")
+                        replay_handles.append((handle, restored_handle))
+                        snapshot_roundtrips += 1
                 first_step = public.call(
                     "step", state_handle=first, action_id=action["actionId"])
                 second_step = public.call(
                     "step", state_handle=second, action_id=action["actionId"])
                 first, second = first_step["child"], second_step["child"]
+                for original, restored in replay_handles:
+                    replay_step = public.call(
+                        "step", state_handle=restored,
+                        action_id=action["actionId"])
+                    expected = (first_step if original == replay_handles[0][0]
+                                else second_step)
+                    if replay_step["terminal"] != expected["terminal"]:
+                        raise AssertionError(
+                            "RunSnapshot replay changed terminal decision")
+                    replay_frame = public.call(
+                        "observe", state_handle=replay_step["child"],
+                        policy_id=FAIR_POLICY_ID)
+                    expected_frame = public.call(
+                        "observe", state_handle=expected["child"],
+                        policy_id=FAIR_POLICY_ID)
+                    if (replay_frame["schemaId"] != expected_frame["schemaId"]
+                            or replay_frame["payloadJson"] != expected_frame["payloadJson"]):
+                        raise AssertionError(
+                            "RunSnapshot replay changed next public observation")
+                    snapshot_replayed_actions += 1
                 if first_step["terminal"] != second_step["terminal"]:
                     errors.append({"seed": seed, "step": step,
                                    "error": "Different terminal decision"})
@@ -168,9 +223,13 @@ def main() -> int:
     print(json.dumps({
         "seeds": seeds, "checked_decisions": checked,
         "canonical_v2_frames": canonical_frames,
+        "snapshot_roundtrips": snapshot_roundtrips,
+        "snapshot_replayed_actions": snapshot_replayed_actions,
         "highest_floor": highest_floor, "errors": errors[:15],
         "total_errors": len(errors),
     }, indent=2, sort_keys=True), flush=True)
+    if (args.snapshot_every and snapshot_replayed_actions == 0):
+        raise AssertionError("No RunSnapshot replay actions verified")
     if errors or checked < len(seeds) or canonical_frames == 0:
         raise AssertionError(
             "Canonical/legacy public observation parity failed: "
