@@ -32,7 +32,8 @@ RUN_ARMS = ("control_a", "control_a2")
 
 
 def _verified_profile(
-    profile: Mapping[str, Any], arm: str, *, actor_profile: bool = False,
+    profile: Mapping[str, Any], arm: str, *,
+    actor_profile: bool = False, wire_profile: bool = False,
 ) -> dict[str, Any]:
     if profile.get("schema") != SCHEMA:
         raise ValueError(f"{arm}: unexpected P2 cohort schema")
@@ -51,6 +52,8 @@ def _verified_profile(
             f"{arm}: need --paired --no-episode-profile with all other "
             "measurement instrumentation off"
         )
+    if identity.get("wire_profile_only", False) is not wire_profile:
+        raise ValueError(f"{arm}: unexpected wire-only profiling mode")
     if identity.get("actor_inference") != "shared":
         raise ValueError(f"{arm}: require shared actor inference")
     workers = identity.get("worker_count")
@@ -64,11 +67,12 @@ def _verified_profile(
         if tuple(run["arm"] for run in runs) != RUN_ARMS:
             raise ValueError(f"{arm}/{seed}: not exact unprofiled B/B arms")
         for run in runs:
-            if any(run.get(key) is not False for key in (
-                "search_instrumentation", "wire_instrumentation",
-                "native_instrumentation",
-            )):
-                raise ValueError(f"{arm}/{seed}: run was instrumented")
+            if (
+                run.get("search_instrumentation") is not False
+                or run.get("native_instrumentation") is not False
+                or run.get("wire_instrumentation") is not wire_profile
+            ):
+                raise ValueError(f"{arm}/{seed}: run was instrumented unexpectedly")
         for field in WORK_FIELDS:
             if runs[0].get(field) != runs[1].get(field):
                 raise ValueError(f"{arm}/{seed}: paired work drift: {field}")
@@ -101,7 +105,9 @@ def report_actor_abba(
     b2: Mapping[str, Any], a2: Mapping[str, Any], *,
     experiment: str = "batching",
 ) -> dict[str, Any]:
-    if experiment not in ("batching", "actor-profile", "prefix-cache", "transport"):
+    if experiment not in (
+        "batching", "actor-profile", "prefix-cache", "transport", "wire-profile",
+    ):
         raise ValueError("Unsupported A/B/B/A experiment")
     profiles = (a1, b1, b2, a2)
     verified = [
@@ -109,6 +115,8 @@ def report_actor_abba(
             profile, label,
             actor_profile=(experiment == "actor-profile"
                            and label in ("B1", "B2")),
+            wire_profile=(experiment == "wire-profile"
+                          and label in ("B1", "B2")),
         )
         for label, profile in zip(ORDER, profiles, strict=True)
     ]
@@ -281,6 +289,63 @@ def report_actor_abba(
                 ),
                 "operations": dict(sorted(by_operation.items())),
             })
+    wire_diagnostics: list[dict[str, Any]] | None = None
+    if experiment == "wire-profile":
+        wire_diagnostics = []
+        for arm, verified_profile in zip(ORDER, verified, strict=True):
+            per_opcode: dict[str, dict[str, int | float]] = {}
+            for row in verified_profile["rows"].values():
+                for run in row["runs"]:
+                    profile_data = run.get("wire")
+                    if not isinstance(profile_data, Mapping):
+                        raise ValueError(f"{arm}: missing wire operation breakdown")
+                    if arm in ("A1", "A2") and profile_data:
+                        raise ValueError(f"{arm}: unprofiled control has wire samples")
+                    for op, stats in profile_data.items():
+                        if not isinstance(stats, Mapping):
+                            raise ValueError(f"{arm}: invalid wire operation: {op}")
+                        for key in ("calls", "request_bytes", "response_bytes"):
+                            v = stats.get(key)
+                            if type(v) is not int or v < 0:
+                                raise ValueError(f"{arm}: invalid wire count {op}/{key}")
+                        for key in (
+                            "encode_seconds", "pipe_seconds", "decode_seconds",
+                        ):
+                            v = stats.get(key)
+                            if (
+                                isinstance(v, bool)
+                                or not isinstance(v, (int, float))
+                                or not math.isfinite(v) or v < 0
+                            ):
+                                raise ValueError(f"{arm}: invalid wire timer {op}/{key}")
+                        bucket = per_opcode.setdefault(op, {
+                            "calls": 0, "request_bytes": 0, "response_bytes": 0,
+                            "encode_seconds": 0.0,
+                            "pipe_seconds": 0.0, "decode_seconds": 0.0,
+                        })
+                        for key in bucket:
+                            bucket[key] += stats[key]
+            if arm in ("B1", "B2") and not per_opcode:
+                raise ValueError(f"{arm}: missing wire-only timing evidence")
+            wire_diagnostics.append({
+                "arm": arm,
+                "total_request_bytes": sum(
+                    op["request_bytes"] for op in per_opcode.values()
+                ),
+                "total_response_bytes": sum(
+                    op["response_bytes"] for op in per_opcode.values()
+                ),
+                "worker_summed_encode_seconds": sum(
+                    op["encode_seconds"] for op in per_opcode.values()
+                ),
+                "worker_summed_pipe_seconds": sum(
+                    op["pipe_seconds"] for op in per_opcode.values()
+                ),
+                "worker_summed_decode_seconds": sum(
+                    op["decode_seconds"] for op in per_opcode.values()
+                ),
+                "operations": dict(sorted(per_opcode.items())),
+            })
     return {
         "schema": REPORT_SCHEMA,
         "experiment": experiment,
@@ -293,6 +358,9 @@ def report_actor_abba(
             "order-balanced P2.2 existing legacy-vs-fused JSONL comparison; "
             "transport metrics are worker-summed, cohort wall is authoritative"
             if experiment == "transport" else
+            "order-balanced P2.2 fused JSONL wire-only timing/overhead "
+            "diagnostic with unchanged PUCT teacher"
+            if experiment == "wire-profile" else
             "order-balanced uninstrumented P2.5 actor candidate; "
             "full episode/RNG acceptance separate"
         ),
@@ -356,6 +424,11 @@ def report_actor_abba(
             {"transport_bridge_operation_totals": transport_bridge}
             if transport_bridge is not None else {}
         ),
+        **(
+            {"wire_profile_diagnostics": wire_diagnostics,
+             "wire_profile_overhead_fraction": b_wall / a_wall - 1}
+            if wire_diagnostics is not None else {}
+        ),
         "ratio_of_total_baseline_to_candidate_wall": a_wall / b_wall,
         "wall_reduction_fraction": 1 - b_wall / a_wall,
         **(
@@ -390,6 +463,13 @@ def report_actor_abba(
                 if experiment == "prefix-cache" else []
             ),
             *(
+                ["Fused transport stays enabled in all four arms; B1/B2 "
+                 "collect JSONL wire-only timing. Pipe wait includes native "
+                 "mechanics, native serialization and scheduling.",
+                 "Wire profiling may add overhead, measured by order-balanced wall"]
+                if experiment == "wire-profile" else []
+            ),
+            *(
                 ["Legacy split versus already-existing fused calls are an "
                  "infrastructure baseline, not a new protocol optimization",
                  "Worker-summed bridge times overlap at multiple workers; "
@@ -405,7 +485,8 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     for name in ("a1", "b1", "b2", "a2"):
         p.add_argument(f"--{name}", type=Path, required=True)
-    p.add_argument("--experiment", choices=("batching", "actor-profile", "prefix-cache", "transport"),
+    p.add_argument("--experiment", choices=("batching", "actor-profile", "prefix-cache",
+                            "transport", "wire-profile"),
                    default="batching")
     p.add_argument("--output", type=Path, required=True)
     args = p.parse_args()
