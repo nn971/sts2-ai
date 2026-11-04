@@ -204,10 +204,22 @@ def _h16_actions(
             if (
                 base.phase == "combat"
                 and action.kind == previous.kind == "select_cards"
-                and len(token.members) == 1
+                and bool(token.members)
+                and {
+                    key: value for key, value in json.loads(previous.payload_json).items()
+                    if key not in ("CardInstanceIds", "card_instance_ids")
+                } == {
+                    key: value for key, value in json.loads(action.payload_json).items()
+                    if key not in ("CardInstanceIds", "card_instance_ids")
+                }
             ):
-                # The common member pointer proves the two candidate IDs
-                # were pooled into the same public selection-card class.
+                # Equal member tuples mean equal *multisets* of public
+                # selection-card classes, including their multiplicities.
+                # Each pointer was joined using the entire public card
+                # signature (except the opaque instance_id). Thus choosing
+                # [A, copy_1] or [A, copy_2] is player-observationally
+                # indistinguishable even for multi-card selections.
+                # Other payload fields must remain exactly equal.
                 aliases.append((previous, action))
             else:
                 raise ValueError(

@@ -15,6 +15,7 @@ import math
 import random
 import time
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -40,7 +41,9 @@ from sts2_ai.search.combat_puct import (
     H16_EXPERIMENTAL_ROOT_CONDITIONED_CAPABILITY,
     CombatFrame,
     CombatPuct,
+    CombatSearchProfile,
 )
+from sts2_ai.search.p2_exact_prefix_cache import ExactRootPrefixCache
 from sts2_ai.training.h16_episode_metrics import (
     combat_results,
     enemy_hp_progress,
@@ -459,9 +462,12 @@ class NativeRootConditionedSampler:
         self, backend: EmulatorBackend, root: StateHandle,
         policy: PilotPolicy,
         *, rollout_transport: str = "fused",
+        p2_prefix_cache_handles: int = 0,
     ) -> None:
         if rollout_transport not in ("legacy", "fused"):
             raise ValueError("Unsupported H16 rollout transport")
+        if type(p2_prefix_cache_handles) is not int or p2_prefix_cache_handles < 0:
+            raise ValueError("P2 prefix cache handle cap must be nonnegative")
         self.rollout_transport = rollout_transport
         self.backend = backend
         self.root = root
@@ -469,12 +475,20 @@ class NativeRootConditionedSampler:
         self._active: StateHandle | None = None
         self._owned: list[StateHandle] = []
         self._combat_frames: list[dict[str, Any]] = []
+        self._prefix_cache = (
+            ExactRootPrefixCache(
+                backend, root, max_handles=p2_prefix_cache_handles,
+                capability=self.fair_combat_capability_id,
+            ) if p2_prefix_cache_handles else None
+        )
 
     def begin_simulation(
         self, root: CombatFrame, search_rng: random.Random,
     ) -> None:
         if self._active is not None:
             raise RuntimeError("Search simulation was already active")
+        if self._prefix_cache is not None:
+            self._prefix_cache.begin_simulation()
         self._active = self.backend.fork(self.root)
         self._owned = [self._active]
         self._combat_frames = [public_state(root.observation)]
@@ -485,6 +499,16 @@ class NativeRootConditionedSampler:
     ) -> CombatFrame:
         if self._active is None:
             raise RuntimeError("Search simulation has not begun")
+        parent_history = list(self._combat_frames)
+        parent_handle = self._active
+        if self._prefix_cache is not None:
+            entry = self._prefix_cache.lookup(
+                frame, action.action_id, self._combat_frames, parent_handle,
+            )
+            if entry is not None:
+                self._active = entry.handle
+                self._combat_frames = deepcopy(list(entry.child_history))
+                return entry.child_frame
         if self.rollout_transport == "fused":
             (result,) = self.backend.batch_rollout_step_frame(
                 ((self._active, action),), PUBLIC_POLICY,
@@ -532,11 +556,34 @@ class NativeRootConditionedSampler:
                 )
             boundary_value = 2.0 * value
             actions = ()
-        return CombatFrame(
+        child_frame = CombatFrame(
             information_key=frame.information_key + "/" + action.action_id,
             observation=observation, legal_actions=actions,
             terminal_reward=boundary_value,
         )
+        if self._prefix_cache is not None and self._prefix_cache.record(
+            frame, action.action_id, child_frame, transition.child,
+            parent_history, self._combat_frames, parent_handle,
+        ):
+            # Ownership moves to a bounded cache; the child is immutable.
+            # The current simulation can step from it without modifying it.
+            assert self._owned[-1] == transition.child
+            self._owned.pop()
+        return child_frame
+
+    def prefix_cache_metrics(self) -> dict[str, int | bool] | None:
+        return (
+            self._prefix_cache.metrics()
+            if self._prefix_cache is not None else None
+        )
+
+    def close(self) -> None:
+        try:
+            if self._active is not None:
+                self.end_simulation()
+        finally:
+            if self._prefix_cache is not None:
+                self._prefix_cache.close()
 
     def end_simulation(self) -> None:
         try:
@@ -554,6 +601,10 @@ def local_combat_puct(
     simulations: int, depth: int | None, seed: int,
     rollout_transport: str = "fused",
     max_simulation_steps: int = 512,
+    search_profile: CombatSearchProfile | None = None,
+    search_report: list[dict[str, object]] | None = None,
+    p2_prefix_cache_handles: int = 0,
+    p2_cache_report: list[dict[str, object]] | None = None,
 ) -> tuple[tuple[float, ...], int]:
     """Combat PUCT: capped depth or full search to combat termination.
 
@@ -567,19 +618,31 @@ def local_combat_puct(
     )
     adapter = NativeRootConditionedSampler(
         backend, state, policy, rollout_transport=rollout_transport,
+        p2_prefix_cache_handles=p2_prefix_cache_handles,
     )
     def evaluator(
         obs: Observation, menu: tuple[LegalAction, ...],
     ) -> tuple[tuple[float, ...], float]:
         scores, value, _ = policy.infer(obs, menu)
         return scores, value
-    result = CombatPuct(
-        adapter, evaluator, max_depth=depth, c_puct=1.5,
-        tree_expansion_mode="full_depth", leaf_mode="value", seed=seed,
-        free_card_selection_steps=True,
-        max_simulation_steps=max_simulation_steps,
-    ).search(root, simulations=simulations)
-    return result.policy, result.transitions
+    try:
+        result = CombatPuct(
+            adapter, evaluator, max_depth=depth, c_puct=1.5,
+            tree_expansion_mode="full_depth", leaf_mode="value", seed=seed,
+            free_card_selection_steps=True,
+            max_simulation_steps=max_simulation_steps,
+        ).search(root, simulations=simulations, profile=search_profile)
+        cache_stats = adapter.prefix_cache_metrics()
+        if p2_cache_report is not None and cache_stats is not None:
+            p2_cache_report.append(dict(cache_stats))
+        if search_profile is not None and search_report is not None:
+            snapshot = search_profile.snapshot(result)
+            if cache_stats is not None:
+                snapshot["p2_exact_prefix_cache"] = cache_stats
+            search_report.append(snapshot)
+        return result.policy, result.transitions
+    finally:
+        adapter.close()
 
 
 def should_search_combat(
@@ -610,12 +673,17 @@ def collect_act_episode(
     card_exposure: Mapping[str, int] | None = None,
     map_profile_id: str | None = EXPERIMENTAL_FIXED_ROUTE_PROFILE,
     compact_card_selection: bool = False,
+    search_profiles: list[dict[str, object]] | None = None,
+    p2_prefix_cache_handles: int = 0,
+    p2_cache_report: list[dict[str, object]] | None = None,
 ) -> PilotEpisode:
     if not (0 <= search_probability <= 1 and max_searches >= 0
             and max_decisions > 0 and simulations > 0
             and (search_depth is None or search_depth > 0)
             and max_simulation_steps > 0
-            and rollout_transport in ("legacy", "fused")):
+            and rollout_transport in ("legacy", "fused")
+            and type(p2_prefix_cache_handles) is int
+            and p2_prefix_cache_handles >= 0):
         raise ValueError("Invalid Act collection settings")
     state = reset_training_run(
         backend, seed, NATIVE_OVERGROWTH, ascension,
@@ -668,12 +736,18 @@ def collect_act_episode(
             else:
                 budget = 0
             if budget:
+                search_profile = (
+                    CombatSearchProfile() if search_profiles is not None else None
+                )
                 search_policy, count = local_combat_puct(
                     backend, state, observation, actions, policy,
                     simulations=budget, depth=search_depth,
                     seed=rng.randrange(2**63),
                     rollout_transport=rollout_transport,
                     max_simulation_steps=max_simulation_steps,
+                    search_profile=search_profile, search_report=search_profiles,
+                    p2_prefix_cache_handles=p2_prefix_cache_handles,
+                    p2_cache_report=p2_cache_report,
                 )
                 search_transitions += count
                 searches += 1

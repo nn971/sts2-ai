@@ -1,0 +1,47 @@
+name: p2-native-bridge-smoke
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/p2-native-bridge-smoke.yml'
+      - 'tools/probe_p2_native_jsonl.py'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  p2-public-v1-native-protocol:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout pinned P1+P2 emulator
+        uses: actions/checkout@v4
+        with:
+          repository: nn971/sts2-emulator
+          ref: 9cc7c4cd9b35881d06898fc304eac238166cd1bc
+          path: emulator
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Build the pinned public-v1 emulator
+        run: |
+          dotnet build emulator/src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj \
+            -c Release --nologo -v quiet -m:1
+      - name: Test native JSONL P2 C# profile and exact replay (no H16 model)
+        run: |
+          python tools/probe_p2_native_jsonl.py \
+            --emulator-root "$GITHUB_WORKSPACE/emulator" \
+            --emulator-revision "$(git -C emulator rev-parse HEAD)" \
+            --output "$RUNNER_TEMP/p2-v1-transport/profile.json"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2-v1-native-transport-profile
+          path: ${{ runner.temp }}/p2-v1-transport/profile.json
+          if-no-files-found: ignore

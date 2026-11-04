@@ -1,0 +1,260 @@
+"""CPU-only preflight contracts; exact public equality is weaker than RNG receipts."""
+from __future__ import annotations
+
+import hashlib
+import json
+
+import pytest
+
+from sts2_ai.emulator import FAIR_POLICY_ID, LegalAction, Observation
+from sts2_ai.emulator.jsonl_backend import JsonlBridgeError, JsonlEmulatorBackend
+from sts2_ai.emulator.protocol import StepFrame, Transition
+from tools.probe_p2_exact_fork_prefix import verify_exact_fork_prefix
+
+
+class NativeForkStub:
+    def __init__(self, *, drift: str | None = None):
+        self.states: dict[str, tuple[int, str]] = {"root": (0, "rng-0")}
+        self.next_id = 0
+        self.drift = drift
+        self.fork_count = 0
+        self.released: list[str] = []
+
+    def _create(self, value: tuple[int, str]) -> str:
+        self.next_id += 1
+        key = f"handle-{self.next_id}"
+        self.states[key] = value
+        return key
+
+    def exact_hash(self, state: str) -> str:
+        depth, hidden = self.states[state]
+        key = f"{depth}" if self.drift in ("receipt_fork", "receipt_step") else (
+            f"{depth}|{hidden}"
+        )
+        return hashlib.sha256(key.encode()).hexdigest()
+
+    def exact_continuation_receipt(self, state: str):
+        depth, hidden = self.states[state]
+        return {
+            "exactHash": self.exact_hash(state),
+            "runStochasticHash": hashlib.sha256(hidden.encode()).hexdigest(),
+            "worldStochasticHash": hashlib.sha256(
+                f"world-{depth}".encode()
+            ).hexdigest(),
+            "combatNativeRngHash": None,
+            "referenceNaturePresent": False,
+            "semanticOtherChancePresent": False,
+            "semanticRewardAuditPresent": False,
+        }
+
+    def observe(self, state: str, policy) -> Observation:
+        assert policy.policy_id == FAIR_POLICY_ID
+        depth, _ = self.states[state]
+        payload = json.dumps({"combat": {"turn": depth}, "hp": 70})
+        return Observation(
+            policy_id=FAIR_POLICY_ID, payload_json=payload,
+            observation_hash=hashlib.sha256(payload.encode()).hexdigest(),
+        )
+
+    def legal_actions(self, state: str):
+        return (
+            (LegalAction("first", "play_card", "{}"),)
+            if self.states[state][0] < 2 else ()
+        )
+
+    def is_terminal(self, state: str) -> bool:
+        return self.states[state][0] >= 2
+
+    def fork(self, state: str) -> str:
+        self.fork_count += 1
+        depth, hidden = self.states[state]
+        if self.drift in ("fork", "receipt_fork") and self.fork_count == 2:
+            hidden = "wrong-private-rng"
+        return self._create((depth, hidden))
+
+    def batch_rollout_step_frame(self, items, policy):
+        answer = []
+        for pos, (source, action) in enumerate(items):
+            depth, hidden = self.states[source]
+            assert action == self.legal_actions(source)[0]
+            if self.drift in ("step", "receipt_step") and pos == 1:
+                hidden = "different-hidden-rng-after-draw"
+            child = self._create((depth + 1, hidden))
+            answer.append(StepFrame(
+                Transition(source, action, child, self.is_terminal(child)),
+                self.observe(child, policy), self.legal_actions(child),
+            ))
+        return tuple(answer)
+
+    def release_many(self, handles):
+        for h in handles:
+            assert h in self.states
+            assert h != "root"
+            del self.states[h]
+            self.released.append(h)
+        return len(handles)
+
+
+def test_exact_fork_prefix_two_steps_and_unconditional_cleanup():
+    backend = NativeForkStub()
+    result = verify_exact_fork_prefix(backend, "root", max_steps=8)
+    assert result["verified"]
+    assert result["steps_checked"] == 2
+    assert result["forks_checked"] == 4
+    assert result["owned_handles_released"] == 8
+    assert result["trace"][-1]["terminal"] is True
+    assert result["independent_rng_receipt_available"] is False
+    assert result["stochastic_envelope_receipts_match"] is True
+    assert result["trace"][0]["parent_run_stochastic_hash"] == (
+        result["trace"][0]["child_run_stochastic_hash"]
+    )
+    assert result["ready_for_p2_1_caching"] is False
+    assert backend.states == {"root": (0, "rng-0")}
+
+
+@pytest.mark.parametrize(("mode", "pattern"), [
+    ("fork", "hash diverged on fork"),
+    ("step", "hash diverged after action"),
+    ("receipt_fork", "Stochastic-envelope receipt diverged on fork"),
+    ("receipt_step", "Stochastic-envelope receipt diverged after action"),
+])
+def test_identical_public_projection_does_not_hide_private_drift(mode, pattern):
+    backend = NativeForkStub(drift=mode)
+    with pytest.raises(ValueError, match=pattern):
+        verify_exact_fork_prefix(backend, "root", max_steps=2)
+    assert backend.states == {"root": (0, "rng-0")}
+    assert len(backend.released) > 0
+
+
+def test_preflight_has_bounded_steps_and_never_releases_input_root():
+    backend = NativeForkStub()
+    result = verify_exact_fork_prefix(backend, "root", max_steps=1)
+    assert result["steps_checked"] == 1
+    assert result["trace"][-1]["terminal"] is False
+    assert backend.states == {"root": (0, "rng-0")}
+    with pytest.raises(ValueError, match="positive integer"):
+        verify_exact_fork_prefix(backend, "root", max_steps=0)
+
+
+def test_stale_fused_observation_fails_with_cleanup():
+    class StaleFrame(NativeForkStub):
+        def batch_rollout_step_frame(self, items, policy):
+            frames = list(super().batch_rollout_step_frame(items, policy))
+            second = frames[1]
+            frames[1] = StepFrame(
+                second.transition, self.observe("root", policy),
+                second.legal_actions,
+            )
+            return tuple(frames)
+
+    backend = StaleFrame()
+    with pytest.raises(ValueError, match="Public continuation"):
+        verify_exact_fork_prefix(backend, "root", max_steps=2)
+    assert backend.states == {"root": (0, "rng-0")}
+
+
+def test_receipt_exact_hash_binding_is_required_even_with_equal_forks():
+    class TamperedReceipt(NativeForkStub):
+        def exact_continuation_receipt(self, state):
+            receipt = super().exact_continuation_receipt(state)
+            receipt["exactHash"] = "0" * 64
+            return receipt
+
+    backend = TamperedReceipt()
+    with pytest.raises(ValueError, match="does not match parent exact hash"):
+        verify_exact_fork_prefix(backend, "root", max_steps=2)
+    assert backend.states == {"root": (0, "rng-0")}
+
+
+def test_jsonl_receipt_requires_versioned_valid_hashes_and_provider_flags():
+    receipt = {
+        "schemaId": "sts2-p2-exact-continuation-receipt-v1",
+        "hashAlgorithm": "sha256-canonical-json",
+        "exactHash": "0" * 64,
+        "runStochasticHash": "a" * 64,
+        "worldStochasticHash": None,
+        "combatNativeRngHash": "f" * 64,
+        "referenceNaturePresent": False,
+        "semanticOtherChancePresent": False,
+        "semanticRewardAuditPresent": False,
+    }
+
+    class FakeBackend:
+        def __init__(self, reply):
+            self.reply = reply
+
+        def _request(self, op, **payload):
+            assert op == "p2_exact_continuation_receipt"
+            assert payload["state_handle"] == "root"
+            return self.reply
+
+    def fetch(reply):
+        return JsonlEmulatorBackend.exact_continuation_receipt(
+            FakeBackend(reply), "root",
+        )
+
+    assert fetch(receipt)["runStochasticHash"] == "a" * 64
+    for field, invalid in (
+        ("schemaId", "unversioned"),
+        ("hashAlgorithm", "md5"),
+        ("runStochasticHash", None),
+        ("exactHash", "NOT-HEX" * 10),
+        ("combatNativeRngHash", "g" * 64),
+        ("semanticOtherChancePresent", None),
+    ):
+        changed = {**receipt, field: invalid}
+        with pytest.raises(JsonlBridgeError):
+            fetch(changed)
+
+
+def test_h16_fused_native_profile_validates_schema_and_counters():
+    profile = {
+        "schemaId": "sts2-p2-h16-fused-native-profile-v1",
+        "enabled": False,
+        "operations": {
+            "fused.environment_step_frame": {
+                "count": 12, "totalSeconds": 0.2, "maxSeconds": 0.04,
+                "allocatedBytes": 4096,
+            },
+        },
+    }
+
+    class FakeBackend:
+        def __init__(self, reply):
+            self.reply = reply
+
+        def _request(self, op):
+            assert op == "p2_h16_fused_perf_stop"
+            return {"ok": True, "profile": self.reply}
+
+    def fetch(reply):
+        return JsonlEmulatorBackend.p2_h16_fused_native_profile_snapshot(
+            FakeBackend(reply), stop=True,
+        )
+
+    assert fetch(profile)["operations"]["fused.environment_step_frame"][
+        "allocatedBytes"
+    ] == 4096
+    for field, value in (
+        ("schemaId", "wrong-version"),
+        ("operations", []),
+    ):
+        with pytest.raises(JsonlBridgeError):
+            fetch({**profile, field: value})
+    for field, value in (
+        ("count", -1),
+        ("allocatedBytes", -1),
+        ("totalSeconds", -1.0),
+        ("maxSeconds", float("nan")),
+    ):
+        corrupt = {
+            **profile,
+            "operations": {
+                "fused.environment_step_frame": {
+                    **profile["operations"]["fused.environment_step_frame"],
+                    field: value,
+                },
+            },
+        }
+        with pytest.raises(JsonlBridgeError):
+            fetch(corrupt)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import subprocess
 import time
 from collections.abc import Mapping, Sequence
@@ -38,6 +39,18 @@ class BridgeOperationStats:
         return self.total_seconds / self.calls if self.calls else 0.0
 
 
+@dataclass(frozen=True, slots=True)
+class BridgeWireStats:
+    """Successful profiled JSONL RPCs, including Python framing and pipe wait."""
+
+    calls: int
+    request_bytes: int
+    response_bytes: int
+    encode_seconds: float
+    pipe_seconds: float
+    decode_seconds: float
+
+
 def _run_git(root: Path, *args: str) -> str:
     try:
         completed = subprocess.run(
@@ -72,6 +85,7 @@ class JsonlEmulatorBackend:
         expected_emulator_revision: str | None = None,
         dotnet: str = "dotnet",
         build: bool = True,
+        profile_wire: bool = False,
     ) -> None:
         self._repo_root = (
             repo_root.resolve()
@@ -106,6 +120,8 @@ class JsonlEmulatorBackend:
         self._next_request_id = 1
         self._closed = False
         self._operation_profile: dict[str, tuple[int, float]] = {}
+        self._profile_wire = profile_wire
+        self._wire_profile: dict[str, list[int | float]] = {}
 
         if build:
             try:
@@ -245,6 +261,93 @@ class JsonlEmulatorBackend:
 
     def reset_operation_profile(self) -> None:
         self._operation_profile.clear()
+        self._wire_profile.clear()
+
+    def set_p2_wire_profile(self, enabled: bool) -> None:
+        """Switch only diagnostic JSONL framing counters between matched runs."""
+        self._profile_wire = enabled
+        self._wire_profile.clear()
+
+    def wire_operation_profile(self) -> Mapping[str, BridgeWireStats]:
+        """Detailed bridge transport accounting when profile_wire=True.
+
+        pipe_seconds includes synchronous C# work, serialization, and pipe
+        scheduling; the Python client cannot decompose that interval alone.
+        """
+        return {
+            op: BridgeWireStats(
+                calls=int(v[0]), request_bytes=int(v[1]), response_bytes=int(v[2]),
+                encode_seconds=float(v[3]), pipe_seconds=float(v[4]),
+                decode_seconds=float(v[5]),
+            )
+            for op, v in sorted(self._wire_profile.items())
+        }
+
+    def p2_native_profile_reset(self) -> None:
+        """Opt-in C# JSONL allocation/timing counters on the pinned P2 emulator."""
+        response = self._request("p2_perf_reset")
+        if response.get("schemaId") != "sts2-p2-jsonl-performance-v1":
+            raise JsonlBridgeError("P2 profiler schema mismatch")
+
+    def p2_native_profile_snapshot(self, *, stop: bool = False) -> dict[str, Any]:
+        """Read C# operation/handle counts; stop first to exclude the read RPC."""
+        response = self._request("p2_perf_stop" if stop else "p2_perf_read")
+        profile = response.get("profile")
+        live = response.get("liveStateHandles")
+        peak = response.get("peakStateHandles")
+        if (
+            not isinstance(profile, dict)
+            or profile.get("schemaId") != "sts2-p2-jsonl-performance-v1"
+            or not isinstance(profile.get("operations"), dict)
+            or type(live) is not int or type(peak) is not int
+            or live < 0 or peak < live
+        ):
+            raise JsonlBridgeError("Malformed C# P2 JSONL profile response")
+        return {
+            "profile": profile,
+            "live_state_handles": live,
+            "peak_state_handles": peak,
+        }
+
+    def p2_h16_fused_native_profile_reset(self) -> None:
+        """Opt-in C# timing on H16/public-v0 fused rollout; never changes game state."""
+        response = self._request("p2_h16_fused_perf_reset")
+        if response.get("schemaId") != "sts2-p2-h16-fused-native-profile-v1":
+            raise JsonlBridgeError("Unsupported H16 fused native timing schema")
+
+    def p2_h16_fused_native_profile_snapshot(
+        self, *, stop: bool = False,
+    ) -> dict[str, Any]:
+        """Return versioned native self-time/allocation data; requires new H16 CLI."""
+        response = self._request(
+            "p2_h16_fused_perf_stop" if stop else "p2_h16_fused_perf_read"
+        )
+        profile = response.get("profile")
+        if (
+            not isinstance(profile, dict)
+            or profile.get("schemaId") != "sts2-p2-h16-fused-native-profile-v1"
+            or not isinstance(profile.get("operations"), dict)
+            or type(profile.get("enabled")) is not bool
+        ):
+            raise JsonlBridgeError("Malformed H16 fused native timing response")
+        for name, entry in profile["operations"].items():
+            if not isinstance(name, str) or not isinstance(entry, dict):
+                raise JsonlBridgeError("Invalid H16 native operation entry")
+            if (
+                type(entry.get("count")) is not int or entry["count"] < 0
+                or type(entry.get("allocatedBytes")) is not int
+                or entry["allocatedBytes"] < 0
+            ):
+                raise JsonlBridgeError("Invalid H16 native count/allocation")
+            for timer in ("totalSeconds", "maxSeconds"):
+                value = entry.get(timer)
+                if (
+                    isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or value < 0
+                ):
+                    raise JsonlBridgeError("Invalid H16 native timing")
+        return profile
 
     @property
     def pristine_reward_proposal_schema(self) -> str | None:
@@ -974,6 +1077,52 @@ class JsonlEmulatorBackend:
         response = self._request("exact_hash", state_handle=state)
         return self._require_string(response, "exactHash")
 
+    def exact_continuation_receipt(
+        self, state: StateHandle,
+    ) -> dict[str, str | bool | None]:
+        """P2.1 diagnostic-only fingerprints of full provider-private RNG owners.
+
+        This is NOT a public observation. Only preflight/fidelity diagnostics
+        may call it. The independent Nature/fair-history continuation laws are
+        not certified merely by these hashes; no cache is enabled here.
+        """
+        response = self._request(
+            "p2_exact_continuation_receipt", state_handle=state,
+        )
+        if (
+            response.get("schemaId")
+            != "sts2-p2-exact-continuation-receipt-v1"
+            or response.get("hashAlgorithm") != "sha256-canonical-json"
+        ):
+            raise JsonlBridgeError(
+                "P2.1 exact-continuation receipt is unavailable or has "
+                "an unsupported version/algorithm"
+            )
+        fingerprints = (
+            "exactHash", "runStochasticHash",
+            "worldStochasticHash", "combatNativeRngHash",
+        )
+        flags = (
+            "referenceNaturePresent", "semanticOtherChancePresent",
+            "semanticRewardAuditPresent",
+        )
+        for key in fingerprints:
+            value = response.get(key)
+            if value is None and key in (
+                "worldStochasticHash", "combatNativeRngHash",
+            ):
+                continue
+            if (
+                not isinstance(value, str) or len(value) != 64
+                or any(char not in "0123456789abcdef" for char in value)
+            ):
+                raise JsonlBridgeError(
+                    f"P2.1 receipt has invalid canonical SHA-256: {key}"
+                )
+        if any(type(response.get(key)) is not bool for key in flags):
+            raise JsonlBridgeError("P2.1 receipt is missing provider-present flags")
+        return {key: response[key] for key in (*fingerprints, *flags)}
+
     def observe(self, state: StateHandle, policy: InformationPolicy) -> Observation:
         response = self._request(
             "observe",
@@ -1080,8 +1229,16 @@ class JsonlEmulatorBackend:
         if stdin is None or stdout is None:
             raise JsonlBridgeError("Emulator bridge pipes are unavailable")
 
+        if self._profile_wire:
+            encode_start = time.perf_counter()
+            wire_request = json.dumps(request, separators=(",", ":")) + "\n"
+            encode_seconds = time.perf_counter() - encode_start
+            pipe_start = time.perf_counter()
+        else:
+            wire_request = json.dumps(request, separators=(",", ":")) + "\n"
+
         try:
-            stdin.write(json.dumps(request, separators=(",", ":")) + "\n")
+            stdin.write(wire_request)
             stdin.flush()
             line = stdout.readline()
         except (BrokenPipeError, OSError) as exc:
@@ -1089,6 +1246,9 @@ class JsonlEmulatorBackend:
 
         if not line:
             raise JsonlBridgeError(self._dead_process_message())
+        if self._profile_wire:
+            pipe_seconds = time.perf_counter() - pipe_start
+            decode_start = time.perf_counter()
 
         try:
             raw = json.loads(line)
@@ -1107,6 +1267,15 @@ class JsonlEmulatorBackend:
             error = response.get("error", "unknown bridge failure")
             raise JsonlBridgeError(f"{error_type}: {error}")
 
+        if self._profile_wire:
+            decode_seconds = time.perf_counter() - decode_start
+            counters = self._wire_profile.setdefault(op, [0, 0, 0, 0.0, 0.0, 0.0])
+            counters[0] += 1
+            counters[1] += len(wire_request.encode("utf-8"))
+            counters[2] += len(line.encode("utf-8"))
+            counters[3] += encode_seconds
+            counters[4] += pipe_seconds
+            counters[5] += decode_seconds
         elapsed = time.perf_counter() - started
         calls, total_seconds = self._operation_profile.get(op, (0, 0.0))
         self._operation_profile[op] = (calls + 1, total_seconds + elapsed)

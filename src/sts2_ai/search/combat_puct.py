@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import math
 import random
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
@@ -118,6 +119,72 @@ class CombatSearchResult:
         return tuple(v / total for v in self.visits)
 
 
+@dataclass
+class CombatSearchProfile:
+    """Opt-in, per-root P2 instrumentation; no stochastic state is cached.
+
+    Repeated *public* path edges quantify potential replay work, not safe
+    native-state reuse. Root-conditioned and fair-history samplers must be
+    compared in separate cohorts.
+    """
+
+    wall_seconds: float = 0.0
+    begin_calls: int = 0
+    begin_seconds: float = 0.0
+    tree_step_calls: int = 0
+    tree_step_seconds: float = 0.0
+    end_calls: int = 0
+    end_seconds: float = 0.0
+    simulation_path_lengths: list[int] = field(default_factory=list)
+    repeated_public_edges: int = 0
+    _seen_public_edges: set[tuple[str, str]] = field(default_factory=set, repr=False)
+
+    def observe_tree_edge(self, parent_key: str, action_id: str) -> None:
+        edge = (parent_key, action_id)
+        if edge in self._seen_public_edges:
+            self.repeated_public_edges += 1
+        else:
+            self._seen_public_edges.add(edge)
+
+    def snapshot(self, result: CombatSearchResult) -> dict[str, object]:
+        """JSON-compatible metrics, explicitly distinguishing potential from proof."""
+        return {
+            "schema": "sts2-p2-combat-search-profile-v1",
+            "chance_capability": result.chance_capability,
+            "tree_expansion_mode": result.tree_expansion_mode,
+            "rollout_mode": result.rollout_mode,
+            "simulations": result.simulations,
+            "maximum_expanded_depth": result.maximum_expanded_depth,
+            "expanded_information_sets": result.expanded_information_sets,
+            "terminal_evaluations": result.terminal_evaluations,
+            "neural_cutoffs": result.neural_cutoffs,
+            "transitions": result.transitions,
+            "terminal_rollout_steps": result.transitions - self.tree_step_calls,
+            "wall_seconds": self.wall_seconds,
+            "begin_calls": self.begin_calls,
+            "begin_seconds": self.begin_seconds,
+            "tree_step_calls": self.tree_step_calls,
+            "tree_step_seconds": self.tree_step_seconds,
+            "end_calls": self.end_calls,
+            "end_seconds": self.end_seconds,
+            "simulation_path_lengths": self.simulation_path_lengths.copy(),
+            "unique_public_edges": len(self._seen_public_edges),
+            "repeated_public_edges": self.repeated_public_edges,
+            "public_replay_hit_fraction": (
+                self.repeated_public_edges / self.tree_step_calls
+                if self.tree_step_calls else 0.0
+            ),
+            "root_visits": list(result.visits),
+            "teacher_policy": list(result.policy),
+            "root_action_ids": list(result.action_ids),
+            "root_mean_value": result.root_mean_value,
+            "note": (
+                "Public edge repeats are replay-work potential ONLY; "
+                "they cannot certify exact RNG/Nature state compatibility."
+            ),
+        }
+
+
 class CombatPuct:
     """A search-policy teacher, never a source of fictitious terminal labels."""
 
@@ -207,9 +274,13 @@ class CombatPuct:
             "Combat did not end within rollout_depth; no terminal reward exists"
         )
 
-    def search(self, root: CombatFrame, *, simulations: int) -> CombatSearchResult:
+    def search(
+        self, root: CombatFrame, *, simulations: int,
+        profile: CombatSearchProfile | None = None,
+    ) -> CombatSearchResult:
         if root.terminal_reward is not None or simulations <= 0:
             raise ValueError("H15 requires nonterminal root and positive budget")
+        profile_started = time.perf_counter() if profile is not None else 0.0
         table: dict[str, _Node] = {root.information_key: self._expand(root)}
         transitions = terminals = cutoffs = 0
         root_value_sum = 0.0
@@ -219,7 +290,15 @@ class CombatPuct:
             frame = root
             seen = {root.information_key}
             try:
-                self._sampler.begin_simulation(root, self._rng)
+                if profile is None:
+                    self._sampler.begin_simulation(root, self._rng)
+                else:
+                    started = time.perf_counter()
+                    try:
+                        self._sampler.begin_simulation(root, self._rng)
+                    finally:
+                        profile.begin_seconds += time.perf_counter() - started
+                        profile.begin_calls += 1
                 result: float | None = None
                 depth = 0
                 steps = 0
@@ -277,7 +356,16 @@ class CombatPuct:
                     action_index = self._choose(node)
                     path.append(node.edges[action_index])
                     action = frame.legal_actions[action_index]
-                    child = self._sampler.step(frame, action, self._rng)
+                    if profile is None:
+                        child = self._sampler.step(frame, action, self._rng)
+                    else:
+                        profile.observe_tree_edge(frame.information_key, action.action_id)
+                        started = time.perf_counter()
+                        try:
+                            child = self._sampler.step(frame, action, self._rng)
+                        finally:
+                            profile.tree_step_seconds += time.perf_counter() - started
+                            profile.tree_step_calls += 1
                     transitions += 1
                     steps += 1
                     if (self._free_card_selection_steps
@@ -298,14 +386,24 @@ class CombatPuct:
                     frame = child
                 if result is None:
                     raise AssertionError("Every simulation must return a value")
+                if profile is not None:
+                    profile.simulation_path_lengths.append(steps)
                 root_value_sum += result
                 for edge in path:
                     edge.visits += 1
                     edge.value_sum += result
             finally:
-                self._sampler.end_simulation()
+                if profile is None:
+                    self._sampler.end_simulation()
+                else:
+                    started = time.perf_counter()
+                    try:
+                        self._sampler.end_simulation()
+                    finally:
+                        profile.end_seconds += time.perf_counter() - started
+                        profile.end_calls += 1
         edges = table[root.information_key].edges
-        return CombatSearchResult(
+        report = CombatSearchResult(
             (H15_DEEP_SEARCH_VERSION
              if self._tree_expansion_mode == "full_depth"
              else H15_SEARCH_VERSION), root.information_key,
@@ -318,3 +416,6 @@ class CombatPuct:
             self._sampler.fair_combat_capability_id,
             self._tree_expansion_mode, max_expanded_depth,
         )
+        if profile is not None:
+            profile.wall_seconds = time.perf_counter() - profile_started
+        return report
