@@ -1045,7 +1045,8 @@ def train_joint_cohort(
             actor_terms = [torch.stack(v).mean() for v in ordinary.values() if v]
             if search_ce:
                 actor_terms.append(search_weight * torch.stack(search_ce).mean())
-            policy_loss = sum(actor_terms) if actor_terms else logits.sum() * 0.0
+            # Avoid 0 * overflowed sums of padded minimum action logits.
+            policy_loss = sum(actor_terms) if actor_terms else act_loss.new_zeros(())
             loss = policy_loss + act_loss + hp_loss - entropy_weight * entropy
             if not bool(torch.isfinite(loss)):
                 raise FloatingPointError(
