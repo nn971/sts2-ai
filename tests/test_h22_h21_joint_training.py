@@ -270,3 +270,77 @@ def test_h22_deterministic_cuda_actor_is_explicit_opt_in(tmp_path):
             workers=1, device="cpu", horizon_lambda=0.42,
             deterministic_cuda=True,
         )
+
+
+def test_h22_h21_fixed_relation_shape_ref_packed_tensor_parity():
+    from sts2_ai.models.h16_batch_actor import _stable_h21_shape_bucket
+
+    model = JointActPilotNet(H21GroundedMacroTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64)))
+    first = model.encode_decision(_state(), _actions())
+    alternate = dict(_state())
+    alternate["deck"] = [*_state()["deck"], {
+        "instance_id": 202, "card_id": "silent.defend",
+        "upgrade_level": 1, "state": {},
+    }]
+    second = model.encode_decision(alternate, _actions())
+    _, nobj, nact, nmem, nrel = _stable_h21_shape_bucket(first)
+    _, mobj, mact, mmem, mrel = _stable_h21_shape_bucket(second)
+    dims = {
+        "pad_objects": max(nobj, mobj),
+        "pad_actions": max(nact, mact),
+        "pad_members": max(nmem, mmem),
+        "pad_relations": max(nrel, mrel),
+    }
+    for frames in ([first], [second], [first, second], [second, first]):
+        reference = collate_h21(frames, **dims)
+        packed = collate_h21_packed(frames, **dims)
+        for name in H20Batch.__dataclass_fields__:
+            assert torch.equal(getattr(reference, name), getattr(packed, name)), name
+        assert reference.kinds.shape[1] == dims["pad_objects"]
+        assert reference.action_kinds.shape[1] == dims["pad_actions"]
+        assert reference.action_members.shape[2] == dims["pad_members"]
+        assert reference.relation_types.shape[1] == dims["pad_relations"]
+        for row, decision in enumerate(frames):
+            assert reference.object_mask[row].sum() == len(decision.objects)
+            assert reference.action_mask[row].sum() == len(decision.actions)
+            assert reference.relation_mask[row].sum() == len(decision.relations)
+            assert not reference.relation_mask[row, len(decision.relations):].any()
+            assert (reference.relation_sources[row, len(decision.relations):] == -1).all()
+    with pytest.raises(ValueError, match="underflows relations"):
+        collate_h21_packed([first], pad_relations=0)
+    with pytest.raises(ValueError, match="underflows objects"):
+        collate_h21([first], pad_objects=1)
+
+
+def test_h22_h21_stable_shape_actor_cpu_smoke(tmp_path):
+    import hashlib
+    from sts2_ai.models.h16_batch_actor import _stable_h21_shape_bucket
+    from concurrent.futures import ThreadPoolExecutor
+
+    model = JointActPilotNet(H21GroundedMacroTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64))).eval()
+    checkpoint = tmp_path / "fixed-h21.pt"
+    model.save(checkpoint)
+    digest = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
+    frames = [
+        model.encode_decision(_state(), _actions()),
+        model.encode_decision(_state(), _actions()),
+    ]
+    assert _stable_h21_shape_bucket(frames[0]) == _stable_h21_shape_bucket(frames[1])
+    for collator in ("reference", "packed"):
+        with SharedH16Service(
+            checkpoint=checkpoint, digest=digest, workers=2,
+            device="cpu", horizon_lambda=0.411395,
+            max_batch=2, max_delay_ms=10.0,
+            fixed_shape_batch_size=2, h21_collator=collator,
+        ) as service:
+            clients = [RemoteH16Actor(service.transport) for _ in frames]
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = [pool.submit(client.infer, frame)
+                           for client, frame in zip(clients, frames, strict=True)]
+                results = [future.result(timeout=30) for future in futures]
+        assert results[0] == results[1]
+        assert service.metrics["p2_fixed_shape_batch_size"] == 2
+        assert service.metrics["p2_fixed_shape_physical_rows"] >= 2
+        assert service.metrics["p2_fixed_shape_bucket_forwards"] >= 1
