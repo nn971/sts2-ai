@@ -344,3 +344,45 @@ def test_h22_h21_stable_shape_actor_cpu_smoke(tmp_path):
         assert service.metrics["p2_fixed_shape_batch_size"] == 2
         assert service.metrics["p2_fixed_shape_physical_rows"] >= 2
         assert service.metrics["p2_fixed_shape_bucket_forwards"] >= 1
+
+
+def test_h22_trainer_dryrun_accepts_fixed_packed_deterministic_cuda(
+    tmp_path, monkeypatch, capsys,
+):
+    from tools.train_h16_joint_act_pilot import main as train_main
+
+    source = tmp_path / "initial-h16.pt"
+    source.write_bytes(b"dry-run-identity-only")
+    arguments = [
+        "h22-dry-run", *h22_default_arguments(),
+        "--initial-h16", str(source),
+        "--macro-prior-weight", "0",
+        "--emulator-root", str(tmp_path),
+        "--emulator-revision", "pinned-emulator",
+        "--output-root", str(tmp_path / "not-executed"),
+        "--actor-h21-collator", "packed",
+        "--actor-fixed-shape-batch-size", "4",
+        "--actor-max-batch", "4",
+        "--actor-deterministic-cuda",
+    ]
+    monkeypatch.setattr("sys.argv", arguments)
+    train_main()
+    report = json.loads(capsys.readouterr().out)
+    options = report["experiment"]["options"]
+    assert not report["execute"]
+    assert options["representation"] == "h21"
+    assert options["actor_h21_collator"] == "packed"
+    assert options["actor_fixed_shape_batch_size"] == 4
+    assert options["actor_deterministic_cuda"] is True
+
+    # Deterministic CUDA is an explicit option, not a CPU or H16 default.
+    arguments.extend(["--actor-device", "cpu"])
+    monkeypatch.setattr("sys.argv", arguments)
+    with pytest.raises(SystemExit, match="Invalid H16 pilot"):
+        train_main()
+
+    arguments[-1] = "cuda"
+    arguments.extend(["--actor-max-batch", "2"])
+    monkeypatch.setattr("sys.argv", arguments)
+    with pytest.raises(SystemExit, match="Invalid H16 pilot"):
+        train_main()
