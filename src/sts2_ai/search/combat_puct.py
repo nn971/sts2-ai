@@ -201,7 +201,9 @@ class CombatPuct:
                     FAIR_COMBAT_CAPABILITY, ROOT_CONDITIONED_COMBAT_CAPABILITY,
                     H16_EXPERIMENTAL_ROOT_CONDITIONED_CAPABILITY,
                 )):
-            raise ValueError("PUCT requires a certified, explicitly labeled combat sampling capability")
+            raise ValueError(
+                "PUCT requires a certified, explicitly labeled combat sampling capability"
+            )
         if (not math.isfinite(c_puct) or c_puct <= 0
                 or (max_depth is not None and max_depth <= 0)
                 or max_simulation_steps <= 0
