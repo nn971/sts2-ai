@@ -241,3 +241,54 @@ def test_h9_teacher_uses_original_codec_and_identical_logits():
     teacher.codec_schema = H15_COMBAT_SCHEMA
     changed = teacher.predict(observation, ACTIONS)
     assert changed.logits != pytest.approx(predicted.logits, abs=1e-8)
+
+
+def test_full_depth_watchdog_reports_public_context_and_remains_strict():
+    from sts2_ai.search.combat_puct import IncompleteCombatRollout
+
+    class SlowButFinite(FairToyCombat):
+        def __init__(self):
+            super().__init__()
+            self.steps = 0
+
+        def begin_simulation(self, root, search_rng):
+            super().begin_simulation(root, search_rng)
+            self.steps = 0
+
+        def step(self, frame, action, search_rng):
+            self.steps += 1
+            done = self.steps == 5
+            return CombatFrame(
+                frame.information_key + "/" + action.action_id,
+                frame.observation,
+                () if done else ACTIONS,
+                2.0 if done else None,
+            )
+
+    score = lambda *_: ((0.0, 0.0), 0.5)
+    short = SlowButFinite()
+    with pytest.raises(IncompleteCombatRollout, match="watchdog=") as exc:
+        CombatPuct(
+            short, score, seed=17, max_depth=None,
+            tree_expansion_mode="full_depth", max_simulation_steps=3,
+        ).search(frame(), simulations=1)
+    message = str(exc.value)
+    context = json.loads(message.split("watchdog=", 1)[1])
+    assert context["simulation"] == context["simulations"] == 1
+    assert context["steps"] == 3
+    assert context["player_hp"] == 40
+    assert context["floor"] == 2
+    assert context["enemy_hps"] == [20, 12]
+    assert len(context["recent_action_ids"]) == 3
+    assert short.ends == 1
+
+    # Increasing the watchdog lets genuinely finite combats finish.
+    longer = SlowButFinite()
+    result = CombatPuct(
+        longer, score, seed=17, max_depth=None,
+        tree_expansion_mode="full_depth", max_simulation_steps=5,
+    ).search(frame(), simulations=1)
+    assert result.transitions == 5
+    assert result.terminal_evaluations == 1
+    assert result.neural_cutoffs == 0
+    assert longer.ends == 1
