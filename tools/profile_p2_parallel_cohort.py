@@ -190,6 +190,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--actor-device", choices=["cpu", "cuda"], default="cpu")
     parser.add_argument("--actor-max-batch", type=int, default=16)
     parser.add_argument("--actor-max-delay-ms", type=float, default=2.0)
+    parser.add_argument("--actor-deterministic-cuda", action="store_true",
+                        help="Opt-in deterministic CUDA scatter/BLAS kernels in H22 "
+                             "shared actor; diagnostic until benchmarked")
     parser.add_argument("--actor-profile", action="store_true",
                         help="Collect bounded queue/batch/forward distributions")
     parser.add_argument("--actor-batch-parity-probe", action="store_true",
@@ -255,6 +258,9 @@ def main() -> None:
         or (a.representation == "h21" and a.actor_fixed_shape_batch_size != 0)
         or (a.actor_h21_collator == "packed" and
             (a.representation != "h21" or a.actor_inference != "shared"))
+        or (a.actor_deterministic_cuda and (
+            a.representation != "h21" or a.actor_inference != "shared"
+            or not a.actor_device.startswith("cuda")))
         or (a.no_episode_profile and (a.profile_overhead or a.native_profile))
         or (a.wire_profile_only and (
             not a.no_episode_profile or a.profile_overhead
@@ -334,6 +340,7 @@ def main() -> None:
         "actor_batch_parity_probe": a.actor_batch_parity_probe,
         "actor_fixed_shape_batch_size": a.actor_fixed_shape_batch_size,
         "actor_h21_collator": a.actor_h21_collator,
+        "actor_deterministic_cuda": a.actor_deterministic_cuda,
         "replay_diagnostics_dir": str(
             a.output.resolve().parent / "replay-mismatches"
         ),
@@ -350,6 +357,7 @@ def main() -> None:
             verify_batch_parity=a.actor_batch_parity_probe,
             fixed_shape_batch_size=a.actor_fixed_shape_batch_size,
             h21_collator=a.actor_h21_collator,
+            deterministic_cuda=a.actor_deterministic_cuda,
         )
         if a.actor_inference == "shared" else nullcontext(None)
     )
@@ -408,6 +416,7 @@ def main() -> None:
             "actor_batch_parity_probe": a.actor_batch_parity_probe,
             "actor_fixed_shape_batch_size": a.actor_fixed_shape_batch_size,
             "actor_h21_collator": a.actor_h21_collator,
+            "actor_deterministic_cuda": a.actor_deterministic_cuda,
             "representation": a.representation,
             "public_schema_id": config["public_schema_id"],
             "codec": H21_CODEC if a.representation == "h21" else H16_CODEC,
