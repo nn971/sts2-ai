@@ -319,3 +319,83 @@ even when public/teacher replay aborts. A nonzero logit/value delta
 correlates with batch shape but is *not by itself proof* that the
 one-transition discrepancy had that cause. If both tests replay exactly,
 repeat the 15-worker search-work test on an independent seed set.
+
+
+## 2026-11-05: concrete CUDA nondeterminism candidate and opt-in control
+
+The **singleton CUDA** replay of `p2-h22-collator-v1-full-1` still
+differed by one step at **PUCT root 2**: expected 2,338, actual 2,337
+(aggregate 4,693 versus 4,692); 107 public decisions and the entire
+root teachers/observations/actions/final state matched exactly.
+Therefore mixed CUDA batching is not necessary for this discrepancy.
+
+Source audit found that H21's inherited
+`H20MapGraphTransformer._object_embeddings` performs **three rounds**
+of GPU `scatter_add` over overlapping edge sources, both for messages
+and their counts. PyTorch explicitly documents CUDA `scatter_add_` as
+potentially nondeterministic and lists it among operations made
+deterministic by `torch.use_deterministic_algorithms(True)`.
+Differences in a near-tied internal PUCT choice could change simulated
+combat length without changing final root visit counts. This is a
+plausible causal candidate, **not yet a measured proof**.
+
+The shared H22 actor now supports **opt-in**
+`--actor-deterministic-cuda` through the P2 profile and A/B/B/A
+orchestrator. It configures `CUBLAS_WORKSPACE_CONFIG=:4096:8`
+before actor GPU initialization, enables deterministic PyTorch
+algorithms (strict `warn_only=False`), disables cuDNN benchmarking
+and TensorFloat32 matmul. The actor emits a matching receipt that
+the A/B/B/A reporter requires to agree across all four arms.
+Only this opt-in shared actor changes; original H16 training defaults,
+H21 encoding, PUCT budget, and emulator simulation are unchanged.
+
+First, reproduce the **same failing seed with deterministic singleton
+CUDA**, in a new diagnostic output directory:
+
+```fish
+cd ~/projects/sts2-ai
+git fetch origin
+git switch perf/p2-h22-packed-collator-20261105
+git pull --ff-only
+set emu ~/projects/sts2-emulator
+set rev (git -C $emu rev-parse HEAD)
+set h22 results/p2-h22-frozen-warmstart-v1.pt
+
+python tools/profile_p2_parallel_cohort.py \
+    --ai-root (pwd) --emulator-root $emu --emulator-revision $rev \
+    --checkpoint $h22 --representation h21 \
+    --actor-h21-collator reference --actor-inference shared \
+    --actor-device cuda --actor-deterministic-cuda \
+    --actor-max-batch 1 --actor-fixed-shape-batch-size 0 \
+    --macro-prior-weight 0 --horizon-lambda 0.411395 \
+    --workers 1 --seeds p2-h22-collator-v1-full-1 \
+    --ascension 0 --map-profile generated \
+    --simulations 16 --depth 0 --max-searches 2 \
+    --max-decisions 4096 --paired --no-episode-profile \
+    --rollout-transport fused \
+    --output results/p2-h22-det-cuda-singleton-v1/profile.json --execute
+```
+
+If exact replay succeeds, run the **15-worker comparison with
+deterministic CUDA enabled in all four arms** and a new output root.
+Use a distinct seed prefix for the eventual acceptance benchmark so
+the result is not a repeated test on the hand-picked failing seed:
+
+```fish
+python tools/run_p2_actor_abba.py \
+    --experiment h21-collator \
+    --emulator-root $emu --emulator-revision $rev \
+    --checkpoint $h22 --macro-prior-weight 0 \
+    --workers 15 --actor-device cuda --actor-deterministic-cuda \
+    --h21-max-batch 4 --seed-count 16 \
+    --seed-prefix p2-h22-detcuda-independent-v1 \
+    --simulations 16 --depth 0 --max-searches 2 \
+    --max-decisions 4096 --require-full-act \
+    --output-root results/p2-h22-collator-det-cuda-15w-v1 --execute
+```
+
+Deterministic kernels may have a throughput cost. They can also raise
+an error for an unsupported operation rather than silently proceeding.
+If exact replay *still* fails, retain the diagnostic and investigate
+emulator state/cloning and other remaining sources of nondeterminism
+before claiming that the scatter fix is sufficient.
