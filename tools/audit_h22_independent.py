@@ -76,11 +76,9 @@ def audit_checkpoint(
     seeds = [f"{namespace}-audit-{study_seed}-{audit_tag}-{i}" for i in range(audit_count)]
     reserved = {
         record["seed"]
-        for stage in [*(
-            [r["train"], r["heldout"]]
-            for r in rows
-        )]
-        for group in stage if group is not None
+        for saved_round in rows
+        for group in (saved_round["train"], saved_round.get("heldout"))
+        if group is not None
         for record in group.get("floor_progress", {}).get("runs", [])
     }
     baseline_path = progress_path.parent / "baseline.json"
