@@ -342,6 +342,15 @@ def _serve(
             if device.startswith("cuda"):
                 stats["p2_cuda_peak_allocated_bytes"] = torch.cuda.max_memory_allocated(device)
                 stats["p2_cuda_peak_reserved_bytes"] = torch.cuda.max_memory_reserved(device)
+        if model.representation == "h21" and device.startswith("cuda"):
+            # One allocator query at teardown: preserve uninstrumented P2
+            # throughput timing while retaining GPU memory provenance.
+            stats["p2_h21_cuda_peak_allocated_bytes"] = (
+                torch.cuda.max_memory_allocated(device)
+            )
+            stats["p2_h21_cuda_peak_reserved_bytes"] = (
+                torch.cuda.max_memory_reserved(device)
+            )
         statistics.put(("ok", stats))
     except BaseException:
         error = traceback.format_exc()
