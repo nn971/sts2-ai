@@ -19,8 +19,8 @@ def h22_default_arguments() -> tuple[str, ...]:
         from train_h18_generated_a0 import h18_default_arguments
 
     baseline = list(h18_default_arguments())
-    # H21 relations are dynamically collated. The validated P2 fixed-shape
-    # H16 actor bucket must remain off until graph-aware batching is certified.
+    # Keep the historical dynamic/reference batching default. The tested
+    # H21 graph-aware fixed-shape packed CUDA path is available via opt-in flags.
     baseline.extend((
         "--representation", "h21",
         "--actor-fixed-shape-batch-size", "0",
