@@ -773,11 +773,12 @@ def test_h22_full_act_gate_rejects_cpu_or_absent_real_search():
     with pytest.raises(ValueError, match="requires CUDA"):
         report_actor_abba(*data, experiment="h21-collator", require_cuda=True)
     data = h22_complete_cohorts()
-    for item in data[1]["seed_reports"]:
-        for run in item["runs"]:
-            run["search_roots"] = 0
-            run["search_transitions"] = 0
-    data[1]["search_transitions"] = 0
+    for profile in data:
+        for item in profile["seed_reports"]:
+            for run in item["runs"]:
+                run["search_roots"] = 0
+                run["search_transitions"] = 0
+        profile["search_transitions"] = 0
     with pytest.raises(ValueError, match="actual combat PUCT work"):
         report_actor_abba(
             *data, experiment="h21-collator", require_search_roots=True,
