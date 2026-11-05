@@ -10,7 +10,7 @@
 - PUCT is still 16 simulations, depth 8, up to one root per episode with adaptive probability .15. This is a validated, bounded search setting. Full-combat PUCT is a separate experiment, not yet demonstrated at 64 episodes/round.
 - A **32-seed independent audit** is a separate read-only script and seed namespace. Run it once on a checkpoint after completing the long experiment, without using it to select hyperparameters.
 
-## Fish commands — stage four rounds
+## Fish commands — stage five rounds
 
 ```fish
 cd ~/projects/sts2-ai
@@ -39,11 +39,11 @@ python -u tools/train_h22_h21_generated_a0.py \
     --h17-search-p16 0.15 --h17-search-p64 0 \
     --max-searches 1 --max-decisions 4096 --minibatch 8 \
     --evaluation-horizon-lambda 0.4113950303216448 \
-    --stop-after-round 4 \
+    --stop-after-round 5 \
     --output-root $out --execute
 ```
 
-The staged four rounds test optimizer snapshots, sparse evaluation and progress monitoring on local CUDA before a longer run.
+The staged five rounds test optimizer snapshots, sparse evaluation and progress monitoring on local CUDA. They also capture both round-1 and round-5 heldout results before a longer run.
 
 ## Continue for a six-hour session
 
@@ -54,7 +54,7 @@ Reuse the **exact same command**, replacing the last two lines of controls with:
     --output-root $out --resume --execute
 ```
 
-Remove `--stop-after-round 4`. The initial `--rounds 150` must remain fixed. The 21,000-second budget is **soft**: the trainer stops only after committing an entire round, so a long last round may exceed it. A later session uses the same `--resume` command and its own wall budget.
+Remove `--stop-after-round 5`. The initial `--rounds 150` must remain fixed. The 21,000-second budget is **soft**: the trainer stops only after committing an entire round, so a long last round may exceed it. A later session uses the same `--resume` command and its own wall budget.
 
 ## Monitoring and independent audit
 
@@ -75,4 +75,4 @@ The monitor prints committed training floor, clears, search roots, transitions, 
 
 ## Stop/go assessment
 
-The two-round matched pilot gave heldout mean maximum floor 1.0 → 6.4375 → 6.625 and no Act clears in 16 seeds. The initial floor-1 deadlock resolved, but the +0.1875 gain between trained rounds is weak. Track actual Act clears, new-map coverage, censored episodes, distribution of floors, training-vs-heldout divergence, replay stability and the cost share of each stage. A successful four-round CUDA pilot is the next gate before allocating a multihour session.
+The two-round matched pilot gave heldout mean maximum floor 1.0 → 6.4375 → 6.625 and no Act clears in 16 seeds. The initial floor-1 deadlock resolved, but the +0.1875 gain between trained rounds is weak. Track actual Act clears, new-map coverage, censored episodes, distribution of floors, training-vs-heldout divergence, replay stability and the cost share of each stage. A successful five-round CUDA pilot is the next gate before allocating a multihour session.
