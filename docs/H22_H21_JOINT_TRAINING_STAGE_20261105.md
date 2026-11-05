@@ -42,10 +42,17 @@ The previously successful H18/P2 smoke used emulator SHA
 be silently reused for H22. The canonical power v2 experimental path remains
 out of scope; H22 explicitly requires public v1.
 
-The accepted fixed-shape-4 P2 actor specialization is deliberately disabled:
-H21 relation tensors require graph-aware padding/parity measurements first.
-Variable-shape H21 batches still use the shared CUDA actor, and rollout
-transport stays fused. The P2 prefix cache remains disabled.
+H21 relation-aware fixed-shape batching and the packed H21 shared-actor
+collator have now passed a four-seed, four-worker bounded depth-8 strict
+replay A/B/B/A test (1.587x faster packed, 37.0% less wall).
+The optimization remains **opt-in**: the H22 wrapper defaults to
+reference collation and dynamic shapes. For an H22 CUDA training pilot, pass
+`--actor-h21-collator packed --actor-fixed-shape-batch-size 4
+--actor-max-batch 4 --actor-deterministic-cuda`. These flags now
+reach the actual shared actor; the optimizer still uses H21 reference
+collation. The benchmark's eight executions per arm were censored at 40
+decisions, so full-Act/15-worker validation remains pending.
+Rollout transport stays fused and the P2 prefix cache stays disabled.
 
 ## Local smoke (fish shell; after focused CI passes)
 
