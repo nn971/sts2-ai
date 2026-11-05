@@ -614,6 +614,8 @@ def h22_collator_cohorts() -> list[dict]:
             "requests": 32, "batches": 16,
             "host_collate_seconds": 0.4 if collator == "packed" else 4.0,
             "transfer_seconds": 0.05, "forward_seconds": 1.3,
+            "p2_h21_cuda_peak_allocated_bytes": 1024,
+            "p2_h21_cuda_peak_reserved_bytes": 2048,
         }
     return data
 
@@ -632,6 +634,10 @@ def test_h22_collator_abba_accepts_exact_h21_variable_shape_replay():
         37 / 25,
     )
     assert result["candidate_faster_in_both_pairs"]
+    assert result["h21_shared_actor_stages"][0]["cuda_peak_memory_bytes"] == {
+        "p2_h21_cuda_peak_allocated_bytes": 1024,
+        "p2_h21_cuda_peak_reserved_bytes": 2048,
+    }
     assert [x["single_actor_process_seconds"]["host_collate_seconds"]
             for x in result["h21_shared_actor_stages"]] == [
                 4.0, 0.4, 0.4, 4.0,
@@ -667,6 +673,12 @@ def test_h22_collator_abba_accepts_exact_h21_variable_shape_replay():
      "invalid H21 actor stage"),
     (1, lambda p: p["shared_actor_metrics"].update({"requests": 0}),
      "missing H21 actor requests"),
+    (1, lambda p: p["shared_actor_metrics"].update({
+        "p2_h21_cuda_peak_allocated_bytes": 0,
+    }), "missing CUDA memory receipt"),
+    (1, lambda p: p["shared_actor_metrics"].update({
+        "p2_h21_cuda_peak_reserved_bytes": 2,
+    }), "invalid H21 CUDA allocator memory"),
 ])
 def test_h22_collator_abba_rejects_drift(arm, change, reason):
     data = h22_collator_cohorts()
