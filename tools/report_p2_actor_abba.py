@@ -110,12 +110,21 @@ def report_actor_abba(
     a1: Mapping[str, Any], b1: Mapping[str, Any],
     b2: Mapping[str, Any], a2: Mapping[str, Any], *,
     experiment: str = "batching",
+    require_complete: bool = False,
+    min_seed_count: int = 1,
+    require_cuda: bool = False,
+    require_search_roots: bool = False,
 ) -> dict[str, Any]:
     if experiment not in (
         "batching", "actor-profile", "prefix-cache", "transport",
         "wire-profile", "native-fused-profile", "h21-collator",
     ):
         raise ValueError("Unsupported A/B/B/A experiment")
+    if (type(min_seed_count) is not int or min_seed_count < 1
+            or (experiment != "h21-collator" and (
+                require_complete or require_cuda or require_search_roots
+                or min_seed_count != 1))):
+        raise ValueError("Invalid full-Act H21 acceptance configuration")
     profiles = (a1, b1, b2, a2)
     verified = [
         _verified_profile(
@@ -247,6 +256,26 @@ def report_actor_abba(
                     if before.get(field) != after.get(field):
                         raise ValueError(f"{label}/{seed}: game/search drift: {field}")
     first = verified[0]["totals"]
+    if experiment == "h21-collator":
+        if len(first_rows) < min_seed_count:
+            raise ValueError(
+                f"Full-Act acceptance requires at least {min_seed_count} independent seeds"
+            )
+        if require_cuda and any(
+            identity.get("actor_device") != "cuda" for identity in identities
+        ):
+            raise ValueError("Full-Act H21 acceptance requires CUDA shared inference")
+        if require_complete and first["censored_episodes"]:
+            raise ValueError(
+                "Full-Act H21 acceptance requires zero censored episode executions"
+            )
+        if require_search_roots and not all(
+            any(run.get("search_roots", 0) > 0 and
+                run.get("search_transitions", 0) > 0
+                for row in profile["rows"].values() for run in row["runs"])
+            for profile in verified
+        ):
+            raise ValueError("Full-Act H21 acceptance requires actual combat PUCT work")
     for label, candidate in zip(ORDER[1:], verified[1:], strict=True):
         for key in (
             "completed_episodes", "censored_episodes",
@@ -507,6 +536,15 @@ def report_actor_abba(
             "within_run_replay": True, "cross_run_public_teacher": True,
             "exact_search_and_episode_work": True,
         },
+        **(
+            {"full_act_gate": {
+                "require_complete": require_complete,
+                "min_seed_count": min_seed_count,
+                "require_cuda": require_cuda,
+                "require_search_roots": require_search_roots,
+                "passed": True,
+            }} if experiment == "h21-collator" else {}
+        ),
         "configurations": {
             ("A_unprofiled_fixed4" if experiment == "actor-profile"
              else "A_uncached_fixed4" if experiment == "prefix-cache"
@@ -639,6 +677,14 @@ def main() -> None:
                             "native-fused-profile", "h21-collator"),
                    default="batching")
     p.add_argument("--output", type=Path, required=True)
+    p.add_argument("--require-complete", action="store_true",
+                   help="Reject any censored execution (H21 collator only)")
+    p.add_argument("--min-seed-count", type=int, default=1,
+                   help="Minimum independent seeds required for H21 acceptance")
+    p.add_argument("--require-cuda", action="store_true",
+                   help="Reject CPU actor evidence for H21 acceptance")
+    p.add_argument("--require-search-roots", action="store_true",
+                   help="Require actual PUCT roots and transitions in each cohort")
     args = p.parse_args()
     paths = (args.a1, args.b1, args.b2, args.a2)
     missing = [str(path) for path in paths if not path.is_file()]
@@ -647,6 +693,10 @@ def main() -> None:
     report = report_actor_abba(
         *[json.loads(path.read_text(encoding="utf-8")) for path in paths],
         experiment=args.experiment,
+        require_complete=args.require_complete,
+        min_seed_count=args.min_seed_count,
+        require_cuda=args.require_cuda,
+        require_search_roots=args.require_search_roots,
     )
     if args.output.exists():
         raise SystemExit(f"Refusing to overwrite A/B/B/A evidence: {args.output}")
