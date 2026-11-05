@@ -40,6 +40,16 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
         or getattr(args, "h21_max_batch", 4) not in (1, 4, 8, 16)
     ):
         raise ValueError("Invalid P2 A/B/B/A benchmark configuration")
+    if getattr(args, "require_full_act", False) and (
+        getattr(args, "experiment", "batching") != "h21-collator"
+        or args.actor_device != "cuda" or args.workers < 15
+        or len(seeds) < 16 or args.max_decisions < 1024
+        or args.max_searches < 1
+    ):
+        raise ValueError(
+            "Full-Act H21 acceptance requires CUDA, >=15 workers, >=16 "
+            "independent seeds, >=1024 decision limit and real PUCT searches"
+        )
     all_seeds = ",".join(seeds)
     common = [
         "--ai-root", str(args.ai_root),
@@ -142,6 +152,11 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
             for element in (flag, str(path))
         ),
         "--experiment", experiment,
+        *(
+            ["--require-complete", "--min-seed-count", "16",
+             "--require-cuda", "--require-search-roots"]
+            if getattr(args, "require_full_act", False) else []
+        ),
         "--output", str(report),
     ])
     return calls, [*files, report]
@@ -151,6 +166,9 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--execute", action="store_true",
                    help="Perform all four runs; otherwise preview commands")
+    p.add_argument("--require-full-act", action="store_true",
+                   help="H21 CUDA/15-worker/16-seed full-Act strict gate; "
+                        "reject censored episodes and missing real PUCT")
     p.add_argument("--experiment", choices=("batching", "actor-profile", "prefix-cache",
                             "transport", "wire-profile",
                             "native-fused-profile", "h21-collator"),
@@ -221,6 +239,7 @@ def main() -> None:
         "seed_count": len(args.seeds.split(",")) if args.seeds else args.seed_count,
         "commands": [shlex.join(call) for call in calls],
         "execute": args.execute,
+        "require_full_act": args.require_full_act,
     }, indent=2), flush=True)
     if args.execute:
         for index, call in enumerate(calls, start=1):
