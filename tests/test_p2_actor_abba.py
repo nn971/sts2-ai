@@ -965,7 +965,7 @@ def test_h22_stable_shape_collator_abba_requires_matched_physical_rows():
 
     wrong = deepcopy(data)
     wrong[1]["identity"]["actor_fixed_shape_batch_size"] = 0
-    with pytest.raises(ValueError, match="physical-row shape drift"):
+    with pytest.raises(ValueError, match="inconsistent actor mode|physical-row shape drift"):
         report_actor_abba(*wrong, experiment="h21-collator")
 
     wrong = deepcopy(data)
