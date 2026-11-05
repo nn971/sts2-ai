@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
-from p2_replay_diagnostics import first_trace_difference
+from p2_replay_diagnostics import classify_trace_difference
 from profile_p2_joint_throughput import (
     ROOT,
     critical_path_shares,
@@ -124,7 +124,8 @@ def _worker_seed(seed: str) -> dict[str, Any]:
             # Mixed GPU batch shapes may change numerical logits enough to
             # alter PUCT teachers or sampled actions. Do not silently round
             # teacher distributions or accept a changed action trajectory.
-            difference = first_trace_difference(signature0, signature)
+            classification = classify_trace_difference(signature0, signature)
+            difference = classification["first_difference"]
             assert difference is not None
             diagnostic = {
                 "schema": "sts2-p2-public-replay-mismatch-v1",
@@ -132,6 +133,7 @@ def _worker_seed(seed: str) -> dict[str, Any]:
                 "actor_max_batch": cfg["actor_max_batch"],
                 "actor_device": cfg["actor_device"],
                 "first_difference": difference,
+                "classification": classification,
                 "expected_trace_sha256": hashlib.sha256(
                     json.dumps(signature0, sort_keys=True).encode()
                 ).hexdigest(),
@@ -149,8 +151,11 @@ def _worker_seed(seed: str) -> dict[str, Any]:
                 encoding="utf-8",
             )
             raise RuntimeError(
-                f"P2 public action/teacher mismatch: seed={seed}, arm={arm}, "
-                f"first={difference}, diagnostics={path}"
+                f"P2 exact replay mismatch ({classification['kind']}): "
+                f"seed={seed}, arm={arm}, first={difference}, "
+                f"semantic_parity={classification['semantic_parity']}, "
+                f"search_work_parity={classification['search_work_parity']}, "
+                f"diagnostics={path}"
             )
         runs.append(report)
     assert signature0 is not None
