@@ -468,3 +468,85 @@ is still desired, the 15-worker A/B/B/A command can use
 a fresh output root. A higher watchdog increases worst-case compute
 per search simulation; do a bounded pilot before spending the full
 128 episode executions.
+
+
+## 2026-11-05: dynamic-batch replay drift persists after deterministic CUDA
+
+15-worker, 16-independent-seed H22 full-depth ABBA with deterministic CUDA
+and a 2048-action watchdog progressed as follows:
+
+| Arm | H21 collator | Cohort wall (seconds) | Completed | Censored |
+|---|---|---:|---:|---:|
+| A1 | reference | 1310.558 | 32 | 0 |
+| B1 | packed | 845.144 | 32 | 0 |
+| B2 | packed | aborted | — | — |
+| A2 | reference | not executed | — | — |
+
+B1/A1 is an **observed 1.55x preliminary wall-time ratio**
+(35.5% lower B1 wall), **not yet an accepted paired A/B/B/A result**.
+B2's second same-seed replay at
+`p2-h22-detcuda-independent-v1-10` differed only in the second PUCT
+root's search transitions (1816 versus 1818), with identical public
+actions, teacher distributions and outcome.
+`torch.use_deterministic_algorithms(True)` does not imply numerical
+identity when a **different microbatch shape, tensor padding or row
+position** changes the operation being evaluated. This is a hypothesis
+for the remaining difference; root-step replay alone cannot prove it.
+
+The old `_shape_groups` fixed-row mechanism was supported for H16 but
+explicitly prohibited for H21 because its **relation tensor width** was
+not included in stable buckets. We added optional H21
+`--actor-fixed-shape-batch-size` with a five-dimensional bucket:
+(phase, rounded objects, rounded actions, rounded selection members,
+rounded relations). The reference and packed H21 collators both
+accept identical explicit padding and produce equal values and
+masks; the actor pads the physical batch with duplicate rows to
+the selected batch size. The default remains **0** (dynamic shapes).
+`run_p2_actor_abba.py --h21-fixed-batch-size 4` enables the same
+relation-aware fixed shapes on **all four arms** and records physical
+row receipts. This is a new matched-work benchmark configuration;
+**do not compare its wall times directly with the earlier dynamic-shape
+A1/B1 arms**. All 15-worker GPU replay is still unverified.
+
+### Next minimal mixed-worker replay test (bounded-depth search)
+
+Run **one** 15-worker reference-packed configuration with actual mixed
+microbatch arrivals, 16 seeds, two replays per seed and two 16-simulation
+PUCT roots, but use a depth-8 leaf-value cutoff to avoid the unusually
+long untrained-H22 combats. This is a *stability probe*, not an accepted
+full-Act throughput result:
+
+```fish
+cd ~/projects/sts2-ai
+git pull --ff-only
+set emu ~/projects/sts2-emulator
+set rev (git -C $emu rev-parse HEAD)
+set h22 results/p2-h22-frozen-warmstart-v1.pt
+set trial_seeds
+for i in (seq 0 15)
+    set -a trial_seeds p2-h22-detcuda-independent-v1-$i
+end
+
+python tools/profile_p2_parallel_cohort.py \
+    --ai-root (pwd) --emulator-root $emu --emulator-revision $rev \
+    --checkpoint $h22 --representation h21 \
+    --actor-inference shared --actor-device cuda \
+    --actor-deterministic-cuda --actor-h21-collator packed \
+    --actor-max-batch 4 --actor-fixed-shape-batch-size 4 \
+    --workers 15 --seeds (string join , $trial_seeds) \
+    --horizon-lambda 0.411395 --macro-prior-weight 0 \
+    --ascension 0 --map-profile generated \
+    --simulations 16 --depth 8 --max-searches 2 \
+    --max-decisions 80 --paired --no-episode-profile \
+    --rollout-transport fused \
+    --output results/p2-h22-stable-h21-depth8-pilot-v1/profile.json \
+    --execute
+```
+
+If this passes same-seed strict replay, run the matched A/B/B/A
+`--experiment h21-collator --h21-fixed-batch-size 4`, with
+`--depth 8`, `--max-decisions 4096`, `--require-full-act`,
+a fresh output root and 16 seeds. Its result can be accepted only for
+**fixed-shape depth-8** inference. Training or deployment of the
+fixed-shape H21 actor remains gated on CUDA replay and throughput
+evidence; we have deliberately kept it opt-in.
