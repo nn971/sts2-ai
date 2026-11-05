@@ -88,7 +88,12 @@ def classify_trace_difference(
         expected.get("transitions"), actual.get("transitions"),
         "$.transitions",
     )
-    work_parity = work_difference is None
+    root_work_difference = first_trace_difference(
+        expected.get("search_work_per_root"),
+        actual.get("search_work_per_root"),
+        "$.search_work_per_root",
+    )
+    work_parity = work_difference is None and root_work_difference is None
     result: dict[str, Any] = {
         "kind": (
             "search_work_only" if semantic_parity and not work_parity
@@ -99,6 +104,7 @@ def classify_trace_difference(
         "first_difference": first,
         "semantic_differences": semantic_differences,
         "search_work_difference": work_difference,
+        "root_search_work_difference": root_work_difference,
         "action_counts": {
             "expected": len(expected.get("actions", ())),
             "actual": len(actual.get("actions", ())),
