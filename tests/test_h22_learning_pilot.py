@@ -152,9 +152,11 @@ def test_h22_paired_pilot_rejects_unmatched_evidence(tmp_path, change, match):
 
 
 def test_h22_paired_pilot_rejects_invalid_expected_settings(tmp_path):
-    _write_pilot(tmp_path)
+    progress = _write_pilot(tmp_path)
     with pytest.raises(ValueError, match="Invalid expected heldout"):
         verify_pilot(tmp_path, expected_heldout=0)
+    progress["experiment"]["options"]["rounds"] = 3
+    (tmp_path / "progress.json").write_text(json.dumps(progress))
     with pytest.raises(ValueError, match="Pilot has incomplete training rounds"):
         verify_pilot(
             tmp_path, expected_rounds=3, expected_workers=4,
