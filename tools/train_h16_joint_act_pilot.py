@@ -424,6 +424,8 @@ def main() -> None:
     start.add_argument("--initial-h9", type=Path)
     start.add_argument("--initial-h16", type=Path,
                        help="Warm-start from a saved H16 v2/v3 policy/value checkpoint")
+    start.add_argument("--initial-h22", type=Path,
+                       help="Initialize a fresh H21 training run from a trained H22 model")
     p.add_argument("--macro-model", type=Path, default=None)
     p.add_argument("--representation", choices=("h16", "h21"), default="h16",
                    help="Opt-in H21 owner-linked map/offer graph codec and joint model")
@@ -583,13 +585,15 @@ def main() -> None:
                 args.h17_horizon_target < 1
             ))):
         p.error("Invalid H16 pilot configuration")
+    if args.initial_h22 is not None and args.representation != "h21":
+        p.error("--initial-h22 requires --representation h21")
     if args.h17_adaptive:
         AdaptiveSearch(args.h17_search_p16, args.h17_search_p64)
-        if args.initial_h16 is None:
-            p.error("H17 must warm-start from an H16 checkpoint")
+        if args.initial_h16 is None and args.initial_h22 is None:
+            p.error("H17 requires an H16 or H22 warm-start checkpoint")
         if args.macro_model is None and args.macro_prior_weight > 0:
             p.error("H17 annealing requires the frozen macro reference")
-    for path in (args.initial_h9, args.initial_h16, args.macro_model):
+    for path in (args.initial_h9, args.initial_h16, args.initial_h22, args.macro_model):
         if path is not None and not path.is_file():
             p.error(f"Missing checkpoint: {path}")
     source = {
@@ -603,13 +607,16 @@ def main() -> None:
         "puct_provenance": "h16-native-act1-root-conditioned-privileged-v1",
         "initial_h9_sha256": sha256(args.initial_h9) if args.initial_h9 else None,
         "initial_h16_sha256": sha256(args.initial_h16) if args.initial_h16 else None,
+        **({"initial_h22_sha256": sha256(args.initial_h22)}
+           if args.initial_h22 is not None else {}),
         "macro_sha256": sha256(args.macro_model) if args.macro_model else None,
         "emulator_revision": args.emulator_revision,
         "options": {
             key: value for key, value in vars(args).items()
             if key not in (
                 "execute", "resume", "output_root", "initial_h9",
-                "initial_h16", "macro_model", "emulator_root", "ai_root", "device",
+                "initial_h16", "initial_h22", "macro_model",
+                "emulator_root", "ai_root", "device",
                 "stop_after_round", "max_wall_seconds",
             ) and (key != "actor_fixed_shape_batch_size" or value != 0) and (
                 key != "actor_h21_collator" or value != "reference"
@@ -675,10 +682,15 @@ def main() -> None:
         if progress_path.exists() or optimizer_path.exists():
             p.error("Output contains an existing run; use --resume or a new directory")
         if args.representation == "h21":
-            if args.initial_h16 is None:
-                p.error("H21 joint training requires an explicit H16 warm-start checkpoint")
-            h16 = JointActPilotNet.load(args.initial_h16, device="cpu")
-            model = JointActPilotNet.warmstart_h21(h16).to(args.device)
+            if args.initial_h22 is not None:
+                model = JointActPilotNet.load(args.initial_h22, device=args.device)
+                if model.representation != "h21":
+                    p.error("H22 warm-start must be a verified H21 checkpoint")
+            else:
+                if args.initial_h16 is None:
+                    p.error("H21 requires an H16 or H22 warm-start checkpoint")
+                h16 = JointActPilotNet.load(args.initial_h16, device="cpu")
+                model = JointActPilotNet.warmstart_h21(h16).to(args.device)
         else:
             model = (
                 JointActPilotNet.load(args.initial_h16, device=args.device)
