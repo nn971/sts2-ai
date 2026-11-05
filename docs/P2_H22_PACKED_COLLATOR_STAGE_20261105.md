@@ -399,3 +399,72 @@ an error for an unsupported operation rather than silently proceeding.
 If exact replay *still* fails, retain the diagnostic and investigate
 emulator state/cloning and other remaining sources of nondeterminism
 before claiming that the scatter fix is sufficient.
+
+
+## 2026-11-05: rare full-depth PUCT >512-action watchdog (15-worker CUDA)
+
+The independent deterministic-CUDA full-Act A1 cohort aborted on
+`p2-h22-detcuda-independent-v1-1` with
+`IncompleteCombatRollout: Full-combat PUCT exceeded 512 actions without reaching
+combat termination`. This is a **single simulated combat continuation**,
+not a 512-decision Act, an actor deadlock or a CUDA determinism exception.
+The H22 checkpoint in this comparison is an **H16-partially-warmstarted,
+H21-graph-untrained diagnostic checkpoint**. It can play long or
+non-progressing simulated fights; no evidence yet establishes why this
+seed exceeds the limit. Earlier single-seed deterministic CUDA replay
+passed exactly and remains valid.
+
+The P2 A/B/B/A runner now forwards an explicit
+`--max-simulation-steps N` to all four arms. The default is still **512**,
+matching the ordinary cohort profiler and full-combat PUCT implementation.
+Watchdog failure now includes its simulation index, public player HP,
+floor, combat turn and visible enemy HP (when available), observation
+hashes, legal-menu length and eight most recent action IDs.
+There is **no fallback terminal value or counterfeit win/loss**.
+
+**First test the exact failing seed in isolation** with a 2048-action guard
+and unprofiled deterministic CUDA (a *diagnostic*, not a full cohort):
+
+```fish
+cd ~/projects/sts2-ai
+git fetch origin
+git switch perf/p2-h22-packed-collator-20261105
+git pull --ff-only
+set emu ~/projects/sts2-emulator
+set rev (git -C $emu rev-parse HEAD)
+set h22 results/p2-h22-frozen-warmstart-v1.pt
+
+python tools/profile_p2_parallel_cohort.py \
+    --ai-root (pwd) --emulator-root $emu --emulator-revision $rev \
+    --checkpoint $h22 --representation h21 \
+    --actor-h21-collator reference \
+    --actor-inference shared --actor-device cuda \
+    --actor-deterministic-cuda --actor-max-batch 1 \
+    --macro-prior-weight 0 --horizon-lambda 0.411395 \
+    --workers 1 --seeds p2-h22-detcuda-independent-v1-1 \
+    --ascension 0 --map-profile generated \
+    --simulations 16 --depth 0 --max-searches 2 \
+    --max-simulation-steps 2048 --max-decisions 4096 \
+    --paired --no-episode-profile --rollout-transport fused \
+    --output results/p2-h22-long-fight-one-seed-v1/profile.json --execute
+```
+
+If the watchdog still fails at 2048, **do not repeatedly increase the
+cap** on all 16 seeds. The fresh error's public HP/turn/enemy HP and last
+actions can identify a stall in an untrained policy. Use a trained
+H22 checkpoint when one exists, or use bounded-depth PUCT for a
+strictly matched *collator throughput* experiment.
+
+An alternative **bounded-depth collator throughput benchmark** uses
+`--depth 8` instead of `--depth 0` in the existing 15-worker A/B/B/A
+command, with a distinct output root. Its PUCT leaf value estimates are
+legitimate finite-depth search targets; report it as **depth-8 search**,
+not completed-combat search. Full-Act completion and same-seed strict
+action/teacher/work parity remain mandatory.
+
+If the 2048-action diagnostic ends normally and a full-depth benchmark
+is still desired, the 15-worker A/B/B/A command can use
+`--max-simulation-steps 2048`, a fresh independent seed prefix and
+a fresh output root. A higher watchdog increases worst-case compute
+per search simulation; do a bounded pilot before spending the full
+128 episode executions.
