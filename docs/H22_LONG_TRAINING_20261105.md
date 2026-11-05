@@ -5,6 +5,7 @@
 - Silent A0, native Overgrowth generated maps, H21 grounded macro graph and packed deterministic CUDA actor, 15 emulator workers.
 - **Trained starting policy**: `results/h22-packed-paired16-two-rounds-v1/models/joint-r0002.pt`. New `--initial-h22` loads the schema-verified H21 checkpoint with a **fresh optimizer and replay buffer**. The checkpoint's SHA256 is part of the immutable experiment fingerprint.
 - **64 training episodes per round**, 16 fixed search-free heldout seeds. Initial evaluation, round 1, every fifth round, and the planned final round: `--heldout-every-rounds 5`. Non-evaluated progress rows contain `heldout: null` and `heldout_evaluated: false`.
+- **Minibatch 32** (rather than the 15-episode pilot's 8) keeps the number of primary optimizer steps per round closer to the pilot while using four times as many, more diverse training episodes. Validate GPU memory and update stability in the five-round stage.
 - **150 planned maximum rounds**. Only `--stop-after-round` and `--max-wall-seconds` vary between resumes; both are excluded from the training fingerprint. The round plan, model source, settings and emulator revision must stay identical.
 - Per-round checkpoint and optimizer snapshot `models/joint-rNNNN.pt` and `models/optimizer-rNNNN.pt` plus H17 replay and `progress.json`. Resume verifies model digest and uses the optimizer snapshot corresponding to the last **committed** progress round; in-progress work may be repeated after interruption.
 - PUCT is still 16 simulations, depth 8, up to one root per episode with adaptive probability .15. This is a validated, bounded search setting. Full-combat PUCT is a separate experiment, not yet demonstrated at 64 episodes/round.
@@ -37,7 +38,7 @@ python -u tools/train_h22_h21_generated_a0.py \
     --heldout-every-rounds 5 --workers 15 \
     --study-seed 20261106 --search-depth 8 \
     --h17-search-p16 0.15 --h17-search-p64 0 \
-    --max-searches 1 --max-decisions 4096 --minibatch 8 \
+    --max-searches 1 --max-decisions 4096 --minibatch 32 \
     --evaluation-horizon-lambda 0.4113950303216448 \
     --stop-after-round 5 \
     --output-root $out --execute
