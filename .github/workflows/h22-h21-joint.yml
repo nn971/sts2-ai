@@ -10,6 +10,7 @@ on:
       - 'tools/train_h16_joint_act_pilot.py'
       - 'tools/train_h22_h21_generated_a0.py'
       - 'tools/probe_h22_joint_bridge.py'
+      - 'tools/check_h22_packed_training_smoke.py'
       - 'tests/test_h22_h21_joint_training.py'
       - '.github/workflows/h22-h21-joint.yml'
   workflow_dispatch:
@@ -91,4 +92,21 @@ jobs:
             --output-root results/p2-h22-ci-collator-abba
           python -c 'import json; from pathlib import Path; r = json.loads(Path("results/p2-h22-ci-collator-abba/p2-h22-collator-abba-report.json").read_text()); assert r["parity"]["passed"]; assert r["workload"]["search_transitions_per_run"] > 0; print(json.dumps({"h22_abba_contract": "pass", "matched_seed_count": r["parity"]["seed_count"], "wall_ratio_cpu_untrained_diagnostic": r["ratio_of_total_baseline_to_candidate_wall"], "candidate_faster_in_both_pairs": r["candidate_faster_in_both_pairs"]}, sort_keys=True))'
 
-
+      - name: One-round H22 real-emulator packed fixed-shape CPU training smoke
+        run: |
+          python -c 'from pathlib import Path; from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer; from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet; JointActPilotNet(SharedObjectTransformer(H7Config(width=32, layers=1, heads=4, feedforward=64))).save(Path("h22-ci-initial-h16.pt"))'
+          python -u tools/train_h22_h21_generated_a0.py \
+            --execute --emulator-root emulator-v1 \
+            --emulator-revision "$(git -C emulator-v1 rev-parse HEAD)" \
+            --initial-h16 h22-ci-initial-h16.pt --macro-prior-weight 0 \
+            --device cpu --actor-inference shared --actor-device cpu \
+            --actor-h21-collator packed \
+            --actor-fixed-shape-batch-size 2 --actor-max-batch 2 \
+            --rounds 1 --runs-per-round 2 --heldout-runs 1 --workers 1 \
+            --study-seed 20261105 --simulations 8 --search-depth 2 \
+            --h17-search-p16 0 --h17-search-p64 0 --max-searches 1 \
+            --max-decisions 512 --minibatch 4 \
+            --output-root results/h22-ci-packed-one-round
+          python tools/check_h22_packed_training_smoke.py \
+            --output-root results/h22-ci-packed-one-round \
+            --fixed-rows 2
