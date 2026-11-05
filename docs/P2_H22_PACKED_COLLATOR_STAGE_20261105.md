@@ -933,3 +933,68 @@ python tools/report_h22_learning_pilot.py --output-root $out \
 If the second round fails again, capture the traceback and progress
 without replacing the existing round-1 output. Do not launch a six-hour
 training run on the basis of this short pilot alone.
+
+
+## 2026-11-05: paired16 two-round learning pilot COMPLETE
+
+The user's resumed H22 CUDA run produced validated
+`results/h22-packed-paired16-two-rounds-v1/learning-pilot-report.json`
+plus `progress.json`. Exact experiment fingerprint
+`abf30ff8f528b6aa26198457a6ce24ed4681c64f8d7af0683e52506d7db2110d`
+on pinned emulator
+`203d5114024b55c69dabc309f10d6f196eac8cca`;
+the two round checkpoints have source-report SHA256 prefixes
+`f20b5a9140cc` and `ba0ed3e69833`.
+The fixed evaluation horizon was `0.4113950303216448` and all 16
+heldout seeds were identical across baseline, r1 and r2, with search
+off and zero censored episodes.
+
+| Metric | pre-update baseline | post-r1 | post-r2 |
+|---|---:|---:|---:|
+| Heldout mean maximum floor | 1.0000 | 6.4375 | 6.6250 |
+| Heldout median maximum floor | 1 | 5.5 | 6 |
+| Heldout floor-1 deaths | 16/16 | 0/16 | 0/16 |
+| Heldout combat wins | 0 | 56 | 56 |
+| Act clears | 0 | 0 | 0 |
+| Training mean max floor | -- | 1.0000 | 6.6667 |
+| Training floor-1 deaths | -- | 15/15 | 0/15 |
+| Primary optimizer steps | -- | 39 | 208 |
+| Adaptive search roots | -- | 14 | 15 |
+| Collection TPS (approx.) | -- | 77.66 | 77.58 |
+
+**Important distinctions in the paired report:**
+`improved_seeds=16` in *both* rounds is measured relative to the
+**initial baseline**, not from one trained round to the next. For
+**r1→r2**, exactly **6 seeds improved, 6 were unchanged, 4 regressed**;
+the net mean floor gain was only **+0.1875** (median paired change 0).
+R1 vs initial baseline improves all 16 seeds by an average +5.4375
+floors, a clear early policy effect on the matched evaluation cohort.
+Training r1 vs r2 used different seeds and differently initialized
+policies, so their mean floor difference is descriptive only.
+Zero clears in 16 heldout attempts at each trained stage.
+
+**Replay fix validated:** r2 replay handled 256 examples (59 macro,
+14 PUCT policy targets), 8 extra replay steps at finite loss 0.518524;
+r2 primary update used 1309 combat + 353 macro decisions and 208
+optimizer steps. Chosen-card diversity grew from 10 to 34 types;
+new macro resource signatures and map choices appeared beyond floor 1.
+GPU actor confirmed fixed-4 packed H21 CUDA in both rounds.
+
+**Efficiency / readiness:** r1 collection 25.59s, update 4.12s,
+heldout 33.58s (~53% measured stage time in evaluation); r2
+collection 44.02s, update 20.47s, heldout 38.21s (~37%). These are
+small-run measurements and should not be extrapolated as a fixed
+long-run rate. The initial floor-1 learning deadlock is resolved; the
+pilot does *not* establish sustained improvement across trained
+rounds or any Act-clear capability. Next training design should
+increase the training-to-evaluation ratio (e.g. 64 train / 16 fixed
+heldout per round), retain a pinned untouched second evaluation
+cohort for generalization, monitor Act clears/floor progress and
+explicitly permit safe resumed extension. Keep per-round fresh
+checkpoints and avoid inferring convergence from this initial jump.
+
+The reporter has been extended (additive fields) with
+`improved_vs_previous`, `unchanged_vs_previous`,
+`regressed_vs_previous` in addition to the legacy
+baseline-relative counts. Re-running the reporter on the same output
+recomputes those fields without new simulator work.
