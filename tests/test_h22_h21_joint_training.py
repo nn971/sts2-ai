@@ -229,10 +229,29 @@ def test_h22_entrypoint_defaults_stay_schema_isolated():
     def last(flag):
         return defaults[len(defaults) - 1 - defaults[::-1].index(flag) + 1]
     assert last("--representation") == "h21"
-    assert last("--actor-fixed-shape-batch-size") == "0"
+    assert last("--actor-h21-collator") == "packed"
+    assert last("--actor-fixed-shape-batch-size") == "4"
     assert last("--actor-max-batch") == "4"
     assert last("--map-profile") == "generated"
     assert last("--rollout-transport") == "fused"
+
+
+def test_h22_packed_default_keeps_reference_opt_out_and_cuda_determinism_explicit():
+    from tools.train_h22_h21_generated_a0 import h22_cli_arguments
+
+    default = h22_cli_arguments([])
+    assert default[default.index("--actor-h21-collator") + 1] == "packed"
+    assert default[default.index("--actor-fixed-shape-batch-size") + 1] == "4"
+    # Generic H16/H18 and CPU smoke settings remain independently selectable.
+    assert "--actor-deterministic-cuda" not in default
+    reference = h22_cli_arguments([
+        "--actor-h21-collator", "reference",
+        "--actor-fixed-shape-batch-size", "0",
+    ])
+    assert reference[-4:] == (
+        "--actor-h21-collator", "reference",
+        "--actor-fixed-shape-batch-size", "0",
+    )
 
 
 def test_h22_joint_optimizer_updates_h21_macro_graph():
