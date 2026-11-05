@@ -231,3 +231,86 @@ remain untrained. Prefer a real trained H22 model when one exists and
 consider a capped reference/packed pilot before the 128-execution full-Act
 benchmark. The emulator checkout must supply the `prototype-ai-v1`
 public schema, regardless of its SHA.
+
+
+## 2026-11-05: 15-worker CUDA same-seed search-work drift
+
+On the first reference `A1` cohort, the user observed a paired replay
+failure on `p2-h22-collator-v1-full-1`:
+
+- First run: **4,692** search transitions.
+- Second run: **4,693** search transitions; +1/4,693 (0.0213%).
+- The original first mismatch was `$.transitions`. Because the
+  diagnostic checker visits dictionary fields in sorted order, the
+  preceding `actions` (observations, chosen actions, legal menus, full
+  teacher policies), `final_public_frame`, `outcome`, and `searches`
+  had **already matched exactly**.
+- This is evidence for *search-work accounting variability with
+  identical public/teacher outputs*. It does not establish whether
+  different CUDA batch shapes, near-tied PUCT traversal, or emulator
+  stochastic-state handling caused the extra step.
+
+The P2 replay failure now explicitly distinguishes
+`search_work_only` from `semantic_or_teacher_drift`, without accepting
+either as an exact-work match. An opt-in-free, extremely small two-integer
+receipt (plus decision index) is now included in every PUCT-root replay
+signature; the next failure reports the first divergent root's decision
+index and transition count, alongside the original aggregate count.
+Per-root search profiling remains **disabled**; these receipts measure
+work only and do not time or alter the search.
+
+Suggested targeted smoke to separate GPU dynamic-batch shape effects from
+general same-seed nondeterminism. Both commands use a distinct output
+directory and a **single problematic seed**; neither is a candidate
+15-worker speedup result.
+
+```fish
+cd ~/projects/sts2-ai
+set emu ~/projects/sts2-emulator
+set rev (git -C $emu rev-parse HEAD)
+set h22 results/p2-h22-frozen-warmstart-v1.pt
+
+# Matched one-worker, singleton CUDA inference, real full-depth combat search.
+python tools/profile_p2_parallel_cohort.py \
+    --ai-root (pwd) --emulator-root $emu --emulator-revision $rev \
+    --checkpoint $h22 --representation h21 \
+    --actor-h21-collator reference \
+    --actor-inference shared --actor-device cuda \
+    --actor-max-batch 1 --actor-fixed-shape-batch-size 0 \
+    --macro-prior-weight 0 --workers 1 \
+    --seeds p2-h22-collator-v1-full-1 \
+    --ascension 0 --map-profile generated \
+    --simulations 16 --depth 0 --max-searches 2 \
+    --max-decisions 4096 --paired --no-episode-profile \
+    --rollout-transport fused \
+    --output results/p2-h22-work-drift-singleton-v1/profile.json --execute
+```
+
+If singleton CUDA is stable, run a **bounded** 15-worker numerical
+batch-parity probe to identify whether mixing decision shapes changes
+GPU logits/values. This probe adds singleton forwards and synchronizes
+CUDA; its output must never be used as a throughput estimate.
+
+```fish
+python tools/profile_p2_parallel_cohort.py \
+    --ai-root (pwd) --emulator-root $emu --emulator-revision $rev \
+    --checkpoint $h22 --representation h21 \
+    --actor-h21-collator reference \
+    --actor-inference shared --actor-device cuda \
+    --actor-max-batch 4 --actor-fixed-shape-batch-size 0 \
+    --actor-profile --actor-batch-parity-probe \
+    --macro-prior-weight 0 --workers 15 \
+    --seeds (string join , (for i in (seq 0 15); echo "p2-h22-collator-v1-full-$i"; end)) \
+    --ascension 0 --map-profile generated \
+    --simulations 16 --depth 0 --max-searches 2 \
+    --max-decisions 160 --paired --no-episode-profile \
+    --rollout-transport fused \
+    --output results/p2-h22-work-drift-shape-probe-v1/profile.json --execute
+```
+
+If the probe detects a mismatch, it writes
+`results/p2-h22-work-drift-shape-probe-v1/actor-batch-numerical-parity.json`
+even when public/teacher replay aborts. A nonzero logit/value delta
+correlates with batch shape but is *not by itself proof* that the
+one-transition discrepancy had that cause. If both tests replay exactly,
+repeat the 15-worker search-work test on an independent seed set.
