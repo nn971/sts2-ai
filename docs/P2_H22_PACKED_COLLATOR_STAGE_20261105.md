@@ -795,3 +795,82 @@ python -c 'import json; from pathlib import Path; root=Path("results/h22-packed-
 heldout seeds and a short multi-round progression with recorded
 pre/post model performance. Treat the 15 first-combat defeats as a
 separate behavior issue, not as a failure of the packed collator.
+
+
+## 2026-11-05 next learning pilot: two rounds, 16 paired heldout seeds
+
+The 15-worker GPU integration smoke passes, but **15/15 initial
+training episodes died on floor 1**. Its two heldout episodes reached
+floors 7/8 after the optimizer update. That earlier `baseline.json`
+used a **different evaluation horizon (0)** from heldout round 1
+(`0.4113950303216448`), so comparing those two summaries alone
+cannot attribute differences to learning even on the same seeds.
+
+For the next small learning pilot, freeze the **evaluation horizon**
+across baseline and every round using the new optional
+`--evaluation-horizon-lambda`. The **training horizon still follows
+H17's schedule**. Training and heldout seeds stay disjoint;
+the 16 heldout seeds remain identical across all three evaluations
+(baseline, round 1, round 2). All evaluation calls disable PUCT.
+This isolates model updates from the principal horizon/seed/search
+confounders in the earlier baseline. The per-seed outcome comparison
+remains descriptive, not proof of sample-wide generalization.
+
+```fish
+cd ~/projects/sts2-ai
+git switch perf/p2-h22-packed-collator-20261105
+git pull --ff-only
+
+set emu ~/projects/sts2-emulator
+set rev (git -C $emu rev-parse HEAD)
+set initial results/h16-v5-combat-credit-r150/models/joint-r0079.pt
+set out results/h22-packed-paired16-two-rounds-v1
+
+test -f $initial; or begin
+    echo "Missing H16 R79 warm-start: $initial" >&2
+    exit 1
+end
+
+python -u tools/train_h22_h21_generated_a0.py \
+    --emulator-root $emu --emulator-revision $rev \
+    --initial-h16 $initial --macro-prior-weight 0 \
+    --device cuda --actor-inference shared --actor-device cuda \
+    --actor-deterministic-cuda --actor-h21-collator packed \
+    --actor-max-batch 4 --actor-fixed-shape-batch-size 4 \
+    --rounds 2 --runs-per-round 15 --heldout-runs 16 --workers 15 \
+    --study-seed 20261105 --search-depth 8 \
+    --h17-search-p16 0.15 --h17-search-p64 0 \
+    --max-searches 1 --max-decisions 512 --minibatch 8 \
+    --evaluation-horizon-lambda 0.4113950303216448 \
+    --output-root $out --execute
+
+python tools/report_h22_learning_pilot.py \
+    --output-root $out \
+    --expected-rounds 2 --expected-train 15 \
+    --expected-heldout 16 --expected-workers 15 \
+    --fixed-rows 4 \
+    --evaluation-horizon-lambda 0.4113950303216448
+```
+
+The last command writes `learning-pilot-report.json`, with
+pre-update/round-1/round-2 summaries, paired per-seed floor deltas
+relative to baseline and previous round, improved/unchanged/regressed
+seed counts, floor-1 training death counts, search roots, optimizer
+steps and measured collection throughput. It **fails closed** for
+mismatched heldout seed sets, incomplete/censored episodes, missing
+training/search/optimizer work, checkpoint hash mismatch, missing
+packed/fixed-4/deterministic CUDA receipts, and changed evaluation
+horizon/provenance. This report is an *evaluation audit*, not a
+statistical convergence criterion.
+
+Keep the existing one-round CUDA smoke intact. The new pilot starts
+fresh from H16 R79 and requires a **new output root**. On any failure,
+retain `baseline.json`, `progress.json`, checkpoints, and logs;
+do not advance immediately to the six-hour training task.
+
+**Readiness check:** look for improvement in the *paired heldout*
+mean maximum floor and number of improved seeds in both rounds, and
+for reductions in training floor-1 deaths. A flat or sharply
+regressing paired evaluation is evidence to investigate the initial
+H21 policy and search/training behavior. Even an improving two-round
+pilot remains small and should inform—not certify—the long-run plan.
