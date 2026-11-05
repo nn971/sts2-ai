@@ -9,7 +9,7 @@ import pytest
 
 from tools.report_p2_actor_abba import report_actor_abba
 from tools.report_p2_cohort_comparison import MATCH_FIELDS
-from tools.run_p2_actor_abba import make_commands
+from tools.run_p2_actor_abba import make_commands, preflight_checkpoint
 
 
 def cohort(
@@ -829,3 +829,48 @@ def test_h22_full_act_runner_enforces_cuda_15_workers_and_full_decisions(tmp_pat
         setattr(candidate, attr, bad)
         with pytest.raises(ValueError, match="Full-Act H21 acceptance"):
             make_commands(candidate)
+
+
+def test_h22_checkpoint_preflight_detects_missing_path(tmp_path):
+    with pytest.raises(ValueError, match="Missing frozen checkpoint"):
+        preflight_checkpoint(Namespace(
+            experiment="h21-collator", checkpoint=tmp_path / "absent.pt",
+        ))
+
+
+def test_h22_frozen_checkpoint_creation_and_schema_preflight(tmp_path):
+    import torch
+
+    from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
+    from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet
+    from tools.create_p2_h22_frozen_checkpoint import create_checkpoint
+
+    torch.manual_seed(11)
+    h16 = JointActPilotNet(SharedObjectTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64)))
+    source = tmp_path / "h16-r79.pt"
+    output = tmp_path / "h22-frozen.pt"
+    h16.save(source)
+    provenance = create_checkpoint(source, output, seed=17)
+    assert provenance["representation"] == "h21"
+    assert provenance["trained_h21_steps"] == 0
+    assert provenance["output_h22"] == str(output.resolve())
+    assert output.is_file()
+    loaded = JointActPilotNet.load(output)
+    assert loaded.representation == "h21"
+    preflight_checkpoint(Namespace(experiment="h21-collator", checkpoint=output))
+    with pytest.raises(ValueError, match="expected H22 H21"):
+        preflight_checkpoint(Namespace(experiment="h21-collator", checkpoint=source))
+    with pytest.raises(FileExistsError, match="Refusing to overwrite"):
+        create_checkpoint(source, output, seed=17)
+    with pytest.raises(FileNotFoundError, match="Missing H16 source"):
+        create_checkpoint(tmp_path / "absent-h16.pt", tmp_path / "new.pt")
+    with pytest.raises(ValueError, match="Expected H16 source"):
+        create_checkpoint(output, tmp_path / "new.pt")
+
+    # Same source and seed reproduce identical initialized weights.
+    second = tmp_path / "h22-frozen-copy.pt"
+    create_checkpoint(source, second, seed=17)
+    other = JointActPilotNet.load(second)
+    for key, value in loaded.state_dict().items():
+        assert torch.equal(value, other.state_dict()[key]), key
