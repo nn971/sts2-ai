@@ -16,7 +16,13 @@ from typing import Any
 from sts2_ai.training.h16_joint_act_pilot import H22_SCHEMA
 
 try:
-    from tools.train_h16_joint_act_pilot import collect, seed_namespace, sha256, summarize, write_json
+    from tools.train_h16_joint_act_pilot import (
+        collect,
+        seed_namespace,
+        sha256,
+        summarize,
+        write_json,
+    )
 except ModuleNotFoundError:
     from train_h16_joint_act_pilot import collect, seed_namespace, sha256, summarize, write_json
 
@@ -29,7 +35,10 @@ def audit_checkpoint(
 ) -> dict[str, Any]:
     if type(audit_count) is not int or audit_count < 1:
         raise ValueError("Independent audit count must be positive")
-    if not audit_tag or any(char not in "abcdefghijklmnopqrstuvwxyz0123456789-_" for char in audit_tag):
+    if (not audit_tag or any(
+        char not in "abcdefghijklmnopqrstuvwxyz0123456789-_"
+        for char in audit_tag
+    )):
         raise ValueError("Audit tag must use lowercase letters, digits, '-' or '_'")
     progress = json.loads(progress_path.read_text())
     source = progress["experiment"]
