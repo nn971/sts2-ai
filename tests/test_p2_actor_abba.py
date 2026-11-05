@@ -876,3 +876,53 @@ def test_h22_frozen_checkpoint_creation_and_schema_preflight(tmp_path):
     other = JointActPilotNet.load(second)
     for key, value in loaded.state_dict().items():
         assert torch.equal(value, other.state_dict()[key]), key
+
+
+def test_h22_deterministic_cuda_abba_flag_is_matched_across_arms(tmp_path):
+    args = Namespace(
+        experiment="h21-collator", actor_deterministic_cuda=True,
+        h21_max_batch=4, require_full_act=True,
+        seeds=None, seed_prefix="h22-det", seed_count=16, workers=15,
+        max_decisions=4096, max_searches=2, simulations=16, depth=0,
+        actor_max_delay_ms=2.0, horizon_lambda=0.411395,
+        macro_prior_weight=0, macro_model=None,
+        ascension=0, ai_root=Path("/tmp/ai"), emulator_root=Path("/tmp/emu"),
+        emulator_revision="pinned-sha", checkpoint=Path("h22.pt"),
+        actor_device="cuda", map_profile="generated", output_root=tmp_path,
+    )
+    commands, _ = make_commands(args)
+    assert all("--actor-deterministic-cuda" in cmd for cmd in commands[:4])
+    assert "--actor-deterministic-cuda" not in commands[-1]
+    for experiment, device in (("batching", "cuda"), ("h21-collator", "cpu")):
+        broken = Namespace(**vars(args))
+        broken.experiment = experiment
+        broken.actor_device = device
+        with pytest.raises(ValueError, match="Invalid P2 A/B/B/A"):
+            make_commands(broken)
+
+
+def test_h22_deterministic_cuda_report_verifies_actor_receipts():
+    data = h22_collator_cohorts()
+    for record in data:
+        record["identity"]["actor_deterministic_cuda"] = True
+        record["shared_actor_metrics"]["p2_deterministic_cuda"] = True
+        record["shared_actor_metrics"][
+            "p2_cuda_cublas_workspace_config"
+        ] = ":4096:8"
+    report = report_actor_abba(*data, experiment="h21-collator")
+    assert report["actor_deterministic_cuda"] is True
+
+    wrong = deepcopy(data)
+    wrong[1]["shared_actor_metrics"]["p2_deterministic_cuda"] = False
+    with pytest.raises(ValueError, match="deterministic CUDA provenance"):
+        report_actor_abba(*wrong, experiment="h21-collator")
+
+    wrong = deepcopy(data)
+    wrong[2]["shared_actor_metrics"]["p2_cuda_cublas_workspace_config"] = ":0:0"
+    with pytest.raises(ValueError, match="invalid deterministic CUDA BLAS"):
+        report_actor_abba(*wrong, experiment="h21-collator")
+
+    wrong = deepcopy(data)
+    wrong[3]["identity"]["actor_deterministic_cuda"] = False
+    with pytest.raises(ValueError, match="deterministic CUDA provenance"):
+        report_actor_abba(*wrong, experiment="h21-collator")
