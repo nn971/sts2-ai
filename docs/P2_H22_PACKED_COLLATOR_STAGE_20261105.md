@@ -599,7 +599,7 @@ enabled. Continue with one-round actual H22 public-v1 generated-map
 training smoke and a 15-worker stability pilot **before** a long run.
 
 
-## Actual H22 one-round packed CUDA training smoke (staged; results pending)
+## Actual H22 one-round packed CUDA training smoke (CUDA pending; CPU CI passed)
 
 This is a **short integration smoke**, separate from the accepted four-seed
 P2 fixed-shape throughput benchmark. It uses real H22-generated A0
@@ -652,3 +652,26 @@ a 1-round real emulator training call with packed/fixed-2, without
 CUDA; it checks optimizer and checkpoint as well. The CPU CI result
 tests execution wiring, whereas the user-local CUDA command verifies
 the GPU-specific actor contract.
+
+
+### Real-emulator H22 CPU CI result — passed
+
+The automatically triggered real public-v1 H22 integration job **passed**
+on AI SHA `3cf9f7e47b79a5af84b754def423d1d60ec2716c`.
+The CPU CI smoke used a small H16 initialization for a new H21 model,
+generated Silent A0 maps, two completed training episodes, one completed
+heldout episode, **zero censored**, two depth-2 PUCT search roots
+(66 search transitions), **27 real optimizer steps**, and an H22 checkpoint
+with verified SHA
+`c3530de06856ae42b749a2fda10bc78abebde7e6bdc8dd8dc957eb58ad8f13f1`.
+The shared packed actor's recorded physical batch size was 2. The check
+confirmed finite saved H21 parameters, persisted optimizer state,
+correct H21 codec and actor receipts.
+
+CI logs and `progress.json`, `baseline.json`, and
+`smoke-verification.json` are available in
+[the successful workflow artifact](https://github.com/nn971/sts2-ai/actions/runs/41970791881/artifacts/13389334147).
+
+This is a **CPU real-emulator integration acceptance**, not proof of
+the local deterministic CUDA actor during optimizer training; the fish
+command above is still the exact pending GPU smoke.
