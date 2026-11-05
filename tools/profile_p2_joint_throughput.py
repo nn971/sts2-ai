@@ -57,12 +57,19 @@ def dll_identity(root: Path) -> dict[str, str] | None:
     return {"path": str(binaries[0]), "sha256": sha256(binaries[0])}
 
 
-def extract_signature(episode: PilotEpisode) -> dict[str, Any]:
+def extract_signature(
+    episode: PilotEpisode, *,
+    p2_search_work_receipts: list[dict[str, int]] | None = None,
+) -> dict[str, Any]:
     """The public decision and teacher trace used for paired replay checks."""
     return {
         "outcome": episode.outcome,
         "searches": episode.searches,
         "transitions": episode.search_transitions,
+        **(
+            {"search_work_per_root": p2_search_work_receipts}
+            if p2_search_work_receipts is not None else {}
+        ),
         "actions": [
             {
                 "observation_hash": d.observation.observation_hash,
@@ -137,6 +144,7 @@ def run_episode(
     remote_wait_before = remote.wait_seconds if remote is not None else 0.0
     roots: list[dict[str, object]] = []
     cache_roots: list[dict[str, object]] = []
+    search_work_receipts: list[dict[str, int]] = []
     from sts2_ai.emulator.run_environment import EXPERIMENTAL_FIXED_ROUTE_PROFILE
     start = time.perf_counter()
     episode = collect_act_episode(
@@ -159,6 +167,7 @@ def run_episode(
         search_profiles=(roots if profile_search else None),
         p2_prefix_cache_handles=p2_prefix_cache_handles,
         p2_cache_report=(cache_roots if p2_prefix_cache_handles else None),
+        p2_search_work_receipts=search_work_receipts,
     )
     elapsed = time.perf_counter() - start
     ops = backend.operation_profile()
@@ -248,7 +257,9 @@ def run_episode(
             "GPU synchronization-specific timings (when using CUDA)",
         ],
     }
-    return report, extract_signature(episode)
+    return report, extract_signature(
+        episode, p2_search_work_receipts=search_work_receipts,
+    )
 
 
 def parse_args() -> argparse.Namespace:
