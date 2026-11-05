@@ -49,10 +49,56 @@ class H21StableEmbedding(nn.Module):
         return result
 
 
-def collate_h21(decisions: list[EncodedDecision]) -> H7Batch:
+def _h21_padding(actual: int, requested: int | None, name: str) -> int:
+    if requested is not None and requested < actual:
+        raise ValueError(f"Fixed H21 actor bucket underflows {name}")
+    return actual if requested is None else requested
+
+
+def collate_h21(
+    decisions: list[EncodedDecision], *,
+    pad_objects: int | None = None,
+    pad_actions: int | None = None,
+    pad_members: int | None = None,
+    pad_relations: int | None = None,
+) -> H7Batch:
     batch = collate_h7(decisions, expected_schema=H21_OBJECT_SCHEMA)
     n = len(decisions)
-    max_edges = max(1, *(len(item.relations) for item in decisions))
+    max_edges = _h21_padding(
+        max(1, *(len(item.relations) for item in decisions)),
+        pad_relations, "relations",
+    )
+    object_padding = _h21_padding(
+        batch.kinds.shape[1], pad_objects, "objects",
+    ) - batch.kinds.shape[1]
+    action_padding = _h21_padding(
+        batch.action_kinds.shape[1], pad_actions, "actions",
+    ) - batch.action_kinds.shape[1]
+    member_padding = _h21_padding(
+        batch.action_members.shape[2], pad_members, "members",
+    ) - batch.action_members.shape[2]
+    if object_padding or action_padding or member_padding:
+        import torch.nn.functional as F
+
+        tensors = vars_as_dict(batch)
+        for name in ("kinds", "identities", "zones", "numeric", "observed",
+                     "owners", "object_mask"):
+            value = -1 if name == "owners" else 0
+            tensor = tensors[name]
+            dimensions = ((0, 0, 0, object_padding)
+                          if tensor.ndim == 3 else (0, object_padding))
+            tensors[name] = F.pad(tensor, dimensions, value=value)
+        for name in ("action_kinds", "action_semantics", "sources", "targets",
+                     "action_mask"):
+            value = -1 if name in ("sources", "targets") else 0
+            tensors[name] = F.pad(
+                tensors[name], (0, action_padding), value=value,
+            )
+        tensors["action_members"] = F.pad(
+            tensors["action_members"],
+            (0, member_padding, 0, action_padding), value=-1,
+        )
+        batch = H7Batch(**tensors)
     types = torch.zeros(n, max_edges, dtype=torch.long)
     sources = torch.full_like(types, -1)
     targets = torch.full_like(types, -1)
@@ -74,7 +120,13 @@ def collate_h21(decisions: list[EncodedDecision]) -> H7Batch:
     )
 
 
-def collate_h21_packed(decisions: list[EncodedDecision]) -> H20Batch:
+def collate_h21_packed(
+    decisions: list[EncodedDecision], *,
+    pad_objects: int | None = None,
+    pad_actions: int | None = None,
+    pad_members: int | None = None,
+    pad_relations: int | None = None,
+) -> H20Batch:
     """Opt-in P2 candidate: build each CPU tensor in a single conversion.
 
     This preserves the exact H21 v4 object/action/relation layout of
@@ -88,13 +140,21 @@ def collate_h21_packed(decisions: list[EncodedDecision]) -> H20Batch:
     if any(not item.objects or not item.actions for item in decisions):
         raise ValueError("H7 decisions require objects and legal actions")
 
-    max_objects = max(len(item.objects) for item in decisions)
-    max_actions = max(len(item.actions) for item in decisions)
-    max_members = max(
-        1, max((len(action.members) for item in decisions
-                for action in item.actions), default=0),
+    max_objects = _h21_padding(
+        max(len(item.objects) for item in decisions), pad_objects, "objects",
     )
-    max_edges = max(1, *(len(item.relations) for item in decisions))
+    max_actions = _h21_padding(
+        max(len(item.actions) for item in decisions), pad_actions, "actions",
+    )
+    max_members = _h21_padding(
+        max(1, max((len(action.members) for item in decisions
+                    for action in item.actions), default=0)),
+        pad_members, "members",
+    )
+    max_edges = _h21_padding(
+        max(1, *(len(item.relations) for item in decisions)),
+        pad_relations, "relations",
+    )
     nfeatures = len(NUMERIC_FIELDS)
 
     names = (
