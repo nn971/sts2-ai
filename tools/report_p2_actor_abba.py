@@ -197,12 +197,25 @@ def report_actor_abba(
                 "wire_profile_only", False
             ):
                 raise ValueError(f"{arm}: instrumentation enabled")
-        if any(i.get("actor_fixed_shape_batch_size") != 0 for i in identities):
-            raise ValueError("H21 variable-shape actor must use fixed size 0")
+        fixed_size = reference.get("actor_fixed_shape_batch_size")
+        if (type(fixed_size) is not int or fixed_size not in (0, 1, 4, 8, 16)
+                or any(i.get("actor_fixed_shape_batch_size") != fixed_size
+                       for i in identities)):
+            raise ValueError("H21 actor physical-row shape drift across arms")
+        if fixed_size:
+            for arm, profile in zip(ORDER, profiles, strict=True):
+                actor = profile["shared_actor_metrics"]
+                if (actor.get("p2_fixed_shape_batch_size") != fixed_size
+                        or not isinstance(actor.get("p2_fixed_shape_physical_rows"), int)
+                        or actor["p2_fixed_shape_physical_rows"] < actor["requests"]
+                        or not isinstance(actor.get("p2_fixed_shape_bucket_forwards"), int)
+                        or actor["p2_fixed_shape_bucket_forwards"] <= 0):
+                    raise ValueError(f"{arm}: missing H21 fixed-shape actor receipt")
         if any(i.get("actor_max_batch") not in (1, 4, 8, 16) for i in identities):
             raise ValueError("Unexpected H21 actor batch cap")
         if (any(i.get("actor_max_batch") != reference.get("actor_max_batch")
                 for i in identities)
+                or (fixed_size and fixed_size > reference["actor_max_batch"])
                 or any(i.get("rollout_transport") != "fused" for i in identities)):
             raise ValueError("H21 batch/transport changed across arms")
     if cache_caps[0] != cache_caps[3] or cache_caps[1] != cache_caps[2]:
