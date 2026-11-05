@@ -364,6 +364,7 @@ def test_h22_trainer_dryrun_accepts_fixed_packed_deterministic_cuda(
         "--actor-fixed-shape-batch-size", "4",
         "--actor-max-batch", "4",
         "--actor-deterministic-cuda",
+        "--evaluation-horizon-lambda", "0.4113950303216448",
     ]
     monkeypatch.setattr("sys.argv", arguments)
     train_main()
@@ -374,6 +375,7 @@ def test_h22_trainer_dryrun_accepts_fixed_packed_deterministic_cuda(
     assert options["actor_h21_collator"] == "packed"
     assert options["actor_fixed_shape_batch_size"] == 4
     assert options["actor_deterministic_cuda"] is True
+    assert options["evaluation_horizon_lambda"] == 0.4113950303216448
 
     # Deterministic CUDA is an explicit option, not a CPU or H16 default.
     arguments.extend(["--actor-device", "cpu"])
