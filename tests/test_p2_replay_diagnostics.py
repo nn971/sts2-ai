@@ -98,3 +98,36 @@ def test_replay_classification_equal_is_exact():
         "search_work_parity": True,
         "first_difference": None,
     }
+
+
+def test_root_level_transition_drift_is_located_before_aggregate_count():
+    before = {
+        **_trace(),
+        "searches": 2,
+        "transitions": 4692,
+        "search_work_per_root": [
+            {"decision_index": 2, "simulations": 16, "search_transitions": 2300},
+            {"decision_index": 9, "simulations": 16, "search_transitions": 2392},
+        ],
+    }
+    after = {
+        **before,
+        "transitions": 4693,
+        "search_work_per_root": [
+            before["search_work_per_root"][0],
+            {"decision_index": 9, "simulations": 16, "search_transitions": 2393},
+        ],
+    }
+    result = classify_trace_difference(before, after)
+    assert result["kind"] == "search_work_only"
+    assert result["semantic_parity"] is True
+    assert result["first_difference"] == {
+        "path": "$.search_work_per_root[1].search_transitions",
+        "kind": "numeric_difference", "expected": 2392, "actual": 2393,
+        "absolute_difference": 1,
+        "relative_difference": 1 / 2393,
+    }
+    assert result["search_work_difference"]["path"] == "$.transitions"
+    assert result["root_search_work_difference"]["path"] == (
+        "$.search_work_per_root[1].search_transitions"
+    )
