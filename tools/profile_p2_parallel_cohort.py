@@ -255,7 +255,6 @@ def main() -> None:
         or a.macro_prior_weight < 0
         or (a.macro_prior_weight > 0 and a.macro_model is None)
         or a.actor_max_batch < 1 or a.actor_max_delay_ms < 0
-        or (a.representation == "h21" and a.actor_fixed_shape_batch_size != 0)
         or (a.actor_h21_collator == "packed" and
             (a.representation != "h21" or a.actor_inference != "shared"))
         or (a.actor_deterministic_cuda and (
