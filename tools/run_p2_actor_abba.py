@@ -30,6 +30,7 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
         not seeds or len(set(seeds)) != len(seeds)
         or args.workers < 1 or args.seed_count < 1
         or args.max_decisions < 1 or args.max_searches < 0
+        or getattr(args, "max_simulation_steps", 512) < 1
         or args.simulations not in (8, 16, 64)
         or args.depth < 0 or args.actor_max_delay_ms < 0
         or not 0 <= args.horizon_lambda <= 1
@@ -70,6 +71,7 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
         "--map-profile", args.map_profile,
         "--simulations", str(args.simulations),
         "--depth", str(args.depth),
+        "--max-simulation-steps", str(getattr(args, "max_simulation_steps", 512)),
         "--max-searches", str(args.max_searches),
         "--max-decisions", str(args.max_decisions),
         "--paired",
@@ -231,6 +233,10 @@ def main() -> None:
                    default="generated")
     p.add_argument("--simulations", type=int, default=16)
     p.add_argument("--depth", type=int, default=8)
+    p.add_argument("--max-simulation-steps", type=int, default=512,
+                   help="Maximum actions in one full-depth combat simulation; "
+                        "larger values permit long fights but never substitute "
+                        "a value or a defeat at the limit")
     p.add_argument("--max-searches", type=int, default=2)
     p.add_argument("--max-decisions", type=int, default=80,
                    help="80 is capped throughput; set higher for full episodes")
@@ -281,6 +287,7 @@ def main() -> None:
         "execute": args.execute,
         "require_full_act": args.require_full_act,
         "actor_deterministic_cuda": args.actor_deterministic_cuda,
+        "max_simulation_steps": args.max_simulation_steps,
     }, indent=2), flush=True)
     if args.execute:
         for index, call in enumerate(calls, start=1):
