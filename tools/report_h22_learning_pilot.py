@@ -192,9 +192,14 @@ def verify_pilot(
             "round": index,
             "mean_delta_from_baseline": mean(baseline_deltas),
             "mean_delta_from_previous": mean(previous_deltas),
+            # Preserve original baseline-relative fields for older reports;
+            # explicitly distinguish marginal changes from the prior round.
             "improved_seeds": sum(d > 0 for d in baseline_deltas),
             "unchanged_seeds": sum(d == 0 for d in baseline_deltas),
             "regressed_seeds": sum(d < 0 for d in baseline_deltas),
+            "improved_vs_previous": sum(d > 0 for d in previous_deltas),
+            "unchanged_vs_previous": sum(d == 0 for d in previous_deltas),
+            "regressed_vs_previous": sum(d < 0 for d in previous_deltas),
         })
         for seed in seeds:
             per_seed[seed][label] = evaluated[seed]["max_floor_reached"]
