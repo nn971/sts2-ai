@@ -217,7 +217,10 @@ def fit_replay(
             ce.append(
                 -(probs * F.log_softmax(logits[i, :len(target)], dim=0)).sum()
             )
-        ce_loss = torch.stack(ce).mean() if ce else logits.sum() * 0
+        # Padded action logits use float32's minimum; summing many can
+        # overflow to -inf, making logits.sum() * 0 a NaN. A missing PUCT
+        # target contributes an exact finite zero with no policy gradient.
+        ce_loss = torch.stack(ce).mean() if ce else hp_loss.new_zeros(())
         loss = replay_weight * (hp_loss + 0.25 * act_loss + 0.5 * ce_loss)
         if not bool(torch.isfinite(loss)):
             raise FloatingPointError("Nonfinite H17 replay loss")
