@@ -38,6 +38,9 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
         or not 0 <= args.ascension <= 10
         or not args.seed_prefix.strip()
         or getattr(args, "h21_max_batch", 4) not in (1, 4, 8, 16)
+        or (getattr(args, "actor_deterministic_cuda", False)
+            and (getattr(args, "experiment", "batching") != "h21-collator"
+                 or not args.actor_device.startswith("cuda")))
     ):
         raise ValueError("Invalid P2 A/B/B/A benchmark configuration")
     if getattr(args, "require_full_act", False) and (
@@ -71,6 +74,10 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
         "--max-decisions", str(args.max_decisions),
         "--paired",
         "--no-episode-profile",
+        *(
+            ["--actor-deterministic-cuda"]
+            if getattr(args, "actor_deterministic_cuda", False) else []
+        ),
         "--execute",
     ]
     if args.macro_model is not None:
@@ -192,6 +199,9 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--execute", action="store_true",
                    help="Perform all four runs; otherwise preview commands")
+    p.add_argument("--actor-deterministic-cuda", action="store_true",
+                   help="Opt-in deterministic PyTorch CUDA graph aggregation in all "
+                        "four H22 arms; use for reproducibility diagnosis")
     p.add_argument("--require-full-act", action="store_true",
                    help="H21 CUDA/15-worker/16-seed full-Act strict gate; "
                         "reject censored episodes and missing real PUCT")
@@ -270,6 +280,7 @@ def main() -> None:
         "commands": [shlex.join(call) for call in calls],
         "execute": args.execute,
         "require_full_act": args.require_full_act,
+        "actor_deterministic_cuda": args.actor_deterministic_cuda,
     }, indent=2), flush=True)
     if args.execute:
         for index, call in enumerate(calls, start=1):
