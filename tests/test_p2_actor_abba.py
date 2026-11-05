@@ -926,3 +926,26 @@ def test_h22_deterministic_cuda_report_verifies_actor_receipts():
     wrong[3]["identity"]["actor_deterministic_cuda"] = False
     with pytest.raises(ValueError, match="deterministic CUDA provenance"):
         report_actor_abba(*wrong, experiment="h21-collator")
+
+
+def test_h22_abba_propagates_watchdog_limit_to_every_arm(tmp_path):
+    args = Namespace(
+        experiment="h21-collator", actor_deterministic_cuda=True,
+        h21_max_batch=4, require_full_act=True,
+        seeds=None, seed_prefix="h22-watchdog", seed_count=16, workers=15,
+        max_decisions=4096, max_searches=2, max_simulation_steps=2048,
+        simulations=16, depth=0, actor_max_delay_ms=2.0,
+        horizon_lambda=0.411395, macro_prior_weight=0, macro_model=None,
+        ascension=0, ai_root=Path("/tmp/ai"), emulator_root=Path("/tmp/emu"),
+        emulator_revision="pinned-emulator", checkpoint=Path("h22.pt"),
+        actor_device="cuda", map_profile="generated", output_root=tmp_path,
+    )
+    commands, _ = make_commands(args)
+    for call in commands[:4]:
+        assert call[call.index("--max-simulation-steps") + 1] == "2048"
+        assert "--actor-deterministic-cuda" in call
+        assert call[call.index("--depth") + 1] == "0"
+    bad = Namespace(**vars(args))
+    bad.max_simulation_steps = 0
+    with pytest.raises(ValueError, match="Invalid P2 A/B/B/A"):
+        make_commands(bad)
