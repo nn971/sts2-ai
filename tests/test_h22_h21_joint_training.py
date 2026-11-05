@@ -314,9 +314,9 @@ def test_h22_h21_fixed_relation_shape_ref_packed_tensor_parity():
 
 
 def test_h22_h21_stable_shape_actor_cpu_smoke(tmp_path):
-    import hashlib
-    from sts2_ai.models.h16_batch_actor import _stable_h21_shape_bucket
     from concurrent.futures import ThreadPoolExecutor
+
+    from sts2_ai.models.h16_batch_actor import _stable_h21_shape_bucket
 
     model = JointActPilotNet(H21GroundedMacroTransformer(
         H7Config(width=32, layers=1, heads=4, feedforward=64))).eval()
