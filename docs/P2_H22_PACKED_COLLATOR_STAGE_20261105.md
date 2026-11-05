@@ -292,6 +292,11 @@ GPU logits/values. This probe adds singleton forwards and synchronizes
 CUDA; its output must never be used as a throughput estimate.
 
 ```fish
+set trial_seeds
+for i in (seq 0 15)
+    set -a trial_seeds p2-h22-collator-v1-full-$i
+end
+
 python tools/profile_p2_parallel_cohort.py \
     --ai-root (pwd) --emulator-root $emu --emulator-revision $rev \
     --checkpoint $h22 --representation h21 \
@@ -300,7 +305,7 @@ python tools/profile_p2_parallel_cohort.py \
     --actor-max-batch 4 --actor-fixed-shape-batch-size 0 \
     --actor-profile --actor-batch-parity-probe \
     --macro-prior-weight 0 --workers 15 \
-    --seeds (string join , (for i in (seq 0 15); echo "p2-h22-collator-v1-full-$i"; end)) \
+    --seeds (string join , $trial_seeds) \
     --ascension 0 --map-profile generated \
     --simulations 16 --depth 0 --max-searches 2 \
     --max-decisions 160 --paired --no-episode-profile \
