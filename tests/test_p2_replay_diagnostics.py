@@ -1,7 +1,10 @@
 """P2 replay diagnostics must locate and preserve exact differences."""
 from __future__ import annotations
 
-from tools.p2_replay_diagnostics import first_trace_difference
+from tools.p2_replay_diagnostics import (
+    classify_trace_difference,
+    first_trace_difference,
+)
 
 
 def _trace():
@@ -57,3 +60,41 @@ def test_different_public_keys():
     assert diff["path"] == "$.final_public_frame"
     assert diff["kind"] == "different_keys"
     assert diff["actual_only"] == ["hidden"]
+
+
+def test_search_transition_only_drift_preserves_semantic_parity():
+    before = {**_trace(), "searches": 2, "transitions": 4692}
+    after = {**_trace(), "searches": 2, "transitions": 4693}
+    diagnosis = classify_trace_difference(before, after)
+    assert diagnosis["kind"] == "search_work_only"
+    assert diagnosis["semantic_parity"] is True
+    assert diagnosis["search_work_parity"] is False
+    assert diagnosis["semantic_differences"] == {}
+    assert diagnosis["first_difference"]["path"] == "$.transitions"
+    assert diagnosis["search_work"]["absolute_drift"] == 1
+    assert diagnosis["search_work"]["relative_drift"] == 1 / 4693
+
+
+def test_search_work_difference_does_not_hide_teacher_drift():
+    before = {**_trace(), "searches": 2, "transitions": 4692}
+    after = {**_trace(), "searches": 2, "transitions": 4693}
+    after["actions"][0] = {**after["actions"][0],
+                          "teacher_policy": [0.24, 0.76]}
+    diagnosis = classify_trace_difference(before, after)
+    assert diagnosis["kind"] == "semantic_or_teacher_drift"
+    assert diagnosis["semantic_parity"] is False
+    assert diagnosis["search_work_parity"] is False
+    assert diagnosis["first_difference"]["path"] == "$.actions[0].teacher_policy[0]"
+    assert diagnosis["semantic_differences"]["actions"]["path"] == (
+        "$.actions[0].teacher_policy[0]"
+    )
+
+
+def test_replay_classification_equal_is_exact():
+    trace = {**_trace(), "transitions": 123, "searches": 1}
+    assert classify_trace_difference(trace, trace) == {
+        "kind": "exact_replay",
+        "semantic_parity": True,
+        "search_work_parity": True,
+        "first_difference": None,
+    }
