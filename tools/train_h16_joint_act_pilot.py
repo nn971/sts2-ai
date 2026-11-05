@@ -222,6 +222,8 @@ def collect(
             max_batch=args.actor_max_batch,
             max_delay_ms=args.actor_max_delay_ms,
             fixed_shape_batch_size=args.actor_fixed_shape_batch_size,
+            h21_collator=getattr(args, "actor_h21_collator", "reference"),
+            deterministic_cuda=getattr(args, "actor_deterministic_cuda", False),
         )
         if args.actor_inference == "shared" else nullcontext(None)
     )
@@ -395,6 +397,28 @@ def h17_macro_weight_for_round(
     return initial_weight * max(0.0, 1.0 - round_index / decay_rounds)
 
 
+def load_h22_initial(path: Path, *, device: str = "cpu") -> JointActPilotNet:
+    """Load a schema-verified H21 checkpoint as a fresh learner initialization."""
+    model = JointActPilotNet.load(path, device=device)
+    if model.representation != "h21":
+        raise ValueError("H22 warm-start must be a verified H21 checkpoint")
+    return model
+
+
+def should_evaluate_round(
+    round_number: int, *, planned_rounds: int, cadence: int,
+) -> bool:
+    """Keep first/final evaluation and periodic checkpoints under sparse eval."""
+    if (type(round_number) is not int or type(planned_rounds) is not int
+            or type(cadence) is not int or planned_rounds < 1
+            or cadence < 1 or not 1 <= round_number <= planned_rounds):
+        raise ValueError("Invalid evaluation round/cadence")
+    return (
+        cadence == 1 or round_number == 1
+        or round_number % cadence == 0 or round_number == planned_rounds
+    )
+
+
 def _checkpoint(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     target = path.with_name("." + path.name + ".tmp")
@@ -408,6 +432,8 @@ def main() -> None:
     start.add_argument("--initial-h9", type=Path)
     start.add_argument("--initial-h16", type=Path,
                        help="Warm-start from a saved H16 v2/v3 policy/value checkpoint")
+    start.add_argument("--initial-h22", type=Path,
+                       help="Initialize a fresh H21 training run from a trained H22 model")
     p.add_argument("--macro-model", type=Path, default=None)
     p.add_argument("--representation", choices=("h16", "h21"), default="h16",
                    help="Opt-in H21 owner-linked map/offer graph codec and joint model")
@@ -423,6 +449,21 @@ def main() -> None:
                    help="Fixed research route, or seeded Overgrowth map with player path choices")
     p.add_argument("--runs-per-round", type=int, default=16)
     p.add_argument("--heldout-runs", type=int, default=8)
+    p.add_argument(
+        "--heldout-every-rounds", type=int, default=1,
+        help="Opt-in evaluation cadence: baseline, round 1, multiples of "
+             "this interval and final round. Other rows record heldout=null.",
+    )
+    p.add_argument(
+        "--stop-after-round", type=int, default=None,
+        help="Run-control only: pause after checkpointing this round "
+             "(planned --rounds stays fixed across resumes).",
+    )
+    p.add_argument(
+        "--max-wall-seconds", type=float, default=None,
+        help="Run-control only: stop between committed rounds when "
+             "the elapsed wall budget is exceeded; never interrupt a round.",
+    )
     p.add_argument("--workers", type=int, default=15)
     p.add_argument(
         "--rollout-transport", choices=("legacy", "fused"), default="fused",
@@ -437,6 +478,16 @@ def main() -> None:
                    help="Device for the shared inference actor only.")
     p.add_argument("--actor-max-batch", type=int, default=16)
     p.add_argument("--actor-max-delay-ms", type=float, default=2.0)
+    p.add_argument(
+        "--actor-h21-collator", choices=("reference", "packed"),
+        default="reference",
+        help="Opt-in packed H21 shared-actor CPU collation; historical default remains reference.",
+    )
+    p.add_argument(
+        "--actor-deterministic-cuda", action="store_true",
+        help="Opt-in deterministic CUDA algorithms for H21 shared inference "
+             "(use with --actor-fixed-shape-batch-size for repeatable shapes).",
+    )
     p.add_argument(
         "--actor-fixed-shape-batch-size", type=int, default=0,
         help="Opt-in P2 fixed-shape shared actor bucket (0 preserves historical "
@@ -474,6 +525,11 @@ def main() -> None:
                    default=0.4113950303216448)
     p.add_argument("--h17-horizon-target", type=float, default=0.77)
     p.add_argument("--h17-horizon-rounds", type=int, default=200)
+    p.add_argument(
+        "--evaluation-horizon-lambda", type=float, default=None,
+        help="Optional fixed continuation horizon for both pre-update baseline "
+             "and all post-update heldout evaluations. Training schedule is unchanged.",
+    )
     p.add_argument("--h17-hp-reference", type=int, default=100,
                    help="Fixed H17 HP-credit denominator (bounded at 1)")
     p.add_argument("--h17-replay-capacity", type=int, default=8192)
@@ -488,7 +544,8 @@ def main() -> None:
     p.add_argument("--execute", action="store_true")
     p.add_argument("--resume", action="store_true")
     args = p.parse_args()
-    if (min(args.rounds, args.runs_per_round, args.heldout_runs, args.workers,
+    if (min(args.rounds, args.runs_per_round, args.heldout_runs,
+            args.heldout_every_rounds, args.workers,
             args.max_decisions, args.search_start_round,
             args.simulations, args.max_simulation_steps, args.minibatch, args.epochs,
             args.actor_max_batch) <= 0
@@ -496,12 +553,24 @@ def main() -> None:
             or (args.search_depth == 0 and not args.h17_adaptive)
             or not 0 <= args.ascension <= 10
             or args.max_searches < 0 or args.study_seed < 0
+            or (args.stop_after_round is not None
+                and not 1 <= args.stop_after_round <= args.rounds)
+            or (args.max_wall_seconds is not None and (
+                not math.isfinite(args.max_wall_seconds)
+                or args.max_wall_seconds <= 0))
             or not math.isfinite(args.actor_max_delay_ms)
             or args.actor_max_delay_ms < 0
+            or (args.evaluation_horizon_lambda is not None and (
+                not math.isfinite(args.evaluation_horizon_lambda)
+                or not 0 <= args.evaluation_horizon_lambda < 1))
             or not 0 <= args.actor_fixed_shape_batch_size <= args.actor_max_batch
             or (args.actor_fixed_shape_batch_size > 0
                 and args.actor_inference != "shared")
-            or (args.representation == "h21" and args.actor_fixed_shape_batch_size != 0)
+            or (args.actor_deterministic_cuda and (
+                args.representation != "h21" or args.actor_inference != "shared"
+                or not args.actor_device.startswith("cuda")))
+            or (args.actor_h21_collator == "packed" and
+                (args.representation != "h21" or args.actor_inference != "shared"))
             or not (args.actor_device == "cpu"
                     or args.actor_device.startswith("cuda"))
             or not math.isfinite(args.horizon_tau_rounds)
@@ -524,13 +593,15 @@ def main() -> None:
                 args.h17_horizon_target < 1
             ))):
         p.error("Invalid H16 pilot configuration")
+    if args.initial_h22 is not None and args.representation != "h21":
+        p.error("--initial-h22 requires --representation h21")
     if args.h17_adaptive:
         AdaptiveSearch(args.h17_search_p16, args.h17_search_p64)
-        if args.initial_h16 is None:
-            p.error("H17 must warm-start from an H16 checkpoint")
+        if args.initial_h16 is None and args.initial_h22 is None:
+            p.error("H17 requires an H16 or H22 warm-start checkpoint")
         if args.macro_model is None and args.macro_prior_weight > 0:
             p.error("H17 annealing requires the frozen macro reference")
-    for path in (args.initial_h9, args.initial_h16, args.macro_model):
+    for path in (args.initial_h9, args.initial_h16, args.initial_h22, args.macro_model):
         if path is not None and not path.is_file():
             p.error(f"Missing checkpoint: {path}")
     source = {
@@ -544,14 +615,26 @@ def main() -> None:
         "puct_provenance": "h16-native-act1-root-conditioned-privileged-v1",
         "initial_h9_sha256": sha256(args.initial_h9) if args.initial_h9 else None,
         "initial_h16_sha256": sha256(args.initial_h16) if args.initial_h16 else None,
+        **({"initial_h22_sha256": sha256(args.initial_h22)}
+           if args.initial_h22 is not None else {}),
         "macro_sha256": sha256(args.macro_model) if args.macro_model else None,
         "emulator_revision": args.emulator_revision,
         "options": {
             key: value for key, value in vars(args).items()
             if key not in (
                 "execute", "resume", "output_root", "initial_h9",
-                "initial_h16", "macro_model", "emulator_root", "ai_root", "device",
+                "initial_h16", "initial_h22", "macro_model",
+                "emulator_root", "ai_root", "device",
+                "stop_after_round", "max_wall_seconds",
             ) and (key != "actor_fixed_shape_batch_size" or value != 0) and (
+                key != "actor_h21_collator" or value != "reference"
+            ) and (
+                key != "actor_deterministic_cuda" or value
+            ) and (
+                key != "evaluation_horizon_lambda" or value is not None
+            ) and (
+                key != "heldout_every_rounds" or value != 1
+            ) and (
                 key != "representation" or value != "h16"
             ) and (
                 key not in ("ascension", "map_profile")
@@ -579,9 +662,11 @@ def main() -> None:
         p.error("Actor CUDA unavailable; use --actor-device cpu for a smoke")
     torch.set_num_threads(1)
     torch.manual_seed(args.study_seed)
+    wall_started = time.perf_counter()
     root = args.output_root
     progress_path = root / "progress.json"
     optimizer_path = root / "optimizer-state.pt"
+    model_dir = root / "models"
     history: list[dict[str, Any]] = []
     if args.resume:
         if not progress_path.is_file() or not optimizer_path.is_file():
@@ -590,22 +675,31 @@ def main() -> None:
         if progress["fingerprint"] != fingerprint:
             p.error("Cannot resume different H16 pilot configuration")
         history = progress["rounds"]
+        if not history:
+            p.error("--resume requires at least one committed training round")
         if len(history) > args.rounds:
             p.error("Existing checkpoint exceeds configured round count")
-        model = JointActPilotNet.load(
-            root / "models" / f"joint-r{len(history):04d}.pt",
-            device=args.device,
-        )
+        committed_model = root / "models" / f"joint-r{len(history):04d}.pt"
+        if (not committed_model.is_file()
+                or sha256(committed_model) != history[-1]["checkpoint_sha256"]):
+            p.error("Committed resume checkpoint digest mismatch")
+        model = JointActPilotNet.load(committed_model, device=args.device)
         if model.representation != args.representation:
             p.error("Resume checkpoint representation differs from experiment")
     else:
         if progress_path.exists() or optimizer_path.exists():
             p.error("Output contains an existing run; use --resume or a new directory")
         if args.representation == "h21":
-            if args.initial_h16 is None:
-                p.error("H21 joint training requires an explicit H16 warm-start checkpoint")
-            h16 = JointActPilotNet.load(args.initial_h16, device="cpu")
-            model = JointActPilotNet.warmstart_h21(h16).to(args.device)
+            if args.initial_h22 is not None:
+                try:
+                    model = load_h22_initial(args.initial_h22, device=args.device)
+                except ValueError as error:
+                    p.error(str(error))
+            else:
+                if args.initial_h16 is None:
+                    p.error("H21 requires an H16 or H22 warm-start checkpoint")
+                h16 = JointActPilotNet.load(args.initial_h16, device="cpu")
+                model = JointActPilotNet.warmstart_h21(h16).to(args.device)
         else:
             model = (
                 JointActPilotNet.load(args.initial_h16, device=args.device)
@@ -615,12 +709,17 @@ def main() -> None:
             )
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
     if args.resume:
-        saved = torch.load(optimizer_path, map_location="cpu", weights_only=True)
+        # Progress is the last commit marker. A crash during the next
+        # round's staged writes must not invalidate the last committed
+        # optimizer. New runs keep immutable per-round optimizer snapshots.
+        committed_optimizer = (
+            model_dir / f"optimizer-r{len(history):04d}.pt"
+        ) if (model_dir / f"optimizer-r{len(history):04d}.pt").is_file() else optimizer_path
+        saved = torch.load(committed_optimizer, map_location="cpu", weights_only=True)
         if saved["fingerprint"] != fingerprint or saved["round"] != len(history):
             p.error("Optimizer and progress records disagree")
         optimizer.load_state_dict(saved["optimizer"])
         torch.set_rng_state(saved["rng_state"])
-    model_dir = root / "models"
     model_dir.mkdir(parents=True, exist_ok=True)
     actor_path = root / "actor-current.pt"
     namespace = seed_namespace(args.ascension, args.map_profile)
@@ -642,10 +741,16 @@ def main() -> None:
     if not history:
         model.save(actor_path)
         baseline = collect(
-            args, actor_path, seeds=heldout, horizon_lambda=0.0, search=False,
+            args, actor_path, seeds=heldout,
+            horizon_lambda=(
+                args.evaluation_horizon_lambda
+                if args.evaluation_horizon_lambda is not None else 0.0
+            ),
+            search=False,
         )
         write_json(root / "baseline.json", summarize(baseline))
-    for round_index in range(len(history), args.rounds):
+    stop_at = min(args.rounds, args.stop_after_round or args.rounds)
+    for round_index in range(len(history), stop_at):
         horizon_lambda = (
             h17_horizon_for_round(
                 round_index, start=args.h17_horizon_initial,
@@ -721,12 +826,24 @@ def main() -> None:
         model_path = model_dir / f"joint-r{round_index + 1:04d}.pt"
         model.save(model_path)
         model.save(actor_path)
-        evaluation_started = time.perf_counter()
-        evaluation = collect(
-            args, actor_path, seeds=heldout,
-            horizon_lambda=horizon_lambda, search=False,
+        evaluate_now = should_evaluate_round(
+            round_index + 1, planned_rounds=args.rounds,
+            cadence=args.heldout_every_rounds,
         )
-        evaluation_seconds = time.perf_counter() - evaluation_started
+        evaluation_started = time.perf_counter()
+        evaluation = (
+            collect(
+                args, actor_path, seeds=heldout,
+                horizon_lambda=(
+                    args.evaluation_horizon_lambda
+                    if args.evaluation_horizon_lambda is not None else horizon_lambda
+                ),
+                search=False,
+            ) if evaluate_now else None
+        )
+        evaluation_seconds = (
+            time.perf_counter() - evaluation_started if evaluate_now else 0.0
+        )
         simulated_transitions = sum(
             len(episode.decisions) + episode.search_transitions
             for episode in train
@@ -748,7 +865,9 @@ def main() -> None:
                 if horizon_lambda < 1.0 else None
             ),
             "train": summarize(train), "update": report,
-            "heldout": summarize(evaluation),
+            "heldout": summarize(evaluation) if evaluation is not None else None,
+            **({"heldout_evaluated": evaluate_now}
+               if args.heldout_every_rounds != 1 else {}),
             **({
                 "macro_prior_weight": args.macro_prior_weight,
                 "hp_reference": args.h17_hp_reference,
@@ -762,12 +881,16 @@ def main() -> None:
             "checkpoint_sha256": sha256(model_path),
         }
         history.append(row)
-        _checkpoint(optimizer_path, {
+        committed_state = {
             "fingerprint": fingerprint,
             "round": len(history),
             "optimizer": optimizer.state_dict(),
             "rng_state": torch.get_rng_state(),
-        })
+        }
+        _checkpoint(
+            model_dir / f"optimizer-r{len(history):04d}.pt", committed_state,
+        )
+        _checkpoint(optimizer_path, committed_state)
         if args.h17_adaptive:
             write_replay(
                 root / "replay" / f"r{len(history):04d}.json.gz",
@@ -784,6 +907,12 @@ def main() -> None:
             prior = root / "replay" / f"r{len(history)-2:04d}.json.gz"
             prior.unlink(missing_ok=True)
         print("[h16-act1-joint] " + json.dumps(row, sort_keys=True), flush=True)
+        if (args.max_wall_seconds is not None
+                and time.perf_counter() - wall_started >= args.max_wall_seconds):
+            print("[h16-act1-joint] wall budget reached after committed "
+                  f"round {len(history)}; resume with identical configuration",
+                  flush=True)
+            break
     print("[h16-act1-joint] completed", len(history), "rounds", flush=True)
 
 

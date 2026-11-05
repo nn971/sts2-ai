@@ -11,9 +11,11 @@ conditioning against replayed public histories.
 """
 from __future__ import annotations
 
+import json
 import math
 import random
 import time
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
@@ -199,7 +201,9 @@ class CombatPuct:
                     FAIR_COMBAT_CAPABILITY, ROOT_CONDITIONED_COMBAT_CAPABILITY,
                     H16_EXPERIMENTAL_ROOT_CONDITIONED_CAPABILITY,
                 )):
-            raise ValueError("PUCT requires an explicitly labeled combat sampling capability")
+            raise ValueError(
+                "PUCT requires a certified, explicitly labeled combat sampling capability"
+            )
         if (not math.isfinite(c_puct) or c_puct <= 0
                 or (max_depth is not None and max_depth <= 0)
                 or max_simulation_steps <= 0
@@ -285,8 +289,9 @@ class CombatPuct:
         transitions = terminals = cutoffs = 0
         root_value_sum = 0.0
         max_expanded_depth = 0
-        for _ in range(simulations):
+        for simulation_index in range(simulations):
             path: list[_Edge] = []
+            recent_actions: deque[str] = deque(maxlen=8)
             frame = root
             seen = {root.information_key}
             try:
@@ -348,14 +353,46 @@ class CombatPuct:
                     # The separate watchdog detects nonterminating simulations
                     # without substituting a fabricated value or terminal loss.
                     if self._depth is None and steps >= self._max_simulation_steps:
+                        # Only inspect the public observation on watchdog failure.
+                        # Never assign a synthetic terminal reward or critic cutoff.
+                        try:
+                            public = json.loads(frame.observation.payload_json)
+                        except (ValueError, TypeError):
+                            public = {}
+                        if not isinstance(public, dict):
+                            public = {}
+                        combat = public.get("combat")
+                        combat = combat if isinstance(combat, dict) else {}
+                        enemies = combat.get("enemies")
+                        enemy_hps = [
+                            enemy.get("hp") for enemy in enemies[:8]
+                            if isinstance(enemy, dict)
+                        ] if isinstance(enemies, list) else None
+                        detail = {
+                            "simulation": simulation_index + 1,
+                            "simulations": simulations,
+                            "steps": steps,
+                            "root_observation_hash": root.observation.observation_hash,
+                            "current_observation_hash": (
+                                frame.observation.observation_hash
+                            ),
+                            "floor": public.get("floor"),
+                            "player_hp": public.get("hp"),
+                            "combat_turn": combat.get("turn"),
+                            "enemy_hps": enemy_hps,
+                            "legal_action_count": len(frame.legal_actions),
+                            "recent_action_ids": list(recent_actions),
+                        }
                         raise IncompleteCombatRollout(
                             "Full-combat PUCT exceeded "
-                            f"{self._max_simulation_steps} actions "
-                            "without reaching combat termination"
+                            f"{self._max_simulation_steps} actions without reaching "
+                            f"combat termination; watchdog={json.dumps(detail, sort_keys=True)}"
                         )
                     action_index = self._choose(node)
                     path.append(node.edges[action_index])
                     action = frame.legal_actions[action_index]
+                    if self._depth is None:
+                        recent_actions.append(action.action_id[:96])
                     if profile is None:
                         child = self._sampler.step(frame, action, self._rng)
                     else:

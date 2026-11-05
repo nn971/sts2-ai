@@ -30,6 +30,7 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
         not seeds or len(set(seeds)) != len(seeds)
         or args.workers < 1 or args.seed_count < 1
         or args.max_decisions < 1 or args.max_searches < 0
+        or getattr(args, "max_simulation_steps", 512) < 1
         or args.simulations not in (8, 16, 64)
         or args.depth < 0 or args.actor_max_delay_ms < 0
         or not 0 <= args.horizon_lambda <= 1
@@ -37,8 +38,26 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
         or (args.macro_prior_weight and args.macro_model is None)
         or not 0 <= args.ascension <= 10
         or not args.seed_prefix.strip()
+        or getattr(args, "h21_max_batch", 4) not in (1, 4, 8, 16)
+        or getattr(args, "h21_fixed_batch_size", 0) not in (0, 1, 4, 8, 16)
+        or getattr(args, "h21_fixed_batch_size", 0) > getattr(args, "h21_max_batch", 4)
+        or (getattr(args, "h21_fixed_batch_size", 0) > 0
+            and getattr(args, "experiment", "batching") != "h21-collator")
+        or (getattr(args, "actor_deterministic_cuda", False)
+            and (getattr(args, "experiment", "batching") != "h21-collator"
+                 or not args.actor_device.startswith("cuda")))
     ):
         raise ValueError("Invalid P2 A/B/B/A benchmark configuration")
+    if getattr(args, "require_full_act", False) and (
+        getattr(args, "experiment", "batching") != "h21-collator"
+        or args.actor_device != "cuda" or args.workers < 15
+        or len(seeds) < 16 or args.max_decisions < 1024
+        or args.max_searches < 1
+    ):
+        raise ValueError(
+            "Full-Act H21 acceptance requires CUDA, >=15 workers, >=16 "
+            "independent seeds, >=1024 decision limit and real PUCT searches"
+        )
     all_seeds = ",".join(seeds)
     common = [
         "--ai-root", str(args.ai_root),
@@ -56,22 +75,33 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
         "--map-profile", args.map_profile,
         "--simulations", str(args.simulations),
         "--depth", str(args.depth),
+        "--max-simulation-steps", str(getattr(args, "max_simulation_steps", 512)),
         "--max-searches", str(args.max_searches),
         "--max-decisions", str(args.max_decisions),
         "--paired",
         "--no-episode-profile",
+        *(
+            ["--actor-deterministic-cuda"]
+            if getattr(args, "actor_deterministic_cuda", False) else []
+        ),
         "--execute",
     ]
     if args.macro_model is not None:
         common.extend(("--macro-model", str(args.macro_model)))
     experiment = getattr(args, "experiment", "batching")
     if experiment not in ("batching", "actor-profile", "prefix-cache",
-                        "transport", "wire-profile", "native-fused-profile"):
+                        "transport", "wire-profile", "native-fused-profile",
+                        "h21-collator"):
         raise ValueError("Invalid actor A/B/B/A experiment")
     modes = (
         ORDER if experiment == "batching" else
-        (("A1", 16, 4), ("B1", 16, 4),
-         ("B2", 16, 4), ("A2", 16, 4))
+        ((("A1", args.h21_max_batch, getattr(args, "h21_fixed_batch_size", 0)),
+          ("B1", args.h21_max_batch, getattr(args, "h21_fixed_batch_size", 0)),
+          ("B2", args.h21_max_batch, getattr(args, "h21_fixed_batch_size", 0)),
+          ("A2", args.h21_max_batch, getattr(args, "h21_fixed_batch_size", 0)))
+         if experiment == "h21-collator" else
+         (("A1", 16, 4), ("B1", 16, 4),
+          ("B2", 16, 4), ("A2", 16, 4)))
     )
     files = [
         args.output_root / name / "profile.json" for name, _, _ in modes
@@ -81,6 +111,11 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
          *common,
          "--actor-max-batch", str(max_batch),
          "--actor-fixed-shape-batch-size", str(fixed_size),
+         *(
+             ["--representation", "h21", "--actor-h21-collator",
+              "packed" if name in ("B1", "B2") else "reference"]
+             if experiment == "h21-collator" else []
+         ),
          *(
              ["--actor-profile"]
              if experiment == "actor-profile" and name in ("B1", "B2")
@@ -119,6 +154,8 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
         if experiment == "wire-profile" else
         "p2-native-fused-profile-abba-report.json"
         if experiment == "native-fused-profile"
+        else "p2-h22-collator-abba-report.json"
+        if experiment == "h21-collator"
         else "actor-abba-report.json"
     )
     calls.append([
@@ -130,18 +167,55 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
             for element in (flag, str(path))
         ),
         "--experiment", experiment,
+        *(
+            ["--require-complete", "--min-seed-count", "16",
+             "--require-cuda", "--require-search-roots"]
+            if getattr(args, "require_full_act", False) else []
+        ),
         "--output", str(report),
     ])
     return calls, [*files, report]
+
+
+def preflight_checkpoint(args: argparse.Namespace) -> None:
+    """Fail before A1 if the frozen checkpoint is missing or wrong-schema."""
+    checkpoint = args.checkpoint.expanduser()
+    if not checkpoint.is_file():
+        raise ValueError(
+            f"Missing frozen checkpoint: {checkpoint}. "
+            "Run tools/create_p2_h22_frozen_checkpoint.py --initial-h16 "
+            "<existing-H16-joint.pt> --output <H22-output.pt> first, or "
+            "pass --checkpoint pointing to an existing H22 checkpoint."
+        )
+    if getattr(args, "experiment", "batching") == "h21-collator":
+        from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet
+
+        try:
+            model = JointActPilotNet.load(checkpoint, device="cpu")
+        except (RuntimeError, ValueError, KeyError) as exc:
+            raise ValueError(
+                f"Cannot load H22 benchmark checkpoint: {checkpoint}: {exc}"
+            ) from exc
+        if model.representation != "h21":
+            raise ValueError(
+                f"Checkpoint uses {model.representation}, expected H22 H21 v4: "
+                f"{checkpoint}. Create a frozen H22 warm-start first."
+            )
 
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--execute", action="store_true",
                    help="Perform all four runs; otherwise preview commands")
+    p.add_argument("--actor-deterministic-cuda", action="store_true",
+                   help="Opt-in deterministic PyTorch CUDA graph aggregation in all "
+                        "four H22 arms; use for reproducibility diagnosis")
+    p.add_argument("--require-full-act", action="store_true",
+                   help="H21 CUDA/15-worker/16-seed full-Act strict gate; "
+                        "reject censored episodes and missing real PUCT")
     p.add_argument("--experiment", choices=("batching", "actor-profile", "prefix-cache",
                             "transport", "wire-profile",
-                            "native-fused-profile"),
+                            "native-fused-profile", "h21-collator"),
                    default="batching",
                    help="Batching, actor profile, exact prefix, or JSONL fused/legacy transport")
     p.add_argument("--ai-root", type=Path, default=ROOT)
@@ -154,6 +228,12 @@ def main() -> None:
     p.add_argument("--workers", type=int, default=15)
     p.add_argument("--actor-device", choices=("cuda", "cpu"), default="cuda")
     p.add_argument("--actor-max-delay-ms", type=float, default=2.0)
+    p.add_argument("--h21-max-batch", type=int, choices=(1, 4, 8, 16),
+                   default=4, help="Matched H21 actor batch cap")
+    p.add_argument("--h21-fixed-batch-size", type=int, choices=(0, 1, 4, 8, 16),
+                   default=0,
+                   help="Opt-in matched H21 fixed GPU rows and relation-aware shape "
+                        "buckets (0 = original dynamic shape); all arms share setting")
     p.add_argument("--seeds",
                    help="Optional comma-separated independent seed cohort")
     p.add_argument("--seed-prefix", default="p2-a0-abba-independent-20261104")
@@ -163,6 +243,10 @@ def main() -> None:
                    default="generated")
     p.add_argument("--simulations", type=int, default=16)
     p.add_argument("--depth", type=int, default=8)
+    p.add_argument("--max-simulation-steps", type=int, default=512,
+                   help="Maximum actions in one full-depth combat simulation; "
+                        "larger values permit long fights but never substitute "
+                        "a value or a defeat at the limit")
     p.add_argument("--max-searches", type=int, default=2)
     p.add_argument("--max-decisions", type=int, default=80,
                    help="80 is capped throughput; set higher for full episodes")
@@ -173,6 +257,10 @@ def main() -> None:
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
     if args.execute:
+        try:
+            preflight_checkpoint(args)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
         existing = [str(output) for output in outputs if output.exists()]
         if existing:
             raise SystemExit(
@@ -198,11 +286,19 @@ def main() -> None:
             "P2.2 fused in all arms: A1/A2 native profiler off; "
             "B1/B2 C# fused-only timers on; wire/actor/PUCT profiling off"
             if args.experiment == "native-fused-profile" else
+            "H22 public-v1 reference/packed/packed/reference H21 collation; "
+            "dynamic shape, same actor batch cap and checkpoint; "
+            "all profiling disabled; strict public/teacher replay"
+            if args.experiment == "h21-collator" else
             "actor/search/wire profiling disabled; strict B/B replay"
         ),
         "seed_count": len(args.seeds.split(",")) if args.seeds else args.seed_count,
         "commands": [shlex.join(call) for call in calls],
         "execute": args.execute,
+        "require_full_act": args.require_full_act,
+        "actor_deterministic_cuda": args.actor_deterministic_cuda,
+        "max_simulation_steps": args.max_simulation_steps,
+        "h21_fixed_batch_size": args.h21_fixed_batch_size,
     }, indent=2), flush=True)
     if args.execute:
         for index, call in enumerate(calls, start=1):

@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import math
 import multiprocessing
+import os
 import queue
 import time
 import traceback
@@ -20,7 +21,7 @@ import torch
 
 from sts2_ai.models.packed_actor_collation import prepare_h7_actor_packed
 from sts2_ai.models.shared_game_objects import EncodedDecision
-from sts2_ai.models.shared_macro_transformer_v2 import collate_h21
+from sts2_ai.models.shared_macro_transformer_v2 import collate_h21, collate_h21_packed
 from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet
 
 
@@ -91,18 +92,27 @@ def _stable_shape_bucket(encoded: EncodedDecision) -> tuple[str, int, int, int]:
     )
 
 
+def _stable_h21_shape_bucket(encoded: EncodedDecision) -> tuple[str, int, int, int, int]:
+    """Public H21 GPU bucket includes edge width, which feeds scatter_add."""
+    base = _stable_shape_bucket(encoded)
+    edges = max(1, len(encoded.relations))
+    return (*base, ((edges + 15) // 16) * 16)
+
+
 def _shape_groups(
-    work: list[Any], physical_size: int,
-) -> list[tuple[list[Any], tuple[str, int, int, int] | None]]:
+    work: list[Any], physical_size: int, *, h21: bool = False,
+) -> list[tuple[list[Any], tuple[int | str, ...] | None]]:
     """Bucket before fixed-row padding; output order is irrelevant to RPC slots."""
     if physical_size == 0:
         return [(work, None)]
-    buckets: dict[tuple[str, int, int, int], list[Any]] = {}
+    buckets: dict[tuple[int | str, ...], list[Any]] = {}
     for item in work:
         frame = item[2]
         if not isinstance(frame, EncodedDecision):
             raise ValueError("H16 actor expects public EncodedDecision tokens")
-        buckets.setdefault(_stable_shape_bucket(frame), []).append(item)
+        bucket = (_stable_h21_shape_bucket(frame) if h21
+                  else _stable_shape_bucket(frame))
+        buckets.setdefault(bucket, []).append(item)
     return [
         (entries[offset:offset + physical_size], bucket)
         for bucket, entries in buckets.items()
@@ -118,12 +128,15 @@ def _serve(
     profile_actor: bool = False,
     verify_batch_parity: bool = False,
     fixed_shape_batch_size: int = 0,
+    h21_collator: str = "reference",
+    deterministic_cuda: bool = False,
 ) -> None:
     stats: dict[str, Any] = {
         "device": device, "requests": 0, "batches": 0,
         "max_batch_observed": 0, "model_load_seconds": 0.0,
         "host_collate_seconds": 0.0, "transfer_seconds": 0.0,
         "forward_seconds": 0.0,
+        "p2_deterministic_cuda": deterministic_cuda,
     }
     if fixed_shape_batch_size:
         stats["p2_fixed_shape_batch_size"] = fixed_shape_batch_size
@@ -166,13 +179,31 @@ def _serve(
         }
 
     try:
+        if deterministic_cuda:
+            if not device.startswith("cuda"):
+                raise ValueError("Deterministic CUDA actor requires a CUDA device")
+            # Must precede cuBLAS handle creation in this freshly spawned actor.
+            os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+            torch.use_deterministic_algorithms(True, warn_only=False)
+            torch.backends.cudnn.benchmark = False
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cuda.matmul.allow_tf32 = False
+            stats["p2_cuda_cublas_workspace_config"] = os.environ[
+                "CUBLAS_WORKSPACE_CONFIG"
+            ]
         torch.set_num_threads(1)
         started = time.perf_counter()
         if hashlib.sha256(Path(checkpoint).read_bytes()).hexdigest() != checkpoint_sha:
             raise ValueError("H16 shared actor checkpoint SHA256 mismatch")
         model = JointActPilotNet.load(Path(checkpoint), device=device).eval()
-        if model.representation == "h21" and fixed_shape_batch_size:
-            raise ValueError("H21 relation batching is not fixed-shape certified; use batch size 0")
+        if deterministic_cuda and model.representation != "h21":
+            raise ValueError("Deterministic CUDA P2 experiment requires H21 model")
+        if (h21_collator not in ("reference", "packed")
+                or (model.representation != "h21" and h21_collator != "reference")):
+            raise ValueError("Packed H21 collator requires H21 actor representation")
+        h21_collate = collate_h21 if h21_collator == "reference" else collate_h21_packed
+        if model.representation == "h21":
+            stats["p2_h21_collator"] = h21_collator
         stats["model_load_seconds"] = time.perf_counter() - started
         startup.put(("ready", None))
         stopping = False
@@ -196,7 +227,10 @@ def _serve(
                         break
                     work.append(entry)
                 try:
-                    batches = _shape_groups(work, fixed_shape_batch_size)
+                    batches = _shape_groups(
+                        work, fixed_shape_batch_size,
+                        h21=(model.representation == "h21"),
+                    )
                 except Exception:
                     error = traceback.format_exc()
                     for entry in work:
@@ -220,6 +254,8 @@ def _serve(
                                 "pad_actions": bucket[2],
                                 "pad_members": bucket[3],
                             }
+                            if model.representation == "h21":
+                                padding["pad_relations"] = bucket[4]
                             stats["p2_fixed_shape_physical_rows"] += len(frames)
                             stats["p2_fixed_shape_bucket_forwards"] += 1
                         started = time.perf_counter()
@@ -235,7 +271,8 @@ def _serve(
                             batch_histogram[count_key] = (
                                 batch_histogram.get(count_key, 0) + 1
                             )
-                        host = (collate_h21(frames) if model.representation == "h21"
+                        host = (h21_collate(frames, **padding)
+                                if model.representation == "h21"
                                 else prepare_h7_actor_packed(frames, **padding))
                         host_elapsed = time.perf_counter() - started
                         stats["host_collate_seconds"] += host_elapsed
@@ -259,7 +296,7 @@ def _serve(
                         if (verify_batch_parity and len(actual_work) > 1
                                 and parity["samples"] < parity["limit"]):
                             sample = real_frames[0]
-                            single = (collate_h21([sample]) if model.representation == "h21"
+                            single = (h21_collate([sample]) if model.representation == "h21"
                                       else prepare_h7_actor_packed([sample])).to(device)
                             single_logits, _, single_hp = model(
                                 single, horizon_lambda=horizon_lambda,
@@ -335,6 +372,15 @@ def _serve(
             if device.startswith("cuda"):
                 stats["p2_cuda_peak_allocated_bytes"] = torch.cuda.max_memory_allocated(device)
                 stats["p2_cuda_peak_reserved_bytes"] = torch.cuda.max_memory_reserved(device)
+        if model.representation == "h21" and device.startswith("cuda"):
+            # One allocator query at teardown: preserve uninstrumented P2
+            # throughput timing while retaining GPU memory provenance.
+            stats["p2_h21_cuda_peak_allocated_bytes"] = (
+                torch.cuda.max_memory_allocated(device)
+            )
+            stats["p2_h21_cuda_peak_reserved_bytes"] = (
+                torch.cuda.max_memory_reserved(device)
+            )
         statistics.put(("ok", stats))
     except BaseException:
         error = traceback.format_exc()
@@ -355,6 +401,8 @@ class SharedH16Service:
         profile_actor: bool = False,
         verify_batch_parity: bool = False,
         fixed_shape_batch_size: int = 0,
+        h21_collator: str = "reference",
+        deterministic_cuda: bool = False,
     ) -> None:
         if (workers < 1 or max_batch < 1 or max_delay_ms < 0
                 or not math.isfinite(max_delay_ms)
@@ -364,7 +412,9 @@ class SharedH16Service:
                 or (verify_batch_parity and not profile_actor)
                 or fixed_shape_batch_size < 0
                 or fixed_shape_batch_size > max_batch
-                or (verify_batch_parity and fixed_shape_batch_size > 0)):
+                or (verify_batch_parity and fixed_shape_batch_size > 0)
+                or h21_collator not in ("reference", "packed")
+                or (deterministic_cuda and not device.startswith("cuda"))):
             raise ValueError("Invalid H16 shared actor configuration")
         ctx = multiprocessing.get_context("spawn")
         self.requests = ctx.Queue(maxsize=workers * 4)
@@ -379,7 +429,8 @@ class SharedH16Service:
             args=(str(checkpoint), digest, device, horizon_lambda,
                   self.requests, self.replies, self.startup, self.statistics,
                   max_batch, max_delay_ms, profile_actor,
-                  verify_batch_parity, fixed_shape_batch_size),
+                  verify_batch_parity, fixed_shape_batch_size, h21_collator,
+                  deterministic_cuda),
             daemon=True,
         )
         self.metrics: dict[str, Any] = {}

@@ -240,8 +240,14 @@ def test_generated_map_probe_never_enables_fixed_route_only_compact_selection():
         keyword.value for keyword in episode_call.keywords
         if keyword.arg == "compact_card_selection"
     )
-    assert isinstance(compact, ast.Constant)
-    assert compact.value is False
+    # H16/public-v0 keeps the old False default, while H21/public-v1
+    # explicitly opts into generated-map compact selection.
+    assert isinstance(compact, ast.Name)
+    assert compact.id == "compact_card_selection"
+    names = [parameter.arg for parameter in runner.args.kwonlyargs]
+    default = runner.args.kw_defaults[names.index("compact_card_selection")]
+    assert isinstance(default, ast.Constant)
+    assert default.value is False
 
 
 def test_generated_map_draw_pile_selection_uses_public_prompt_candidates():

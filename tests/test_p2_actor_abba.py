@@ -9,7 +9,7 @@ import pytest
 
 from tools.report_p2_actor_abba import report_actor_abba
 from tools.report_p2_cohort_comparison import MATCH_FIELDS
-from tools.run_p2_actor_abba import make_commands
+from tools.run_p2_actor_abba import make_commands, preflight_checkpoint
 
 
 def cohort(
@@ -596,3 +596,402 @@ def test_p2_native_fused_runner_only_toggles_native_timing(tmp_path):
         call[call.index("--p2-prefix-cache-handles") + 1] == "0"
         for call in calls[:4]
     )
+
+
+def h22_collator_cohorts() -> list[dict]:
+    arms = ("reference", "packed", "packed", "reference")
+    data = [cohort(wall, batch=4, fixed_shape=0, complete=True)
+            for wall in (18.0, 13.0, 12.0, 19.0)]
+    for record, collator in zip(data, arms, strict=True):
+        record["identity"].update({
+            "representation": "h21",
+            "public_schema_id": "prototype-ai-v1",
+            "codec": "h21-grounded-reward-shop-event-v4",
+            "actor_h21_collator": collator,
+        })
+        record["shared_actor_metrics"] = {
+            "p2_h21_collator": collator,
+            "requests": 32, "batches": 16,
+            "host_collate_seconds": 0.4 if collator == "packed" else 4.0,
+            "transfer_seconds": 0.05, "forward_seconds": 1.3,
+            "p2_h21_cuda_peak_allocated_bytes": 1024,
+            "p2_h21_cuda_peak_reserved_bytes": 2048,
+        }
+    return data
+
+
+def test_h22_collator_abba_accepts_exact_h21_variable_shape_replay():
+    data = h22_collator_cohorts()
+    frozen = deepcopy(data)
+    result = report_actor_abba(*data, experiment="h21-collator")
+    assert data == frozen
+    assert result["parity"]["passed"]
+    assert result["public_schema_id"] == "prototype-ai-v1"
+    assert result["actor_h21_collators"] == [
+        "reference", "packed", "packed", "reference",
+    ]
+    assert result["ratio_of_total_baseline_to_candidate_wall"] == pytest.approx(
+        37 / 25,
+    )
+    assert result["candidate_faster_in_both_pairs"]
+    assert result["h21_shared_actor_stages"][0]["cuda_peak_memory_bytes"] == {
+        "p2_h21_cuda_peak_allocated_bytes": 1024,
+        "p2_h21_cuda_peak_reserved_bytes": 2048,
+    }
+    assert [x["single_actor_process_seconds"]["host_collate_seconds"]
+            for x in result["h21_shared_actor_stages"]] == [
+                4.0, 0.4, 0.4, 4.0,
+            ]
+    assert result["configurations"]["A_H21_reference"]["h21_collator"] == "reference"
+    assert result["configurations"]["B_H21_packed"]["h21_collator"] == "packed"
+
+
+@pytest.mark.parametrize(("arm", "change", "reason"), [
+    (1, lambda p: p["identity"].update({"public_schema_id": "prototype-ai-v0"}),
+     "public schema"),
+    (1, lambda p: p["identity"].update({"representation": "h16"}),
+     "public schema"),
+    (1, lambda p: p["identity"].update({"actor_h21_collator": "reference"}),
+     "collator"),
+    (1, lambda p: p["shared_actor_metrics"].update({"p2_h21_collator": "reference"}),
+     "actor collator receipt"),
+    (2, lambda p: p["identity"].update({"actor_fixed_shape_batch_size": 4}),
+     "inconsistent actor mode"),
+    (2, lambda p: p["identity"].update({"actor_max_batch": 16}),
+     "inconsistent actor mode"),
+    (2, lambda p: p["identity"].update({"rollout_transport": "legacy"}),
+     "provenance drift"),
+    (2, lambda p: p["identity"].update({"checkpoint_sha256": "wrong"}),
+     "provenance drift"),
+    (3, lambda p: p["seed_reports"][0].update({"trace_sha256": "wrong"}),
+     "teacher replay"),
+    (3, lambda p: p["seed_reports"][0]["runs"][0].update({"search_transitions": 1}),
+     "paired work drift"),
+    (1, lambda p: p["identity"].update({"wire_profile_only": True}),
+     "unexpected wire-only profiling"),
+    (1, lambda p: p["shared_actor_metrics"].update({"host_collate_seconds": -1}),
+     "invalid H21 actor stage"),
+    (1, lambda p: p["shared_actor_metrics"].update({"requests": 0}),
+     "missing H21 actor requests"),
+    (1, lambda p: p["shared_actor_metrics"].update({
+        "p2_h21_cuda_peak_allocated_bytes": 0,
+    }), "missing CUDA memory receipt"),
+    (1, lambda p: p["shared_actor_metrics"].update({
+        "p2_h21_cuda_peak_reserved_bytes": 2,
+    }), "invalid H21 CUDA allocator memory"),
+])
+def test_h22_collator_abba_rejects_drift(arm, change, reason):
+    data = h22_collator_cohorts()
+    change(data[arm])
+    with pytest.raises(ValueError, match=reason):
+        report_actor_abba(*data, experiment="h21-collator")
+
+
+def test_h22_collator_abba_runner_changes_only_collator(tmp_path):
+    args = Namespace(
+        experiment="h21-collator", h21_max_batch=4,
+        seeds=None, seed_prefix="p2-h22", seed_count=16, workers=15,
+        max_decisions=4096, max_searches=2, simulations=16, depth=0,
+        actor_max_delay_ms=2.0, horizon_lambda=0.411395,
+        macro_prior_weight=0, macro_model=None,
+        ascension=0, ai_root=Path("/tmp/ai"), emulator_root=Path("/tmp/emu"),
+        emulator_revision="emulator-v1-sha", checkpoint=Path("h22.pt"),
+        actor_device="cuda", map_profile="generated", output_root=tmp_path,
+    )
+    calls, outputs = make_commands(args)
+    assert outputs[-1].name == "p2-h22-collator-abba-report.json"
+    assert [call[call.index("--actor-h21-collator") + 1]
+            for call in calls[:4]] == [
+                "reference", "packed", "packed", "reference",
+            ]
+    for command in calls[:4]:
+        assert command[command.index("--representation") + 1] == "h21"
+        assert command[command.index("--actor-max-batch") + 1] == "4"
+        assert command[command.index("--actor-fixed-shape-batch-size") + 1] == "0"
+        assert command[command.index("--max-decisions") + 1] == "4096"
+        assert command[command.index("--depth") + 1] == "0"
+        assert "--paired" in command and "--no-episode-profile" in command
+        assert "--actor-profile" not in command
+        assert "--execute" in command
+        assert command[command.index("--rollout-transport") + 1] == "fused"
+    assert calls[-1][calls[-1].index("--experiment") + 1] == "h21-collator"
+
+
+def test_h22_report_cli_accepts_h21_collator_mode(tmp_path):
+    """Exercise the CLI parser, not just the Python report function."""
+    import subprocess
+    import sys
+
+    script = Path(__file__).resolve().parents[1] / "tools/report_p2_actor_abba.py"
+    result = subprocess.run(
+        [
+            sys.executable, str(script),
+            "--a1", str(tmp_path / "a1.json"),
+            "--b1", str(tmp_path / "b1.json"),
+            "--b2", str(tmp_path / "b2.json"),
+            "--a2", str(tmp_path / "a2.json"),
+            "--experiment", "h21-collator",
+            "--output", str(tmp_path / "report.json"),
+        ],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 1
+    assert "Missing successful P2 A/B/B/A profiles" in result.stderr
+    assert "invalid choice" not in result.stderr
+
+
+def h22_complete_cohorts() -> list[dict]:
+    data = h22_collator_cohorts()
+    for p in data:
+        for row in p["seed_reports"]:
+            for run in row["runs"]:
+                run["complete"] = True
+                run["outcome"] = "act_clear" if row["seed"] == "seed-a" else "defeat"
+        p["completed_episodes"] = 4
+        p["censored_episodes"] = 0
+    return data
+
+
+def test_h22_full_act_gate_verifies_complete_cuda_search_and_seed_count():
+    inputs = h22_complete_cohorts()
+    report = report_actor_abba(
+        *inputs, experiment="h21-collator", require_complete=True,
+        min_seed_count=2, require_cuda=True, require_search_roots=True,
+    )
+    assert report["full_act_gate"] == {
+        "require_complete": True, "min_seed_count": 2,
+        "require_cuda": True, "require_search_roots": True, "passed": True,
+    }
+    assert report["workload"]["censored_episode_executions_per_run"] == 0
+
+
+def test_h22_full_act_gate_rejects_censoring_and_insufficient_seeds():
+    with pytest.raises(ValueError, match="zero censored"):
+        report_actor_abba(
+            *h22_collator_cohorts(), experiment="h21-collator",
+            require_complete=True, min_seed_count=2,
+        )
+    with pytest.raises(ValueError, match="at least 16 independent seeds"):
+        report_actor_abba(
+            *h22_complete_cohorts(), experiment="h21-collator",
+            min_seed_count=16,
+        )
+
+
+def test_h22_full_act_gate_rejects_cpu_or_absent_real_search():
+    data = h22_complete_cohorts()
+    for row in data:
+        row["identity"]["actor_device"] = "cpu"
+    with pytest.raises(ValueError, match="requires CUDA"):
+        report_actor_abba(*data, experiment="h21-collator", require_cuda=True)
+    data = h22_complete_cohorts()
+    for profile in data:
+        for item in profile["seed_reports"]:
+            for run in item["runs"]:
+                run["search_roots"] = 0
+                run["search_transitions"] = 0
+        profile["search_transitions"] = 0
+    with pytest.raises(ValueError, match="actual combat PUCT work"):
+        report_actor_abba(
+            *data, experiment="h21-collator", require_search_roots=True,
+        )
+
+
+def test_h22_full_act_runner_enforces_cuda_15_workers_and_full_decisions(tmp_path):
+    args = Namespace(
+        experiment="h21-collator", require_full_act=True, h21_max_batch=4,
+        seeds=None, seed_prefix="h22-gpu", seed_count=16, workers=15,
+        max_decisions=4096, max_searches=2, simulations=16, depth=0,
+        actor_max_delay_ms=2.0, horizon_lambda=0.411395,
+        macro_prior_weight=0, macro_model=None,
+        ascension=0, ai_root=Path("/tmp/ai"), emulator_root=Path("/tmp/emu"),
+        emulator_revision="emulator-v1-sha", checkpoint=Path("h22.pt"),
+        actor_device="cuda", map_profile="generated", output_root=tmp_path,
+    )
+    commands, _ = make_commands(args)
+    assert all(command[command.index("--workers") + 1] == "15"
+               for command in commands[:4])
+    assert all(command[command.index("--seeds") + 1].count(",") == 15
+               for command in commands[:4])
+    assert all(command[command.index("--depth") + 1] == "0"
+               for command in commands[:4])
+    assert all(command[command.index("--max-decisions") + 1] == "4096"
+               for command in commands[:4])
+    for required in ("--require-complete", "--require-cuda",
+                     "--require-search-roots", "--min-seed-count"):
+        assert required in commands[-1]
+    for attr, bad in (
+        ("workers", 8), ("actor_device", "cpu"), ("seed_count", 8),
+        ("max_decisions", 80), ("max_searches", 0),
+        ("experiment", "batching"),
+    ):
+        candidate = Namespace(**vars(args))
+        setattr(candidate, attr, bad)
+        with pytest.raises(ValueError, match="Full-Act H21 acceptance"):
+            make_commands(candidate)
+
+
+def test_h22_checkpoint_preflight_detects_missing_path(tmp_path):
+    with pytest.raises(ValueError, match="Missing frozen checkpoint"):
+        preflight_checkpoint(Namespace(
+            experiment="h21-collator", checkpoint=tmp_path / "absent.pt",
+        ))
+
+
+def test_h22_frozen_checkpoint_creation_and_schema_preflight(tmp_path):
+    # Lightweight P2 contract CI does not install PyTorch; H22 CI runs the
+    # same creation/checkpoint verification in its torch-enabled environment.
+    torch = pytest.importorskip("torch")
+
+    from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
+    from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet
+    from tools.create_p2_h22_frozen_checkpoint import create_checkpoint
+
+    torch.manual_seed(11)
+    h16 = JointActPilotNet(SharedObjectTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64)))
+    source = tmp_path / "h16-r79.pt"
+    output = tmp_path / "h22-frozen.pt"
+    h16.save(source)
+    provenance = create_checkpoint(source, output, seed=17)
+    assert provenance["representation"] == "h21"
+    assert provenance["trained_h21_steps"] == 0
+    assert provenance["output_h22"] == str(output.resolve())
+    assert output.is_file()
+    loaded = JointActPilotNet.load(output)
+    assert loaded.representation == "h21"
+    preflight_checkpoint(Namespace(experiment="h21-collator", checkpoint=output))
+    with pytest.raises(ValueError, match="expected H22 H21"):
+        preflight_checkpoint(Namespace(experiment="h21-collator", checkpoint=source))
+    with pytest.raises(FileExistsError, match="Refusing to overwrite"):
+        create_checkpoint(source, output, seed=17)
+    with pytest.raises(FileNotFoundError, match="Missing H16 source"):
+        create_checkpoint(tmp_path / "absent-h16.pt", tmp_path / "new.pt")
+    with pytest.raises(ValueError, match="Expected H16 source"):
+        create_checkpoint(output, tmp_path / "new.pt")
+
+    # Same source and seed reproduce identical initialized weights.
+    second = tmp_path / "h22-frozen-copy.pt"
+    create_checkpoint(source, second, seed=17)
+    other = JointActPilotNet.load(second)
+    for key, value in loaded.state_dict().items():
+        assert torch.equal(value, other.state_dict()[key]), key
+
+
+def test_h22_deterministic_cuda_abba_flag_is_matched_across_arms(tmp_path):
+    args = Namespace(
+        experiment="h21-collator", actor_deterministic_cuda=True,
+        h21_max_batch=4, require_full_act=True,
+        seeds=None, seed_prefix="h22-det", seed_count=16, workers=15,
+        max_decisions=4096, max_searches=2, simulations=16, depth=0,
+        actor_max_delay_ms=2.0, horizon_lambda=0.411395,
+        macro_prior_weight=0, macro_model=None,
+        ascension=0, ai_root=Path("/tmp/ai"), emulator_root=Path("/tmp/emu"),
+        emulator_revision="pinned-sha", checkpoint=Path("h22.pt"),
+        actor_device="cuda", map_profile="generated", output_root=tmp_path,
+    )
+    commands, _ = make_commands(args)
+    assert all("--actor-deterministic-cuda" in cmd for cmd in commands[:4])
+    assert "--actor-deterministic-cuda" not in commands[-1]
+    for experiment, device in (("batching", "cuda"), ("h21-collator", "cpu")):
+        broken = Namespace(**vars(args))
+        broken.experiment = experiment
+        broken.actor_device = device
+        with pytest.raises(ValueError, match="Invalid P2 A/B/B/A"):
+            make_commands(broken)
+
+
+def test_h22_deterministic_cuda_report_verifies_actor_receipts():
+    data = h22_collator_cohorts()
+    for record in data:
+        record["identity"]["actor_deterministic_cuda"] = True
+        record["shared_actor_metrics"]["p2_deterministic_cuda"] = True
+        record["shared_actor_metrics"][
+            "p2_cuda_cublas_workspace_config"
+        ] = ":4096:8"
+    report = report_actor_abba(*data, experiment="h21-collator")
+    assert report["actor_deterministic_cuda"] is True
+
+    wrong = deepcopy(data)
+    wrong[1]["shared_actor_metrics"]["p2_deterministic_cuda"] = False
+    with pytest.raises(ValueError, match="deterministic CUDA provenance"):
+        report_actor_abba(*wrong, experiment="h21-collator")
+
+    wrong = deepcopy(data)
+    wrong[2]["shared_actor_metrics"]["p2_cuda_cublas_workspace_config"] = ":0:0"
+    with pytest.raises(ValueError, match="invalid deterministic CUDA BLAS"):
+        report_actor_abba(*wrong, experiment="h21-collator")
+
+    wrong = deepcopy(data)
+    wrong[3]["identity"]["actor_deterministic_cuda"] = False
+    with pytest.raises(ValueError, match="deterministic CUDA provenance"):
+        report_actor_abba(*wrong, experiment="h21-collator")
+
+
+def test_h22_abba_propagates_watchdog_limit_to_every_arm(tmp_path):
+    args = Namespace(
+        experiment="h21-collator", actor_deterministic_cuda=True,
+        h21_max_batch=4, require_full_act=True,
+        seeds=None, seed_prefix="h22-watchdog", seed_count=16, workers=15,
+        max_decisions=4096, max_searches=2, max_simulation_steps=2048,
+        simulations=16, depth=0, actor_max_delay_ms=2.0,
+        horizon_lambda=0.411395, macro_prior_weight=0, macro_model=None,
+        ascension=0, ai_root=Path("/tmp/ai"), emulator_root=Path("/tmp/emu"),
+        emulator_revision="pinned-emulator", checkpoint=Path("h22.pt"),
+        actor_device="cuda", map_profile="generated", output_root=tmp_path,
+    )
+    commands, _ = make_commands(args)
+    for call in commands[:4]:
+        assert call[call.index("--max-simulation-steps") + 1] == "2048"
+        assert "--actor-deterministic-cuda" in call
+        assert call[call.index("--depth") + 1] == "0"
+    bad = Namespace(**vars(args))
+    bad.max_simulation_steps = 0
+    with pytest.raises(ValueError, match="Invalid P2 A/B/B/A"):
+        make_commands(bad)
+
+
+def test_h22_stable_shape_collator_abba_requires_matched_physical_rows():
+    data = h22_collator_cohorts()
+    for profile in data:
+        profile["identity"]["actor_fixed_shape_batch_size"] = 4
+        profile["shared_actor_metrics"].update({
+            "p2_fixed_shape_batch_size": 4,
+            "p2_fixed_shape_physical_rows": 64,
+            "p2_fixed_shape_bucket_forwards": 16,
+        })
+    accepted = report_actor_abba(*data, experiment="h21-collator")
+    assert accepted["parity"]["passed"]
+
+    wrong = deepcopy(data)
+    wrong[1]["identity"]["actor_fixed_shape_batch_size"] = 0
+    with pytest.raises(ValueError, match="inconsistent actor mode|physical-row shape drift"):
+        report_actor_abba(*wrong, experiment="h21-collator")
+
+    wrong = deepcopy(data)
+    wrong[2]["shared_actor_metrics"]["p2_fixed_shape_bucket_forwards"] = 0
+    with pytest.raises(ValueError, match="missing H21 fixed-shape actor receipt"):
+        report_actor_abba(*wrong, experiment="h21-collator")
+
+
+def test_h22_fixed_shape_runner_matches_all_four_arms(tmp_path):
+    args = Namespace(
+        experiment="h21-collator", actor_deterministic_cuda=True,
+        h21_max_batch=4, h21_fixed_batch_size=4,
+        require_full_act=True, seeds=None,
+        seed_prefix="h22-shape", seed_count=16, workers=15,
+        max_decisions=4096, max_searches=2, max_simulation_steps=512,
+        simulations=16, depth=8, actor_max_delay_ms=2.0,
+        horizon_lambda=0.411395, macro_prior_weight=0, macro_model=None,
+        ascension=0, ai_root=Path("/tmp/ai"), emulator_root=Path("/tmp/emu"),
+        emulator_revision="pinned-emulator", checkpoint=Path("h22.pt"),
+        actor_device="cuda", map_profile="generated", output_root=tmp_path,
+    )
+    commands, _ = make_commands(args)
+    assert all(c[c.index("--actor-fixed-shape-batch-size") + 1] == "4"
+               for c in commands[:4])
+    assert all("--actor-deterministic-cuda" in c for c in commands[:4])
+    wrong = Namespace(**vars(args))
+    wrong.h21_fixed_batch_size = 8
+    with pytest.raises(ValueError, match="Invalid P2 A/B/B/A"):
+        make_commands(wrong)

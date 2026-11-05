@@ -9,7 +9,11 @@ import torch
 
 from sts2_ai.emulator.protocol import LegalAction, Observation
 from sts2_ai.models.h16_batch_actor import RemoteH16Actor, SharedH16Service
-from sts2_ai.models.shared_macro_transformer_v2 import H21GroundedMacroTransformer
+from sts2_ai.models.shared_macro_transformer_v2 import (
+    H21GroundedMacroTransformer,
+    collate_h21,
+    collate_h21_packed,
+)
 from sts2_ai.models.shared_transformer import H7Config, H20Batch, SharedObjectTransformer
 from sts2_ai.training.h16_joint_act_pilot import (
     H22_SCHEMA,
@@ -22,6 +26,7 @@ from sts2_ai.training.h16_joint_act_pilot import (
 )
 from sts2_ai.training.h17_replay import fit_replay
 from sts2_ai.training.h21_macro_offer_codec import H21_CODEC, H21_OBJECT_SCHEMA
+from tools.create_p2_h22_frozen_checkpoint import create_checkpoint
 from tools.train_h22_h21_generated_a0 import h22_default_arguments
 
 
@@ -126,6 +131,52 @@ def test_h22_alias_audit_and_policy_forward():
     assert offsets == (0.0, 0.0)
 
 
+@pytest.mark.parametrize("with_search_target", (False, True))
+def test_h22_replay_mixed_action_widths_keep_empty_puct_loss_finite(
+    with_search_target,
+):
+    torch.manual_seed(19)
+    model = JointActPilotNet(H21GroundedMacroTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64)))
+    state = _state()
+    actions = _actions()
+    # Three padded actions across one mixed-width minibatch: float32 min
+    # logits sum to -inf. The old 0 * logits.sum() fallback was NaN.
+    menus = (actions, actions[:1], actions[:1], actions[:1])
+    rows = [
+        {
+            "observation": json.dumps(state),
+            "actions": [[a.action_id, a.kind, a.payload_json] for a in menu],
+            "phase": "macro", "act": 0.0,
+            "room_hp": [0.8, 0.4], "combat_quality": None,
+            "search_policy": (
+                [0.7, 0.3] if with_search_target and i == 0 else None
+            ),
+        }
+        for i, menu in enumerate(menus)
+    ]
+    encoded = [model.encode_decision(state, menu) for menu in menus]
+    batch = model.collate(encoded)
+    assert int((~batch.action_mask).sum()) == 3
+    with torch.no_grad():
+        logits, _, _ = model(batch, value_logits=True, horizon_lambda=0.42)
+    assert bool(torch.isneginf(logits.sum()))
+    assert bool(torch.isnan(logits.sum() * 0))
+
+    result = fit_replay(
+        model, torch.optim.AdamW(model.parameters(), lr=1e-5),
+        rows, horizon_lambda=0.42, replay_weight=0.2, minibatch=4,
+    )
+    assert result["steps"] == 1
+    assert result["examples"] == 4
+    assert result["search_targets"] == int(with_search_target)
+    assert torch.isfinite(torch.tensor(result["loss"])).item()
+    assert all(
+        torch.isfinite(weight).all().item()
+        for weight in model.state_dict().values() if weight.is_floating_point()
+    )
+
+
 def test_h22_replay_uses_h21_relation_batch():
     model = JointActPilotNet(H21GroundedMacroTransformer(
         H7Config(width=32, layers=1, heads=4, feedforward=64)))
@@ -148,7 +199,8 @@ def test_h22_replay_uses_h21_relation_batch():
     assert report["steps"] == 1
 
 
-def test_h22_shared_cpu_actor_matches_local_h21_graph_forward(tmp_path):
+@pytest.mark.parametrize("collator", ("reference", "packed"))
+def test_h22_shared_cpu_actor_matches_local_h21_graph_forward(tmp_path, collator):
     torch.manual_seed(4)
     model = JointActPilotNet(H21GroundedMacroTransformer(
         H7Config(width=32, layers=1, heads=4, feedforward=64))).eval()
@@ -162,13 +214,14 @@ def test_h22_shared_cpu_actor_matches_local_h21_graph_forward(tmp_path):
     with SharedH16Service(
         checkpoint=path, digest=digest, workers=1, device="cpu",
         horizon_lambda=0.42, max_batch=4,
-        fixed_shape_batch_size=0,
+        fixed_shape_batch_size=0, h21_collator=collator,
     ) as service:
         remote = RemoteH16Actor(service.transport)
         logits, hp = remote.infer(encoded)
     assert list(logits) == pytest.approx(
         local_logits[0, :len(encoded.actions)].detach().tolist(), abs=1e-5)
     assert hp == pytest.approx(float(local_hp[0]), abs=1e-5)
+    assert service.metrics["p2_h21_collator"] == collator
 
 
 def test_h22_entrypoint_defaults_stay_schema_isolated():
@@ -176,10 +229,29 @@ def test_h22_entrypoint_defaults_stay_schema_isolated():
     def last(flag):
         return defaults[len(defaults) - 1 - defaults[::-1].index(flag) + 1]
     assert last("--representation") == "h21"
-    assert last("--actor-fixed-shape-batch-size") == "0"
+    assert last("--actor-h21-collator") == "packed"
+    assert last("--actor-fixed-shape-batch-size") == "4"
     assert last("--actor-max-batch") == "4"
     assert last("--map-profile") == "generated"
     assert last("--rollout-transport") == "fused"
+
+
+def test_h22_packed_default_keeps_reference_opt_out_and_cuda_determinism_explicit():
+    from tools.train_h22_h21_generated_a0 import h22_cli_arguments
+
+    default = h22_cli_arguments([])
+    assert default[default.index("--actor-h21-collator") + 1] == "packed"
+    assert default[default.index("--actor-fixed-shape-batch-size") + 1] == "4"
+    # Generic H16/H18 and CPU smoke settings remain independently selectable.
+    assert "--actor-deterministic-cuda" not in default
+    reference = h22_cli_arguments([
+        "--actor-h21-collator", "reference",
+        "--actor-fixed-shape-batch-size", "0",
+    ])
+    assert reference[-4:] == (
+        "--actor-h21-collator", "reference",
+        "--actor-fixed-shape-batch-size", "0",
+    )
 
 
 def test_h22_joint_optimizer_updates_h21_macro_graph():
@@ -204,3 +276,253 @@ def test_h22_joint_optimizer_updates_h21_macro_graph():
     assert report["combat_decisions"] == 0
     assert report["optimizer_steps"] == 1
     assert report["loss"] == pytest.approx(float(report["loss"]))
+
+
+def test_h22_packed_collate_exact_tensors_and_mixed_sizes():
+    first = encode_joint_decision(_state(), _actions(), representation="h21")
+    next_state = {**_state(), "deck": [
+        *_state()["deck"],
+        {"instance_id": 202, "card_id": "silent.defend",
+         "upgrade_level": 0, "state": {}},
+    ]}
+    second = encode_joint_decision(next_state, _actions(), representation="h21")
+    for decisions in ([first], [first, second], [second, first]):
+        reference = collate_h21(decisions)
+        packed = collate_h21_packed(decisions)
+        for name in type(reference).__dataclass_fields__:
+            expected, actual = getattr(reference, name), getattr(packed, name)
+            assert expected.dtype == actual.dtype, name
+            assert torch.equal(expected, actual), name
+
+
+def test_h22_packed_collator_refuses_legacy_mode(tmp_path):
+    base = JointActPilotNet(SharedObjectTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64))).eval()
+    path = tmp_path / "h16-actor.pt"
+    base.save(path)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    with pytest.raises(RuntimeError, match="Packed H21 collator requires H21"):
+        with SharedH16Service(
+            checkpoint=path, digest=digest, workers=1, device="cpu",
+            horizon_lambda=0.42, max_batch=4, h21_collator="packed",
+        ):
+            pass
+
+
+def test_h22_frozen_benchmark_helper_from_existing_h16(tmp_path):
+    base = JointActPilotNet(SharedObjectTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64)))
+    h16_path = tmp_path / "existing-h16.pt"
+    h22_path = tmp_path / "frozen-h22.pt"
+    base.save(h16_path)
+    report = create_checkpoint(h16_path, h22_path, seed=20261105)
+    assert report["checkpoint_schema"] == H22_SCHEMA
+    assert report["trained_h21_steps"] == 0
+    assert report["seed"] == 20261105
+    assert report["source_h16"] == str(h16_path.resolve())
+    assert report["output_h22"] == str(h22_path.resolve())
+    assert JointActPilotNet.load(h22_path).representation == "h21"
+    with pytest.raises(FileExistsError, match="Refusing to overwrite"):
+        create_checkpoint(h16_path, h22_path)
+    with pytest.raises(FileNotFoundError, match="Missing H16 source"):
+        create_checkpoint(tmp_path / "absent.pt", tmp_path / "other.pt")
+
+
+def test_h22_deterministic_cuda_actor_is_explicit_opt_in(tmp_path):
+    with pytest.raises(ValueError, match="Invalid H16 shared actor configuration"):
+        SharedH16Service(
+            checkpoint=tmp_path / "unused.pt", digest="unused",
+            workers=1, device="cpu", horizon_lambda=0.42,
+            deterministic_cuda=True,
+        )
+
+
+def test_h22_h21_fixed_relation_shape_ref_packed_tensor_parity():
+    from sts2_ai.models.h16_batch_actor import _stable_h21_shape_bucket
+
+    model = JointActPilotNet(H21GroundedMacroTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64)))
+    first = model.encode_decision(_state(), _actions())
+    alternate = dict(_state())
+    alternate["deck"] = [*_state()["deck"], {
+        "instance_id": 202, "card_id": "silent.defend",
+        "upgrade_level": 1, "state": {},
+    }]
+    second = model.encode_decision(alternate, _actions())
+    _, nobj, nact, nmem, nrel = _stable_h21_shape_bucket(first)
+    _, mobj, mact, mmem, mrel = _stable_h21_shape_bucket(second)
+    dims = {
+        "pad_objects": max(nobj, mobj),
+        "pad_actions": max(nact, mact),
+        "pad_members": max(nmem, mmem),
+        "pad_relations": max(nrel, mrel),
+    }
+    for frames in ([first], [second], [first, second], [second, first]):
+        reference = collate_h21(frames, **dims)
+        packed = collate_h21_packed(frames, **dims)
+        for name in H20Batch.__dataclass_fields__:
+            assert torch.equal(getattr(reference, name), getattr(packed, name)), name
+        assert reference.kinds.shape[1] == dims["pad_objects"]
+        assert reference.action_kinds.shape[1] == dims["pad_actions"]
+        assert reference.action_members.shape[2] == dims["pad_members"]
+        assert reference.relation_types.shape[1] == dims["pad_relations"]
+        for row, decision in enumerate(frames):
+            assert reference.object_mask[row].sum() == len(decision.objects)
+            assert reference.action_mask[row].sum() == len(decision.actions)
+            assert reference.relation_mask[row].sum() == len(decision.relations)
+            assert not reference.relation_mask[row, len(decision.relations):].any()
+            assert (reference.relation_sources[row, len(decision.relations):] == -1).all()
+    with pytest.raises(ValueError, match="underflows relations"):
+        collate_h21_packed([first], pad_relations=0)
+    with pytest.raises(ValueError, match="underflows objects"):
+        collate_h21([first], pad_objects=1)
+
+
+def test_h22_h21_stable_shape_actor_cpu_smoke(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from sts2_ai.models.h16_batch_actor import _stable_h21_shape_bucket
+
+    model = JointActPilotNet(H21GroundedMacroTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64))).eval()
+    checkpoint = tmp_path / "fixed-h21.pt"
+    model.save(checkpoint)
+    digest = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
+    frames = [
+        model.encode_decision(_state(), _actions()),
+        model.encode_decision(_state(), _actions()),
+    ]
+    assert _stable_h21_shape_bucket(frames[0]) == _stable_h21_shape_bucket(frames[1])
+    for collator in ("reference", "packed"):
+        with SharedH16Service(
+            checkpoint=checkpoint, digest=digest, workers=2,
+            device="cpu", horizon_lambda=0.411395,
+            max_batch=2, max_delay_ms=10.0,
+            fixed_shape_batch_size=2, h21_collator=collator,
+        ) as service:
+            clients = [RemoteH16Actor(service.transport) for _ in frames]
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = [pool.submit(client.infer, frame)
+                           for client, frame in zip(clients, frames, strict=True)]
+                results = [future.result(timeout=30) for future in futures]
+        assert results[0] == results[1]
+        assert service.metrics["p2_fixed_shape_batch_size"] == 2
+        assert service.metrics["p2_fixed_shape_physical_rows"] >= 2
+        assert service.metrics["p2_fixed_shape_bucket_forwards"] >= 1
+
+
+def test_h22_trainer_dryrun_accepts_fixed_packed_deterministic_cuda(
+    tmp_path, monkeypatch, capsys,
+):
+    from tools.train_h16_joint_act_pilot import main as train_main
+
+    source = tmp_path / "initial-h16.pt"
+    source.write_bytes(b"dry-run-identity-only")
+    arguments = [
+        "h22-dry-run", *h22_default_arguments(),
+        "--initial-h16", str(source),
+        "--macro-prior-weight", "0",
+        "--emulator-root", str(tmp_path),
+        "--emulator-revision", "pinned-emulator",
+        "--output-root", str(tmp_path / "not-executed"),
+        "--actor-h21-collator", "packed",
+        "--actor-fixed-shape-batch-size", "4",
+        "--actor-max-batch", "4",
+        "--actor-deterministic-cuda",
+        "--evaluation-horizon-lambda", "0.4113950303216448",
+    ]
+    monkeypatch.setattr("sys.argv", arguments)
+    train_main()
+    report = json.loads(capsys.readouterr().out)
+    options = report["experiment"]["options"]
+    assert not report["execute"]
+    assert options["representation"] == "h21"
+    assert options["actor_h21_collator"] == "packed"
+    assert options["actor_fixed_shape_batch_size"] == 4
+    assert options["actor_deterministic_cuda"] is True
+    assert options["evaluation_horizon_lambda"] == 0.4113950303216448
+
+    # Deterministic CUDA is an explicit option, not a CPU or H16 default.
+    arguments.extend(["--actor-device", "cpu"])
+    monkeypatch.setattr("sys.argv", arguments)
+    with pytest.raises(SystemExit) as error:
+        train_main()
+    assert error.value.code == 2
+    assert "Invalid H16 pilot configuration" in capsys.readouterr().err
+
+    arguments[-1] = "cuda"
+    arguments.extend(["--actor-max-batch", "2"])
+    monkeypatch.setattr("sys.argv", arguments)
+    with pytest.raises(SystemExit) as error:
+        train_main()
+    assert error.value.code == 2
+    assert "Invalid H16 pilot configuration" in capsys.readouterr().err
+
+
+def test_h22_cuda_15w_smoke_verifier_requires_full_worker_cohort(
+    tmp_path, monkeypatch,
+):
+    import tools.check_h22_packed_training_smoke as verifier
+
+    opts = {
+        "representation": "h21", "actor_inference": "shared",
+        "actor_h21_collator": "packed", "actor_fixed_shape_batch_size": 4,
+        "actor_max_batch": 4, "actor_deterministic_cuda": True,
+        "workers": 15, "runs_per_round": 15, "heldout_runs": 2,
+    }
+    actor = {
+        "p2_h21_collator": "packed", "p2_fixed_shape_batch_size": 4,
+        "p2_fixed_shape_bucket_forwards": 3,
+        "p2_fixed_shape_physical_rows": 12, "requests": 6,
+        "device": "cuda", "p2_deterministic_cuda": True,
+        "p2_cuda_cublas_workspace_config": ":4096:8",
+    }
+    checkpoint = tmp_path / "models" / "joint-r0001.pt"
+    checkpoint.parent.mkdir()
+    checkpoint.write_bytes(b"synthetic-checkpoint")
+    (tmp_path / "optimizer-state.pt").write_bytes(b"synthetic-optimizer")
+
+    def progress(train_completed=15):
+        return {
+            "experiment": {"schema": H22_SCHEMA, "options": opts},
+            "rounds": [{
+                "round": 1, "train": {
+                    "completed": train_completed, "censored": 0,
+                    "searches": 2, "search_transitions": 32,
+                    "rollout_profile": {"actor_service": actor},
+                },
+                "heldout": {
+                    "completed": 2, "censored": 0,
+                    "rollout_profile": {"actor_service": actor},
+                },
+                "update": {"optimizer_steps": 2},
+                "checkpoint_sha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
+            }],
+        }
+
+    class Trained:
+        representation = "h21"
+
+        def state_dict(self):
+            return {"weights": torch.ones(2)}
+
+    monkeypatch.setattr(verifier.JointActPilotNet, "load", lambda *_a, **_kw: Trained())
+    (tmp_path / "progress.json").write_text(json.dumps(progress()))
+    result = verifier.verify_smoke(
+        tmp_path, require_cuda=True, expected_workers=15,
+        expected_train=15, expected_heldout=2,
+    )
+    assert result["train_completed"] == 15
+    assert result["heldout_completed"] == 2
+    assert result["requested_workers"] == 15
+
+    opts["workers"] = 4
+    (tmp_path / "progress.json").write_text(json.dumps(progress()))
+    with pytest.raises(ValueError, match="requested workers"):
+        verifier.verify_smoke(tmp_path, expected_workers=15)
+    opts["workers"] = 15
+    (tmp_path / "progress.json").write_text(json.dumps(progress(14)))
+    with pytest.raises(ValueError, match="train count mismatch"):
+        verifier.verify_smoke(tmp_path, expected_train=15)
+    with pytest.raises(ValueError, match="positive integer"):
+        verifier.verify_smoke(tmp_path, expected_workers=0)

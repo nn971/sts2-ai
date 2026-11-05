@@ -57,12 +57,19 @@ def dll_identity(root: Path) -> dict[str, str] | None:
     return {"path": str(binaries[0]), "sha256": sha256(binaries[0])}
 
 
-def extract_signature(episode: PilotEpisode) -> dict[str, Any]:
+def extract_signature(
+    episode: PilotEpisode, *,
+    p2_search_work_receipts: list[dict[str, int]] | None = None,
+) -> dict[str, Any]:
     """The public decision and teacher trace used for paired replay checks."""
     return {
         "outcome": episode.outcome,
         "searches": episode.searches,
         "transitions": episode.search_transitions,
+        **(
+            {"search_work_per_root": p2_search_work_receipts}
+            if p2_search_work_receipts is not None else {}
+        ),
         "actions": [
             {
                 "observation_hash": d.observation.observation_hash,
@@ -117,6 +124,7 @@ def run_episode(
     native_fused_profile: bool = False,
     search_enabled: bool = True,
     p2_prefix_cache_handles: int = 0,
+    compact_card_selection: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     # The H16 policy and emulator streams have stable per-episode seed owners.
     set_h16_rollout_seed(seed)
@@ -136,6 +144,7 @@ def run_episode(
     remote_wait_before = remote.wait_seconds if remote is not None else 0.0
     roots: list[dict[str, object]] = []
     cache_roots: list[dict[str, object]] = []
+    search_work_receipts: list[dict[str, int]] = []
     from sts2_ai.emulator.run_environment import EXPERIMENTAL_FIXED_ROUTE_PROFILE
     start = time.perf_counter()
     episode = collect_act_episode(
@@ -143,10 +152,10 @@ def run_episode(
         seed=seed,
         ascension=ascension,
         map_profile_id=(EXPERIMENTAL_FIXED_ROUTE_PROFILE if fixed_route else None),
-        # The H16-compatible emulator only allows compact selection on
-        # the experimental fixed route. Preserve the ordinary generated-map
-        # action contract in this benchmark (also the default on fixed route).
-        compact_card_selection=False,
+        # H16/public-v0 generated-map profiling keeps compact selection off.
+        # H22/public-v1 explicitly opts in to its supported generated-map
+        # compact selection contract; no implicit schema conversion.
+        compact_card_selection=compact_card_selection,
         max_decisions=max_decisions,
         search_probability=1.0 if search_enabled else 0.0,
         max_searches=max_searches,
@@ -158,6 +167,7 @@ def run_episode(
         search_profiles=(roots if profile_search else None),
         p2_prefix_cache_handles=p2_prefix_cache_handles,
         p2_cache_report=(cache_roots if p2_prefix_cache_handles else None),
+        p2_search_work_receipts=search_work_receipts,
     )
     elapsed = time.perf_counter() - start
     ops = backend.operation_profile()
@@ -247,7 +257,9 @@ def run_episode(
             "GPU synchronization-specific timings (when using CUDA)",
         ],
     }
-    return report, extract_signature(episode)
+    return report, extract_signature(
+        episode, p2_search_work_receipts=search_work_receipts,
+    )
 
 
 def parse_args() -> argparse.Namespace:

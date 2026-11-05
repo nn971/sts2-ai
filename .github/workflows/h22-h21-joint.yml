@@ -10,7 +10,13 @@ on:
       - 'tools/train_h16_joint_act_pilot.py'
       - 'tools/train_h22_h21_generated_a0.py'
       - 'tools/probe_h22_joint_bridge.py'
+      - 'tools/check_h22_packed_training_smoke.py'
+      - 'tools/report_h22_learning_pilot.py'
+      - 'tools/monitor_h22_long_training.py'
+      - 'tools/audit_h22_independent.py'
       - 'tests/test_h22_h21_joint_training.py'
+      - 'tests/test_h22_learning_pilot.py'
+      - 'tests/test_h22_long_training.py'
       - '.github/workflows/h22-h21-joint.yml'
   workflow_dispatch:
 
@@ -29,11 +35,11 @@ jobs:
           python -m pip install -e '.[dev]'
       - name: H22 lint and compile
         run: |
-          python -m ruff check src/sts2_ai/training/h16_joint_act_pilot.py src/sts2_ai/training/h17_replay.py src/sts2_ai/emulator/jsonl_backend.py src/sts2_ai/models/h16_batch_actor.py tools/train_h16_joint_act_pilot.py tools/train_h22_h21_generated_a0.py tests/test_h22_h21_joint_training.py
-          python -m compileall -q src/sts2_ai/training/h16_joint_act_pilot.py src/sts2_ai/training/h17_replay.py src/sts2_ai/emulator/jsonl_backend.py src/sts2_ai/models/h16_batch_actor.py tools/train_h16_joint_act_pilot.py tools/train_h22_h21_generated_a0.py
+          python -m ruff check src/sts2_ai/training/h16_joint_act_pilot.py src/sts2_ai/training/h17_replay.py src/sts2_ai/emulator/jsonl_backend.py src/sts2_ai/models/h16_batch_actor.py tools/train_h16_joint_act_pilot.py tools/train_h22_h21_generated_a0.py tools/report_h22_learning_pilot.py tools/monitor_h22_long_training.py tools/audit_h22_independent.py tests/test_h22_h21_joint_training.py tests/test_h22_learning_pilot.py tests/test_h22_long_training.py
+          python -m compileall -q src/sts2_ai/training/h16_joint_act_pilot.py src/sts2_ai/training/h17_replay.py src/sts2_ai/emulator/jsonl_backend.py src/sts2_ai/models/h16_batch_actor.py tools/train_h16_joint_act_pilot.py tools/train_h22_h21_generated_a0.py tools/report_h22_learning_pilot.py tools/monitor_h22_long_training.py tools/audit_h22_independent.py
       - name: H21 representation, H22 joint and H18 regression
         run: |
-          python -m pytest -q tests/test_h22_h21_joint_training.py tests/test_h21_macro_offers.py tests/test_h21_pending_continuations.py tests/test_h21_action_alias_audit.py tests/test_h16_joint_act_pilot.py tests/test_h18_p2_training_stage.py
+          python -m pytest -q tests/test_h22_h21_joint_training.py tests/test_h22_learning_pilot.py tests/test_h22_long_training.py tests/test_h21_macro_offers.py tests/test_h21_pending_continuations.py tests/test_h21_action_alias_audit.py tests/test_h16_joint_act_pilot.py tests/test_h18_p2_training_stage.py
 
   h22-live-public-v1-bridge:
     runs-on: ubuntu-latest
@@ -61,3 +67,61 @@ jobs:
         run: |
           python tools/probe_h22_joint_bridge.py \
             --emulator-root emulator-v1 --max-decisions 80
+      - name: Smoke frozen H22 packed shared actor with real public-v1 PUCT
+        run: |
+          python -c 'from pathlib import Path; from sts2_ai.models.shared_macro_transformer_v2 import H21GroundedMacroTransformer; from sts2_ai.models.shared_transformer import H7Config; from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet; JointActPilotNet(H21GroundedMacroTransformer(H7Config(width=32, layers=1, heads=4, feedforward=64))).save(Path("h22-ci-frozen-untrained.pt"))'
+          python tools/profile_p2_parallel_cohort.py \
+            --execute --emulator-root emulator-v1 \
+            --emulator-revision "$(git -C emulator-v1 rev-parse HEAD)" \
+            --checkpoint h22-ci-frozen-untrained.pt \
+            --representation h21 --actor-h21-collator packed \
+            --actor-inference shared --actor-device cpu \
+            --actor-max-batch 2 --workers 1 \
+            --seeds h22-h21-v1-bridge-ci-20261105 \
+            --simulations 8 --depth 2 --max-searches 1 \
+            --max-decisions 80 --no-episode-profile --paired \
+            --output h22-ci-packed-public-v1.json
+          python -c 'import json; from pathlib import Path; p = json.loads(Path("h22-ci-packed-public-v1.json").read_text()); assert p["shared_actor_metrics"]["p2_h21_collator"] == "packed"; assert p["search_roots"] > 0; assert all(x["public_teacher_parity"] is True for x in p["seed_reports"]); print(json.dumps({"h22_packed_actor_ci": "pass", "search_roots": p["search_roots"], "transitions": p["search_transitions"], "cohort_wall_seconds": p["cohort_wall_seconds"], "actor_collate_seconds": p["shared_actor_metrics"]["host_collate_seconds"]}, sort_keys=True))'
+
+      - name: Check H22 frozen reference-packed-packed-reference real PUCT parity
+        run: |
+          python tools/run_p2_actor_abba.py \
+            --execute --experiment h21-collator \
+            --emulator-root emulator-v1 \
+            --emulator-revision "$(git -C emulator-v1 rev-parse HEAD)" \
+            --checkpoint h22-ci-frozen-untrained.pt --macro-prior-weight 0 \
+            --workers 1 --actor-device cpu --h21-max-batch 4 \
+            --seeds h22-h21-v1-bridge-ci-20261105 \
+            --simulations 8 --depth 2 --max-searches 1 \
+            --max-decisions 80 \
+            --output-root results/p2-h22-ci-collator-abba
+          python -c 'import json; from pathlib import Path; r = json.loads(Path("results/p2-h22-ci-collator-abba/p2-h22-collator-abba-report.json").read_text()); assert r["parity"]["passed"]; assert r["workload"]["search_transitions_per_run"] > 0; print(json.dumps({"h22_abba_contract": "pass", "matched_seed_count": r["parity"]["seed_count"], "wall_ratio_cpu_untrained_diagnostic": r["ratio_of_total_baseline_to_candidate_wall"], "candidate_faster_in_both_pairs": r["candidate_faster_in_both_pairs"]}, sort_keys=True))'
+
+      - name: One-round H22 real-emulator packed fixed-shape CPU training smoke
+        run: |
+          python -c 'from pathlib import Path; from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer; from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet; JointActPilotNet(SharedObjectTransformer(H7Config(width=32, layers=1, heads=4, feedforward=64))).save(Path("h22-ci-initial-h16.pt"))'
+          python -u tools/train_h22_h21_generated_a0.py \
+            --execute --emulator-root emulator-v1 \
+            --emulator-revision "$(git -C emulator-v1 rev-parse HEAD)" \
+            --initial-h16 h22-ci-initial-h16.pt --macro-prior-weight 0 \
+            --device cpu --actor-inference shared --actor-device cpu \
+            --actor-h21-collator packed \
+            --actor-fixed-shape-batch-size 2 --actor-max-batch 2 \
+            --rounds 1 --runs-per-round 2 --heldout-runs 1 --workers 1 \
+            --study-seed 20261105 --simulations 8 --search-depth 2 \
+            --h17-search-p16 0.5 --h17-search-p64 0 --max-searches 1 \
+            --max-decisions 512 --minibatch 4 \
+            --output-root results/h22-ci-packed-one-round
+          python tools/check_h22_packed_training_smoke.py \
+            --output-root results/h22-ci-packed-one-round \
+            --fixed-rows 2
+      - name: Retain H22 one-round packed training smoke receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: h22-packed-one-round-cpu-smoke
+          path: |
+            results/h22-ci-packed-one-round/progress.json
+            results/h22-ci-packed-one-round/baseline.json
+            results/h22-ci-packed-one-round/smoke-verification.json
+          if-no-files-found: warn

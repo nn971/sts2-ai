@@ -753,6 +753,7 @@ def collect_act_episode(
     search_profiles: list[dict[str, object]] | None = None,
     p2_prefix_cache_handles: int = 0,
     p2_cache_report: list[dict[str, object]] | None = None,
+    p2_search_work_receipts: list[dict[str, int]] | None = None,
 ) -> PilotEpisode:
     if not (0 <= search_probability <= 1 and max_searches >= 0
             and max_decisions > 0 and simulations > 0
@@ -826,6 +827,15 @@ def collect_act_episode(
                     p2_prefix_cache_handles=p2_prefix_cache_handles,
                     p2_cache_report=p2_cache_report,
                 )
+                if p2_search_work_receipts is not None:
+                    # P2 audit: two integers per PUCT root, no profiler/extra
+                    # emulator work or actor inference. Preserve strict work
+                    # parity while locating any transition-count difference.
+                    p2_search_work_receipts.append({
+                        "decision_index": len(decisions),
+                        "search_transitions": count,
+                        "simulations": budget,
+                    })
                 search_transitions += count
                 searches += 1
                 greedy = max(range(len(scores)), key=lambda i: scores[i])
@@ -1035,7 +1045,8 @@ def train_joint_cohort(
             actor_terms = [torch.stack(v).mean() for v in ordinary.values() if v]
             if search_ce:
                 actor_terms.append(search_weight * torch.stack(search_ce).mean())
-            policy_loss = sum(actor_terms) if actor_terms else logits.sum() * 0.0
+            # Avoid 0 * overflowed sums of padded minimum action logits.
+            policy_loss = sum(actor_terms) if actor_terms else act_loss.new_zeros(())
             loss = policy_loss + act_loss + hp_loss - entropy_weight * entropy
             if not bool(torch.isfinite(loss)):
                 raise FloatingPointError(

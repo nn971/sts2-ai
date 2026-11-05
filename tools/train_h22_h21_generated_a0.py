@@ -19,11 +19,14 @@ def h22_default_arguments() -> tuple[str, ...]:
         from train_h18_generated_a0 import h18_default_arguments
 
     baseline = list(h18_default_arguments())
-    # H21 relations are dynamically collated. The validated P2 fixed-shape
-    # H16 actor bucket must remain off until graph-aware batching is certified.
+    # P2.5 full-Act A/B/B/A accepted fixed-4 H21 packed collation as the
+    # H22-specific default. The generic H16/H17/H18 trainer remains unchanged.
+    # CUDA determinism is explicit in training/acceptance commands so the
+    # same H22 entrypoint remains usable for CPU CI and diagnostics.
     baseline.extend((
         "--representation", "h21",
-        "--actor-fixed-shape-batch-size", "0",
+        "--actor-h21-collator", "packed",
+        "--actor-fixed-shape-batch-size", "4",
         "--actor-max-batch", "4",
         "--minibatch", "8",
         "--rounds", "40",
@@ -31,8 +34,18 @@ def h22_default_arguments() -> tuple[str, ...]:
     return tuple(baseline)
 
 
+def h22_cli_arguments(overrides: list[str]) -> tuple[str, ...]:
+    """Resolve the H18 default H16 source when a trained H22 source is explicit."""
+    baseline = list(h22_default_arguments())
+    if any(arg == "--initial-h22" or arg.startswith("--initial-h22=")
+           for arg in overrides):
+        position = baseline.index("--initial-h16")
+        del baseline[position:position + 2]
+    return (*baseline, *overrides)
+
+
 if __name__ == "__main__":
     from train_h16_joint_act_pilot import main
 
-    sys.argv = [sys.argv[0], *h22_default_arguments(), *sys.argv[1:]]
+    sys.argv = [sys.argv[0], *h22_cli_arguments(sys.argv[1:])]
     main()

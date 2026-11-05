@@ -1,0 +1,90 @@
+{
+  "schema": "sts2-p2-h22-fullact-acceptance-receipt-v1",
+  "evidence_source": "user-supplied closure.json and p2-h22-collator-abba-report.json; exact cohort metrics copied, local machine paths omitted",
+  "status": "accepted",
+  "verified_scope": {
+    "character": "Silent",
+    "ascension": 0,
+    "map_profile": "generated",
+    "public_schema": "prototype-ai-v1",
+    "actor_device": "cuda",
+    "deterministic_cuda": true,
+    "workers": 15,
+    "actor_fixed_shape_batch_size": 4,
+    "actor_max_batch": 4,
+    "search_simulations": 16,
+    "search_depth": 8,
+    "max_searches": 2,
+    "max_decisions": 4096,
+    "paired_replays_per_seed": 2,
+    "independent_seeds": 16,
+    "completed_episodes_per_arm": 32,
+    "censored_episodes_per_arm": 0
+  },
+  "source": {
+    "ai_sha": "3f562595b37f419e0cf6980d7e98394c04789c22",
+    "emulator_sha": "203d5114024b55c69dabc309f10d6f196eac8cca",
+    "emulator_cli_sha256": "14589e3409aceaf14ce7fb2017fd9e7c19b26a5884ad46b3e9079313a9ea97b5",
+    "checkpoint_sha256": "ba0ed3e698330c6bf3b42716e7b17024ba43db35839306ec630a1605b45e3e9b"
+  },
+  "parity": {
+    "within_run_replay": true,
+    "cross_run_public_teacher": true,
+    "exact_search_and_episode_work": true,
+    "search_transitions_per_arm": 8350,
+    "real_transitions_per_arm": 3578,
+    "actor_requests_per_arm": 9930
+  },
+  "cohorts": [
+    {
+      "arm": "A1",
+      "collator": "reference",
+      "wall_seconds": 184.4793103300035,
+      "collate_seconds": 96.24598562618485,
+      "forward_seconds": 65.84425105154514,
+      "transfer_seconds": 4.6769788365927525,
+      "peak_cuda_allocated_bytes": 181214720,
+      "peak_cuda_reserved_bytes": 228589568
+    },
+    {
+      "arm": "B1",
+      "collator": "packed",
+      "wall_seconds": 100.71269067795947,
+      "collate_seconds": 12.764606733457185,
+      "forward_seconds": 65.53630751965102,
+      "transfer_seconds": 4.920770489552524,
+      "peak_cuda_allocated_bytes": 182132224,
+      "peak_cuda_reserved_bytes": 220200960
+    },
+    {
+      "arm": "B2",
+      "collator": "packed",
+      "wall_seconds": 100.27216768200742,
+      "collate_seconds": 12.774783847213257,
+      "forward_seconds": 64.87547989387531,
+      "transfer_seconds": 4.951528361940291,
+      "peak_cuda_allocated_bytes": 182132224,
+      "peak_cuda_reserved_bytes": 220200960
+    },
+    {
+      "arm": "A2",
+      "collator": "reference",
+      "wall_seconds": 184.37593815196306,
+      "collate_seconds": 96.719871915353,
+      "forward_seconds": 65.36487791110994,
+      "transfer_seconds": 4.713891603809316,
+      "peak_cuda_allocated_bytes": 181214720,
+      "peak_cuda_reserved_bytes": 228589568
+    }
+  ],
+  "summary": {
+    "speedup": 1.8352389901001462,
+    "wall_reduction_fraction": 0.4551118380797743,
+    "order_pair_speedup_A1_over_B1": 1.831738473951585,
+    "order_pair_speedup_A2_over_B2": 1.8387548849714057,
+    "strict_gate_passed": true,
+    "promotion_threshold": 1.1,
+    "decision": "promote_packed_h21_collation_in_h22_specific_defaults"
+  },
+  "limitation": "Emulator public-v1 exact public/PUCT replay parity; native installed-game fidelity and other Nature providers were not measured by this benchmark."
+}
