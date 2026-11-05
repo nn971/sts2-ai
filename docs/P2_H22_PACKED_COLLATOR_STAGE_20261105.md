@@ -277,7 +277,7 @@ python tools/profile_p2_parallel_cohort.py \
     --actor-h21-collator reference \
     --actor-inference shared --actor-device cuda \
     --actor-max-batch 1 --actor-fixed-shape-batch-size 0 \
-    --macro-prior-weight 0 --workers 1 \
+    --macro-prior-weight 0 --horizon-lambda 0.411395 --workers 1 \
     --seeds p2-h22-collator-v1-full-1 \
     --ascension 0 --map-profile generated \
     --simulations 16 --depth 0 --max-searches 2 \
@@ -304,7 +304,7 @@ python tools/profile_p2_parallel_cohort.py \
     --actor-inference shared --actor-device cuda \
     --actor-max-batch 4 --actor-fixed-shape-batch-size 0 \
     --actor-profile --actor-batch-parity-probe \
-    --macro-prior-weight 0 --workers 15 \
+    --macro-prior-weight 0 --horizon-lambda 0.411395 --workers 15 \
     --seeds (string join , $trial_seeds) \
     --ascension 0 --map-profile generated \
     --simulations 16 --depth 0 --max-searches 2 \
