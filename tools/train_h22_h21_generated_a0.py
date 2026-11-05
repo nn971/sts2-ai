@@ -19,11 +19,14 @@ def h22_default_arguments() -> tuple[str, ...]:
         from train_h18_generated_a0 import h18_default_arguments
 
     baseline = list(h18_default_arguments())
-    # Keep the historical dynamic/reference batching default. The tested
-    # H21 graph-aware fixed-shape packed CUDA path is available via opt-in flags.
+    # P2.5 full-Act A/B/B/A accepted fixed-4 H21 packed collation as the
+    # H22-specific default. The generic H16/H17/H18 trainer remains unchanged.
+    # CUDA determinism is explicit in training/acceptance commands so the
+    # same H22 entrypoint remains usable for CPU CI and diagnostics.
     baseline.extend((
         "--representation", "h21",
-        "--actor-fixed-shape-batch-size", "0",
+        "--actor-h21-collator", "packed",
+        "--actor-fixed-shape-batch-size", "4",
         "--actor-max-batch", "4",
         "--minibatch", "8",
         "--rounds", "40",
