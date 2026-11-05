@@ -486,6 +486,11 @@ def main() -> None:
                    default=0.4113950303216448)
     p.add_argument("--h17-horizon-target", type=float, default=0.77)
     p.add_argument("--h17-horizon-rounds", type=int, default=200)
+    p.add_argument(
+        "--evaluation-horizon-lambda", type=float, default=None,
+        help="Optional fixed continuation horizon for both pre-update baseline "
+             "and all post-update heldout evaluations. Training schedule is unchanged.",
+    )
     p.add_argument("--h17-hp-reference", type=int, default=100,
                    help="Fixed H17 HP-credit denominator (bounded at 1)")
     p.add_argument("--h17-replay-capacity", type=int, default=8192)
@@ -510,6 +515,9 @@ def main() -> None:
             or args.max_searches < 0 or args.study_seed < 0
             or not math.isfinite(args.actor_max_delay_ms)
             or args.actor_max_delay_ms < 0
+            or (args.evaluation_horizon_lambda is not None and (
+                not math.isfinite(args.evaluation_horizon_lambda)
+                or not 0 <= args.evaluation_horizon_lambda < 1))
             or not 0 <= args.actor_fixed_shape_batch_size <= args.actor_max_batch
             or (args.actor_fixed_shape_batch_size > 0
                 and args.actor_inference != "shared")
@@ -571,6 +579,8 @@ def main() -> None:
                 key != "actor_h21_collator" or value != "reference"
             ) and (
                 key != "actor_deterministic_cuda" or value
+            ) and (
+                key != "evaluation_horizon_lambda" or value is not None
             ) and (
                 key != "representation" or value != "h16"
             ) and (
@@ -662,7 +672,12 @@ def main() -> None:
     if not history:
         model.save(actor_path)
         baseline = collect(
-            args, actor_path, seeds=heldout, horizon_lambda=0.0, search=False,
+            args, actor_path, seeds=heldout,
+            horizon_lambda=(
+                args.evaluation_horizon_lambda
+                if args.evaluation_horizon_lambda is not None else 0.0
+            ),
+            search=False,
         )
         write_json(root / "baseline.json", summarize(baseline))
     for round_index in range(len(history), args.rounds):
@@ -744,7 +759,11 @@ def main() -> None:
         evaluation_started = time.perf_counter()
         evaluation = collect(
             args, actor_path, seeds=heldout,
-            horizon_lambda=horizon_lambda, search=False,
+            horizon_lambda=(
+                args.evaluation_horizon_lambda
+                if args.evaluation_horizon_lambda is not None else horizon_lambda
+            ),
+            search=False,
         )
         evaluation_seconds = time.perf_counter() - evaluation_started
         simulated_transitions = sum(
