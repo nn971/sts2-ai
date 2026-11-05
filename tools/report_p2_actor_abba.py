@@ -180,6 +180,16 @@ def report_actor_abba(
             actor = profile.get("shared_actor_metrics")
             if not isinstance(actor, dict) or actor.get("p2_h21_collator") != collator:
                 raise ValueError(f"{arm}: missing actual actor collator receipt")
+            deterministic = identity.get("actor_deterministic_cuda", False)
+            if (type(deterministic) is not bool
+                    or deterministic != reference.get("actor_deterministic_cuda", False)
+                    or actor.get("p2_deterministic_cuda", False) is not deterministic):
+                raise ValueError(f"{arm}: deterministic CUDA provenance/actor receipt drift")
+            if deterministic and (
+                identity.get("actor_device") != "cuda"
+                or actor.get("p2_cuda_cublas_workspace_config") != ":4096:8"
+            ):
+                raise ValueError(f"{arm}: invalid deterministic CUDA BLAS receipt")
             for field in ("representation", "public_schema_id", "codec"):
                 if identity.get(field) != reference.get(field):
                     raise ValueError(f"{arm}: H21 provenance drift: {field}")
@@ -618,7 +628,10 @@ def report_actor_abba(
         **(
             {"public_schema_id": reference["public_schema_id"],
              "actor_collation_ratio_source": "matched unprofiled full cohort wall",
-             "actor_h21_collators": [i["actor_h21_collator"] for i in identities]}
+             "actor_h21_collators": [i["actor_h21_collator"] for i in identities],
+             "actor_deterministic_cuda": reference.get(
+                 "actor_deterministic_cuda", False,
+             )}
             if experiment == "h21-collator" else {}
         ),
         "wall_reduction_fraction": 1 - b_wall / a_wall,
