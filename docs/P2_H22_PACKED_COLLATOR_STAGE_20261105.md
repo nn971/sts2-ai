@@ -146,6 +146,7 @@ python tools/run_p2_actor_abba.py \
     --seed-count 16 --seed-prefix p2-h22-collator-v1-full \
     --simulations 16 --depth 0 --max-searches 2 \
     --max-decisions 4096 \
+    --require-full-act \
     --output-root results/p2-h22-collator-15workers-v1 --execute
 ```
 
@@ -160,3 +161,32 @@ default. The result must include actual PUCT roots and noncensored episodes
 for a completed-Act throughput claim. Treat ordinary stochastic game parity
 as emulator-relative; native installed-game fidelity remains an independent
 research thread.
+
+## Full-Act promotion gate and 15-CUDA-worker readiness
+
+`--require-full-act` is now available on the `h21-collator` orchestrator
+and is intended for the **frozen H22 CUDA run**, not the short CPU CI smoke.
+It demands CUDA inference, 15 or more emulator workers, at least 16
+independent seeds, at least 1,024 allowed decisions per episode, and
+enabled combat searches **before running any cohort**.
+
+The strict report then verifies every run against the same model binary,
+public-v1 codec, emulator SHA/DLL, actor settings and exact public/PUCT
+teacher replay, and additionally **rejects any censored execution**,
+absent combat PUCT roots/transitions or a CPU actor. For an H22 checkpoint
+that is still untrained or a search that loops until the decision cap,
+the four raw `profile.json` files remain as diagnostic evidence while
+the strict final report intentionally fails to certify full-Act throughput.
+A defeat counts as a complete Act termination; clearing the boss is not
+needed for a *throughput* comparison.
+
+The 16-seed command above is a resource-heavy four-cohort experiment;
+with two paired replays per seed it executes **128 full Act attempts**.
+This benchmark intentionally does not change the PUCT simulation count,
+Nature, stochastic seed ownership, H22 model or optimizer.
+
+The GitHub-hosted CPU Actions runner validates the H21/public-v1 bridge
+and reporter, but CUDA measurement must use the user's CUDA workstation.
+Do not infer 15-worker CUDA speedup from the single-seed CPU result.
+After validation, compare batch caps 1, 4, 8, 16 with separate output
+directories and identical frozen weights.
