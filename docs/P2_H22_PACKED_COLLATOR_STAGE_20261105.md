@@ -597,3 +597,58 @@ dynamic batching; H16/H18 and the H21 optimizer collation remain
 unchanged. These new flags participate in the fingerprint when
 enabled. Continue with one-round actual H22 public-v1 generated-map
 training smoke and a 15-worker stability pilot **before** a long run.
+
+
+## Actual H22 one-round packed CUDA training smoke (staged; results pending)
+
+This is a **short integration smoke**, separate from the accepted four-seed
+P2 fixed-shape throughput benchmark. It uses real H22-generated A0
+Overgrowth runs, the corrected public-v1/H21 graph, one round of **actual
+joint optimizer updates**, PUCT (small depth-2 budget), checkpoint saving,
+and heldout evaluation. It explicitly opts into
+`packed + fixed-4 + deterministic CUDA`. The optimizer intentionally
+continues using the reference H21 collation, which was not part of P2.
+
+```fish
+cd ~/projects/sts2-ai
+git switch perf/p2-h22-packed-collator-20261105
+git pull --ff-only
+
+set emu ~/projects/sts2-emulator
+set rev (git -C $emu rev-parse HEAD)
+set initial results/h16-v5-combat-credit-r150/models/joint-r0079.pt
+set out results/h22-packed-one-round-cuda-v1
+
+dotnet build $emu/src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj -c Release -m:1
+
+python -u tools/train_h22_h21_generated_a0.py \
+    --emulator-root $emu --emulator-revision $rev \
+    --initial-h16 $initial --macro-prior-weight 0 \
+    --device cuda --actor-inference shared --actor-device cuda \
+    --actor-deterministic-cuda --actor-h21-collator packed \
+    --actor-max-batch 4 --actor-fixed-shape-batch-size 4 \
+    --rounds 1 --runs-per-round 2 --heldout-runs 1 --workers 2 \
+    --study-seed 20261105 --search-depth 2 --max-searches 1 \
+    --h17-search-p16 0.5 --h17-search-p64 0 \
+    --max-decisions 512 --minibatch 4 \
+    --output-root $out --execute
+
+python tools/check_h22_packed_training_smoke.py \
+    --output-root $out --fixed-rows 4 --require-cuda
+```
+
+The verifier requires: all train and heldout episodes completed (no
+censoring); at least one real search root/transition; at least one optimizer
+step; checkpoint SHA/provenance match; finite trained H21 weights; and
+packed/fixed-4/deterministic CUDA receipts for **both** train and
+heldout shared actors. It writes `smoke-verification.json` to the output
+directory on success. Small adaptive-budget search is intentional for
+bounded integration time; it is **not** a full-depth PUCT training quality
+test. Use a **fresh output root** for repeated smoke runs.
+
+A CPU equivalent with tiny H16 warmstart runs as an extra
+`h22-live-public-v1-bridge` GitHub Actions step on PR #172, using
+a 1-round real emulator training call with packed/fixed-2, without
+CUDA; it checks optimizer and checkpoint as well. The CPU CI result
+tests execution wiring, whereas the user-local CUDA command verifies
+the GPU-specific actor contract.
