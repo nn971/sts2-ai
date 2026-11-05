@@ -162,6 +162,32 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
     return calls, [*files, report]
 
 
+def preflight_checkpoint(args: argparse.Namespace) -> None:
+    """Fail before A1 if the frozen checkpoint is missing or wrong-schema."""
+    checkpoint = args.checkpoint.expanduser()
+    if not checkpoint.is_file():
+        raise ValueError(
+            f"Missing frozen checkpoint: {checkpoint}. "
+            "Run tools/create_p2_h22_frozen_checkpoint.py --initial-h16 "
+            "<existing-H16-joint.pt> --output <H22-output.pt> first, or "
+            "pass --checkpoint pointing to an existing H22 checkpoint."
+        )
+    if getattr(args, "experiment", "batching") == "h21-collator":
+        from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet
+
+        try:
+            model = JointActPilotNet.load(checkpoint, device="cpu")
+        except (RuntimeError, ValueError, KeyError) as exc:
+            raise ValueError(
+                f"Cannot load H22 benchmark checkpoint: {checkpoint}: {exc}"
+            ) from exc
+        if model.representation != "h21":
+            raise ValueError(
+                f"Checkpoint uses {model.representation}, expected H22 H21 v4: "
+                f"{checkpoint}. Create a frozen H22 warm-start first."
+            )
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--execute", action="store_true",
@@ -205,6 +231,10 @@ def main() -> None:
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
     if args.execute:
+        try:
+            preflight_checkpoint(args)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
         existing = [str(output) for output in outputs if output.exists()]
         if existing:
             raise SystemExit(
