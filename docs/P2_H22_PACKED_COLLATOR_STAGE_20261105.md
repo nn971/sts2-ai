@@ -173,7 +173,10 @@ enabled combat searches **before running any cohort**.
 The strict report then verifies every run against the same model binary,
 public-v1 codec, emulator SHA/DLL, actor settings and exact public/PUCT
 teacher replay, and additionally **rejects any censored execution**,
-absent combat PUCT roots/transitions or a CPU actor. For an H22 checkpoint
+absent combat PUCT roots/transitions or a CPU actor. The shared H21 actor
+records final CUDA allocated/reserved peak bytes even with per-batch
+profiling disabled; the strict CUDA reporter checks these allocator receipts.
+This preserves the original uninstrumented throughput measurement. For an H22 checkpoint
 that is still untrained or a search that loops until the decision cap,
 the four raw `profile.json` files remain as diagnostic evidence while
 the strict final report intentionally fails to certify full-Act throughput.
