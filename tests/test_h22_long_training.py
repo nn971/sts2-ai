@@ -10,9 +10,10 @@ import pytest
 from sts2_ai.training.h16_joint_act_pilot import H22_SCHEMA
 from tools import audit_h22_independent as audit_module
 from tools.monitor_h22_long_training import monitor
+from tools.train_h16_joint_act_pilot import load_h22_initial
 from tools.train_h16_joint_act_pilot import main as train_main
 from tools.train_h16_joint_act_pilot import should_evaluate_round
-from tools.train_h22_h21_generated_a0 import h22_default_arguments
+from tools.train_h22_h21_generated_a0 import h22_cli_arguments, h22_default_arguments
 
 
 def test_h22_sparse_eval_schedule_first_periodic_and_final():
@@ -239,13 +240,14 @@ def test_h22_warmstart_file_identity_and_legacy_rejection(
     config = H7Config(width=32, layers=1, heads=4, feedforward=64)
     h22 = tmp_path / "h22-r2.pt"
     JointActPilotNet(H21GroundedMacroTransformer(config)).save(h22)
-    base = [
-        "train", *h22_default_arguments(),
+    overrides = [
         "--initial-h22", str(h22), "--emulator-root", str(tmp_path),
         "--emulator-revision", "pinned-v1",
         "--output-root", str(tmp_path / "new-h22-training"),
         "--macro-prior-weight", "0", "--actor-inference", "shared",
     ]
+    base = ["train", *h22_cli_arguments(overrides)]
+    assert "--initial-h16" not in base
     monkeypatch.setattr("sys.argv", base)
     train_main()
     source = json.loads(capsys.readouterr().out)["experiment"]
@@ -265,6 +267,5 @@ def test_h22_warmstart_file_identity_and_legacy_rejection(
     assert JointActPilotNet.load(legacy).representation == "h16"
     # Same weights/pointer CLI cannot bypass the H21 checkpoint identity checks.
     with pytest.raises(ValueError, match="H21"):
-        JointActPilotNet.load(legacy).warmstart_h21(
-            JointActPilotNet.load(h22),
-        )
+        load_h22_initial(legacy, device="cpu")
+    assert load_h22_initial(h22, device="cpu").representation == "h21"
