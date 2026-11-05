@@ -378,11 +378,15 @@ def test_h22_trainer_dryrun_accepts_fixed_packed_deterministic_cuda(
     # Deterministic CUDA is an explicit option, not a CPU or H16 default.
     arguments.extend(["--actor-device", "cpu"])
     monkeypatch.setattr("sys.argv", arguments)
-    with pytest.raises(SystemExit, match="Invalid H16 pilot"):
+    with pytest.raises(SystemExit) as error:
         train_main()
+    assert error.value.code == 2
+    assert "Invalid H16 pilot configuration" in capsys.readouterr().err
 
     arguments[-1] = "cuda"
     arguments.extend(["--actor-max-batch", "2"])
     monkeypatch.setattr("sys.argv", arguments)
-    with pytest.raises(SystemExit, match="Invalid H16 pilot"):
+    with pytest.raises(SystemExit) as error:
         train_main()
+    assert error.value.code == 2
+    assert "Invalid H16 pilot configuration" in capsys.readouterr().err
