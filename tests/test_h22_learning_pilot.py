@@ -108,11 +108,17 @@ def test_h22_paired_learning_pilot_uses_identical_seed_outcomes(tmp_path):
         "improved_seeds": 1,
         "unchanged_seeds": 1,
         "regressed_seeds": 1,
+        "improved_vs_previous": 1,
+        "unchanged_vs_previous": 1,
+        "regressed_vs_previous": 1,
     }
     assert result["paired_rounds"][1]["mean_delta_from_baseline"] == pytest.approx(
         4 / 3,
     )
     assert result["paired_rounds"][1]["improved_seeds"] == 2
+    assert result["paired_rounds"][1]["improved_vs_previous"] == 3
+    assert result["paired_rounds"][1]["unchanged_vs_previous"] == 0
+    assert result["paired_rounds"][1]["regressed_vs_previous"] == 0
     assert result["train_stages"][0]["train_floor_one_deaths"] == 4
     assert [row["seed"] for row in result["per_seed"]] == [
         "hold-0", "hold-1", "hold-2",
