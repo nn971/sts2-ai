@@ -397,6 +397,14 @@ def h17_macro_weight_for_round(
     return initial_weight * max(0.0, 1.0 - round_index / decay_rounds)
 
 
+def load_h22_initial(path: Path, *, device: str = "cpu") -> JointActPilotNet:
+    """Load a schema-verified H21 checkpoint as a fresh learner initialization."""
+    model = JointActPilotNet.load(path, device=device)
+    if model.representation != "h21":
+        raise ValueError("H22 warm-start must be a verified H21 checkpoint")
+    return model
+
+
 def should_evaluate_round(
     round_number: int, *, planned_rounds: int, cadence: int,
 ) -> bool:
@@ -683,9 +691,10 @@ def main() -> None:
             p.error("Output contains an existing run; use --resume or a new directory")
         if args.representation == "h21":
             if args.initial_h22 is not None:
-                model = JointActPilotNet.load(args.initial_h22, device=args.device)
-                if model.representation != "h21":
-                    p.error("H22 warm-start must be a verified H21 checkpoint")
+                try:
+                    model = load_h22_initial(args.initial_h22, device=args.device)
+                except ValueError as error:
+                    p.error(str(error))
             else:
                 if args.initial_h16 is None:
                     p.error("H21 requires an H16 or H22 warm-start checkpoint")
