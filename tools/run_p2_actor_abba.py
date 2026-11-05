@@ -39,6 +39,10 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
         or not 0 <= args.ascension <= 10
         or not args.seed_prefix.strip()
         or getattr(args, "h21_max_batch", 4) not in (1, 4, 8, 16)
+        or getattr(args, "h21_fixed_batch_size", 0) not in (0, 1, 4, 8, 16)
+        or getattr(args, "h21_fixed_batch_size", 0) > getattr(args, "h21_max_batch", 4)
+        or (getattr(args, "h21_fixed_batch_size", 0) > 0
+            and getattr(args, "experiment", "batching") != "h21-collator")
         or (getattr(args, "actor_deterministic_cuda", False)
             and (getattr(args, "experiment", "batching") != "h21-collator"
                  or not args.actor_device.startswith("cuda")))
@@ -91,8 +95,10 @@ def make_commands(args: argparse.Namespace) -> tuple[list[list[str]], list[Path]
         raise ValueError("Invalid actor A/B/B/A experiment")
     modes = (
         ORDER if experiment == "batching" else
-        ((("A1", args.h21_max_batch, 0), ("B1", args.h21_max_batch, 0),
-          ("B2", args.h21_max_batch, 0), ("A2", args.h21_max_batch, 0))
+        ((("A1", args.h21_max_batch, getattr(args, "h21_fixed_batch_size", 0)),
+          ("B1", args.h21_max_batch, getattr(args, "h21_fixed_batch_size", 0)),
+          ("B2", args.h21_max_batch, getattr(args, "h21_fixed_batch_size", 0)),
+          ("A2", args.h21_max_batch, getattr(args, "h21_fixed_batch_size", 0)))
          if experiment == "h21-collator" else
          (("A1", 16, 4), ("B1", 16, 4),
           ("B2", 16, 4), ("A2", 16, 4)))
@@ -223,7 +229,11 @@ def main() -> None:
     p.add_argument("--actor-device", choices=("cuda", "cpu"), default="cuda")
     p.add_argument("--actor-max-delay-ms", type=float, default=2.0)
     p.add_argument("--h21-max-batch", type=int, choices=(1, 4, 8, 16),
-                   default=4, help="Matched H21 dynamic actor batch cap")
+                   default=4, help="Matched H21 actor batch cap")
+    p.add_argument("--h21-fixed-batch-size", type=int, choices=(0, 1, 4, 8, 16),
+                   default=0,
+                   help="Opt-in matched H21 fixed GPU rows and relation-aware shape "
+                        "buckets (0 = original dynamic shape); all arms share setting")
     p.add_argument("--seeds",
                    help="Optional comma-separated independent seed cohort")
     p.add_argument("--seed-prefix", default="p2-a0-abba-independent-20261104")
@@ -288,6 +298,7 @@ def main() -> None:
         "require_full_act": args.require_full_act,
         "actor_deterministic_cuda": args.actor_deterministic_cuda,
         "max_simulation_steps": args.max_simulation_steps,
+        "h21_fixed_batch_size": args.h21_fixed_batch_size,
     }, indent=2), flush=True)
     if args.execute:
         for index, call in enumerate(calls, start=1):
