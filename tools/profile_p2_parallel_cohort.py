@@ -273,6 +273,22 @@ def main() -> None:
         raise SystemExit("Invalid P2 parallel profiler configuration")
     if a.actor_inference == "local" and a.actor_device != "cpu":
         raise SystemExit("Local-worker inference is CPU-only; use shared CUDA actor")
+    if not a.checkpoint.is_file():
+        raise SystemExit(
+            f"Missing frozen actor checkpoint: {a.checkpoint}. "
+            "Create or select an H22 checkpoint before running the cohort."
+        )
+    if a.representation == "h21":
+        try:
+            checkpoint_model = JointActPilotNet.load(a.checkpoint, device="cpu")
+        except (RuntimeError, ValueError, KeyError) as exc:
+            raise SystemExit(f"Invalid H22 checkpoint: {a.checkpoint}: {exc}") from exc
+        if checkpoint_model.representation != "h21":
+            raise SystemExit(
+                f"Expected H22/H21 v4 checkpoint, got "
+                f"{checkpoint_model.representation}: {a.checkpoint}"
+            )
+        del checkpoint_model
     if a.actor_device == "cuda" and not torch.cuda.is_available():
         raise SystemExit("Requested CUDA actor unavailable")
     if git_head(a.emulator_root) != a.emulator_revision:
