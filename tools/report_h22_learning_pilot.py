@@ -84,7 +84,7 @@ def _stage_summary(
 
 
 def verify_pilot(
-    root: Path, *, expected_rounds: int = 3,
+    root: Path, *, expected_rounds: int = 2,
     expected_train: int = 15, expected_heldout: int = 16,
     expected_workers: int = 15, fixed_rows: int = 4,
     evaluation_horizon: float = 0.4113950303216448,
@@ -225,7 +225,7 @@ def verify_pilot(
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--output-root", type=Path, required=True)
-    p.add_argument("--expected-rounds", type=int, default=3)
+    p.add_argument("--expected-rounds", type=int, default=2)
     p.add_argument("--expected-train", type=int, default=15)
     p.add_argument("--expected-heldout", type=int, default=16)
     p.add_argument("--expected-workers", type=int, default=15)
