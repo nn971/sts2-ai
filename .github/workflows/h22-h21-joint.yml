@@ -11,7 +11,9 @@ on:
       - 'tools/train_h22_h21_generated_a0.py'
       - 'tools/probe_h22_joint_bridge.py'
       - 'tools/check_h22_packed_training_smoke.py'
+      - 'tools/report_h22_learning_pilot.py'
       - 'tests/test_h22_h21_joint_training.py'
+      - 'tests/test_h22_learning_pilot.py'
       - '.github/workflows/h22-h21-joint.yml'
   workflow_dispatch:
 
@@ -30,11 +32,11 @@ jobs:
           python -m pip install -e '.[dev]'
       - name: H22 lint and compile
         run: |
-          python -m ruff check src/sts2_ai/training/h16_joint_act_pilot.py src/sts2_ai/training/h17_replay.py src/sts2_ai/emulator/jsonl_backend.py src/sts2_ai/models/h16_batch_actor.py tools/train_h16_joint_act_pilot.py tools/train_h22_h21_generated_a0.py tests/test_h22_h21_joint_training.py
-          python -m compileall -q src/sts2_ai/training/h16_joint_act_pilot.py src/sts2_ai/training/h17_replay.py src/sts2_ai/emulator/jsonl_backend.py src/sts2_ai/models/h16_batch_actor.py tools/train_h16_joint_act_pilot.py tools/train_h22_h21_generated_a0.py
+          python -m ruff check src/sts2_ai/training/h16_joint_act_pilot.py src/sts2_ai/training/h17_replay.py src/sts2_ai/emulator/jsonl_backend.py src/sts2_ai/models/h16_batch_actor.py tools/train_h16_joint_act_pilot.py tools/train_h22_h21_generated_a0.py tools/report_h22_learning_pilot.py tests/test_h22_h21_joint_training.py tests/test_h22_learning_pilot.py
+          python -m compileall -q src/sts2_ai/training/h16_joint_act_pilot.py src/sts2_ai/training/h17_replay.py src/sts2_ai/emulator/jsonl_backend.py src/sts2_ai/models/h16_batch_actor.py tools/train_h16_joint_act_pilot.py tools/train_h22_h21_generated_a0.py tools/report_h22_learning_pilot.py
       - name: H21 representation, H22 joint and H18 regression
         run: |
-          python -m pytest -q tests/test_h22_h21_joint_training.py tests/test_h21_macro_offers.py tests/test_h21_pending_continuations.py tests/test_h21_action_alias_audit.py tests/test_h16_joint_act_pilot.py tests/test_h18_p2_training_stage.py
+          python -m pytest -q tests/test_h22_h21_joint_training.py tests/test_h22_learning_pilot.py tests/test_h21_macro_offers.py tests/test_h21_pending_continuations.py tests/test_h21_action_alias_audit.py tests/test_h16_joint_act_pilot.py tests/test_h18_p2_training_stage.py
 
   h22-live-public-v1-bridge:
     runs-on: ubuntu-latest
