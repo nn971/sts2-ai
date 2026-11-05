@@ -223,6 +223,7 @@ def collect(
             max_delay_ms=args.actor_max_delay_ms,
             fixed_shape_batch_size=args.actor_fixed_shape_batch_size,
             h21_collator=getattr(args, "actor_h21_collator", "reference"),
+            deterministic_cuda=getattr(args, "actor_deterministic_cuda", False),
         )
         if args.actor_inference == "shared" else nullcontext(None)
     )
@@ -444,6 +445,11 @@ def main() -> None:
         help="Opt-in packed H21 shared-actor CPU collation; historical default remains reference.",
     )
     p.add_argument(
+        "--actor-deterministic-cuda", action="store_true",
+        help="Opt-in deterministic CUDA algorithms for H21 shared inference "
+             "(use with --actor-fixed-shape-batch-size for repeatable shapes).",
+    )
+    p.add_argument(
         "--actor-fixed-shape-batch-size", type=int, default=0,
         help="Opt-in P2 fixed-shape shared actor bucket (0 preserves historical "
              "H16/H17 behavior; H18 performance stage uses 4).",
@@ -507,7 +513,9 @@ def main() -> None:
             or not 0 <= args.actor_fixed_shape_batch_size <= args.actor_max_batch
             or (args.actor_fixed_shape_batch_size > 0
                 and args.actor_inference != "shared")
-            or (args.representation == "h21" and args.actor_fixed_shape_batch_size != 0)
+            or (args.actor_deterministic_cuda and (
+                args.representation != "h21" or args.actor_inference != "shared"
+                or not args.actor_device.startswith("cuda")))
             or (args.actor_h21_collator == "packed" and
                 (args.representation != "h21" or args.actor_inference != "shared"))
             or not (args.actor_device == "cpu"
@@ -561,6 +569,8 @@ def main() -> None:
                 "initial_h16", "macro_model", "emulator_root", "ai_root", "device",
             ) and (key != "actor_fixed_shape_batch_size" or value != 0) and (
                 key != "actor_h21_collator" or value != "reference"
+            ) and (
+                key != "actor_deterministic_cuda" or value
             ) and (
                 key != "representation" or value != "h16"
             ) and (
