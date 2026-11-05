@@ -741,3 +741,57 @@ claim or a replacement for 15-worker full-Act throughput measurement.
 If the verifier fails, retain `progress.json`, `smoke-verification.json`
 (if present), and the terminal traceback for diagnosis; preserve the
 output directory. Use a new output root for any retry.
+
+
+## 2026-11-05: 15-worker CUDA training smoke PASSED; early-policy collapse observed
+
+The user's completed local run
+`results/h22-packed-cuda-15w-smoke-v1` produced
+`smoke-verification.json` result **"H22 one-round packed training smoke
+passed"** on emulator SHA `203d5114024b55c69dabc309f10d6f196eac8cca`.
+Experiment fingerprint
+`eed08109ebb895b3c19919cb63687e1be7bfef56f6806272be4667741a0a889d`;
+new H21 checkpoint SHA-256
+`e02fc7372fd27de4ace4b61f65814845201f127260dfb93c7a3e3ec84bf6a1f1`.
+
+- All **15 training** and **2 heldout** episodes completed, **0 censored**;
+  H21 packed fixed-4 CUDA / deterministic-CUDA actor receipts were checked
+  in both rollout phases; saved checkpoint, optimizer state and finite
+  weights passed the verifier. 39 optimizer steps on 311 training decisions,
+  including 252 combat and 59 macro decisions.
+- 14 16-simulation bounded depth-8 PUCT roots, 1676 search transitions,
+  two search-overridden actions (14.3% of roots).
+- **83.01 approximate emulator transitions/second** for training collection
+  (311 real decisions + 1676 search transitions over 23.937s), plus
+  3.712s update and 10.370s heldout. This measurement includes short
+  failed combats and is not a full-Act throughput claim.
+- **Critical learning-readiness caveat:** All 15 collection episodes died
+  on **floor 1**, zero combat wins, mean enemy HP removed on defeats
+  13.05%. In contrast, the two **post-update**, search-free heldout
+  episodes died on floors 7 and 8, winning nine combats in total.
+  Two heldout seeds are too few to claim generalization.
+  The train vs heldout contrast is confounded by checkpoint (before
+  vs after 39 updates), seeds, and search (adaptive on vs off). Only
+  two of 14 search roots overrode the policy.
+- 15 distinct generated-map graphs appeared in the train cohort, but
+  deaths on floor 1 prevented sampling the later macro map/shop/reward
+  choice distribution. The heldout pair had two distinct map graphs.
+
+**Next diagnostic before a multihour run:** compare
+`results/h22-packed-cuda-15w-smoke-v1/baseline.json`
+(pre-update, **same two heldout seeds** and search disabled) with round-1
+`progress.json` heldout. This removes the principal seed/search
+confounder from the heldout before/after comparison, although two
+seeds are still an undersized sample:
+
+```fish
+cd ~/projects/sts2-ai
+python -c 'import json; from pathlib import Path; root=Path("results/h22-packed-cuda-15w-smoke-v1"); b=json.loads((root/"baseline.json").read_text()); h=json.loads((root/"progress.json").read_text())["rounds"][0]["heldout"]; keys=("completed","censored","cleared","decisions"); print("pre-update ", {k:b.get(k) for k in keys}, "max_floor", b["floor_progress"]["mean_max_floor_reached"]); print("post-update", {k:h.get(k) for k in keys}, "max_floor", h["floor_progress"]["mean_max_floor_reached"])'
+```
+
+**Acceptance boundary:** The 15-worker hardware integration gate is
+**complete**; learning stability and useful starting policy remain
+**unverified**. Before a six-hour experiment, evaluate more fixed
+heldout seeds and a short multi-round progression with recorded
+pre/post model performance. Treat the 15 first-combat defeats as a
+separate behavior issue, not as a failure of the packed collator.
