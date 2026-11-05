@@ -261,3 +261,12 @@ def test_h22_frozen_benchmark_helper_from_existing_h16(tmp_path):
         create_checkpoint(h16_path, h22_path)
     with pytest.raises(FileNotFoundError, match="Missing H16 source"):
         create_checkpoint(tmp_path / "absent.pt", tmp_path / "other.pt")
+
+
+def test_h22_deterministic_cuda_actor_is_explicit_opt_in(tmp_path):
+    with pytest.raises(ValueError, match="Invalid H16 shared actor configuration"):
+        SharedH16Service(
+            checkpoint=tmp_path / "unused.pt", digest="unused",
+            workers=1, device="cpu", horizon_lambda=0.42,
+            deterministic_cuda=True,
+        )
