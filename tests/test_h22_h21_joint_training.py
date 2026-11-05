@@ -26,6 +26,7 @@ from sts2_ai.training.h16_joint_act_pilot import (
 )
 from sts2_ai.training.h17_replay import fit_replay
 from sts2_ai.training.h21_macro_offer_codec import H21_CODEC, H21_OBJECT_SCHEMA
+from tools.create_p2_h22_frozen_checkpoint import create_checkpoint
 from tools.train_h22_h21_generated_a0 import h22_default_arguments
 
 
@@ -241,3 +242,22 @@ def test_h22_packed_collator_refuses_legacy_mode(tmp_path):
             horizon_lambda=0.42, max_batch=4, h21_collator="packed",
         ):
             pass
+
+
+def test_h22_frozen_benchmark_helper_from_existing_h16(tmp_path):
+    base = JointActPilotNet(SharedObjectTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64)))
+    h16_path = tmp_path / "existing-h16.pt"
+    h22_path = tmp_path / "frozen-h22.pt"
+    base.save(h16_path)
+    report = create_checkpoint(h16_path, h22_path, seed=20261105)
+    assert report["checkpoint_schema"] == H22_SCHEMA
+    assert report["trained_h21_steps"] == 0
+    assert report["seed"] == 20261105
+    assert report["source_h16"] == str(h16_path.resolve())
+    assert report["output_h22"] == str(h22_path.resolve())
+    assert JointActPilotNet.load(h22_path).representation == "h21"
+    with pytest.raises(FileExistsError, match="Refusing to overwrite"):
+        create_checkpoint(h16_path, h22_path)
+    with pytest.raises(FileNotFoundError, match="Missing H16 source"):
+        create_checkpoint(tmp_path / "absent.pt", tmp_path / "other.pt")
