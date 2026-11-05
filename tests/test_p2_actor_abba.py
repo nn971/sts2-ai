@@ -726,3 +726,93 @@ def test_h22_report_cli_accepts_h21_collator_mode(tmp_path):
     assert result.returncode == 1
     assert "Missing successful P2 A/B/B/A profiles" in result.stderr
     assert "invalid choice" not in result.stderr
+
+
+def h22_complete_cohorts() -> list[dict]:
+    data = h22_collator_cohorts()
+    for p in data:
+        for row in p["seed_reports"]:
+            for run in row["runs"]:
+                run["complete"] = True
+                run["outcome"] = "act_clear" if row["seed"] == "seed-a" else "defeat"
+        p["completed_episodes"] = 4
+        p["censored_episodes"] = 0
+    return data
+
+
+def test_h22_full_act_gate_verifies_complete_cuda_search_and_seed_count():
+    inputs = h22_complete_cohorts()
+    report = report_actor_abba(
+        *inputs, experiment="h21-collator", require_complete=True,
+        min_seed_count=2, require_cuda=True, require_search_roots=True,
+    )
+    assert report["full_act_gate"] == {
+        "require_complete": True, "min_seed_count": 2,
+        "require_cuda": True, "require_search_roots": True, "passed": True,
+    }
+    assert report["workload"]["censored_episode_executions_per_run"] == 0
+
+
+def test_h22_full_act_gate_rejects_censoring_and_insufficient_seeds():
+    with pytest.raises(ValueError, match="zero censored"):
+        report_actor_abba(
+            *h22_collator_cohorts(), experiment="h21-collator",
+            require_complete=True, min_seed_count=2,
+        )
+    with pytest.raises(ValueError, match="at least 16 independent seeds"):
+        report_actor_abba(
+            *h22_complete_cohorts(), experiment="h21-collator",
+            min_seed_count=16,
+        )
+
+
+def test_h22_full_act_gate_rejects_cpu_or_absent_real_search():
+    data = h22_complete_cohorts()
+    for row in data:
+        row["identity"]["actor_device"] = "cpu"
+    with pytest.raises(ValueError, match="requires CUDA"):
+        report_actor_abba(*data, experiment="h21-collator", require_cuda=True)
+    data = h22_complete_cohorts()
+    for item in data[1]["seed_reports"]:
+        for run in item["runs"]:
+            run["search_roots"] = 0
+            run["search_transitions"] = 0
+    data[1]["search_transitions"] = 0
+    with pytest.raises(ValueError, match="actual combat PUCT work"):
+        report_actor_abba(
+            *data, experiment="h21-collator", require_search_roots=True,
+        )
+
+
+def test_h22_full_act_runner_enforces_cuda_15_workers_and_full_decisions(tmp_path):
+    args = Namespace(
+        experiment="h21-collator", require_full_act=True, h21_max_batch=4,
+        seeds=None, seed_prefix="h22-gpu", seed_count=16, workers=15,
+        max_decisions=4096, max_searches=2, simulations=16, depth=0,
+        actor_max_delay_ms=2.0, horizon_lambda=0.411395,
+        macro_prior_weight=0, macro_model=None,
+        ascension=0, ai_root=Path("/tmp/ai"), emulator_root=Path("/tmp/emu"),
+        emulator_revision="emulator-v1-sha", checkpoint=Path("h22.pt"),
+        actor_device="cuda", map_profile="generated", output_root=tmp_path,
+    )
+    commands, _ = make_commands(args)
+    assert all(command[command.index("--workers") + 1] == "15"
+               for command in commands[:4])
+    assert all(command[command.index("--seeds") + 1].count(",") == 15
+               for command in commands[:4])
+    assert all(command[command.index("--depth") + 1] == "0"
+               for command in commands[:4])
+    assert all(command[command.index("--max-decisions") + 1] == "4096"
+               for command in commands[:4])
+    for required in ("--require-complete", "--require-cuda",
+                     "--require-search-roots", "--min-seed-count"):
+        assert required in commands[-1]
+    for attr, bad in (
+        ("workers", 8), ("actor_device", "cpu"), ("seed_count", 8),
+        ("max_decisions", 80), ("max_searches", 0),
+        ("experiment", "batching"),
+    ):
+        candidate = Namespace(**vars(args))
+        setattr(candidate, attr, bad)
+        with pytest.raises(ValueError, match="Full-Act H21 acceptance"):
+            make_commands(candidate)
