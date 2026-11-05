@@ -675,3 +675,69 @@ CI logs and `progress.json`, `baseline.json`, and
 This is a **CPU real-emulator integration acceptance**, not proof of
 the local deterministic CUDA actor during optimizer training; the fish
 command above is still the exact pending GPU smoke.
+
+
+## 2026-11-05 next gate: actual 15-worker CUDA one-round smoke
+
+The earlier real-emulator CI run exercises complete H22 CPU training, and
+the four-seed CUDA P2 A/B/B/A establishes short-horizon packed throughput.
+A **local CUDA training smoke with 15 actual worker trajectories** is
+the remaining hardware integration gate. Run in fish on the machine with
+the existing H16 R79 warm-start and public-v1 emulator checkout. This
+uses **one round, 15 training runs, 2 heldout runs, fixed physical batch
+size 4, one bounded depth-8 PUCT root per training episode at most**.
+The H17 adaptive allocator uses 16-simulation PUCT when it allocates
+search; `--h17-search-p64 0` excludes 64-simulation searches. The
+choice `--h17-search-p16 0.15` is a per-decision adaptive probability
+budget, not a guarantee of one root per episode. The verifier requires
+at least one real search root overall.
+
+```fish
+cd ~/projects/sts2-ai
+git switch perf/p2-h22-packed-collator-20261105
+git pull --ff-only
+
+set emu ~/projects/sts2-emulator
+set rev (git -C $emu rev-parse HEAD)
+set initial results/h16-v5-combat-credit-r150/models/joint-r0079.pt
+set out results/h22-packed-cuda-15w-smoke-v1
+
+test -f $initial; or begin
+    echo "Missing H16 R79 warm-start: $initial" >&2
+    exit 1
+end
+
+dotnet build $emu/src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj -c Release -m:1
+
+python -u tools/train_h22_h21_generated_a0.py \
+    --emulator-root $emu --emulator-revision $rev \
+    --initial-h16 $initial --macro-prior-weight 0 \
+    --device cuda --actor-inference shared --actor-device cuda \
+    --actor-deterministic-cuda --actor-h21-collator packed \
+    --actor-max-batch 4 --actor-fixed-shape-batch-size 4 \
+    --rounds 1 --runs-per-round 15 --heldout-runs 2 --workers 15 \
+    --study-seed 20261105 --search-depth 8 \
+    --h17-search-p16 0.15 --h17-search-p64 0 \
+    --max-searches 1 --max-decisions 512 --minibatch 8 \
+    --output-root $out --execute
+
+python tools/check_h22_packed_training_smoke.py \
+    --output-root $out --fixed-rows 4 --require-cuda \
+    --expected-workers 15 --expected-train 15 --expected-heldout 2
+```
+
+The validation must observe 15 completed train and 2 completed
+heldout trajectories, zero censoring, at least one search root and
+search transition, at least one optimizer update, a finite H21 saved
+checkpoint with matching SHA-256, persisted optimizer state, and
+packed/fixed-4/deterministic-CUDA actor receipts on both collection and
+evaluation. The verifier also checks the **configured** 15 workers and
+trajectory counts; with 15 training episodes the executor can saturate
+all 15 worker slots, but this does not by itself prove simultaneous
+occupancy of every process at the same instant.
+
+This is a **single integration smoke**, not a learning-performance
+claim or a replacement for 15-worker full-Act throughput measurement.
+If the verifier fails, retain `progress.json`, `smoke-verification.json`
+(if present), and the terminal traceback for diagnosis; preserve the
+output directory. Use a new output root for any retry.
