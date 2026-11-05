@@ -637,6 +637,7 @@ def main() -> None:
     root = args.output_root
     progress_path = root / "progress.json"
     optimizer_path = root / "optimizer-state.pt"
+    model_dir = root / "models"
     history: list[dict[str, Any]] = []
     if args.resume:
         if not progress_path.is_file() or not optimizer_path.is_file():
@@ -645,6 +646,8 @@ def main() -> None:
         if progress["fingerprint"] != fingerprint:
             p.error("Cannot resume different H16 pilot configuration")
         history = progress["rounds"]
+        if not history:
+            p.error("--resume requires at least one committed training round")
         if len(history) > args.rounds:
             p.error("Existing checkpoint exceeds configured round count")
         committed_model = root / "models" / f"joint-r{len(history):04d}.pt"
@@ -682,7 +685,6 @@ def main() -> None:
             p.error("Optimizer and progress records disagree")
         optimizer.load_state_dict(saved["optimizer"])
         torch.set_rng_state(saved["rng_state"])
-    model_dir = root / "models"
     model_dir.mkdir(parents=True, exist_ok=True)
     actor_path = root / "actor-current.pt"
     namespace = seed_namespace(args.ascension, args.map_profile)
