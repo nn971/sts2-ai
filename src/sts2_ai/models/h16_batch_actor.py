@@ -92,18 +92,27 @@ def _stable_shape_bucket(encoded: EncodedDecision) -> tuple[str, int, int, int]:
     )
 
 
+def _stable_h21_shape_bucket(encoded: EncodedDecision) -> tuple[str, int, int, int, int]:
+    """Public H21 GPU bucket includes edge width, which feeds scatter_add."""
+    base = _stable_shape_bucket(encoded)
+    edges = max(1, len(encoded.relations))
+    return (*base, ((edges + 15) // 16) * 16)
+
+
 def _shape_groups(
-    work: list[Any], physical_size: int,
-) -> list[tuple[list[Any], tuple[str, int, int, int] | None]]:
+    work: list[Any], physical_size: int, *, h21: bool = False,
+) -> list[tuple[list[Any], tuple[int | str, ...] | None]]:
     """Bucket before fixed-row padding; output order is irrelevant to RPC slots."""
     if physical_size == 0:
         return [(work, None)]
-    buckets: dict[tuple[str, int, int, int], list[Any]] = {}
+    buckets: dict[tuple[int | str, ...], list[Any]] = {}
     for item in work:
         frame = item[2]
         if not isinstance(frame, EncodedDecision):
             raise ValueError("H16 actor expects public EncodedDecision tokens")
-        buckets.setdefault(_stable_shape_bucket(frame), []).append(item)
+        bucket = (_stable_h21_shape_bucket(frame) if h21
+                  else _stable_shape_bucket(frame))
+        buckets.setdefault(bucket, []).append(item)
     return [
         (entries[offset:offset + physical_size], bucket)
         for bucket, entries in buckets.items()
@@ -189,8 +198,6 @@ def _serve(
         model = JointActPilotNet.load(Path(checkpoint), device=device).eval()
         if deterministic_cuda and model.representation != "h21":
             raise ValueError("Deterministic CUDA P2 experiment requires H21 model")
-        if model.representation == "h21" and fixed_shape_batch_size:
-            raise ValueError("H21 relation batching is not fixed-shape certified; use batch size 0")
         if (h21_collator not in ("reference", "packed")
                 or (model.representation != "h21" and h21_collator != "reference")):
             raise ValueError("Packed H21 collator requires H21 actor representation")
@@ -220,7 +227,10 @@ def _serve(
                         break
                     work.append(entry)
                 try:
-                    batches = _shape_groups(work, fixed_shape_batch_size)
+                    batches = _shape_groups(
+                        work, fixed_shape_batch_size,
+                        h21=(model.representation == "h21"),
+                    )
                 except Exception:
                     error = traceback.format_exc()
                     for entry in work:
@@ -244,6 +254,8 @@ def _serve(
                                 "pad_actions": bucket[2],
                                 "pad_members": bucket[3],
                             }
+                            if model.representation == "h21":
+                                padding["pad_relations"] = bucket[4]
                             stats["p2_fixed_shape_physical_rows"] += len(frames)
                             stats["p2_fixed_shape_bucket_forwards"] += 1
                         started = time.perf_counter()
@@ -259,7 +271,8 @@ def _serve(
                             batch_histogram[count_key] = (
                                 batch_histogram.get(count_key, 0) + 1
                             )
-                        host = (h21_collate(frames) if model.representation == "h21"
+                        host = (h21_collate(frames, **padding)
+                                if model.representation == "h21"
                                 else prepare_h7_actor_packed(frames, **padding))
                         host_elapsed = time.perf_counter() - started
                         stats["host_collate_seconds"] += host_elapsed
