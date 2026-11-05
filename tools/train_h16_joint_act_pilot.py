@@ -425,6 +425,21 @@ def main() -> None:
                    help="Fixed research route, or seeded Overgrowth map with player path choices")
     p.add_argument("--runs-per-round", type=int, default=16)
     p.add_argument("--heldout-runs", type=int, default=8)
+    p.add_argument(
+        "--heldout-every-rounds", type=int, default=1,
+        help="Opt-in evaluation cadence: baseline, round 1, multiples of "
+             "this interval and final round. Other rows record heldout=null.",
+    )
+    p.add_argument(
+        "--stop-after-round", type=int, default=None,
+        help="Run-control only: pause after checkpointing this round "
+             "(planned --rounds stays fixed across resumes).",
+    )
+    p.add_argument(
+        "--max-wall-seconds", type=float, default=None,
+        help="Run-control only: stop between committed rounds when "
+             "the elapsed wall budget is exceeded; never interrupt a round.",
+    )
     p.add_argument("--workers", type=int, default=15)
     p.add_argument(
         "--rollout-transport", choices=("legacy", "fused"), default="fused",
@@ -505,7 +520,8 @@ def main() -> None:
     p.add_argument("--execute", action="store_true")
     p.add_argument("--resume", action="store_true")
     args = p.parse_args()
-    if (min(args.rounds, args.runs_per_round, args.heldout_runs, args.workers,
+    if (min(args.rounds, args.runs_per_round, args.heldout_runs,
+            args.heldout_every_rounds, args.workers,
             args.max_decisions, args.search_start_round,
             args.simulations, args.max_simulation_steps, args.minibatch, args.epochs,
             args.actor_max_batch) <= 0
@@ -513,6 +529,11 @@ def main() -> None:
             or (args.search_depth == 0 and not args.h17_adaptive)
             or not 0 <= args.ascension <= 10
             or args.max_searches < 0 or args.study_seed < 0
+            or (args.stop_after_round is not None
+                and not 1 <= args.stop_after_round <= args.rounds)
+            or (args.max_wall_seconds is not None and (
+                not math.isfinite(args.max_wall_seconds)
+                or args.max_wall_seconds <= 0))
             or not math.isfinite(args.actor_max_delay_ms)
             or args.actor_max_delay_ms < 0
             or (args.evaluation_horizon_lambda is not None and (
@@ -575,12 +596,15 @@ def main() -> None:
             if key not in (
                 "execute", "resume", "output_root", "initial_h9",
                 "initial_h16", "macro_model", "emulator_root", "ai_root", "device",
+                "stop_after_round", "max_wall_seconds",
             ) and (key != "actor_fixed_shape_batch_size" or value != 0) and (
                 key != "actor_h21_collator" or value != "reference"
             ) and (
                 key != "actor_deterministic_cuda" or value
             ) and (
                 key != "evaluation_horizon_lambda" or value is not None
+            ) and (
+                key != "heldout_every_rounds" or value != 1
             ) and (
                 key != "representation" or value != "h16"
             ) and (
@@ -609,6 +633,7 @@ def main() -> None:
         p.error("Actor CUDA unavailable; use --actor-device cpu for a smoke")
     torch.set_num_threads(1)
     torch.manual_seed(args.study_seed)
+    wall_started = time.perf_counter()
     root = args.output_root
     progress_path = root / "progress.json"
     optimizer_path = root / "optimizer-state.pt"
@@ -622,10 +647,11 @@ def main() -> None:
         history = progress["rounds"]
         if len(history) > args.rounds:
             p.error("Existing checkpoint exceeds configured round count")
-        model = JointActPilotNet.load(
-            root / "models" / f"joint-r{len(history):04d}.pt",
-            device=args.device,
-        )
+        committed_model = root / "models" / f"joint-r{len(history):04d}.pt"
+        if (not committed_model.is_file()
+                or sha256(committed_model) != history[-1]["checkpoint_sha256"]):
+            p.error("Committed resume checkpoint digest mismatch")
+        model = JointActPilotNet.load(committed_model, device=args.device)
         if model.representation != args.representation:
             p.error("Resume checkpoint representation differs from experiment")
     else:
@@ -645,7 +671,13 @@ def main() -> None:
             )
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
     if args.resume:
-        saved = torch.load(optimizer_path, map_location="cpu", weights_only=True)
+        # Progress is the last commit marker. A crash during the next
+        # round's staged writes must not invalidate the last committed
+        # optimizer. New runs keep immutable per-round optimizer snapshots.
+        committed_optimizer = (
+            model_dir / f"optimizer-r{len(history):04d}.pt"
+        ) if (model_dir / f"optimizer-r{len(history):04d}.pt").is_file() else optimizer_path
+        saved = torch.load(committed_optimizer, map_location="cpu", weights_only=True)
         if saved["fingerprint"] != fingerprint or saved["round"] != len(history):
             p.error("Optimizer and progress records disagree")
         optimizer.load_state_dict(saved["optimizer"])
@@ -680,7 +712,8 @@ def main() -> None:
             search=False,
         )
         write_json(root / "baseline.json", summarize(baseline))
-    for round_index in range(len(history), args.rounds):
+    stop_at = min(args.rounds, args.stop_after_round or args.rounds)
+    for round_index in range(len(history), stop_at):
         horizon_lambda = (
             h17_horizon_for_round(
                 round_index, start=args.h17_horizon_initial,
@@ -756,16 +789,25 @@ def main() -> None:
         model_path = model_dir / f"joint-r{round_index + 1:04d}.pt"
         model.save(model_path)
         model.save(actor_path)
-        evaluation_started = time.perf_counter()
-        evaluation = collect(
-            args, actor_path, seeds=heldout,
-            horizon_lambda=(
-                args.evaluation_horizon_lambda
-                if args.evaluation_horizon_lambda is not None else horizon_lambda
-            ),
-            search=False,
+        evaluate_now = (
+            args.heldout_every_rounds == 1 or round_index == 0
+            or (round_index + 1) % args.heldout_every_rounds == 0
+            or round_index + 1 == args.rounds
         )
-        evaluation_seconds = time.perf_counter() - evaluation_started
+        evaluation_started = time.perf_counter()
+        evaluation = (
+            collect(
+                args, actor_path, seeds=heldout,
+                horizon_lambda=(
+                    args.evaluation_horizon_lambda
+                    if args.evaluation_horizon_lambda is not None else horizon_lambda
+                ),
+                search=False,
+            ) if evaluate_now else None
+        )
+        evaluation_seconds = (
+            time.perf_counter() - evaluation_started if evaluate_now else 0.0
+        )
         simulated_transitions = sum(
             len(episode.decisions) + episode.search_transitions
             for episode in train
@@ -787,7 +829,9 @@ def main() -> None:
                 if horizon_lambda < 1.0 else None
             ),
             "train": summarize(train), "update": report,
-            "heldout": summarize(evaluation),
+            "heldout": summarize(evaluation) if evaluation is not None else None,
+            **({"heldout_evaluated": evaluate_now}
+               if args.heldout_every_rounds != 1 else {}),
             **({
                 "macro_prior_weight": args.macro_prior_weight,
                 "hp_reference": args.h17_hp_reference,
@@ -801,12 +845,16 @@ def main() -> None:
             "checkpoint_sha256": sha256(model_path),
         }
         history.append(row)
-        _checkpoint(optimizer_path, {
+        committed_state = {
             "fingerprint": fingerprint,
             "round": len(history),
             "optimizer": optimizer.state_dict(),
             "rng_state": torch.get_rng_state(),
-        })
+        }
+        _checkpoint(
+            model_dir / f"optimizer-r{len(history):04d}.pt", committed_state,
+        )
+        _checkpoint(optimizer_path, committed_state)
         if args.h17_adaptive:
             write_replay(
                 root / "replay" / f"r{len(history):04d}.json.gz",
@@ -823,6 +871,12 @@ def main() -> None:
             prior = root / "replay" / f"r{len(history)-2:04d}.json.gz"
             prior.unlink(missing_ok=True)
         print("[h16-act1-joint] " + json.dumps(row, sort_keys=True), flush=True)
+        if (args.max_wall_seconds is not None
+                and time.perf_counter() - wall_started >= args.max_wall_seconds):
+            print("[h16-act1-joint] wall budget reached after committed "
+                  f"round {len(history)}; resume with identical configuration",
+                  flush=True)
+            break
     print("[h16-act1-joint] completed", len(history), "rounds", flush=True)
 
 
