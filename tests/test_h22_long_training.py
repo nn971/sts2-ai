@@ -227,3 +227,44 @@ def test_h22_sparse_progress_monitor_distinguishes_missing_eval(tmp_path):
     assert "eval_every=5" in text
     assert "Latest measured heldout: r1" in text
     assert "\n2\t6.00\t0\t-\t-\t4\t320\t32.0\t20\t7\t17.0" in text
+
+
+def test_h22_warmstart_file_identity_and_legacy_rejection(
+    tmp_path, monkeypatch, capsys,
+):
+    from sts2_ai.models.shared_macro_transformer_v2 import H21GroundedMacroTransformer
+    from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
+    from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet
+
+    config = H7Config(width=32, layers=1, heads=4, feedforward=64)
+    h22 = tmp_path / "h22-r2.pt"
+    JointActPilotNet(H21GroundedMacroTransformer(config)).save(h22)
+    base = [
+        "train", *h22_default_arguments(),
+        "--initial-h22", str(h22), "--emulator-root", str(tmp_path),
+        "--emulator-revision", "pinned-v1",
+        "--output-root", str(tmp_path / "new-h22-training"),
+        "--macro-prior-weight", "0", "--actor-inference", "shared",
+    ]
+    monkeypatch.setattr("sys.argv", base)
+    train_main()
+    source = json.loads(capsys.readouterr().out)["experiment"]
+    assert source["initial_h22_sha256"] == hashlib.sha256(h22.read_bytes()).hexdigest()
+    assert source["initial_h16_sha256"] is None
+    assert "initial_h22" not in source["options"]
+    assert JointActPilotNet.load(h22).representation == "h21"
+
+    monkeypatch.setattr("sys.argv", [*base, "--representation", "h16"])
+    with pytest.raises(SystemExit) as error:
+        train_main()
+    assert error.value.code == 2
+    capsys.readouterr()
+
+    legacy = tmp_path / "legacy.pt"
+    JointActPilotNet(SharedObjectTransformer(config)).save(legacy)
+    assert JointActPilotNet.load(legacy).representation == "h16"
+    # Same weights/pointer CLI cannot bypass the H21 checkpoint identity checks.
+    with pytest.raises(ValueError, match="H21"):
+        JointActPilotNet.load(legacy).warmstart_h21(
+            JointActPilotNet.load(h22),
+        )
