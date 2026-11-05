@@ -131,6 +131,52 @@ def test_h22_alias_audit_and_policy_forward():
     assert offsets == (0.0, 0.0)
 
 
+@pytest.mark.parametrize("with_search_target", (False, True))
+def test_h22_replay_mixed_action_widths_keep_empty_puct_loss_finite(
+    with_search_target,
+):
+    torch.manual_seed(19)
+    model = JointActPilotNet(H21GroundedMacroTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64)))
+    state = _state()
+    actions = _actions()
+    # Three padded actions across one mixed-width minibatch: float32 min
+    # logits sum to -inf. The old 0 * logits.sum() fallback was NaN.
+    menus = (actions, actions[:1], actions[:1], actions[:1])
+    rows = [
+        {
+            "observation": json.dumps(state),
+            "actions": [[a.action_id, a.kind, a.payload_json] for a in menu],
+            "phase": "macro", "act": 0.0,
+            "room_hp": [0.8, 0.4], "combat_quality": None,
+            "search_policy": (
+                [0.7, 0.3] if with_search_target and i == 0 else None
+            ),
+        }
+        for i, menu in enumerate(menus)
+    ]
+    encoded = [model.encode_decision(state, menu) for menu in menus]
+    batch = model.collate(encoded)
+    assert int((~batch.action_mask).sum()) == 3
+    with torch.no_grad():
+        logits, _, _ = model(batch, value_logits=True, horizon_lambda=0.42)
+    assert bool(torch.isneginf(logits.sum()))
+    assert bool(torch.isnan(logits.sum() * 0))
+
+    result = fit_replay(
+        model, torch.optim.AdamW(model.parameters(), lr=1e-5),
+        rows, horizon_lambda=0.42, replay_weight=0.2, minibatch=4,
+    )
+    assert result["steps"] == 1
+    assert result["examples"] == 4
+    assert result["search_targets"] == int(with_search_target)
+    assert torch.isfinite(torch.tensor(result["loss"])).item()
+    assert all(
+        torch.isfinite(weight).all().item()
+        for weight in model.state_dict().values() if weight.is_floating_point()
+    )
+
+
 def test_h22_replay_uses_h21_relation_batch():
     model = JointActPilotNet(H21GroundedMacroTransformer(
         H7Config(width=32, layers=1, heads=4, feedforward=64)))
