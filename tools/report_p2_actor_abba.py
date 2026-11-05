@@ -306,6 +306,21 @@ def report_actor_abba(
                         or not math.isfinite(value) or value < 0):
                     raise ValueError(f"{arm}: invalid H21 actor stage {key}")
                 stages[key] = float(value)
+            gpu_memory = None
+            if profile["identity"].get("actor_device") == "cuda":
+                memory = {}
+                for key in (
+                    "p2_h21_cuda_peak_allocated_bytes",
+                    "p2_h21_cuda_peak_reserved_bytes",
+                ):
+                    value = metrics.get(key)
+                    if type(value) is not int or value <= 0:
+                        raise ValueError(f"{arm}: missing CUDA memory receipt {key}")
+                    memory[key] = value
+                if (memory["p2_h21_cuda_peak_allocated_bytes"]
+                        > memory["p2_h21_cuda_peak_reserved_bytes"]):
+                    raise ValueError(f"{arm}: invalid H21 CUDA allocator memory")
+                gpu_memory = memory
             h21_actor_stages.append({
                 "arm": arm, "collator": metrics["p2_h21_collator"],
                 "requests": metrics["requests"], "batches": metrics["batches"],
@@ -313,6 +328,7 @@ def report_actor_abba(
                 "host_collate_fraction_of_cohort_wall": (
                     stages["host_collate_seconds"] / elapsed
                 ),
+                "cuda_peak_memory_bytes": gpu_memory,
             })
     cache_diagnostics: list[dict[str, Any]] | None = None
     if experiment == "prefix-cache":
