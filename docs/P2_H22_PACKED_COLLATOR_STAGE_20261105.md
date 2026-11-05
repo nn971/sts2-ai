@@ -550,3 +550,50 @@ a fresh output root and 16 seeds. Its result can be accepted only for
 **fixed-shape depth-8** inference. Training or deployment of the
 fixed-shape H21 actor remains gated on CUDA replay and throughput
 evidence; we have deliberately kept it opt-in.
+
+
+## 2026-11-05 acceptance: short fixed-shape H21 packed A/B/B/A
+
+The user's **successful** four-seed / four-worker deterministic CUDA
+A1/B1/B2/A2 report used **fixed physical row count 4**, bounded
+**depth-8 PUCT**, **8 simulations/search root**, **2 searches/episode**,
+**40 real decisions/episode**, and a frozen H22 H21-untrained checkpoint.
+All four cohorts had exactly **320 real transitions**, **1076 PUCT
+search transitions**, and **8 intentionally censored episodes** per arm.
+The strict reporter verified within-cohort identical replay,
+across-cohort public/teacher parity, and identical search and episode
+work for every seed.
+
+| Arm | CPU collator | Cohort wall | Host collation | Forward | Batches |
+|---|---|---:|---:|---:|---:|
+| A1 | reference | 31.5678 s | 13.8961 s | 9.8437 s | 1015 |
+| B1 | packed | 19.9061 s | 1.8311 s | 10.3563 s | 1007 |
+| B2 | packed | 19.5113 s | 1.7654 s | 10.1133 s | 988 |
+| A2 | reference | 30.9999 s | 13.5278 s | 9.9736 s | 1012 |
+
+**Accepted result for this bounded, fixed-shape, short-horizon
+microbenchmark:** wall-time speed ratio **1.5873134565x**,
+**37.00047%** less total cohort wall. Both order-balanced pairs favor
+packed (1.58584x and 1.58882x). The observed CPU collation reduction
+is around 7.6x, while model forward is essentially unchanged.
+Torch physical batching/request arrival varies slightly by arm;
+the traces and counted PUCT work are still exactly paired.
+
+**Limits:** no episode completed Act 1 (all censored at 40 actions);
+four seeds cannot establish statistical confidence or full-Act
+reproducibility. This result does **not** prove 15-worker full-depth
+training throughput; the earlier 15-worker dynamic-shape B2 mismatch
+remains a separate observation. It is sound evidence to retain the
+packed implementation and stage it as an opt-in H22 inference
+optimization.
+
+**Training integration:** `tools/train_h16_joint_act_pilot.py` now
+allows H21 fixed-shape buckets, and can pass opt-in
+`--actor-deterministic-cuda` to the actual shared inference subprocess
+alongside `--actor-h21-collator packed
+--actor-fixed-shape-batch-size 4 --actor-max-batch 4`.
+The H22 generated-map wrapper still defaults to reference,
+dynamic batching; H16/H18 and the H21 optimizer collation remain
+unchanged. These new flags participate in the fingerprint when
+enabled. Continue with one-round actual H22 public-v1 generated-map
+training smoke and a 15-worker stability pilot **before** a long run.
