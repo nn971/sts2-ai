@@ -390,3 +390,72 @@ def test_h22_trainer_dryrun_accepts_fixed_packed_deterministic_cuda(
         train_main()
     assert error.value.code == 2
     assert "Invalid H16 pilot configuration" in capsys.readouterr().err
+
+
+def test_h22_cuda_15w_smoke_verifier_requires_full_worker_cohort(
+    tmp_path, monkeypatch,
+):
+    import tools.check_h22_packed_training_smoke as verifier
+
+    opts = {
+        "representation": "h21", "actor_inference": "shared",
+        "actor_h21_collator": "packed", "actor_fixed_shape_batch_size": 4,
+        "actor_max_batch": 4, "actor_deterministic_cuda": True,
+        "workers": 15, "runs_per_round": 15, "heldout_runs": 2,
+    }
+    actor = {
+        "p2_h21_collator": "packed", "p2_fixed_shape_batch_size": 4,
+        "p2_fixed_shape_bucket_forwards": 3,
+        "p2_fixed_shape_physical_rows": 12, "requests": 6,
+        "device": "cuda", "p2_deterministic_cuda": True,
+        "p2_cuda_cublas_workspace_config": ":4096:8",
+    }
+    checkpoint = tmp_path / "models" / "joint-r0001.pt"
+    checkpoint.parent.mkdir()
+    checkpoint.write_bytes(b"synthetic-checkpoint")
+    (tmp_path / "optimizer-state.pt").write_bytes(b"synthetic-optimizer")
+
+    def progress(train_completed=15):
+        return {
+            "experiment": {"schema": H22_SCHEMA, "options": opts},
+            "rounds": [{
+                "round": 1, "train": {
+                    "completed": train_completed, "censored": 0,
+                    "searches": 2, "search_transitions": 32,
+                    "rollout_profile": {"actor_service": actor},
+                },
+                "heldout": {
+                    "completed": 2, "censored": 0,
+                    "rollout_profile": {"actor_service": actor},
+                },
+                "update": {"optimizer_steps": 2},
+                "checkpoint_sha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
+            }],
+        }
+
+    class Trained:
+        representation = "h21"
+
+        def state_dict(self):
+            return {"weights": torch.ones(2)}
+
+    monkeypatch.setattr(verifier.JointActPilotNet, "load", lambda *_a, **_kw: Trained())
+    (tmp_path / "progress.json").write_text(json.dumps(progress()))
+    result = verifier.verify_smoke(
+        tmp_path, require_cuda=True, expected_workers=15,
+        expected_train=15, expected_heldout=2,
+    )
+    assert result["train_completed"] == 15
+    assert result["heldout_completed"] == 2
+    assert result["requested_workers"] == 15
+
+    opts["workers"] = 4
+    (tmp_path / "progress.json").write_text(json.dumps(progress()))
+    with pytest.raises(ValueError, match="requested workers"):
+        verifier.verify_smoke(tmp_path, expected_workers=15)
+    opts["workers"] = 15
+    (tmp_path / "progress.json").write_text(json.dumps(progress(14)))
+    with pytest.raises(ValueError, match="train count mismatch"):
+        verifier.verify_smoke(tmp_path, expected_train=15)
+    with pytest.raises(ValueError, match="positive integer"):
+        verifier.verify_smoke(tmp_path, expected_workers=0)
