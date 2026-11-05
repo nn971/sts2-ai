@@ -268,3 +268,77 @@ def test_h22_warmstart_file_identity_and_legacy_rejection(
     with pytest.raises(ValueError, match="H21"):
         load_h22_initial(legacy, device="cpu")
     assert load_h22_initial(h22, device="cpu").representation == "h21"
+
+
+def test_h22_training_pause_and_resume_uses_committed_optimizer_snapshot(
+    tmp_path, monkeypatch, capsys,
+):
+    """Exercise real runner state transitions without a costly emulator."""
+    from types import SimpleNamespace
+
+    import tools.train_h16_joint_act_pilot as runner
+    from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
+    from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet
+
+    initial = tmp_path / "tiny-h16.pt"
+    JointActPilotNet(SharedObjectTransformer(
+        H7Config(width=32, layers=1, heads=4, feedforward=64),
+    )).save(initial)
+    root = tmp_path / "state"
+    calls = []
+
+    def fake_collect(_args, _model, *, seeds, horizon_lambda, search):
+        calls.append((tuple(seeds), search))
+        return [SimpleNamespace(
+            complete=True, decisions=(), search_transitions=0,
+        )]
+
+    monkeypatch.setattr(runner, "collect", fake_collect)
+    monkeypatch.setattr(runner, "summarize", lambda eps: {
+        "played": len(eps), "completed": len(eps), "censored": 0,
+        "cleared": 0, "decisions": 0, "searches": 0,
+        "search_transitions": 0,
+        "floor_progress": {"mean_max_floor_reached": 1.0},
+    })
+    monkeypatch.setattr(
+        runner, "train_joint_cohort",
+        lambda *_args, **_kw: {"optimizer_steps": 1},
+    )
+    base = [
+        "trainer", "--initial-h16", str(initial),
+        "--representation", "h21",
+        "--emulator-root", str(tmp_path), "--emulator-revision", "pinned",
+        "--output-root", str(root), "--device", "cpu",
+        "--actor-device", "cpu", "--macro-prior-weight", "0",
+        "--rounds", "3", "--runs-per-round", "1", "--heldout-runs", "1",
+        "--workers", "1", "--heldout-every-rounds", "5",
+        "--max-decisions", "10", "--execute",
+    ]
+
+    def train(*additional):
+        monkeypatch.setattr("sys.argv", [*base, *additional])
+        runner.main()
+        capsys.readouterr()
+        return json.loads((root / "progress.json").read_text())
+
+    first = train("--stop-after-round", "1")
+    assert len(first["rounds"]) == 1
+    assert first["rounds"][0]["heldout_evaluated"]
+    assert (root / "models" / "optimizer-r0001.pt").is_file()
+    assert len(calls) == 3  # initial baseline, train, heldout
+
+    (root / "optimizer-state.pt").write_bytes(b"partial-next-round-interruption")
+    second = train("--resume", "--stop-after-round", "2")
+    assert len(second["rounds"]) == 2
+    assert second["fingerprint"] == first["fingerprint"]
+    assert second["rounds"][1]["heldout"] is None
+    assert second["rounds"][1]["heldout_evaluated"] is False
+    assert len(calls) == 4  # only the second training cohort
+
+    final = train("--resume", "--max-wall-seconds", "900")
+    assert len(final["rounds"]) == 3
+    assert final["fingerprint"] == first["fingerprint"]
+    assert final["rounds"][2]["heldout_evaluated"]
+    assert final["rounds"][2]["heldout"] is not None
+    assert len(calls) == 6  # third training cohort + final heldout
+    assert (root / "models" / "optimizer-r0003.pt").is_file()
