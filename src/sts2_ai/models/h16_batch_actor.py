@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import math
 import multiprocessing
+import os
 import queue
 import time
 import traceback
@@ -119,12 +120,14 @@ def _serve(
     verify_batch_parity: bool = False,
     fixed_shape_batch_size: int = 0,
     h21_collator: str = "reference",
+    deterministic_cuda: bool = False,
 ) -> None:
     stats: dict[str, Any] = {
         "device": device, "requests": 0, "batches": 0,
         "max_batch_observed": 0, "model_load_seconds": 0.0,
         "host_collate_seconds": 0.0, "transfer_seconds": 0.0,
         "forward_seconds": 0.0,
+        "p2_deterministic_cuda": deterministic_cuda,
     }
     if fixed_shape_batch_size:
         stats["p2_fixed_shape_batch_size"] = fixed_shape_batch_size
@@ -167,11 +170,25 @@ def _serve(
         }
 
     try:
+        if deterministic_cuda:
+            if not device.startswith("cuda"):
+                raise ValueError("Deterministic CUDA actor requires a CUDA device")
+            # Must precede cuBLAS handle creation in this freshly spawned actor.
+            os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+            torch.use_deterministic_algorithms(True, warn_only=False)
+            torch.backends.cudnn.benchmark = False
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cuda.matmul.allow_tf32 = False
+            stats["p2_cuda_cublas_workspace_config"] = os.environ[
+                "CUBLAS_WORKSPACE_CONFIG"
+            ]
         torch.set_num_threads(1)
         started = time.perf_counter()
         if hashlib.sha256(Path(checkpoint).read_bytes()).hexdigest() != checkpoint_sha:
             raise ValueError("H16 shared actor checkpoint SHA256 mismatch")
         model = JointActPilotNet.load(Path(checkpoint), device=device).eval()
+        if deterministic_cuda and model.representation != "h21":
+            raise ValueError("Deterministic CUDA P2 experiment requires H21 model")
         if model.representation == "h21" and fixed_shape_batch_size:
             raise ValueError("H21 relation batching is not fixed-shape certified; use batch size 0")
         if (h21_collator not in ("reference", "packed")
@@ -372,6 +389,7 @@ class SharedH16Service:
         verify_batch_parity: bool = False,
         fixed_shape_batch_size: int = 0,
         h21_collator: str = "reference",
+        deterministic_cuda: bool = False,
     ) -> None:
         if (workers < 1 or max_batch < 1 or max_delay_ms < 0
                 or not math.isfinite(max_delay_ms)
@@ -382,7 +400,8 @@ class SharedH16Service:
                 or fixed_shape_batch_size < 0
                 or fixed_shape_batch_size > max_batch
                 or (verify_batch_parity and fixed_shape_batch_size > 0)
-                or h21_collator not in ("reference", "packed")):
+                or h21_collator not in ("reference", "packed")
+                or (deterministic_cuda and not device.startswith("cuda"))):
             raise ValueError("Invalid H16 shared actor configuration")
         ctx = multiprocessing.get_context("spawn")
         self.requests = ctx.Queue(maxsize=workers * 4)
@@ -397,7 +416,8 @@ class SharedH16Service:
             args=(str(checkpoint), digest, device, horizon_lambda,
                   self.requests, self.replies, self.startup, self.statistics,
                   max_batch, max_delay_ms, profile_actor,
-                  verify_batch_parity, fixed_shape_batch_size, h21_collator),
+                  verify_batch_parity, fixed_shape_batch_size, h21_collator,
+                  deterministic_cuda),
             daemon=True,
         )
         self.metrics: dict[str, Any] = {}
