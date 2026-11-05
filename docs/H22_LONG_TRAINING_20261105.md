@@ -1,5 +1,14 @@
 # H22 long training, checkpoint continuation and independent audit
 
+> **P2 closure gate first.** Complete the 15-worker full-Act CUDA
+> reference/packed A/B/B/A protocol in
+> [P2_CLOSURE_20261105.md](P2_CLOSURE_20261105.md) and inspect
+> `p2-h22-closure.json` before starting this training task. The
+> long-training commands below assume packed fixed-shape-4 inference;
+> if the final P2 result does not justify that choice, revise the
+> actor setting and assign a new output root/fingerprint before launch.
+> The already completed two-round pilot remains unaffected.
+
 ## Design and acceptance scope
 
 - Silent A0, native Overgrowth generated maps, H21 grounded macro graph and packed deterministic CUDA actor, 15 emulator workers.
