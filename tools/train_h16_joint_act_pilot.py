@@ -397,6 +397,20 @@ def h17_macro_weight_for_round(
     return initial_weight * max(0.0, 1.0 - round_index / decay_rounds)
 
 
+def should_evaluate_round(
+    round_number: int, *, planned_rounds: int, cadence: int,
+) -> bool:
+    """Keep first/final evaluation and periodic checkpoints under sparse eval."""
+    if (type(round_number) is not int or type(planned_rounds) is not int
+            or type(cadence) is not int or planned_rounds < 1
+            or cadence < 1 or not 1 <= round_number <= planned_rounds):
+        raise ValueError("Invalid evaluation round/cadence")
+    return (
+        cadence == 1 or round_number == 1
+        or round_number % cadence == 0 or round_number == planned_rounds
+    )
+
+
 def _checkpoint(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     target = path.with_name("." + path.name + ".tmp")
@@ -791,10 +805,9 @@ def main() -> None:
         model_path = model_dir / f"joint-r{round_index + 1:04d}.pt"
         model.save(model_path)
         model.save(actor_path)
-        evaluate_now = (
-            args.heldout_every_rounds == 1 or round_index == 0
-            or (round_index + 1) % args.heldout_every_rounds == 0
-            or round_index + 1 == args.rounds
+        evaluate_now = should_evaluate_round(
+            round_index + 1, planned_rounds=args.rounds,
+            cadence=args.heldout_every_rounds,
         )
         evaluation_started = time.perf_counter()
         evaluation = (
