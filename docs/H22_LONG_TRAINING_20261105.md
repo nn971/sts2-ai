@@ -1,13 +1,13 @@
 # H22 long training, checkpoint continuation and independent audit
 
-> **P2 closure gate first.** Complete the 15-worker full-Act CUDA
-> reference/packed A/B/B/A protocol in
-> [P2_CLOSURE_20261105.md](P2_CLOSURE_20261105.md) and inspect
-> `p2-h22-closure.json` before starting this training task. The
-> long-training commands below assume packed fixed-shape-4 inference;
-> if the final P2 result does not justify that choice, revise the
-> actor setting and assign a new output root/fingerprint before launch.
-> The already completed two-round pilot remains unaffected.
+> **P2 performance acceptance complete (2026-11-05).** The
+> 15-worker, 16-seed, full-Act H22 CUDA A/B/B/A benchmark passed exact
+> public/search-teacher parity and measured **1.83524×** packed-collation
+> speedup. See [P2 closure](P2_CLOSURE_20261105.md). Packed fixed-4
+> collation is now the H22 wrapper default; the explicit CLI arguments
+> below preserve experiment provenance and deterministic CUDA behavior.
+> **Next gate:** run the staged five-round, 64-train/16-heldout CUDA pilot
+> and inspect learning/update stability before committing to six hours.
 
 ## Design and acceptance scope
 
