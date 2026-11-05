@@ -10,9 +10,8 @@ import pytest
 from sts2_ai.training.h16_joint_act_pilot import H22_SCHEMA
 from tools import audit_h22_independent as audit_module
 from tools.monitor_h22_long_training import monitor
-from tools.train_h16_joint_act_pilot import load_h22_initial
+from tools.train_h16_joint_act_pilot import load_h22_initial, should_evaluate_round
 from tools.train_h16_joint_act_pilot import main as train_main
-from tools.train_h16_joint_act_pilot import should_evaluate_round
 from tools.train_h22_h21_generated_a0 import h22_cli_arguments, h22_default_arguments
 
 
