@@ -104,9 +104,19 @@ jobs:
             --actor-fixed-shape-batch-size 2 --actor-max-batch 2 \
             --rounds 1 --runs-per-round 2 --heldout-runs 1 --workers 1 \
             --study-seed 20261105 --simulations 8 --search-depth 2 \
-            --h17-search-p16 0 --h17-search-p64 0 --max-searches 1 \
+            --h17-search-p16 0.5 --h17-search-p64 0 --max-searches 1 \
             --max-decisions 512 --minibatch 4 \
             --output-root results/h22-ci-packed-one-round
           python tools/check_h22_packed_training_smoke.py \
             --output-root results/h22-ci-packed-one-round \
             --fixed-rows 2
+      - name: Retain H22 one-round packed training smoke receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: h22-packed-one-round-cpu-smoke
+          path: |
+            results/h22-ci-packed-one-round/progress.json
+            results/h22-ci-packed-one-round/baseline.json
+            results/h22-ci-packed-one-round/smoke-verification.json
+          if-no-files-found: warn
