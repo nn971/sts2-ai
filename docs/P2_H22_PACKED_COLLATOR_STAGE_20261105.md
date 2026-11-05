@@ -998,3 +998,39 @@ The reporter has been extended (additive fields) with
 `regressed_vs_previous` in addition to the legacy
 baseline-relative counts. Re-running the reporter on the same output
 recomputes those fields without new simulator work.
+
+
+## 2026-11-05 FINAL P2.5: 15-worker full-Act CUDA A/B/B/A ACCEPTED
+
+This section supersedes earlier *pending* statements in the dated
+experiments above. The user executed the predeclared final P2.5 test
+on independent seeds, using the trained H22 R2 checkpoint, the pinned
+public-v1 emulator and deterministic CUDA fixed-4 actor with
+16-simulation depth-8 PUCT and at most two roots per Act attempt.
+
+- A1 reference **184.4793s**; B1 packed **100.7127s**;
+  B2 packed **100.2722s**; A2 reference **184.3759s**.
+- **1.83524× combined speedup**; **45.5112%** less whole-cohort wall;
+  pairwise 1.83174× and 1.83875×, both favorable to packed.
+- **16 seeds × 2 paired executions = 32 complete Act terminations per
+  arm**; zero censoring. Exact cross-arm public action and PUCT teacher
+  parity; identical 3,578 real + 8,350 search transitions/arm.
+- Host collation reference **96.25–96.72s** versus packed
+  **12.76–12.77s**. GPU forward **64.88–65.84s** throughout;
+  similar CUDA peak allocated/reserved memory.
+- Closure checker: `p2_5_gate_passed=true`,
+  `packed_collator_decision=eligible_for_default_promotion`.
+
+**Closure decision:** P2.0–P2.5 accepted/closed in the measured
+H22 public-v1 fixed-shape, deterministic CUDA, Silent A0 generated-map,
+depth-8 search scope. Promote packed + fixed-4 as the
+`tools/train_h22_h21_generated_a0.py` H22-specific defaults.
+The underlying H16/H17/H18 trainer remains unchanged; CUDA
+determinism stays explicit for production and acceptance commands.
+P2.1 prefix cache remains off after measured regression; P2.4
+serialization/COW work is deferred. Full-depth search and native
+installed-game fidelity require their own parity/performance work.
+
+See [P2 closure ledger](P2_CLOSURE_20261105.md) and
+[evidence receipt](evidence/P2_H22_FULL_ACT_ACCEPTANCE_20261105.json)
+for reproducibility, provenance SHA-256 digests, and decision boundary.
