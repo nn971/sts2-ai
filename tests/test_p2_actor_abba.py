@@ -839,7 +839,9 @@ def test_h22_checkpoint_preflight_detects_missing_path(tmp_path):
 
 
 def test_h22_frozen_checkpoint_creation_and_schema_preflight(tmp_path):
-    import torch
+    # Lightweight P2 contract CI does not install PyTorch; H22 CI runs the
+    # same creation/checkpoint verification in its torch-enabled environment.
+    torch = pytest.importorskip("torch")
 
     from sts2_ai.models.shared_transformer import H7Config, SharedObjectTransformer
     from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet
