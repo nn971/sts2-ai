@@ -874,3 +874,62 @@ for reductions in training floor-1 deaths. A flat or sharply
 regressing paired evaluation is evidence to investigate the initial
 H21 policy and search/training behavior. Even an improving two-round
 pilot remains small and should inform—not certify—the long-run plan.
+
+
+## 2026-11-05 replay NaN at beginning of round 2 — fixed
+
+The first actual `h22-packed-paired16-two-rounds-v1` attempt reached the
+end of round 1 and then failed during the second round's
+`fit_replay()` call with `FloatingPointError("Nonfinite H17 replay loss")`.
+The follow-up report failed with "Pilot has incomplete training rounds",
+which is expected after interrupted round 2.
+
+Root cause: `fit_replay` previously used `logits.sum() * 0` for
+minibatches with no PUCT targets. The public model masks padded action
+logits with `torch.finfo(dtype).min`; summing multiple padded positions
+can overflow to `-inf`, and `0 * -inf` is NaN. This is a deterministic
+arithmetic failure whenever an unsearched minibatch contains sufficient
+action padding, unrelated to GPU randomness. The corrected empty
+PUCT-CE loss is `hp_loss.new_zeros(())`. The analogous empty
+joint-policy fallback now uses `act_loss.new_zeros(())`, avoiding
+the same overflow hazard. Regression tests exercise real H21
+mixed-action-width replay with and without a PUCT target.
+
+**Recovery without discarding round 1:** Keep the original output
+directory and rerun **the same full command and options** from the
+previous section with one extra flag, `--resume`. The trainer loads
+the saved round-1 model, optimizer state, and H17 replay file; it will
+recollect and retrain round 2. Source experiment fingerprint remains
+unchanged (codefix changes no experiment option).
+
+```fish
+cd ~/projects/sts2-ai
+git switch perf/p2-h22-packed-collator-20261105
+git pull --ff-only
+
+set emu ~/projects/sts2-emulator
+set rev (git -C $emu rev-parse HEAD)
+set initial results/h16-v5-combat-credit-r150/models/joint-r0079.pt
+set out results/h22-packed-paired16-two-rounds-v1
+
+python -u tools/train_h22_h21_generated_a0.py \
+    --emulator-root $emu --emulator-revision $rev \
+    --initial-h16 $initial --macro-prior-weight 0 \
+    --device cuda --actor-inference shared --actor-device cuda \
+    --actor-deterministic-cuda --actor-h21-collator packed \
+    --actor-max-batch 4 --actor-fixed-shape-batch-size 4 \
+    --rounds 2 --runs-per-round 15 --heldout-runs 16 --workers 15 \
+    --study-seed 20261105 --search-depth 8 \
+    --h17-search-p16 0.15 --h17-search-p64 0 \
+    --max-searches 1 --max-decisions 512 --minibatch 8 \
+    --evaluation-horizon-lambda 0.4113950303216448 \
+    --output-root $out --resume --execute
+
+python tools/report_h22_learning_pilot.py --output-root $out \
+    --expected-rounds 2 --expected-train 15 \
+    --expected-heldout 16 --expected-workers 15
+```
+
+If the second round fails again, capture the traceback and progress
+without replacing the existing round-1 output. Do not launch a six-hour
+training run on the basis of this short pilot alone.
