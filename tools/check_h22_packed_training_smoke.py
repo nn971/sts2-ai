@@ -14,6 +14,9 @@ from sts2_ai.training.h16_joint_act_pilot import H22_SCHEMA, JointActPilotNet
 
 def verify_smoke(
     root: Path, *, fixed_rows: int = 4, require_cuda: bool = False,
+    expected_workers: int | None = None,
+    expected_train: int | None = None,
+    expected_heldout: int | None = None,
 ) -> dict:
     progress = json.loads((root / "progress.json").read_text())
     rounds = progress["rounds"]
@@ -29,6 +32,20 @@ def verify_smoke(
         raise ValueError("H22 packed fixed-shape training options mismatch")
     if require_cuda and opts.get("actor_deterministic_cuda") is not True:
         raise ValueError("Missing deterministic CUDA training provenance")
+    for label, value in (
+        ("workers", expected_workers),
+        ("train", expected_train),
+        ("heldout", expected_heldout),
+    ):
+        if value is not None and (type(value) is not int or value < 1):
+            raise ValueError(f"Expected {label} must be a positive integer")
+    for key, expected in (
+        ("workers", expected_workers),
+        ("runs_per_round", expected_train),
+        ("heldout_runs", expected_heldout),
+    ):
+        if expected is not None and opts.get(key) != expected:
+            raise ValueError(f"H22 smoke requested {key} does not match {expected}")
     record = rounds[0]
     if (record.get("round") != 1
             or record["train"]["completed"] < 1
@@ -38,6 +55,12 @@ def verify_smoke(
             or record["train"]["search_transitions"] < 1
             or record["update"]["optimizer_steps"] < 1):
         raise ValueError("Missing completed train/eval, real PUCT, or optimizer update")
+    if (expected_train is not None
+            and record["train"]["completed"] != expected_train):
+        raise ValueError("H22 smoke train count mismatch")
+    if (expected_heldout is not None
+            and record["heldout"]["completed"] != expected_heldout):
+        raise ValueError("H22 smoke heldout count mismatch")
     for stage in ("train", "heldout"):
         actor = record[stage]["rollout_profile"]["actor_service"]
         if (not isinstance(actor, dict)
@@ -76,6 +99,7 @@ def verify_smoke(
         "optimizer_steps": record["update"]["optimizer_steps"],
         "fixed_rows": fixed_rows,
         "actor_device": record["train"]["rollout_profile"]["actor_service"]["device"],
+        "requested_workers": opts.get("workers"),
         "checkpoint_sha256": digest,
         "checkpoint": str(checkpoint),
     }
@@ -90,10 +114,18 @@ def main() -> None:
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--fixed-rows", type=int, default=4)
     parser.add_argument("--require-cuda", action="store_true")
+    parser.add_argument("--expected-workers", type=int)
+    parser.add_argument("--expected-train", type=int)
+    parser.add_argument("--expected-heldout", type=int)
     args = parser.parse_args()
     print(json.dumps(
-        verify_smoke(args.output_root, fixed_rows=args.fixed_rows,
-                     require_cuda=args.require_cuda),
+        verify_smoke(
+            args.output_root, fixed_rows=args.fixed_rows,
+            require_cuda=args.require_cuda,
+            expected_workers=args.expected_workers,
+            expected_train=args.expected_train,
+            expected_heldout=args.expected_heldout,
+        ),
         indent=2, sort_keys=True,
     ))
 
