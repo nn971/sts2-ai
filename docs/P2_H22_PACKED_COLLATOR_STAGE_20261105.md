@@ -112,10 +112,28 @@ git -C $emu pull --ff-only
 set rev (git -C $emu rev-parse HEAD)
 dotnet build $emu/src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj -c Release -m:1
 
+# The two paths below are LOCAL files, not committed model artifacts.
+# Verify that your H16 R79 checkpoint actually exists, or choose another
+# existing compatible H16 joint-r*.pt source checkpoint.
 set initial results/h16-v5-combat-credit-r150/models/joint-r0079.pt
 set h22 results/p2-h22-frozen-warmstart-v1.pt
-test -f $initial; or echo "Missing R79 source checkpoint"
-test -f $h22; or python -c 'from pathlib import Path; from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet; base = JointActPilotNet.load(Path("results/h16-v5-combat-credit-r150/models/joint-r0079.pt")); JointActPilotNet.warmstart_h21(base).save(Path("results/p2-h22-frozen-warmstart-v1.pt"))'
+
+if not test -f $initial
+    echo "Find your existing H16 joint checkpoints and set 'initial' to one:"
+    find results -type f -name 'joint-r*.pt' -print
+end
+
+if not test -f $h22
+    if test -f $initial
+        python tools/create_p2_h22_frozen_checkpoint.py \
+            --initial-h16 $initial --output $h22 --seed 20261105
+    else
+        echo "Missing H16 source: select an existing file printed above."
+    end
+end
+
+# Required before launching A1; a trained H22 checkpoint can also be used.
+test -f $h22; and python -c 'from pathlib import Path; from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet; p=Path("results/p2-h22-frozen-warmstart-v1.pt"); m=JointActPilotNet.load(p); assert m.representation=="h21"; print("Verified frozen H22 checkpoint:", p)'
 ```
 
 First perform the 8-seed, one-worker bounded integration/pairing test
@@ -193,3 +211,23 @@ and reporter, but CUDA measurement must use the user's CUDA workstation.
 Do not infer 15-worker CUDA speedup from the single-seed CPU result.
 After validation, compare batch caps 1, 4, 8, 16 with separate output
 directories and identical frozen weights.
+
+## Missing-checkpoint preflight
+
+The `results/p2-h22-frozen-warmstart-v1.pt` path in the original benchmark
+command is a **local output location**, not a downloadable or already
+committed checkpoint. Previously, without creating it first, A1 raised a
+`FileNotFoundError`. The A/B/B/A orchestrator and direct cohort profiler
+now fail early with a clear missing-H22-or-incompatible-H16 error instead
+of launching worker episodes. The helper
+`tools/create_p2_h22_frozen_checkpoint.py` refuses to overwrite existing
+files, checks the original H16 checkpoint schema and source existence,
+uses the supplied deterministic initialization seed, reloads the output as
+H22/H21, and prints source/output SHA-256 provenance.
+
+For CPU/GPU **throughput** benchmarking an H22 model initialized from an
+existing H16 checkpoint is sufficient, but the graph-specific H21 layers
+remain untrained. Prefer a real trained H22 model when one exists and
+consider a capped reference/packed pilot before the 128-execution full-Act
+benchmark. The emulator checkout must supply the `prototype-ai-v1`
+public schema, regardless of its SHA.
