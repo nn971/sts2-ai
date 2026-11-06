@@ -232,6 +232,7 @@ def run_boss_diagnosis(
         "checkpoint_sha256": row["checkpoint_sha256"],
         "round": round_number, "seeds": seeds, "workers": workers,
         "search_floor": 16, "max_searches": 1, "max_simulation_steps": 512,
+        "search_rng": "independent_deterministic_v1", 
         "nature": source.get("chance_provenance"),
         "horizon_lambda": evaluation_horizon,
         "arms": list(arms),
@@ -246,6 +247,7 @@ def run_boss_diagnosis(
         "macro_model": None, "workers": workers,
         "search_probability": 1.0, "max_searches": 1,
         "h17_adaptive": False, "search_floor": 16,
+        "independent_search_rng": True,
         "card_exposure": {},
     }
     output_root.mkdir(parents=True, exist_ok=True)
@@ -297,6 +299,7 @@ def run_boss_diagnosis(
             "Root-conditioned Native PUCT is privileged and not a fair Nature search.",
             "Same boss entry is verified by public snapshot and preboss action trace.",
             "Identical prefix plus native seed conditions the hidden RNG continuation.",
+            "Search simulation seeds are deterministic and independent of behavior sampling.",
             "A searched root can change subsequent actions and future boss states.",
             "An unfinished full-combat 512-step search fails, not a terminal reward.",
             "The cohort is diagnostic; preserve independent validation seeds.",
