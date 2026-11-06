@@ -7,10 +7,15 @@ import pytest
 
 from sts2_ai.training.h16_joint_act_pilot import search_floor_allows
 from tools.compare_h22_boss_checkpoints import (
-    boss_stats, paired_difference, select_for_diagnosis,
+    boss_stats,
+    paired_difference,
+    select_for_diagnosis,
 )
 from tools.diagnose_h22_boss_search import (
-    check_preboss_parity, compare_arms, describe_episode, summarize_arm,
+    check_preboss_parity,
+    compare_arms,
+    describe_episode,
+    summarize_arm,
 )
 
 
