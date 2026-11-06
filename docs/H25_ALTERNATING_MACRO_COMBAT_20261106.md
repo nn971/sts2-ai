@@ -94,10 +94,12 @@ eligible roots within each sampled fight*.
     watch -n 10 'jq . results/h25-a0-exact-replay-smoke-v1/live.json'
 
 The atomic `live.json` heartbeat updates every 20 seconds or after
-a worker finishes. It reports only completed-worker search totals;
-an individual long PUCT root remains unobservable until that worker
-returns. Round-level outcomes and model checkpoints are committed
-to `progress.json` and `models/` after heldout evaluation.
+a worker finishes. Aggregate search totals count completed worker tasks.
+Additionally, `workers/worker-PID.json` is updated **after each completed
+PUCT root**, recording the number of roots and transitions in the current
+sampled fight. One individual full-depth root may still run for a long time.
+Round-level outcomes and model checkpoints are committed to
+`progress.json` and `models/` after heldout evaluation.
 
 ## Tests and outstanding gates
 
