@@ -262,31 +262,79 @@ def main() -> None:
         return
     if args.device.startswith("cuda") and not torch.cuda.is_available():
         raise ValueError("H25 needs a functioning CUDA shared actor")
-    if (args.output_root / "progress.json").exists():
-        raise ValueError("Output contains a previous experiment; use a new root")
+    root = args.output_root
+    progress_path = root / "progress.json"
+    if args.resume:
+        if not progress_path.is_file():
+            raise ValueError("--resume requires committed progress.json")
+    elif progress_path.exists() or (root / "optimizer-current.pt").exists():
+        raise ValueError("Output contains a previous experiment; use --resume or a new root")
     torch.set_num_threads(1)
     torch.manual_seed(args.study_seed)
-    source = JointActPilotNet.load(args.initial_h22, device=args.device)
-    macro = H24JointActPilotNet.warmstart_h22(
-        source, act_only=True, search_act_mix=1.0,
-    ).to(args.device)
-    combat = copy.deepcopy(macro)
-    del source
-    macro_optimizer = torch.optim.AdamW(macro.parameters(), lr=args.lr)
-    combat_optimizer = torch.optim.AdamW(combat.parameters(), lr=args.lr)
-    root = args.output_root
     (root / "models").mkdir(parents=True, exist_ok=True)
     macro_path = root / "macro-current.pt"
     combat_path = root / "combat-current.pt"
-    history = []
+    history: list[dict[str, Any]] = []
+    prior_elapsed = 0.0
+    if args.resume:
+        progress = json.loads(progress_path.read_text())
+        if progress.get("fingerprint") != fingerprint:
+            raise ValueError("H25 resume fingerprint differs from committed experiment")
+        history = progress["rounds"]
+        if not history or len(history) > args.rounds:
+            raise ValueError("H25 resume has no valid committed round")
+        committed = history[-1]
+        number = len(history)
+        if committed["round"] != number:
+            raise ValueError("H25 progress history is not sequential")
+        saved_macro = root / "models" / f"macro-r{number:04d}.pt"
+        saved_combat = root / "models" / f"combat-r{number:04d}.pt"
+        saved_opt = root / "models" / f"optimizers-r{number:04d}.pt"
+        if any(not item.is_file() for item in (saved_macro, saved_combat, saved_opt)):
+            raise ValueError("H25 committed checkpoint files are missing")
+        if (committed["macro_checkpoint_sha256"] != sha256(saved_macro)
+                or committed["combat_checkpoint_sha256"] != sha256(saved_combat)
+                or committed["optimizer_checkpoint_sha256"] != sha256(saved_opt)):
+            raise ValueError("H25 committed checkpoint digest mismatch")
+        macro = JointActPilotNet.load(saved_macro, device=args.device)
+        combat = JointActPilotNet.load(saved_combat, device=args.device)
+        if (not getattr(macro, "h24_act_only", False)
+                or not getattr(combat, "h24_act_only", False)):
+            raise ValueError("H25 resume requires Act-only H24 checkpoints")
+        macro_optimizer = torch.optim.AdamW(macro.parameters(), lr=args.lr)
+        combat_optimizer = torch.optim.AdamW(combat.parameters(), lr=args.lr)
+        saved = torch.load(saved_opt, map_location="cpu", weights_only=True)
+        if saved["fingerprint"] != fingerprint or saved["round"] != number:
+            raise ValueError("H25 optimizer/progress identity mismatch")
+        macro_optimizer.load_state_dict(saved["macro_optimizer"])
+        combat_optimizer.load_state_dict(saved["combat_optimizer"])
+        torch.set_rng_state(saved["rng_state"])
+        prior_elapsed = float(progress["elapsed_wall_seconds"])
+        macro.save(macro_path)
+        combat.save(combat_path)
+        print(f"[h25] resumed from committed round {number}", flush=True)
+    else:
+        source = JointActPilotNet.load(args.initial_h22, device=args.device)
+        macro = H24JointActPilotNet.warmstart_h22(
+            source, act_only=True, search_act_mix=1.0,
+        ).to(args.device)
+        combat = copy.deepcopy(macro)
+        del source
+        macro_optimizer = torch.optim.AdamW(macro.parameters(), lr=args.lr)
+        combat_optimizer = torch.optim.AdamW(combat.parameters(), lr=args.lr)
+        macro.save(macro_path)
+        combat.save(combat_path)
+    wall_started = time.perf_counter()
     namespace = seed_namespace(0, "generated")
     heldout = [
         f"{namespace}-heldout-{args.study_seed}-{i}"
         for i in range(args.heldout_runs)
     ]
-    macro.save(macro_path)
-    combat.save(combat_path)
-    for round_index in range(args.rounds):
+    if (args.max_wall_seconds is not None
+            and prior_elapsed >= args.max_wall_seconds):
+        print("[h25] wall budget already reached; no further rounds", flush=True)
+        return
+    for round_index in range(len(history), args.rounds):
         round_number = round_index + 1
         seeds = [
             f"{namespace}-train-{args.study_seed}-r{round_index}-{i}"
