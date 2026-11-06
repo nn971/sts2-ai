@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
-from torch import Tensor
+from torch import Tensor, nn
 
 from sts2_ai.emulator.protocol import LegalAction
 from sts2_ai.models.shared_game_objects import EncodedDecision
@@ -98,6 +98,7 @@ class H24JointActPilotNet(JointActPilotNet):
         vocabulary: SafeResourceVocabulary | None = None,
         search_act_mix: float = 0.0,
         act_only: bool = False,
+        macro_progress: bool = False,
     ) -> None:
         if not isinstance(backbone, H21GroundedMacroTransformer):
             raise TypeError("H24 requires H21 grounded backbone")
@@ -110,6 +111,14 @@ class H24JointActPilotNet(JointActPilotNet):
             raise ValueError("Act-only H24 must use the monotone Act critic for PUCT")
         self.search_act_mix = search_act_mix
         self.h24_act_only = act_only
+        if macro_progress and not act_only:
+            raise ValueError("Macro progress head requires Act-only mode")
+        self.macro_progress_head = (
+            nn.Linear(backbone.config.width, 1) if macro_progress else None
+        )
+        if self.macro_progress_head is not None:
+            nn.init.zeros_(self.macro_progress_head.weight)
+            nn.init.zeros_(self.macro_progress_head.bias)
         if act_only:
             for parameter in self.horizon_head.parameters():
                 parameter.requires_grad_(False)
@@ -125,12 +134,14 @@ class H24JointActPilotNet(JointActPilotNet):
         vocabulary: SafeResourceVocabulary | None = None,
         search_act_mix: float = 0.0,
         act_only: bool = False,
+        macro_progress: bool = False,
     ) -> H24JointActPilotNet:
         if (source.representation != "h21"
                 or isinstance(source, H24JointActPilotNet)):
             raise ValueError("H24 warmstart requires an ordinary H22 model")
         model = cls(source.backbone, selection=selection, vocabulary=vocabulary,
-                    search_act_mix=search_act_mix, act_only=act_only)
+                    search_act_mix=search_act_mix, act_only=act_only,
+                    macro_progress=macro_progress)
         model.horizon_head.load_state_dict(source.horizon_head.state_dict())
         model.act_clear.load_state_dict(source.act_clear.state_dict())
         # Reuse the H22 Act-clear linear head as the initial neutral base.
@@ -220,6 +231,27 @@ class H24JointActPilotNet(JointActPilotNet):
                 self.search_act_mix * torch.sigmoid(act))
         return logits, torch.sigmoid(act), hp_prob
 
+    def forward_macro_training(
+        self, batch: H24Batch,
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        """Policy, monotone Act-clear logit, and auxiliary floor-progress logit."""
+        if self.macro_progress_head is None:
+            raise ValueError("H25 macro-progress head is not enabled")
+        if not isinstance(batch, H24Batch):
+            raise TypeError("H25 needs an H24 resource-neutral macro batch")
+        logits, _, policy_context = self.backbone(
+            batch.policy, return_context=True,
+        )
+        _, _, neutral_context = self.backbone(
+            batch.neutral_value, return_context=True,
+        )
+        act = self.monotone_act(
+            neutral_context, hp=batch.hp, gold=batch.gold,
+            potions=batch.potions, relics=batch.relics,
+        )
+        progress = self.macro_progress_head(policy_context).squeeze(-1)
+        return logits, act, progress
+
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save({
@@ -234,6 +266,7 @@ class H24JointActPilotNet(JointActPilotNet):
             "vocabulary": asdict(self.vocabulary),
             "search_act_mix": self.search_act_mix,
             "act_only": self.h24_act_only,
+            "macro_progress": self.macro_progress_head is not None,
             "state_dict": self.state_dict(),
         }, path)
 
@@ -256,6 +289,7 @@ class H24JointActPilotNet(JointActPilotNet):
             vocabulary=SafeResourceVocabulary(**checkpoint["vocabulary"]),
             search_act_mix=checkpoint["search_act_mix"],
             act_only=checkpoint.get("act_only", False),
+            macro_progress=checkpoint.get("macro_progress", False),
         )
         model.load_state_dict(checkpoint["state_dict"], strict=True)
         return model.to(device)
