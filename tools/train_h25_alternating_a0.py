@@ -34,14 +34,24 @@ from sts2_ai.training.h25_alternating import (
     fit_combat_search,
     fit_macro_reinforce,
 )
-from tools.train_h16_joint_act_pilot import (
-    _worker_init,
-    _worker_run_h25,
-    seed_namespace,
-    sha256,
-    summarize,
-    write_json,
-)
+try:
+    from tools.train_h16_joint_act_pilot import (
+        _worker_init,
+        _worker_run_h25,
+        seed_namespace,
+        sha256,
+        summarize,
+        write_json,
+    )
+except ModuleNotFoundError:
+    from train_h16_joint_act_pilot import (
+        _worker_init,
+        _worker_run_h25,
+        seed_namespace,
+        sha256,
+        summarize,
+        write_json,
+    )
 
 H25_SCHEMA = "sts2-h25-independent-macro-combat-all-root-full-depth-v1"
 
