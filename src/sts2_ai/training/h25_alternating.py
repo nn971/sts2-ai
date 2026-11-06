@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 import random
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -194,6 +194,7 @@ def collect_searched_fight(
     map_profile_id: str | None, simulations: int,
     seed: int, max_decisions: int = 256,
     max_simulation_steps: int = 512,
+    on_root: Callable[[int, int, int], None] | None = None,
 ) -> CombatSearchResult:
     """Full-depth PUCT at every eligible root of one sampled complete fight."""
     if simulations <= 0 or max_decisions <= 0:
@@ -226,6 +227,8 @@ def collect_searched_fight(
                 chosen = _sample(visits, rng)
                 roots += 1
                 transitions += work
+                if on_root is not None:
+                    on_root(roots, transitions, decisions)
             else:
                 chosen = 0
             next_frame, = backend.batch_rollout_step_frame(
