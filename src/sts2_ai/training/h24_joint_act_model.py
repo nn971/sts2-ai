@@ -1,6 +1,7 @@
 """H24 opt-in H22-compatible joint model with a genuinely neutral Act-clear critic.
 
-Policy and shaped future-HP heads consume the original H21 public context.
+Policy consumes the original H21 public context. The optional legacy future-HP
+head is disabled in the Act-only experiment.
 The Act-clear head consumes a *separately encoded* resource-neutral H21 state
 and certified nonnegative resource coordinates. Relic monotonicity is OFF.
 Inference is more expensive than H22 (two backbone forwards); monitor TPS.
@@ -96,6 +97,7 @@ class H24JointActPilotNet(JointActPilotNet):
         selection: ResourceConstraintSelection | None = None,
         vocabulary: SafeResourceVocabulary | None = None,
         search_act_mix: float = 0.0,
+        act_only: bool = False,
     ) -> None:
         if not isinstance(backbone, H21GroundedMacroTransformer):
             raise TypeError("H24 requires H21 grounded backbone")
@@ -104,7 +106,13 @@ class H24JointActPilotNet(JointActPilotNet):
         super().__init__(backbone)
         self.selection = selection if selection is not None else ResourceConstraintSelection()
         self.vocabulary = vocabulary if vocabulary is not None else SafeResourceVocabulary()
+        if act_only and search_act_mix != 1.0:
+            raise ValueError("Act-only H24 must use the monotone Act critic for PUCT")
         self.search_act_mix = search_act_mix
+        self.h24_act_only = act_only
+        if act_only:
+            for parameter in self.horizon_head.parameters():
+                parameter.requires_grad_(False)
         self.monotone_act = build_h24_monotone_head(
             backbone.config.width, selection=self.selection,
             vocabulary=self.vocabulary,
@@ -116,12 +124,13 @@ class H24JointActPilotNet(JointActPilotNet):
         selection: ResourceConstraintSelection | None = None,
         vocabulary: SafeResourceVocabulary | None = None,
         search_act_mix: float = 0.0,
+        act_only: bool = False,
     ) -> H24JointActPilotNet:
         if (source.representation != "h21"
                 or isinstance(source, H24JointActPilotNet)):
             raise ValueError("H24 warmstart requires an ordinary H22 model")
         model = cls(source.backbone, selection=selection, vocabulary=vocabulary,
-                    search_act_mix=search_act_mix)
+                    search_act_mix=search_act_mix, act_only=act_only)
         model.horizon_head.load_state_dict(source.horizon_head.state_dict())
         model.act_clear.load_state_dict(source.act_clear.state_dict())
         # Reuse the H22 Act-clear linear head as the initial neutral base.
@@ -186,6 +195,13 @@ class H24JointActPilotNet(JointActPilotNet):
             neutral_context, hp=batch.hp, gold=batch.gold,
             potions=batch.potions, relics=batch.relics,
         )
+        if self.h24_act_only:
+            if auxiliary_lambda is not None:
+                raise ValueError("Act-only H24 has no future-HP auxiliary target")
+            if value_logits:
+                return logits, act, act
+            act_probability = torch.sigmoid(act)
+            return logits, act_probability, act_probability
         hp = self._horizon_logits(policy_context, horizon_lambda)
         if auxiliary_lambda is not None:
             aux = self._horizon_logits(policy_context, auxiliary_lambda)
@@ -217,6 +233,7 @@ class H24JointActPilotNet(JointActPilotNet):
             "selection": asdict(self.selection),
             "vocabulary": asdict(self.vocabulary),
             "search_act_mix": self.search_act_mix,
+            "act_only": self.h24_act_only,
             "state_dict": self.state_dict(),
         }, path)
 
@@ -238,6 +255,7 @@ class H24JointActPilotNet(JointActPilotNet):
             selection=ResourceConstraintSelection(**checkpoint["selection"]),
             vocabulary=SafeResourceVocabulary(**checkpoint["vocabulary"]),
             search_act_mix=checkpoint["search_act_mix"],
+            act_only=checkpoint.get("act_only", False),
         )
         model.load_state_dict(checkpoint["state_dict"], strict=True)
         return model.to(device)
