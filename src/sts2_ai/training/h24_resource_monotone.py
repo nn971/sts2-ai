@@ -14,6 +14,8 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 
+from sts2_ai.training.h24_applicability import ResourceConstraintSelection
+
 
 @dataclass(frozen=True)
 class SafeResourceVocabulary:
@@ -122,3 +124,31 @@ class MonotoneResourceLogit(nn.Module):
         elif relics is not None and relics.numel():
             raise ValueError("Relics are not configured")
         return result
+
+def build_h24_monotone_head(
+    context_width: int, *,
+    selection: ResourceConstraintSelection | None = None,
+    vocabulary: SafeResourceVocabulary | None = None,
+) -> MonotoneResourceLogit:
+    """Build only selected monotone resource coordinates.
+
+    A vocabulary is an input list, not a mechanics-safety certificate.
+    The eventual value encoder/trainer must also verify eligibility.
+    By default HP and gold are present; potion coordinates require named
+    items, and relic coordinates require explicit opt-in *and* named items.
+    """
+    chosen = selection if selection is not None else ResourceConstraintSelection()
+    words = vocabulary if vocabulary is not None else SafeResourceVocabulary()
+    if not isinstance(chosen, ResourceConstraintSelection):
+        raise TypeError("Expected H24 resource constraint selection")
+    if not isinstance(words, SafeResourceVocabulary):
+        raise TypeError("Expected H24 certified-resource vocabulary")
+    if words.relic_ids and not chosen.relic:
+        raise ValueError("Relic monotonicity is disabled by default; opt in explicitly")
+    if words.potion_ids and not chosen.potion:
+        raise ValueError("Potion monotonicity is disabled by selection")
+    return MonotoneResourceLogit(
+        context_width, hp=chosen.hp, gold=chosen.gold,
+        potions=len(words.potion_ids) if chosen.potion else 0,
+        relics=len(words.relic_ids) if chosen.relic else 0,
+    )
