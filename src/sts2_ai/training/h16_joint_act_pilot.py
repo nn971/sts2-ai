@@ -390,6 +390,8 @@ class PilotDecision:
     search_policy: tuple[float, ...] | None = None
     predicted_value: float | None = None
     search_simulations: int = 0
+    # Populated only for H23 isolated-RNG root audits; excluded from training.
+    search_actor_reference_policy: tuple[float, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -873,6 +875,8 @@ def collect_act_episode(
             decisions.append(PilotDecision(
                 observation, actions, chosen, offsets, search_policy, predicted_value,
                 budget,
+                (_softmax(scores, policy.temperature)
+                 if independent_search_rng and budget else None),
             ))
             if rollout_transport == "fused":
                 (next_frame,) = backend.batch_rollout_step_frame(
