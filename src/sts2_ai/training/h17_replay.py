@@ -192,17 +192,22 @@ def fit_replay(
         logits, act_logit, hp_logit = model(
             batch, value_logits=True, horizon_lambda=horizon_lambda,
         )
-        hp_labels = torch.tensor([
-            combat_shaped_hp_return(
-                row["room_hp"], row["act"], horizon_lambda,
-                combat_quality=row["combat_quality"],
-                combat_credit_weight=combat_credit_weight,
-            ) for row in chunk
-        ], dtype=hp_logit.dtype, device=device)
+        act_only = bool(getattr(model, "h24_act_only", False))
+        if not act_only:
+            hp_labels = torch.tensor([
+                combat_shaped_hp_return(
+                    row["room_hp"], row["act"], horizon_lambda,
+                    combat_quality=row["combat_quality"],
+                    combat_credit_weight=combat_credit_weight,
+                ) for row in chunk
+            ], dtype=hp_logit.dtype, device=device)
         act_labels = torch.tensor(
             [row["act"] for row in chunk], dtype=act_logit.dtype, device=device,
         )
-        hp_loss = F.mse_loss(torch.sigmoid(hp_logit), hp_labels)
+        hp_loss = (
+            act_logit.new_zeros(()) if act_only
+            else F.mse_loss(torch.sigmoid(hp_logit), hp_labels)
+        )
         act_loss = F.binary_cross_entropy_with_logits(act_logit, act_labels)
         ce = []
         for i, row in enumerate(chunk):
@@ -221,7 +226,10 @@ def fit_replay(
         # overflow to -inf, making logits.sum() * 0 a NaN. A missing PUCT
         # target contributes an exact finite zero with no policy gradient.
         ce_loss = torch.stack(ce).mean() if ce else hp_loss.new_zeros(())
-        loss = replay_weight * (hp_loss + 0.25 * act_loss + 0.5 * ce_loss)
+        loss = replay_weight * (
+            (act_loss if act_only else hp_loss + 0.25 * act_loss)
+            + 0.5 * ce_loss
+        )
         if not bool(torch.isfinite(loss)):
             raise FloatingPointError("Nonfinite H17 replay loss")
         optimizer.zero_grad(set_to_none=True)
