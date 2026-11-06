@@ -7,9 +7,10 @@ Inference is more expensive than H22 (two backbone forwards); monitor TPS.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import torch
 from torch import Tensor
@@ -17,20 +18,27 @@ from torch import Tensor
 from sts2_ai.emulator.protocol import LegalAction
 from sts2_ai.models.shared_game_objects import EncodedDecision
 from sts2_ai.models.shared_macro_transformer_v2 import (
-    H21GroundedMacroTransformer, collate_h21, collate_h21_packed,
+    H21GroundedMacroTransformer,
+    collate_h21,
+    collate_h21_packed,
 )
-from sts2_ai.models.shared_transformer import H20Batch, H7Config
+from sts2_ai.models.shared_transformer import H7Config, H20Batch
 from sts2_ai.training.h16_joint_act_pilot import (
-    H22_SCHEMA, JointActPilotNet, encode_joint_decision,
+    H22_SCHEMA,
+    JointActPilotNet,
+    encode_joint_decision,
 )
 from sts2_ai.training.h19_resource_codec import EMULATOR_PUBLIC_SCHEMA_V1
 from sts2_ai.training.h21_macro_offer_codec import H21_CODEC, H21_OBJECT_SCHEMA
 from sts2_ai.training.h24_applicability import ResourceConstraintSelection
 from sts2_ai.training.h24_neutral_value import (
-    H24_NEUTRAL_ENCODER, H24NeutralValue, encode_h24_neutral_value,
+    H24_NEUTRAL_ENCODER,
+    H24NeutralValue,
+    encode_h24_neutral_value,
 )
 from sts2_ai.training.h24_resource_monotone import (
-    SafeResourceVocabulary, build_h24_monotone_head,
+    SafeResourceVocabulary,
+    build_h24_monotone_head,
 )
 
 H24_SCHEMA = "sts2-h24-h21-hard-resource-monotone-act-v1"
@@ -50,7 +58,7 @@ class H24Batch:
     potions: Tensor | None
     relics: Tensor | None
 
-    def to(self, device: str | torch.device) -> "H24Batch":
+    def to(self, device: str | torch.device) -> H24Batch:
         return H24Batch(
             self.policy.to(device), self.neutral_value.to(device),
             *(x.to(device) if x is not None else None
@@ -108,7 +116,7 @@ class H24JointActPilotNet(JointActPilotNet):
         selection: ResourceConstraintSelection | None = None,
         vocabulary: SafeResourceVocabulary | None = None,
         search_act_mix: float = 0.0,
-    ) -> "H24JointActPilotNet":
+    ) -> H24JointActPilotNet:
         if (source.representation != "h21"
                 or isinstance(source, H24JointActPilotNet)):
             raise ValueError("H24 warmstart requires an ordinary H22 model")
