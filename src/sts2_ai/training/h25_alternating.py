@@ -306,27 +306,73 @@ def fit_combat_search(
     return {"examples": len(examples), "steps": steps, "loss": total / steps}
 
 
+def macro_future_floor_targets(
+    episode: PilotEpisode, *, act_end_floor: int = 16,
+) -> tuple[float, ...]:
+    """Relative future floor reach for every recorded decision.
+
+    Labels use the *future* highest floor reached in the completed rollout.
+    Unlike binary Act-clear, they distinguish ordinary losing trajectories.
+    The target is normalized by the remaining Act 1 floor distance.
+    """
+    if not episode.complete or act_end_floor <= 0:
+        raise ValueError("H25 floor progress needs a complete valid Act")
+    floors = []
+    for frame in episode.frames:
+        floor = frame.get("floor")
+        if type(floor) is not int or floor < 0:
+            raise ValueError("H25 requires public integer floor progress")
+        floors.append(min(floor, act_end_floor))
+    maximum = floors[-1]
+    result = [0.0] * len(episode.decisions)
+    for index in reversed(range(len(episode.decisions))):
+        maximum = max(maximum, floors[index])
+        floor = floors[index]
+        result[index] = min(
+            1.0, max(0.0, (maximum - floor) / max(1, act_end_floor - floor)),
+        )
+    return tuple(result)
+
+
 def fit_macro_reinforce(
     model: Any, optimizer: torch.optim.Optimizer,
     episodes: Sequence[PilotEpisode], *,
     minibatch: int = 8, epochs: int = 1, temperature: float = 0.85,
     entropy_weight: float = 0.001,
+    progress_weight: float = 0.25,
+    progress_loss_weight: float = 0.5,
 ) -> dict[str, float | int]:
-    """Act-clear REINFORCE and calibrated value BCE on macro decisions only."""
-    if minibatch < 1 or epochs < 1 or temperature <= 0:
+    """Separate Act-clear critic and floor-progress critic; macro PG on both.
+
+    Act-clear BCE remains a calibrated terminal-outcome target. Floor progress
+    supplies the actor with a graded learning signal on losing trajectories.
+    The secondary value is excluded from combat continuation and PUCT.
+    """
+    if (minibatch < 1 or epochs < 1 or temperature <= 0
+            or progress_weight < 0 or progress_loss_weight < 0
+            or not math.isfinite(progress_weight)
+            or not math.isfinite(progress_loss_weight)):
         raise ValueError("Invalid H25 macro optimization settings")
+    if getattr(model, "macro_progress_head", None) is None:
+        raise ValueError("H25 macro optimizer requires floor-progress critic")
     samples = [
-        (d, float(ep.outcome == "act_clear"))
-        for ep in episodes if ep.complete for d in ep.decisions
+        (d, float(ep.outcome == "act_clear"), progress[index])
+        for ep in episodes if ep.complete
+        for progress in [macro_future_floor_targets(ep)]
+        for index, d in enumerate(ep.decisions)
         if not isinstance(public_state(d.observation).get("combat"), dict)
         and d.search_policy is None
     ]
     if not samples:
-        return {"examples": 0, "steps": 0, "loss": 0.0}
+        return {
+            "examples": 0, "steps": 0, "loss": 0.0,
+            "clear_loss": 0.0, "progress_loss": 0.0,
+            "mean_progress_target": 0.0,
+        }
     device = next(model.parameters()).device
     model.train()
     rng = random.Random(25002 + len(samples))
-    total = 0.0
+    total = clear_total = progress_total = 0.0
     steps = 0
     for _ in range(epochs):
         rng.shuffle(samples)
@@ -334,14 +380,14 @@ def fit_macro_reinforce(
             chunk = samples[start:start + minibatch]
             frames = [
                 model.encode_decision(public_state(d.observation), d.legal_actions)
-                for d, _ in chunk
+                for d, _, _ in chunk
             ]
             batch = model.collate(frames).to(device)
-            policy_logits, value_logits, _ = model(
-                batch, value_logits=True,
+            policy_logits, value_logits, progress_logits = (
+                model.forward_macro_training(batch)
             )
             offsets = torch.zeros_like(policy_logits)
-            for i, (decision, _) in enumerate(chunk):
+            for i, (decision, _, _) in enumerate(chunk):
                 offsets[i, :len(decision.macro_offset)] = torch.tensor(
                     decision.macro_offset, dtype=policy_logits.dtype, device=device,
                 )
@@ -350,19 +396,33 @@ def fit_macro_reinforce(
             )
             logp = F.log_softmax(logits, dim=-1)
             target = torch.tensor(
-                [outcome for _, outcome in chunk],
+                [outcome for _, outcome, _ in chunk],
                 device=device, dtype=value_logits.dtype,
             )
-            baseline = torch.sigmoid(value_logits.detach())
+            target_progress = torch.tensor(
+                [progress for _, _, progress in chunk],
+                device=device, dtype=value_logits.dtype,
+            )
+            clear_baseline = torch.sigmoid(value_logits.detach())
+            progress_probability = torch.sigmoid(progress_logits)
+            progress_baseline = progress_probability.detach()
+            advantage = (
+                target - clear_baseline
+                + progress_weight * (target_progress - progress_baseline)
+            )
             pg = torch.stack([
-                -(target[i] - baseline[i]) * logp[i, decision.chosen_index]
-                for i, (decision, _) in enumerate(chunk)
+                -advantage[i] * logp[i, decision.chosen_index]
+                for i, (decision, _, _) in enumerate(chunk)
             ]).mean()
             critic = F.binary_cross_entropy_with_logits(value_logits, target)
+            progress_loss = F.mse_loss(progress_probability, target_progress)
             entropy = -(logp.exp() * logp).masked_fill(
                 ~batch.action_mask, 0,
             ).sum(-1).mean()
-            loss = pg + critic - entropy_weight * entropy
+            loss = (
+                pg + critic + progress_loss_weight * progress_loss
+                - entropy_weight * entropy
+            )
             if not bool(torch.isfinite(loss)):
                 raise FloatingPointError("H25 macro reinforcement nonfinite loss")
             optimizer.zero_grad(set_to_none=True)
@@ -373,5 +433,14 @@ def fit_macro_reinforce(
             optimizer.step()
             steps += 1
             total += float(loss.detach())
+            clear_total += float(critic.detach())
+            progress_total += float(progress_loss.detach())
     model.eval()
-    return {"examples": len(samples), "steps": steps, "loss": total / steps}
+    return {
+        "examples": len(samples), "steps": steps,
+        "loss": total / steps, "clear_loss": clear_total / steps,
+        "progress_loss": progress_total / steps,
+        "mean_progress_target": sum(p for _, _, p in samples) / len(samples),
+        "progress_weight": progress_weight,
+        "progress_loss_weight": progress_loss_weight,
+    }
