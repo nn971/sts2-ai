@@ -751,7 +751,7 @@ def independent_search_seed(run_seed: str, decision_index: int) -> int:
     """Isolate H23 PUCT simulation randomness from player action sampling."""
     if not run_seed or decision_index < 0:
         raise ValueError("Invalid independent PUCT search seed coordinates")
-    data = f"h23-search-seed-v1|{run_seed}|{decision_index}".encode("utf-8")
+    data = f"h23-search-seed-v1|{run_seed}|{decision_index}".encode()
     return int.from_bytes(hashlib.blake2b(data, digest_size=8).digest(), "big") % (2**63)
 
 
