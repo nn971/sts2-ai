@@ -24,7 +24,8 @@ import tempfile
 import time
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import nullcontext
-from dataclasses import asdict, replace as dataclass_replace
+from dataclasses import asdict
+from dataclasses import replace as dataclass_replace
 from pathlib import Path
 from typing import Any
 
@@ -50,9 +51,6 @@ from sts2_ai.training.h16_joint_act_pilot import (
     train_joint_cohort,
 )
 from sts2_ai.training.h16_public_codec import set_h16_rollout_seed
-from sts2_ai.training.h24_applicability import ResourceConstraintSelection
-from sts2_ai.training.h24_resource_monotone import SafeResourceVocabulary
-from sts2_ai.training.h24_joint_act_model import H24_SCHEMA, H24JointActPilotNet
 from sts2_ai.training.h17_adaptive import AdaptiveSearch, coverage_summary, update_coverage
 from sts2_ai.training.h17_replay import (
     collect_replay,
@@ -62,6 +60,9 @@ from sts2_ai.training.h17_replay import (
     sample_replay,
     write_replay,
 )
+from sts2_ai.training.h24_applicability import ResourceConstraintSelection
+from sts2_ai.training.h24_joint_act_model import H24_SCHEMA, H24JointActPilotNet
+from sts2_ai.training.h24_resource_monotone import SafeResourceVocabulary
 
 _WORKER: dict[str, Any] = {}
 
