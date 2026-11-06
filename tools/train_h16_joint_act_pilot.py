@@ -118,7 +118,7 @@ def _worker_init(config: dict[str, Any]) -> None:
     macro = (PhaseSplitNeuralModel.load(Path(config["macro_model"]))
              if config["macro_model"] is not None
              and config["macro_prior_weight"] > 0 else None)
-    policy = PilotPolicy(
+    macro_policy = PilotPolicy(
         model, temperature=config["temperature"],
         representation=config["representation"],
         horizon_lambda=config["horizon_lambda"], macro_teacher=macro,
@@ -129,6 +129,33 @@ def _worker_init(config: dict[str, Any]) -> None:
         h24_selection=config.get("h24_selection"),
         h24_vocabulary=config.get("h24_vocabulary"),
     )
+    if config.get("h25_combat_checkpoint") is not None:
+        from sts2_ai.training.h25_alternating import SplitPilotPolicy
+
+        remote_combat = (
+            RemoteH16Actor(config["h25_combat_actor_transport_handle"])
+            if remote is not None else None
+        )
+        combat_model = (
+            None if remote_combat is not None else JointActPilotNet.load(
+                Path(config["h25_combat_checkpoint"]), device="cpu",
+            )
+        )
+        combat_policy = PilotPolicy(
+            combat_model, temperature=config["temperature"],
+            representation=config["representation"],
+            horizon_lambda=config["horizon_lambda"],
+            macro_prior_weight=0, remote_actor=remote_combat,
+            combat_credit_weight=config["combat_credit_weight"],
+            loss_progress_cap=config["loss_progress_cap"],
+            h24_selection=config.get("h24_selection"),
+            h24_vocabulary=config.get("h24_vocabulary"),
+        )
+        policy = SplitPilotPolicy(
+            macro_policy, combat_policy, hp_bias=config["h25_hp_bias"],
+        )
+    else:
+        policy = macro_policy
     emulator = JsonlEmulatorBackend(
         repo_root=Path(config["ai_root"]),
         emulator_root=Path(config["emulator_root"]),
@@ -182,6 +209,74 @@ def _worker_run(seed: str) -> PilotEpisode:
         actor_inference_calls=policy.inference_calls,
         actor_inference_seconds=policy.inference_seconds,
     )
+
+
+
+def _worker_run_h25(seed: str) -> dict[str, Any]:
+    """Collect one search-free Act and revisit selected fight starts."""
+    from sts2_ai.training.h25_alternating import (
+        collect_searched_fight,
+        sample_fight_starts,
+    )
+
+    set_h16_rollout_seed(seed)
+    cfg = _WORKER["config"]
+    rng = random.Random(int(digest([
+        seed, cfg["study_seed"], "h25-actor-v1",
+    ])[:16], 16))
+    backend, policy = _WORKER["backend"], _WORKER["policy"]
+    backend.reset_operation_profile()
+    policy.inference_calls = 0
+    policy.inference_seconds = 0.0
+    episode = collect_act_episode(
+        backend, policy, seed=seed, ascension=cfg["ascension"],
+        map_profile_id=cfg["map_profile_id"],
+        compact_card_selection=cfg["map_profile_id"] is None,
+        max_decisions=cfg["max_decisions"],
+        # No search while collecting macro reinforcement experience.
+        search_probability=0, max_searches=0,
+        simulations=cfg["h25_combat_simulations"], search_depth=None,
+        rng=rng, rollout_transport=cfg["rollout_transport"],
+        max_simulation_steps=cfg["max_simulation_steps"],
+    )
+    episode = dataclass_replace(
+        episode,
+        bridge_profile={
+            op: (v.calls, v.total_seconds)
+            for op, v in backend.operation_profile().items()
+        },
+        actor_inference_calls=policy.inference_calls,
+        actor_inference_seconds=policy.inference_seconds,
+    )
+    sampled = sample_fight_starts(
+        episode, count=cfg["h25_fights_per_run"],
+        seed=rng.randrange(2**63),
+    )
+    examples = []
+    roots = transitions = complete_fights = incomplete_fights = 0
+    for index in sampled:
+        result = collect_searched_fight(
+            backend, episode, index, policy,
+            ascension=cfg["ascension"],
+            map_profile_id=cfg["map_profile_id"],
+            simulations=cfg["h25_combat_simulations"],
+            seed=rng.randrange(2**63),
+            max_decisions=cfg["h25_max_combat_decisions"],
+            max_simulation_steps=cfg["max_simulation_steps"],
+        )
+        examples.extend(result.examples)
+        roots += result.searched_roots
+        transitions += result.search_transitions
+        complete_fights += int(result.complete_fight)
+        incomplete_fights += int(not result.complete_fight)
+    return {
+        "episode": episode, "examples": examples,
+        "search": {
+            "sampled_fights": len(sampled), "complete_fights": complete_fights,
+            "incomplete_fights": incomplete_fights, "roots": roots,
+            "transitions": transitions, "examples": len(examples),
+        },
+    }
 
 
 def collect(
