@@ -6,6 +6,7 @@ import pytest
 
 from sts2_ai.training.h24_applicability import (
     ResourceAuthority,
+    ResourceConstraintSelection,
     REQUIRED,
     audit_public_pair,
 )
@@ -48,13 +49,14 @@ def test_structure_and_external_proof_gates(resource):
     else:
         item = "proto.relic.paper_krane"
         b["relics"] = [{"relic_id": item, "state": {}}]
+    selected = ResourceConstraintSelection(relic=True)
     blocked = audit_public_pair(a, b, resource=resource,
-                                emulator_revision="pinned-r")
+                                emulator_revision="pinned-r", selection=selected)
     assert not blocked.eligible
     assert blocked.structural_failures
     approved = audit_public_pair(a, b, resource=resource,
                                  authority=make_auth(resource, item),
-                                 emulator_revision="pinned-r")
+                                 emulator_revision="pinned-r", selection=selected)
     assert approved.eligible, approved
     b["floor"] = 7
     assert not audit_public_pair(a, b, resource=resource,
@@ -113,3 +115,36 @@ def test_no_mutation():
     original = deepcopy(a), deepcopy(b)
     audit_public_pair(a, b, resource="gold", emulator_revision="pinned-r")
     assert (a, b) == original
+
+def test_h24_relic_default_off_despite_full_predicate_authority():
+    lower, upper = deepcopy(BASE), deepcopy(BASE)
+    identity = "proto.relic.paper_krane"
+    upper["relics"] = [{"relic_id": identity, "state": {}}]
+    authority = make_auth("relic", identity)
+    default = ResourceConstraintSelection()
+    assert default.hp and default.gold and default.potion
+    assert not default.relic
+    result = audit_public_pair(lower, upper, resource="relic",
+        emulator_revision="pinned-r", authority=authority)
+    assert result.disabled_by_config
+    assert not result.eligible
+    explicitly_enabled = audit_public_pair(lower, upper, resource="relic",
+        emulator_revision="pinned-r", authority=authority,
+        selection=ResourceConstraintSelection(relic=True))
+    assert explicitly_enabled.eligible
+    assert not explicitly_enabled.disabled_by_config
+
+
+def test_h24_relic_opt_in_still_needs_mechanics_and_item_verdict():
+    lower, upper = deepcopy(BASE), deepcopy(BASE)
+    upper["relics"] = [{"relic_id": "proto.relic.centennial_puzzle", "state": {}}]
+    result = audit_public_pair(lower, upper, resource="relic",
+        emulator_revision="pinned-r", selection=ResourceConstraintSelection(relic=True))
+    assert not result.eligible
+    assert any("R2:item:" in value for value in result.missing_mechanics_review)
+    assert any("R2:item:" in value for value in result.missing_user_verdict)
+
+
+def test_h24_rejects_non_boolean_selection_flag():
+    with pytest.raises(ValueError, match="booleans"):
+        ResourceConstraintSelection(relic=1)
