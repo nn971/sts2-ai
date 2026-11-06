@@ -2,7 +2,7 @@
 
 ## Status / branch boundary
 
-**Stage 0 only:** this branch adds the tested nonnegative-coefficient value
+**Stage 0 and resource-selection scaffold:** this branch adds the tested nonnegative-coefficient value
 primitive and focused unit tests. It has **not** been connected to H22 model
 inference, checkpoints, PUCT, replay, or joint training; there is no claim yet
 of end-to-end monotone H22 values or an improved clear rate.
@@ -59,7 +59,7 @@ resource-neutral context, prove its equality on synthetic certified public
 pairs, and fail closed on any field or relationship that still leaks x.
 Retain full H21 policy/action input. Record the resulting actor speed cost.
 
-The Act-clear head receives all four certified coordinates. The geometric
+The Act-clear head receives selected certified coordinates. **Default H24 resource switches:** HP on, gold on, certified potion presence on, **relic hard monotonicity off**. The potion list starts empty until audited, so the default gives no unconditional potion inequality. Relics remain fully visible to policy and unconstrained-value features; a separate explicit opt-in and item-specific mechanics proof are required for a relic-monotone head. The geometric
 future-HP head receives certified HP only; its existing horizon-conditioning,
 random-horizon auxiliary loss and bounded combat-credit target remain.
 The actor retains H22 behavior/search supervision, without fixed per-action
@@ -76,7 +76,9 @@ randomness and root-conditioned PUCT provenance.
 
 Initial pilot: 5 rounds x 64 train completed episodes, 16 fresh held-out
 episodes at round 5, 15 workers. Compare (1) unchanged H22, (2) H24
-HP+gold, (3) H24 all four with audited nonempty potion/relic whitelists.
+HP+gold, (3) H24 HP+gold+audited potion identities. Relic monotonicity
+remains disabled in all default pilot arms; optional relic-specific ablations
+require a separate explicit switch and evidence.
 Then independent 32–64 fresh held-out seeds and per-resource ablations.
 Interpret zero or tiny clear counts using boss reach, floor, boss-damage,
 calibration and action/resource usage; do not assume every short training
@@ -87,9 +89,10 @@ experiment leads to a substantial improvement.
 - [x] Stage 0: standalone monotone-head component and tests: monotonicity
   after optimizer steps, invalid-coordinate refusal, and counterexample
   showing why resource-dependent z is unsafe.
-- [ ] Stage 1: source-backed admissibility predicates, item whitelist and
-  fail-closed exception tests; public-only counterfactual state construction,
-  with exact normalized-context tensor parity.
+- [x] Stage 1a: explicit predicate registry and fail-closed human/mechanics
+  approval gates, plus an opt-in-only relic selection switch and tests.
+- [ ] Stage 1b: emulator-backed admissibility proofs, approved potion/relic
+  whitelists, executable public counterfactual states and neutral-context parity.
 - [ ] Stage 2: distinct H24 checkpoint schema and training flag, neutralized
   value encoder and actual inference wiring for shared actor, local PUCT,
   joint optimizer and replay, preserving H22 defaults.
@@ -109,3 +112,13 @@ potion use, spending and relic uptake; search work and transitions/second.
 Act experience, not just reduced violation rate. The current Stage-0
 primitive is intentionally **not a runnable H24 trainer**. Hinge/ranking
 regularizers would be soft constraints and do not satisfy this contract.
+## User verdict: relic off by default (2026-11-06)
+
+Ancient relics frequently have drawbacks; normal/uncommon/rare items are
+usually beneficial but are not guaranteed safe. The Centennial Puzzle and
+Tungsten Rod interaction demonstrates that individually beneficial effects
+can alter each other's triggers. **Rarity never authorizes a hard relic
+inequality.** The default factory allocates zero relic-monotone coordinates,
+and the applicability auditor rejects relic pairs by default even if an
+external review claims them certified. Use `ResourceConstraintSelection(relic=True)`
+only in a separately identified experiment after identity/context audits.
