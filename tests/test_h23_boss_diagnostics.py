@@ -5,7 +5,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from sts2_ai.training.h16_joint_act_pilot import search_floor_allows
+from sts2_ai.training.h16_joint_act_pilot import (
+    independent_search_seed,
+    search_floor_allows,
+)
 from tools.compare_h22_boss_checkpoints import (
     boss_stats,
     paired_difference,
@@ -128,3 +131,14 @@ def test_h23_boss_floor_filter_is_opt_in_and_pre_rng():
     assert not search_floor_allows({"floor": 1, "combat": {}}, 16)
     assert search_floor_allows({"floor": 16, "combat": {}}, 16)
     assert not search_floor_allows({"floor": 15}, 16)
+
+def test_h23_independent_search_seed_is_stable_and_run_local():
+    fixed = independent_search_seed("run-42", 17)
+    assert 0 <= fixed < 2**63
+    assert fixed == independent_search_seed("run-42", 17)
+    assert fixed != independent_search_seed("run-42", 18)
+    assert fixed != independent_search_seed("other-run", 17)
+    with pytest.raises(ValueError, match="Invalid independent"):
+        independent_search_seed("run-42", -1)
+    with pytest.raises(ValueError, match="Invalid independent"):
+        independent_search_seed("", 0)
