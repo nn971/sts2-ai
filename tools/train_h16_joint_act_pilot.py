@@ -263,6 +263,7 @@ def _worker_run_h25(seed: str) -> dict[str, Any]:
                     Path(cfg["h25_status_root"]) / f"worker-{os.getpid()}.json",
                     {
                         "stage": "combat_search", "seed": seed,
+                        "round": cfg["h25_round_number"],
                         "fight_start_decision": fight_start_decision,
                         "roots_in_fight": roots_in_fight,
                         "transitions_in_fight": transitions_in_fight,
