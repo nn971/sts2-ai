@@ -3,7 +3,6 @@ import pytest
 import torch
 
 from sts2_ai.training.h24_applicability import ResourceConstraintSelection
-
 from sts2_ai.training.h24_resource_monotone import (
     MonotoneResourceLogit,
     SafeResourceVocabulary,
