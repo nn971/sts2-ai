@@ -1,7 +1,7 @@
 """H24 isolated checkpoint, exact value order and H22 policy preservation."""
-from copy import deepcopy
 import hashlib
 import json
+from copy import deepcopy
 
 import pytest
 import torch
@@ -11,7 +11,10 @@ from sts2_ai.models.h16_batch_actor import RemoteH16Actor, SharedH16Service
 from sts2_ai.models.shared_macro_transformer_v2 import H21GroundedMacroTransformer
 from sts2_ai.models.shared_transformer import H7Config
 from sts2_ai.training.h16_joint_act_pilot import (
-    JointActPilotNet, PilotDecision, PilotEpisode, PilotPolicy,
+    JointActPilotNet,
+    PilotDecision,
+    PilotEpisode,
+    PilotPolicy,
     train_joint_cohort,
 )
 from sts2_ai.training.h17_replay import fit_replay
