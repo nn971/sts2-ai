@@ -3,7 +3,6 @@ from copy import deepcopy
 
 import pytest
 
-from sts2_ai.models.shared_game_objects import KINDS
 from sts2_ai.training.h24_applicability import ResourceConstraintSelection
 from sts2_ai.training.h24_neutral_value import (
     assert_h24_pair_neutral_parity,
