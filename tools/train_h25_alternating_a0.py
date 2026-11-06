@@ -56,7 +56,7 @@ except ModuleNotFoundError:
         write_json,
     )
 
-H25_SCHEMA = "sts2-h25-independent-macro-combat-all-root-full-depth-v1"
+H25_SCHEMA = "sts2-h25-independent-macro-combat-floor-progress-v2"
 
 
 def _atomic_torch_save(value: dict[str, Any], path: Path) -> None:
@@ -110,6 +110,8 @@ def _stable_identity(args: argparse.Namespace) -> dict[str, Any]:
         "combat_simulations": args.combat_simulations,
         "combat_hp_bias": args.combat_hp_bias,
         "macro_update_every": args.macro_update_every,
+        "macro_progress_weight": args.macro_progress_weight,
+        "macro_progress_loss_weight": args.macro_progress_loss_weight,
         "minibatch": args.minibatch, "epochs": args.epochs,
         "lr": args.lr, "temperature": args.temperature,
         "actor_max_batch": args.actor_max_batch,
@@ -222,14 +224,18 @@ def _args() -> argparse.Namespace:
     p.add_argument("--emulator-revision", required=True)
     p.add_argument("--output-root", type=Path, required=True)
     p.add_argument("--rounds", type=int, default=4)
-    p.add_argument("--runs-per-round", type=int, default=8)
-    p.add_argument("--heldout-runs", type=int, default=4)
+    p.add_argument("--runs-per-round", type=int, default=64)
+    p.add_argument("--heldout-runs", type=int, default=16)
     p.add_argument("--workers", type=int, default=15)
     p.add_argument("--study-seed", type=int, default=20261120)
     p.add_argument("--combat-fights-per-run", type=int, default=1)
-    p.add_argument("--combat-simulations", type=int, default=16)
+    p.add_argument("--combat-simulations", type=int, default=64)
     p.add_argument("--combat-hp-bias", type=float, default=0.15)
     p.add_argument("--macro-update-every", type=int, default=4)
+    p.add_argument("--macro-progress-weight", type=float, default=0.25,
+                   help="Weight of graded floor progress in macro policy advantage")
+    p.add_argument("--macro-progress-loss-weight", type=float, default=0.5,
+                   help="Weight for separate floor-progress critic MSE")
     p.add_argument("--minibatch", type=int, default=8)
     p.add_argument("--epochs", type=int, default=1)
     p.add_argument("--lr", type=float, default=1e-5)
@@ -257,6 +263,8 @@ def _args() -> argparse.Namespace:
             args.max_decisions, args.actor_max_batch,
             args.actor_fixed_shape_batch_size) <= 0
             or args.combat_fights_per_run < 0
+            or not 0 <= args.macro_progress_weight <= 1
+            or not 0 <= args.macro_progress_loss_weight <= 1
             or not 0 < args.temperature <= 5
             or not 0 <= args.combat_hp_bias <= 1
             or args.actor_fixed_shape_batch_size > args.actor_max_batch
