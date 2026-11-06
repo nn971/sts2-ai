@@ -747,6 +747,7 @@ def collect_act_episode(
     rng: random.Random, rollout_transport: str = "fused",
     max_simulation_steps: int = 512,
     adaptive_search: AdaptiveSearch | None = None,
+    search_floor: int | None = None,
     card_exposure: Mapping[str, int] | None = None,
     map_profile_id: str | None = EXPERIMENTAL_FIXED_ROUTE_PROFILE,
     compact_card_selection: bool = False,
@@ -761,7 +762,9 @@ def collect_act_episode(
             and max_simulation_steps > 0
             and rollout_transport in ("legacy", "fused")
             and type(p2_prefix_cache_handles) is int
-            and p2_prefix_cache_handles >= 0):
+            and p2_prefix_cache_handles >= 0
+            and (search_floor is None or
+                 (type(search_floor) is int and 1 <= search_floor <= 16))):
         raise ValueError("Invalid Act collection settings")
     state = reset_training_run(
         backend, seed, NATIVE_OVERGROWTH, ascension,
@@ -797,7 +800,11 @@ def collect_act_episode(
                 raise RuntimeError("Nonterminal run has no legal player actions")
             scores, predicted_value, offsets = policy.infer(observation, actions)
             search_policy = None
-            if adaptive_search is None:
+            # H23 diagnostic: preserve the exact unsearched player/RNG
+            # prefix before the selected boss floor, including RNG draws.
+            if search_floor is not None and public.get("floor") != search_floor:
+                budget = 0
+            elif adaptive_search is None:
                 budget = (
                     simulations if should_search_combat(
                         public, actions, searches=searches,
