@@ -2,8 +2,10 @@
 
 This is the human-decision interface for H24's **hard** constraints.
 Code: \`src/sts2_ai/training/h24_applicability.py\`.
-Review statuses are **pending**. No experimental training or relabeling is
-enabled by the registry.
+**User verdict (2026-11-06):** the mathematical formulations are accepted as
+proposed, with relic hard monotonicity **disabled by default**. Every
+mechanics-dependent application still requires its own revision-pinned proof.
+No experimental training or relabeling is enabled by the registry.
 
 A **human verdict** and a **revision-pinned mechanics verification** are
 independent gates. The former authorizes the intended mathematical assumption;
@@ -149,7 +151,13 @@ counterfactuals, validate probability couplings, modify H21 encoding,
 or enable any value loss. It is intentionally reviewable before the
 resource-neutral encoder and optimizer wiring.
 
-**Verdict requested:** For G2/G4/G5/G6, H2/H3, D2/D3, P3/P4/P5 and
-R3/R4/R5, choose **approve as written**, **modify conditions** or
-**defer pending mechanics audit**. For P2 and R2, choose whether to start
-with empty item whitelists or name particular item identities for audit.
+**Recorded verdict:** formulas and conditional gates approved. Resource switches:
+HP=True; gold=True; potion=True (with an initially empty audited identity
+list); relic=False. Relic eligibility requires a separate explicit opt-in,
+even if an identity is whitelisted. Ancient relics frequently have negative
+effects. Normal, Uncommon and Rare rarity classes are generally safer, but
+rarity is *not* a mechanics certificate. Examples to test: Centennial Puzzle
+(first-damage draw trigger) and Tungsten Rod (reduces HP lost), which can
+interact with damage-trigger opportunities. Continue to audit actual relic
+identity, persistent state, other relics, card/power effects and the remaining
+Act continuation. All item whitelists remain empty until mechanically verified.
