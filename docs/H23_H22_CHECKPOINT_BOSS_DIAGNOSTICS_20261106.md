@@ -101,17 +101,7 @@ The main question is whether search **improves actual boss outcomes**, not wheth
 
 ## Stage C: Untouched final checkpoint validation
 
-Only **after selecting** the candidate from Stage A (and not from the final cohort), invoke the original independent checkpoint audit once with a different `--audit-tag`, on 32–64 additional seeds:
-
-```fish
-python -u tools/audit_h22_independent.py \
-    --progress $progress --emulator-root $emu \
-    --round $selected --audit-count 64 --workers 15 \
-    --audit-tag h23-independent-final-v1 \
-    --output results/h23-independent-final.json --execute
-```
-
-For a literal fish output path, prefer the following rather than the example filename interpolation above:
+Only **after selecting** the candidate from Stage A (and not from the final cohort), invoke the original independent checkpoint audit **once** on 64 additional, untouched seeds:
 
 ```fish
 set final_out results/h23-independent-final-r$selected.json
