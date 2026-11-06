@@ -56,6 +56,13 @@ def render_h25(root: Path, *, now: float | None = None) -> str:
                 f"{search.get('transitions', 0):>15} "
                 f"{combat.get('steps', 0):>8}/{macro.get('steps', 0):<8}"
             )
+            if macro and "progress_loss" in macro:
+                result.append(
+                    "         Macro objectives: "
+                    f"clear_BCE={macro.get('clear_loss', 0):.4f}  "
+                    f"floor_MSE={macro['progress_loss']:.4f}  "
+                    f"mean_target={macro.get('mean_progress_target', 0):.3f}"
+                )
     else:
         result.append("No committed round yet.")
     result.append("")
