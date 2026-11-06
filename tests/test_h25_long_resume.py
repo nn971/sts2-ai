@@ -143,3 +143,33 @@ def test_h25_atomic_optimizer_roundtrip(tmp_path):
     value = torch.load(path, weights_only=True, map_location="cpu")
     assert value["fingerprint"] == "abc" and value["round"] == 1
     torch.testing.assert_close(value["values"], torch.tensor([1.0]))
+
+
+def test_h25_checkpoint_retention_preserves_latest_and_periodic(tmp_path):
+    folder = tmp_path / "models"
+    folder.mkdir()
+    for n in range(1, 9):
+        for kind in ("macro", "combat", "optimizers"):
+            (folder / f"{kind}-r{n:04d}.pt").write_bytes(b"checkpoint")
+    pruned = trainer.prune_h25_checkpoints(
+        tmp_path, newest=8, keep_last=2, archive_every=4,
+    )
+    assert len(pruned) == 15
+    for n in range(1, 9):
+        expected = n in (4, 7, 8)
+        for kind in ("macro", "combat", "optimizers"):
+            assert (folder / f"{kind}-r{n:04d}.pt").exists() == expected
+
+
+def test_h25_monitor_supports_live_without_round_commit(tmp_path):
+    from tools.monitor_h25 import render_h25
+
+    (tmp_path / "live.json").write_text(json.dumps({
+        "timestamp_unix": 1000, "round": 1,
+        "stage": "full_acts_and_sampled_fight_search",
+        "completed_episodes": 0, "total_episodes": 16,
+    }))
+    dashboard = render_h25(tmp_path, now=1020)
+    assert "No committed round yet" in dashboard
+    assert "completed workers 0/16" in dashboard
+    assert "heartbeat age 20s" in dashboard
