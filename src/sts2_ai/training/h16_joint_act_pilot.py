@@ -456,6 +456,8 @@ class PilotPolicy:
         macro_prior_weight: float = 0.5, remote_actor: Any = None,
         combat_credit_weight: float = 0.25, loss_progress_cap: float = 0.2,
         representation: str = "h16",
+        h24_selection: dict[str, bool] | None = None,
+        h24_vocabulary: dict[str, tuple[str, ...]] | None = None,
     ) -> None:
         if not 0 <= horizon_lambda <= 1 or temperature <= 0 or macro_prior_weight < 0:
             raise ValueError("Invalid pilot continuation/policy weighting")
@@ -467,6 +469,10 @@ class PilotPolicy:
         if (representation not in ("h16", "h21")
                 or (model is not None and model.representation != representation)):
             raise ValueError("Joint policy representation/model mismatch")
+        if (h24_selection is None) != (h24_vocabulary is None):
+            raise ValueError("H24 actor needs selection and vocabulary together")
+        self.h24_selection = h24_selection
+        self.h24_vocabulary = h24_vocabulary
         self.representation = representation
         self.model = model.eval() if model is not None else None
         self.remote_actor = remote_actor
@@ -501,7 +507,21 @@ class PilotPolicy:
             raise ValueError("Nonterminal inference needs a legal menu")
         started = time.perf_counter()
         public = public_state(observation)
-        encoded = encode_joint_decision(public, actions, representation=self.representation)
+        if self.model is not None:
+            encoded = self.model.encode_decision(public, actions)
+        elif self.h24_selection is not None:
+            from sts2_ai.training.h24_applicability import ResourceConstraintSelection
+            from sts2_ai.training.h24_joint_act_model import encode_h24_joint_decision
+            from sts2_ai.training.h24_resource_monotone import SafeResourceVocabulary
+            encoded = encode_h24_joint_decision(
+                public, actions,
+                selection=ResourceConstraintSelection(**self.h24_selection),
+                vocabulary=SafeResourceVocabulary(**self.h24_vocabulary),
+            )
+        else:
+            encoded = encode_joint_decision(
+                public, actions, representation=self.representation,
+            )
         if self.remote_actor is not None:
             raw_scores, value = self.remote_actor.infer(encoded)
         else:
