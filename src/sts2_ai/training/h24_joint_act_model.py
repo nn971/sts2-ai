@@ -223,7 +223,7 @@ class H24JointActPilotNet(JointActPilotNet):
     @classmethod
     def from_checkpoint_data(
         cls, checkpoint: dict[str, Any], *, device: str = "cpu",
-    ) -> "H24JointActPilotNet":
+    ) -> H24JointActPilotNet:
         if (
             checkpoint.get("schema") != H24_SCHEMA
             or checkpoint.get("parent_schema") != H22_SCHEMA
