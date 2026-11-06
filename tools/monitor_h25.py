@@ -38,7 +38,7 @@ def render_h25(root: Path, *, now: float | None = None) -> str:
                 f"Committed: {len(rows)} rounds; active training time: {elapsed/3600:.2f} h"
             )
         result.append(
-            "Round   Train       Heldout     Max floor    Roots      Transitions   Combat/Macro steps"
+            "Round   Train     Heldout   Max floor   Roots    Transitions   Combat/Macro"
         )
         for row in rows[-8:]:
             train, held = row.get("train", {}), row.get("heldout", {})
