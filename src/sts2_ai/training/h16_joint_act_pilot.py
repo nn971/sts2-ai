@@ -10,6 +10,7 @@ public-history fair posterior. No hidden state is passed to the network.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import random
@@ -744,6 +745,14 @@ def search_floor_allows(state: dict[str, Any], floor: int | None) -> bool:
     return floor is None or state.get("floor") == floor
 
 
+def independent_search_seed(run_seed: str, decision_index: int) -> int:
+    """Isolate H23 PUCT simulation randomness from player action sampling."""
+    if not run_seed or decision_index < 0:
+        raise ValueError("Invalid independent PUCT search seed coordinates")
+    data = f"h23-search-seed-v1|{run_seed}|{decision_index}".encode("utf-8")
+    return int.from_bytes(hashlib.blake2b(data, digest_size=8).digest(), "big") % (2**63)
+
+
 def collect_act_episode(
     backend: EmulatorBackend, policy: PilotPolicy, *,
     seed: str, ascension: int, max_decisions: int,
@@ -753,6 +762,7 @@ def collect_act_episode(
     max_simulation_steps: int = 512,
     adaptive_search: AdaptiveSearch | None = None,
     search_floor: int | None = None,
+    independent_search_rng: bool = False,
     card_exposure: Mapping[str, int] | None = None,
     map_profile_id: str | None = EXPERIMENTAL_FIXED_ROUTE_PROFILE,
     compact_card_selection: bool = False,
@@ -769,7 +779,8 @@ def collect_act_episode(
             and type(p2_prefix_cache_handles) is int
             and p2_prefix_cache_handles >= 0
             and (search_floor is None or
-                 (type(search_floor) is int and 1 <= search_floor <= 16))):
+                 (type(search_floor) is int and 1 <= search_floor <= 16))
+            and type(independent_search_rng) is bool):
         raise ValueError("Invalid Act collection settings")
     state = reset_training_run(
         backend, seed, NATIVE_OVERGROWTH, ascension,
@@ -832,7 +843,8 @@ def collect_act_episode(
                 search_policy, count = local_combat_puct(
                     backend, state, observation, actions, policy,
                     simulations=budget, depth=search_depth,
-                    seed=rng.randrange(2**63),
+                    seed=(independent_search_seed(seed, len(decisions))
+                          if independent_search_rng else rng.randrange(2**63)),
                     rollout_transport=rollout_transport,
                     max_simulation_steps=max_simulation_steps,
                     search_profile=search_profile, search_report=search_profiles,
