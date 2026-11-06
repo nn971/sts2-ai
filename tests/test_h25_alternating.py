@@ -12,7 +12,9 @@ from sts2_ai.emulator.protocol import LegalAction, Observation
 from sts2_ai.models.shared_macro_transformer_v2 import H21GroundedMacroTransformer
 from sts2_ai.models.shared_transformer import H7Config
 from sts2_ai.training.h16_joint_act_pilot import (
-    JointActPilotNet, PilotDecision, PilotEpisode,
+    JointActPilotNet,
+    PilotDecision,
+    PilotEpisode,
 )
 from sts2_ai.training.h24_joint_act_model import H24JointActPilotNet
 from sts2_ai.training.h25_alternating import (
