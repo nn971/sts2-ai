@@ -69,6 +69,13 @@ def describe_episode(episode: Any) -> dict[str, Any]:
     root_policy = (
         first_decision.search_policy if first_decision is not None else None
     )
+    actor_reference = (
+        first_decision.search_actor_reference_policy
+        if first_decision is not None else None
+    )
+    if (root_policy is not None and actor_reference is not None
+            and len(root_policy) != len(actor_reference)):
+        raise ValueError("PUCT and frozen actor root distributions differ in length")
     root_argmax = (
         max(range(len(root_policy)), key=lambda i: root_policy[i])
         if root_policy is not None else None
@@ -102,6 +109,22 @@ def describe_episode(episode: Any) -> dict[str, Any]:
         ),
         "boss_root_search_policy": (
             list(root_policy) if root_policy is not None else None
+        ),
+        "boss_root_actor_policy": (
+            list(actor_reference) if actor_reference is not None else None
+        ),
+        "boss_root_actor_teacher_tv": (
+            sum(abs(a - b) for a, b in
+                zip(actor_reference, root_policy, strict=True)) / 2
+            if actor_reference is not None and root_policy is not None
+            else None
+        ),
+        "boss_root_actor_argmax": (
+            first_decision.legal_actions[
+                max(range(len(actor_reference)), key=lambda i: actor_reference[i])
+            ].action_id
+            if first_decision is not None and actor_reference is not None
+            else None
         ),
         "boss_root_search_argmax": (
             first_decision.legal_actions[root_argmax].action_id
@@ -182,6 +205,19 @@ def summarize_arm(rows: list[dict[str, Any]]) -> dict[str, Any]:
             )
             if any(r["boss_root_search_policy"] is not None for r in reached)
             else None
+        ),
+        "mean_actor_teacher_tv": (
+            statistics.mean(
+                r["boss_root_actor_teacher_tv"] for r in reached
+                if r["boss_root_actor_teacher_tv"] is not None
+            )
+            if any(r["boss_root_actor_teacher_tv"] is not None for r in reached)
+            else None
+        ),
+        "boss_roots_teacher_top_differs_actor_top": sum(
+            r["boss_root_search_argmax"] != r["boss_root_actor_argmax"]
+            for r in reached if r["boss_root_actor_argmax"] is not None
+            and r["boss_root_search_argmax"] is not None
         ),
     }
 
