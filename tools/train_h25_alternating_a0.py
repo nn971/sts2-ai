@@ -130,6 +130,7 @@ def _collect(
         "emulator_root": str(args.emulator_root.resolve()),
         "ai_root": str(Path.cwd().resolve()),
         "h25_status_root": str((args.output_root / "workers").resolve()),
+        "h25_round_number": round_number,
     }
     episodes: list[PilotEpisode | None] = [None] * len(seeds)
     examples: list[CombatSearchExample] = []
