@@ -2,9 +2,12 @@
 import pytest
 import torch
 
+from sts2_ai.training.h24_applicability import ResourceConstraintSelection
+
 from sts2_ai.training.h24_resource_monotone import (
     MonotoneResourceLogit,
     SafeResourceVocabulary,
+    build_h24_monotone_head,
 )
 
 
@@ -75,3 +78,41 @@ def test_h24_proves_context_invariance_is_necessary():
         hp=torch.tensor([[2.0]]), gold=torch.tensor([[0.0]]),
     )
     assert high < low
+
+def test_h24_head_factory_excludes_relic_coordinates_by_default():
+    head = build_h24_monotone_head(16)
+    assert head.hp and head.gold
+    assert head.potion_weights is None
+    assert head.relic_weights is None
+    assert head.relics == 0
+    # The ordinary H21 resource input remains separate; this is about
+    # constrained value coordinates, not relic object representation.
+    with pytest.raises(ValueError, match="Relic monotonicity is disabled"):
+        build_h24_monotone_head(16, vocabulary=SafeResourceVocabulary(
+            relic_ids=("proto.relic.tungsten_rod",)))
+
+
+def test_h24_head_factory_explicit_relic_opt_in_and_potion_whitelist():
+    vocabulary = SafeResourceVocabulary(
+        potion_ids=("proto.potion.block",),
+        relic_ids=("proto.relic.paper_krane",),
+    )
+    head = build_h24_monotone_head(
+        16, selection=ResourceConstraintSelection(relic=True),
+        vocabulary=vocabulary,
+    )
+    assert head.potions == 1
+    assert head.relics == 1
+    assert head.potion_weights is not None
+    assert head.relic_weights is not None
+    # This factory constructs an architecture only; a list of names
+    # is not a mechanical whitelist or proof of value dominance.
+
+
+def test_h24_potion_disabled_with_nonempty_vocabulary_fails():
+    with pytest.raises(ValueError, match="Potion monotonicity is disabled"):
+        build_h24_monotone_head(
+            16, selection=ResourceConstraintSelection(potion=False),
+            vocabulary=SafeResourceVocabulary(
+                potion_ids=("proto.potion.block",)),
+        )
