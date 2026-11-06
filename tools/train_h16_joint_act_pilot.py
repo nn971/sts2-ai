@@ -24,7 +24,7 @@ import tempfile
 import time
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import nullcontext
-from dataclasses import replace as dataclass_replace
+from dataclasses import asdict, replace as dataclass_replace
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +50,9 @@ from sts2_ai.training.h16_joint_act_pilot import (
     train_joint_cohort,
 )
 from sts2_ai.training.h16_public_codec import set_h16_rollout_seed
+from sts2_ai.training.h24_applicability import ResourceConstraintSelection
+from sts2_ai.training.h24_resource_monotone import SafeResourceVocabulary
+from sts2_ai.training.h24_joint_act_model import H24_SCHEMA, H24JointActPilotNet
 from sts2_ai.training.h17_adaptive import AdaptiveSearch, coverage_summary, update_coverage
 from sts2_ai.training.h17_replay import (
     collect_replay,
@@ -121,6 +124,8 @@ def _worker_init(config: dict[str, Any]) -> None:
         remote_actor=remote,
         combat_credit_weight=config["combat_credit_weight"],
         loss_progress_cap=config["loss_progress_cap"],
+        h24_selection=config.get("h24_selection"),
+        h24_vocabulary=config.get("h24_vocabulary"),
     )
     emulator = JsonlEmulatorBackend(
         repo_root=Path(config["ai_root"]),
@@ -184,6 +189,14 @@ def collect(
     cfg = {
         "checkpoint": str(checkpoint.resolve()),
         "representation": getattr(args, "representation", "h16"),
+        "h24_selection": (
+            asdict(ResourceConstraintSelection()) if getattr(args, "h24", False)
+            else None
+        ),
+        "h24_vocabulary": (
+            asdict(SafeResourceVocabulary()) if getattr(args, "h24", False)
+            else None
+        ),
         "checkpoint_sha256": sha256(checkpoint),
         "macro_model": str(args.macro_model.resolve()) if args.macro_model else None,
         "ai_root": str(args.ai_root.resolve()),
@@ -435,6 +448,16 @@ def main() -> None:
     start.add_argument("--initial-h22", type=Path,
                        help="Initialize a fresh H21 training run from a trained H22 model")
     p.add_argument("--macro-model", type=Path, default=None)
+    p.add_argument(
+        "--h24", action="store_true",
+        help="Opt-in H24 hard monotone Act-clear critic (HP+gold only initially; "
+             "certified potion list empty; relics OFF). Requires --initial-h22.",
+    )
+    p.add_argument(
+        "--h24-search-act-mix", type=float, default=0.0,
+        help="Experimental Act-clear critic blend in PUCT leaf values (0 is "
+             "controlled HP-only search; H22 default behavior unchanged).",
+    )
     p.add_argument("--representation", choices=("h16", "h21"), default="h16",
                    help="Opt-in H21 owner-linked map/offer graph codec and joint model")
     p.add_argument("--emulator-root", type=Path, required=True)
@@ -595,6 +618,10 @@ def main() -> None:
         p.error("Invalid H16 pilot configuration")
     if args.initial_h22 is not None and args.representation != "h21":
         p.error("--initial-h22 requires --representation h21")
+    if (args.h24 and (args.initial_h22 is None or args.representation != "h21")
+            or not 0 <= args.h24_search_act_mix <= 1
+            or (not args.h24 and args.h24_search_act_mix != 0.0)):
+        p.error("H24 requires --initial-h22, H21, and a valid H24-only Act mix")
     if args.h17_adaptive:
         AdaptiveSearch(args.h17_search_p16, args.h17_search_p64)
         if args.initial_h16 is None and args.initial_h22 is None:
@@ -605,7 +632,8 @@ def main() -> None:
         if path is not None and not path.is_file():
             p.error(f"Missing checkpoint: {path}")
     source = {
-        "schema": H22_SCHEMA if args.representation == "h21" else SCHEMA,
+        "schema": (H24_SCHEMA if args.h24
+                   else H22_SCHEMA if args.representation == "h21" else SCHEMA),
         "map_profile": (
             EXPERIMENTAL_FIXED_ROUTE_PROFILE
             if args.map_profile == "fixed-route"
@@ -686,13 +714,26 @@ def main() -> None:
         model = JointActPilotNet.load(committed_model, device=args.device)
         if model.representation != args.representation:
             p.error("Resume checkpoint representation differs from experiment")
+        if bool(getattr(model, "h24_enabled", False)) != args.h24:
+            p.error("Resume checkpoint H24 critic schema differs from experiment")
     else:
         if progress_path.exists() or optimizer_path.exists():
             p.error("Output contains an existing run; use --resume or a new directory")
         if args.representation == "h21":
             if args.initial_h22 is not None:
                 try:
-                    model = load_h22_initial(args.initial_h22, device=args.device)
+                    initial_h22_model = load_h22_initial(
+                        args.initial_h22, device=args.device,
+                    )
+                    model = (
+                        H24JointActPilotNet.warmstart_h22(
+                            initial_h22_model,
+                            selection=ResourceConstraintSelection(),
+                            vocabulary=SafeResourceVocabulary(),
+                            search_act_mix=args.h24_search_act_mix,
+                        ).to(args.device)
+                        if args.h24 else initial_h22_model
+                    )
                 except ValueError as error:
                     p.error(str(error))
             else:
