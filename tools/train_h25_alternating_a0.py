@@ -334,7 +334,9 @@ def main() -> None:
         macro = JointActPilotNet.load(saved_macro, device=args.device)
         combat = JointActPilotNet.load(saved_combat, device=args.device)
         if (not getattr(macro, "h24_act_only", False)
-                or not getattr(combat, "h24_act_only", False)):
+                or not getattr(combat, "h24_act_only", False)
+                or getattr(macro, "macro_progress_head", None) is None
+                or getattr(combat, "macro_progress_head", None) is not None):
             raise ValueError("H25 resume requires Act-only H24 checkpoints")
         macro_optimizer = torch.optim.AdamW(macro.parameters(), lr=args.lr)
         combat_optimizer = torch.optim.AdamW(combat.parameters(), lr=args.lr)
@@ -352,8 +354,10 @@ def main() -> None:
         source = JointActPilotNet.load(args.initial_h22, device=args.device)
         macro = H24JointActPilotNet.warmstart_h22(
             source, act_only=True, search_act_mix=1.0,
+            macro_progress=True,
         ).to(args.device)
         combat = copy.deepcopy(macro)
+        combat.macro_progress_head = None
         del source
         macro_optimizer = torch.optim.AdamW(macro.parameters(), lr=args.lr)
         combat_optimizer = torch.optim.AdamW(combat.parameters(), lr=args.lr)
@@ -400,6 +404,8 @@ def main() -> None:
                 macro, macro_optimizer, train,
                 minibatch=args.minibatch, epochs=args.epochs,
                 temperature=args.temperature,
+                progress_weight=args.macro_progress_weight,
+                progress_loss_weight=args.macro_progress_loss_weight,
             )
             if round_number % args.macro_update_every == 0 else None
         )
