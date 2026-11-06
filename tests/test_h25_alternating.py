@@ -23,6 +23,7 @@ from sts2_ai.training.h25_alternating import (
     SplitPilotPolicy,
     fit_combat_search,
     fit_macro_reinforce,
+    macro_future_floor_targets,
     replay_to_combat_start,
     sample_fight_starts,
 )
@@ -63,9 +64,10 @@ def _models():
         H7Config(width=32, heads=4, layers=1, feedforward=64)
     )).eval()
     macro = H24JointActPilotNet.warmstart_h22(
-        baseline, act_only=True, search_act_mix=1.0,
+        baseline, act_only=True, search_act_mix=1.0, macro_progress=True,
     )
     combat = copy.deepcopy(macro)
+    combat.macro_progress_head = None
     return macro, combat
 
 
@@ -132,6 +134,65 @@ def test_h25_combat_distillation_only_updates_combat():
     assert report["steps"] == 1
     for prior, post in zip(before, macro.parameters(), strict=True):
         torch.testing.assert_close(prior, post, rtol=0, atol=0)
+
+
+def test_h25_progress_labels_are_dense_after_defeat():
+    state = _state()
+    actions = _actions()
+    observation = _observation(state)
+    episode = PilotEpisode(
+        "defeat-floor10",
+        (PilotDecision(observation, actions, 0, (0., 0.)),),
+        (state, {**state, "floor": 10, "hp": 0}),
+        outcome="defeat", searches=0, search_transitions=0,
+    )
+    assert macro_future_floor_targets(episode) == pytest.approx((0.4,))
+
+    early = PilotEpisode(
+        "defeat-floor6",
+        (PilotDecision(observation, actions, 0, (0., 0.)),),
+        (state, {**state, "hp": 0}),
+        outcome="defeat", searches=0, search_transitions=0,
+    )
+    assert macro_future_floor_targets(early) == (0.0,)
+
+
+def test_h25_macro_progress_head_trains_from_only_defeats(tmp_path):
+    macro, combat = _models()
+    assert macro.macro_progress_head is not None
+    assert combat.macro_progress_head is None
+    state = _state()
+    actions = _actions()
+    observation = _observation(state)
+    episodes = [
+        PilotEpisode(
+            f"loss-{floor}",
+            (PilotDecision(observation, actions, 0, (0., 0.)),),
+            (state, {**state, "floor": floor, "hp": 0}),
+            outcome="defeat", searches=0, search_transitions=0,
+        )
+        for floor in (6, 10)
+    ]
+    previous = macro.macro_progress_head.weight.detach().clone()
+    optimizer = torch.optim.AdamW(macro.parameters(), lr=1e-3)
+    report = fit_macro_reinforce(
+        macro, optimizer, episodes, minibatch=2,
+        progress_weight=0.25, progress_loss_weight=0.5,
+    )
+    assert report["examples"] == 2
+    assert report["mean_progress_target"] == pytest.approx(0.2)
+    assert report["progress_loss"] > 0
+    assert not torch.equal(previous, macro.macro_progress_head.weight)
+    macro.eval()
+    macro.save(tmp_path / "macro-with-progress.pt")
+    restored = JointActPilotNet.load(tmp_path / "macro-with-progress.pt")
+    assert restored.macro_progress_head is not None
+    batch = macro.collate([macro.encode_decision(state, actions)])
+    with torch.inference_mode():
+        expected = macro.forward_macro_training(batch)
+        received = restored.forward_macro_training(batch)
+    for x, y in zip(expected, received, strict=True):
+        torch.testing.assert_close(x, y, rtol=1e-5, atol=1e-6)
 
 
 def test_h25_fight_sampler_and_exact_prefix_replay(monkeypatch):
