@@ -6,9 +6,10 @@ populated by default. This module does not alter H22 actor or critic.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 PREDICATES = {
     "G1": "Identical observable non-resource context",
