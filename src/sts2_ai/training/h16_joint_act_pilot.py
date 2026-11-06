@@ -360,6 +360,11 @@ class JointActPilotNet(nn.Module):
     @classmethod
     def load(cls, path: Path, *, device: str = "cpu") -> JointActPilotNet:
         checkpoint = torch.load(path, map_location="cpu", weights_only=True)
+        if checkpoint.get("schema") == "sts2-h24-h21-hard-resource-monotone-act-v1":
+            from sts2_ai.training.h24_joint_act_model import H24JointActPilotNet
+            return H24JointActPilotNet.from_checkpoint_data(
+                checkpoint, device=device,
+            )
         if checkpoint.get("schema") == H22_SCHEMA:
             if (checkpoint.get("codec") != H21_CODEC
                     or checkpoint.get("object_schema") != H21_OBJECT_SCHEMA
