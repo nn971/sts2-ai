@@ -255,6 +255,20 @@ def _worker_run_h25(seed: str) -> dict[str, Any]:
     examples = []
     roots = transitions = complete_fights = incomplete_fights = 0
     for index in sampled:
+        def root_receipt(roots_in_fight: int, transitions_in_fight: int,
+                         decision_in_fight: int) -> None:
+            if cfg.get("h25_status_root") is not None:
+                write_json(
+                    Path(cfg["h25_status_root"]) / f"worker-{os.getpid()}.json",
+                    {
+                        "stage": "combat_search", "seed": seed,
+                        "fight_start_decision": index,
+                        "roots_in_fight": roots_in_fight,
+                        "transitions_in_fight": transitions_in_fight,
+                        "decision_in_fight": decision_in_fight,
+                        "timestamp_unix": time.time(),
+                    },
+                )
         result = collect_searched_fight(
             backend, episode, index, policy,
             ascension=cfg["ascension"],
@@ -263,6 +277,7 @@ def _worker_run_h25(seed: str) -> dict[str, Any]:
             seed=rng.randrange(2**63),
             max_decisions=cfg["h25_max_combat_decisions"],
             max_simulation_steps=cfg["max_simulation_steps"],
+            on_root=root_receipt,
         )
         examples.extend(result.examples)
         roots += result.searched_roots
