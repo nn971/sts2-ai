@@ -8,12 +8,10 @@ combat decision at full depth, with one fixed simulation budget per root.
 """
 from __future__ import annotations
 
-import json
 import math
 import random
 from collections.abc import Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import torch
@@ -26,7 +24,6 @@ from sts2_ai.training.h16_joint_act_pilot import (
     PilotEpisode,
     PilotPolicy,
     _sample,
-    _softmax,
     local_combat_puct,
     public_state,
 )
