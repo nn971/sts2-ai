@@ -14,7 +14,6 @@ import hashlib
 import json
 import math
 import multiprocessing
-import random
 import time
 from collections.abc import Sequence
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
@@ -26,15 +25,22 @@ import torch
 
 from sts2_ai.models.h16_batch_actor import SharedH16Service
 from sts2_ai.training.h16_joint_act_pilot import (
-    JointActPilotNet, PilotEpisode,
-)
-from sts2_ai.training.h25_alternating import (
-    CombatSearchExample, fit_combat_search, fit_macro_reinforce,
+    JointActPilotNet,
+    PilotEpisode,
 )
 from sts2_ai.training.h24_joint_act_model import H24JointActPilotNet
+from sts2_ai.training.h25_alternating import (
+    CombatSearchExample,
+    fit_combat_search,
+    fit_macro_reinforce,
+)
 from tools.train_h16_joint_act_pilot import (
-    _worker_init, _worker_run_h25, seed_namespace, sha256,
-    summarize, write_json,
+    _worker_init,
+    _worker_run_h25,
+    seed_namespace,
+    sha256,
+    summarize,
+    write_json,
 )
 
 H25_SCHEMA = "sts2-h25-independent-macro-combat-all-root-full-depth-v1"
