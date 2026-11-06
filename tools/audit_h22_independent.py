@@ -78,7 +78,7 @@ def audit_checkpoint(
     if type(workers) is not int or workers <= 0:
         raise ValueError("Independent audit worker count must be positive")
     out = output or progress_path.parent / f"independent-audit-r{selected:04d}.json"
-    if out.exists():
+    if execute and out.exists():
         raise ValueError("Independent audit output exists; choose a distinct tag/output")
     namespace = seed_namespace(opts["ascension"], opts["map_profile"])
     study_seed = opts["study_seed"]
