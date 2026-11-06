@@ -29,9 +29,9 @@ jobs:
           python -m pip install -e '.[dev]'
       - name: Lint, compile and inspect pilot CLI
         run: |
-          python -m ruff check src/sts2_ai/training/h25_alternating.py tests/test_h25_alternating.py tools/train_h25_alternating_a0.py
+          python -m ruff check src/sts2_ai/training/h25_alternating.py tests/test_h25_*.py tools/train_h25_alternating_a0.py
           python -m compileall -q src/sts2_ai/training/h25_alternating.py tools/train_h25_alternating_a0.py
           python tools/train_h25_alternating_a0.py --help > /dev/null
       - name: Split-model, replay, reward and distillation tests
         run: |
-          python -m pytest -q tests/test_h25_alternating.py
+          python -m pytest -q tests/test_h25_*.py
