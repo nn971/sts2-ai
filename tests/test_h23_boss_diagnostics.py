@@ -85,9 +85,10 @@ def _episode(boss_action="attack", boss_hp=40, searches=0):
             "hp": boss_hp, "max_hp": 100,
         }]},
     }
-    decision = lambda action: SimpleNamespace(
-        legal_actions=[SimpleNamespace(action_id=action)], chosen_index=0,
-    )
+    def decision(action):
+        return SimpleNamespace(
+            legal_actions=[SimpleNamespace(action_id=action)], chosen_index=0,
+        )
     return SimpleNamespace(
         seed="fixed", frames=(first, boss, last),
         decisions=(decision("preboss-map"), decision(boss_action)),
