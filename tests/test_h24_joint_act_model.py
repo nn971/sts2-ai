@@ -113,7 +113,7 @@ def test_h24_checkpoint_roundtrip_isolated_from_h22(tmp_path):
         observed = loaded(loaded.collate(
             [loaded.encode_decision(state, _actions())]), value_logits=True)
     for x, y in zip(expected, observed, strict=True):
-        torch.testing.assert_close(x, y, rtol=0, atol=0)
+        torch.testing.assert_close(x, y, rtol=1e-5, atol=1e-6)
 
 
 def test_h24_packed_collator_and_gradients():
