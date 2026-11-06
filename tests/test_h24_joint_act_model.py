@@ -225,3 +225,68 @@ def test_h24_shared_actor_matches_local_inference(tmp_path, collator):
     assert list(logits) == pytest.approx(
         local_logits[0, :len(encoded.actions)].detach().tolist(), abs=1e-5)
     assert hp == pytest.approx(float(local_hp[0]), abs=1e-5)
+
+
+def test_h24_act_only_value_search_checkpoint_and_no_hp_head(tmp_path):
+    with pytest.raises(ValueError, match="monotone Act critic"):
+        H24JointActPilotNet.warmstart_h22(_source(), act_only=True)
+    model = H24JointActPilotNet.warmstart_h22(
+        _source(), act_only=True, search_act_mix=1.0,
+    ).eval()
+    assert model.h24_act_only
+    assert not any(p.requires_grad for p in model.horizon_head.parameters())
+    batch = model.collate([model.encode_decision(_state(), _actions())])
+    with torch.no_grad():
+        logits, act_probability, search_value = model(batch, horizon_lambda=0.9)
+        _, act_logit, search_logit = model(batch, value_logits=True)
+    torch.testing.assert_close(act_probability, search_value, rtol=0, atol=0)
+    torch.testing.assert_close(act_logit, search_logit, rtol=0, atol=0)
+    assert torch.isfinite(logits).all()
+    with pytest.raises(ValueError, match="no future-HP"):
+        model(batch, auxiliary_lambda=torch.tensor([0.3]))
+    path = tmp_path / "act-only.pt"
+    model.save(path)
+    restored = JointActPilotNet.load(path)
+    assert restored.h24_act_only and restored.search_act_mix == 1.0
+    with torch.no_grad():
+        _, restored_act, restored_value = restored(
+            restored.collate([restored.encode_decision(_state(), _actions())])
+        )
+    torch.testing.assert_close(restored_act, act_probability, atol=1e-6, rtol=1e-5)
+    torch.testing.assert_close(restored_act, restored_value, atol=0, rtol=0)
+
+
+def test_h24_act_only_trains_act_and_search_without_future_hp():
+    model = H24JointActPilotNet.warmstart_h22(
+        _source(), act_only=True, search_act_mix=1.0,
+    )
+    before = [
+        parameter.detach().clone() for parameter in model.horizon_head.parameters()
+    ]
+    state = _state()
+    actions = _actions()
+    obs = Observation("prototype-fair-v0", json.dumps(state), "h24-act-only")
+    decision = PilotDecision(obs, actions, 0, (0.0, 0.0))
+    episode = PilotEpisode(
+        "h24-act-only-test", (decision,), (state, {**state, "hp": 0}),
+        "defeat", searches=0, search_transitions=0,
+    )
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+    report = train_joint_cohort(
+        model, optimizer, [episode], horizon_lambda=0.6,
+        epochs=1, minibatch=1,
+    )
+    assert report["value_objective"] == "act_clear_only"
+    assert report["hp"] == 0.0
+    assert report["optimizer_steps"] == 1
+    # The replay optimizer also ignores future-HP labels and regressions.
+    replay = fit_replay(model, optimizer, [{
+        "observation": json.dumps(state),
+        "actions": [[a.action_id, a.kind, a.payload_json] for a in actions],
+        "phase": "macro", "act": 0.0,
+        "search_policy": [0.5, 0.5],
+    }], horizon_lambda=0.6, replay_weight=0.2, minibatch=1)
+    assert replay["steps"] == 1
+    assert torch.isfinite(torch.tensor(replay["loss"]))
+    for parameter, initial in zip(model.horizon_head.parameters(), before, strict=True):
+        torch.testing.assert_close(parameter, initial, rtol=0, atol=0)
