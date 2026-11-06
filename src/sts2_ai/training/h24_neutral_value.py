@@ -9,9 +9,10 @@ This is a structural invariant, not a certification of game mechanics.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 from sts2_ai.emulator.protocol import LegalAction
 from sts2_ai.models.shared_game_objects import EncodedDecision
