@@ -1,13 +1,20 @@
 """H24 isolated checkpoint, exact value order and H22 policy preservation."""
 from copy import deepcopy
+import hashlib
+import json
 
 import pytest
 import torch
 
-from sts2_ai.emulator.protocol import LegalAction
+from sts2_ai.emulator.protocol import LegalAction, Observation
+from sts2_ai.models.h16_batch_actor import RemoteH16Actor, SharedH16Service
 from sts2_ai.models.shared_macro_transformer_v2 import H21GroundedMacroTransformer
 from sts2_ai.models.shared_transformer import H7Config
-from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet
+from sts2_ai.training.h16_joint_act_pilot import (
+    JointActPilotNet, PilotDecision, PilotEpisode, PilotPolicy,
+    train_joint_cohort,
+)
+from sts2_ai.training.h17_replay import fit_replay
 from sts2_ai.training.h24_joint_act_model import H24Batch, H24JointActPilotNet
 
 
@@ -136,3 +143,82 @@ def test_h24_refuses_unsupported_checkpoints(tmp_path):
     torch.save(checkpoint, path)
     with pytest.raises(ValueError, match="schema mismatch"):
         JointActPilotNet.load(path)
+
+
+def test_h24_act_head_updates_in_existing_joint_optimizer_and_replay():
+    model = H24JointActPilotNet.warmstart_h22(_source())
+    state = _state()
+    actions = _actions()
+    observation = Observation("prototype-fair-v0", json.dumps(state), "h24-macro")
+    chosen = PilotDecision(observation, actions, 0, (0.0, 0.0))
+    terminal = {**state, "hp": 0}
+    episode = PilotEpisode(
+        "h24-synthetic-macro", (chosen,), (state, terminal),
+        "defeat", searches=0, search_transitions=0,
+    )
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
+    report = train_joint_cohort(
+        model, optimizer, [episode], horizon_lambda=0.42,
+        epochs=1, minibatch=1, hp_reference=100,
+    )
+    assert report["optimizer_steps"] == 1
+    assert torch.isfinite(torch.tensor(report["loss"])).item()
+    replay_rows = [{
+        "observation": json.dumps(state),
+        "actions": [[a.action_id, a.kind, a.payload_json] for a in actions],
+        "phase": "macro", "act": 0.0, "room_hp": [0.8, 0.4],
+        "combat_quality": None, "search_policy": [0.5, 0.5],
+    }]
+    replay = fit_replay(
+        model, optimizer, replay_rows, horizon_lambda=0.42,
+        replay_weight=0.2, minibatch=1,
+    )
+    assert replay["steps"] == 1
+    assert torch.isfinite(torch.tensor(replay["loss"])).item()
+    model.eval()
+    lower, higher = _state(), _state()
+    lower["hp"], lower["gold"] = 31, 40
+    higher["hp"], higher["gold"] = 60, 250
+    with torch.inference_mode():
+        batch = model.collate([
+            model.encode_decision(lower, actions),
+            model.encode_decision(higher, actions),
+        ])
+        _, act, _ = model(batch, value_logits=True)
+    assert act[1] >= act[0] - 1e-7
+
+
+def test_h24_local_policy_infer_uses_dual_encoder():
+    model = H24JointActPilotNet.warmstart_h22(_source()).eval()
+    state = _state()
+    observation = Observation("prototype-fair-v0", json.dumps(state), "h24-macro")
+    policy = PilotPolicy(
+        model, representation="h21", temperature=0.85, horizon_lambda=0.42,
+        macro_prior_weight=0,
+    )
+    scores, value, offsets = policy.infer(observation, _actions())
+    assert len(scores) == 2 and len(offsets) == 2
+    assert 0 <= value <= 1
+
+
+@pytest.mark.parametrize("collator", ["reference", "packed"])
+def test_h24_shared_actor_matches_local_inference(tmp_path, collator):
+    model = H24JointActPilotNet.warmstart_h22(_source()).eval()
+    path = tmp_path / "h24-actor.pt"
+    model.save(path)
+    encoded = model.encode_decision(_state(), _actions())
+    with torch.inference_mode():
+        local_logits, _, local_hp = model(
+            model.collate([encoded]), horizon_lambda=0.42,
+        )
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    with SharedH16Service(
+        checkpoint=path, digest=digest, workers=1, device="cpu",
+        horizon_lambda=0.42, max_batch=2,
+        fixed_shape_batch_size=2, h21_collator=collator,
+    ) as service:
+        remote = RemoteH16Actor(service.transport)
+        logits, hp = remote.infer(encoded)
+    assert list(logits) == pytest.approx(
+        local_logits[0, :len(encoded.actions)].detach().tolist(), abs=1e-5)
+    assert hp == pytest.approx(float(local_hp[0]), abs=1e-5)
