@@ -5,6 +5,7 @@ on:
     paths:
       - 'src/sts2_ai/training/h25_*.py'
       - 'tools/train_h25_*.py'
+      - 'tools/monitor_h25.py'
       - 'tools/train_h16_joint_act_pilot.py'
       - 'tests/test_h25_*.py'
       - '.github/workflows/h25-alternating-pilot.yml'
@@ -29,9 +30,10 @@ jobs:
           python -m pip install -e '.[dev]'
       - name: Lint, compile and inspect pilot CLI
         run: |
-          python -m ruff check src/sts2_ai/training/h25_alternating.py tests/test_h25_*.py tools/train_h25_alternating_a0.py
-          python -m compileall -q src/sts2_ai/training/h25_alternating.py tools/train_h25_alternating_a0.py
+          python -m ruff check src/sts2_ai/training/h25_alternating.py tests/test_h25_*.py tools/train_h25_alternating_a0.py tools/monitor_h25.py
+          python -m compileall -q src/sts2_ai/training/h25_alternating.py tools/train_h25_alternating_a0.py tools/monitor_h25.py
           python tools/train_h25_alternating_a0.py --help > /dev/null
+          python tools/monitor_h25.py --root /tmp/h25-nonexistent --once > /dev/null
       - name: Split-model, replay, reward and distillation tests
         run: |
           python -m pytest -q tests/test_h25_*.py
