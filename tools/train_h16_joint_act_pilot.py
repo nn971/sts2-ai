@@ -22,12 +22,13 @@ import os
 import random
 import tempfile
 import time
+from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from contextlib import nullcontext
 from dataclasses import asdict
 from dataclasses import replace as dataclass_replace
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import torch
 
