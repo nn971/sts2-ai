@@ -62,6 +62,22 @@ class H24Batch:
         return getattr(self.policy, name)
 
 
+def encode_h24_joint_decision(
+    state: dict[str, Any], actions: Sequence[LegalAction], *,
+    selection: ResourceConstraintSelection | None = None,
+    vocabulary: SafeResourceVocabulary | None = None,
+) -> H24EncodedDecision:
+    """Worker-safe H24 RPC encoding without allocating a neural network."""
+    normal = encode_joint_decision(state, actions, representation="h21")
+    neutral = encode_h24_neutral_value(
+        state, selection=selection, vocabulary=vocabulary,
+    )
+    return H24EncodedDecision(
+        normal.schema, normal.phase, normal.objects, normal.actions,
+        normal.relations, neutral,
+    )
+
+
 class H24JointActPilotNet(JointActPilotNet):
     """Checkpoint-isolated alternative to H22's unconstrained Act-clear head."""
 
@@ -108,13 +124,9 @@ class H24JointActPilotNet(JointActPilotNet):
     def encode_decision(
         self, state: dict[str, Any], actions: Sequence[LegalAction],
     ) -> H24EncodedDecision:
-        normal = encode_joint_decision(state, actions, representation="h21")
-        neutral = encode_h24_neutral_value(
-            state, selection=self.selection, vocabulary=self.vocabulary,
-        )
-        return H24EncodedDecision(
-            normal.schema, normal.phase, normal.objects, normal.actions,
-            normal.relations, neutral,
+        return encode_h24_joint_decision(
+            state, actions, selection=self.selection,
+            vocabulary=self.vocabulary,
         )
 
     def collate(
