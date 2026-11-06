@@ -391,9 +391,26 @@ def main() -> None:
             "macro_checkpoint": str(root / "models" / f"macro-r{round_number:04d}.pt"),
             "combat_checkpoint": str(root / "models" / f"combat-r{round_number:04d}.pt"),
         }
+        optimizer_checkpoint = root / "models" / f"optimizers-r{round_number:04d}.pt"
+        # Model snapshots and optimizer are durable before progress.json commits.
+        _atomic_torch_save({
+            "fingerprint": fingerprint, "round": round_number,
+            "macro_optimizer": macro_optimizer.state_dict(),
+            "combat_optimizer": combat_optimizer.state_dict(),
+            "rng_state": torch.get_rng_state(),
+        }, optimizer_checkpoint)
+        row.update({
+            "macro_checkpoint_sha256": sha256(
+                root / "models" / f"macro-r{round_number:04d}.pt"),
+            "combat_checkpoint_sha256": sha256(
+                root / "models" / f"combat-r{round_number:04d}.pt"),
+            "optimizer_checkpoint_sha256": sha256(optimizer_checkpoint),
+        })
         history.append(row)
-        write_json(root / "progress.json", {
+        elapsed_total = prior_elapsed + time.perf_counter() - wall_started
+        write_json(progress_path, {
             "fingerprint": fingerprint, "experiment": identity,
+            "elapsed_wall_seconds": elapsed_total,
             "rounds": history,
         })
         print("[h25] " + json.dumps({
@@ -405,7 +422,16 @@ def main() -> None:
             "combat_steps": combat_update["steps"],
             "macro_steps": macro_update["steps"] if macro_update else 0,
             "collection_seconds": collection_seconds,
+            "elapsed_wall_seconds": round(elapsed_total, 1),
         }), flush=True)
+        if (args.max_wall_seconds is not None
+                and elapsed_total >= args.max_wall_seconds):
+            print(
+                f"[h25] wall budget reached after committed round {round_number}; "
+                "resume with identical experiment and --resume",
+                flush=True,
+            )
+            break
 
 
 if __name__ == "__main__":
