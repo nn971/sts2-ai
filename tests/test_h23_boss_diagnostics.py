@@ -96,6 +96,8 @@ def _episode(boss_action="attack", boss_hp=40, searches=0):
     def decision(action):
         return SimpleNamespace(
             legal_actions=[SimpleNamespace(action_id=action)], chosen_index=0,
+            search_policy=((1.0,) if searches and action != "preboss-map"
+                           else None),
         )
     return SimpleNamespace(
         seed="fixed", frames=(first, boss, last),
@@ -119,6 +121,9 @@ def test_h23_boss_entry_pairing_and_public_prefix_parity():
     assert paired["both_lost_boss_damage_delta_right_minus_left"] == pytest.approx(0.3)
     assert summarize_arm([control])["boss_reached"] == 1
     assert summarize_arm([searched])["search_roots"] == 1
+    assert summarize_arm([searched])["boss_roots_with_search_distribution"] == 1
+    assert searched["boss_root_search_argmax"] == "attack-b"
+    assert searched["boss_root_search_chosen_mass"] == 1.0
 
     changed = dict(searched)
     changed["boss_entry_public_hash"] = "tampered"
