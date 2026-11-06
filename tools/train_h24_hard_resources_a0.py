@@ -2,7 +2,8 @@
 """H24 opt-in hard resource-monotone value experiment on generated Silent A0.
 
 Requires a locally available H22 H21-v4 checkpoint (R95 is the proposed
-selection control). The first H24 arm constrains HP and gold only; the potion
+selection control). The H24 Act-only objective trains only Act-clear probability and search
+policy, with bounded combat-damage actor credit. The potion
 identity whitelist is empty; relic hard monotonicity is disabled. Existing
 H22 model training remains unchanged without --h24.
 """
@@ -24,6 +25,8 @@ def h24_cli_arguments(overrides: list[str]) -> tuple[str, ...]:
     return (
         *h22_cli_arguments(overrides),
         "--h24",
+        "--h24-act-only",
+        "--h24-search-act-mix", "1",
         "--rounds", "5",
     )
 
