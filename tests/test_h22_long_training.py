@@ -175,6 +175,12 @@ def test_h22_independent_audit_is_checkpoint_pinned_and_read_only(
     assert json.loads(progress.read_text()) == original
     out = progress.parent / "independent-audit-r0001.json"
     assert json.loads(out.read_text())["seeds"] == dry["seeds"]
+    # Resume-safe H23 checkpoint selection uses dry-run identity checks even
+    # when a finished audit for that checkpoint already exists.
+    dry_again = audit_module.audit_checkpoint(
+        progress, emulator_root=tmp_path, audit_count=3, execute=False,
+    )
+    assert dry_again["checkpoint_sha256"] == dry["checkpoint_sha256"]
     with pytest.raises(ValueError, match="output exists"):
         audit_module.audit_checkpoint(
             progress, emulator_root=tmp_path, audit_count=3,
