@@ -360,6 +360,11 @@ class JointActPilotNet(nn.Module):
     @classmethod
     def load(cls, path: Path, *, device: str = "cpu") -> JointActPilotNet:
         checkpoint = torch.load(path, map_location="cpu", weights_only=True)
+        if checkpoint.get("schema") == "sts2-h24-h21-hard-resource-monotone-act-v1":
+            from sts2_ai.training.h24_joint_act_model import H24JointActPilotNet
+            return H24JointActPilotNet.from_checkpoint_data(
+                checkpoint, device=device,
+            )
         if checkpoint.get("schema") == H22_SCHEMA:
             if (checkpoint.get("codec") != H21_CODEC
                     or checkpoint.get("object_schema") != H21_OBJECT_SCHEMA
@@ -451,6 +456,8 @@ class PilotPolicy:
         macro_prior_weight: float = 0.5, remote_actor: Any = None,
         combat_credit_weight: float = 0.25, loss_progress_cap: float = 0.2,
         representation: str = "h16",
+        h24_selection: dict[str, bool] | None = None,
+        h24_vocabulary: dict[str, tuple[str, ...]] | None = None,
     ) -> None:
         if not 0 <= horizon_lambda <= 1 or temperature <= 0 or macro_prior_weight < 0:
             raise ValueError("Invalid pilot continuation/policy weighting")
@@ -462,6 +469,10 @@ class PilotPolicy:
         if (representation not in ("h16", "h21")
                 or (model is not None and model.representation != representation)):
             raise ValueError("Joint policy representation/model mismatch")
+        if (h24_selection is None) != (h24_vocabulary is None):
+            raise ValueError("H24 actor needs selection and vocabulary together")
+        self.h24_selection = h24_selection
+        self.h24_vocabulary = h24_vocabulary
         self.representation = representation
         self.model = model.eval() if model is not None else None
         self.remote_actor = remote_actor
@@ -496,7 +507,21 @@ class PilotPolicy:
             raise ValueError("Nonterminal inference needs a legal menu")
         started = time.perf_counter()
         public = public_state(observation)
-        encoded = encode_joint_decision(public, actions, representation=self.representation)
+        if self.model is not None:
+            encoded = self.model.encode_decision(public, actions)
+        elif self.h24_selection is not None:
+            from sts2_ai.training.h24_applicability import ResourceConstraintSelection
+            from sts2_ai.training.h24_joint_act_model import encode_h24_joint_decision
+            from sts2_ai.training.h24_resource_monotone import SafeResourceVocabulary
+            encoded = encode_h24_joint_decision(
+                public, actions,
+                selection=ResourceConstraintSelection(**self.h24_selection),
+                vocabulary=SafeResourceVocabulary(**self.h24_vocabulary),
+            )
+        else:
+            encoded = encode_joint_decision(
+                public, actions, representation=self.representation,
+            )
         if self.remote_actor is not None:
             raw_scores, value = self.remote_actor.infer(encoded)
         else:
@@ -896,13 +921,16 @@ def train_joint_cohort(
             or (hp_reference is not None
                 and (type(hp_reference) is not int or hp_reference <= 0))):
         raise ValueError("Invalid joint training configuration")
+    act_only = bool(getattr(model, "h24_act_only", False))
     current_lambda = horizon_lambda if hp_target == "geometric" else 0.0
     entries: list[tuple[PilotDecision, float, tuple[float, ...], float | None]] = []
     for episode in episodes:
         if not episode.complete:
             raise ValueError("Censored episodes cannot train geometric returns")
-        completed = completed_room_hp(
-            episode.frames, hp_reference=hp_reference,
+        completed = (
+            None if act_only else completed_room_hp(
+                episode.frames, hp_reference=hp_reference,
+            )
         )
         act = float(episode.outcome == "act_clear")
         quality_by_index: dict[int, float] = {}
@@ -910,7 +938,8 @@ def train_joint_cohort(
             for index in range(result.start, result.end):
                 quality_by_index[index] = result.quality(loss_progress_cap)
         for i, decision in enumerate(episode.decisions):
-            rooms = remaining_room_hp(episode.frames[i], completed)
+            rooms = (() if completed is None else
+                     remaining_room_hp(episode.frames[i], completed))
             combat = isinstance(episode.frames[i].get("combat"), dict)
             if combat and i not in quality_by_index:
                 raise ValueError("Complete episode has unlabelled combat decisions")
@@ -942,20 +971,25 @@ def train_joint_cohort(
                 ) for decision, _, _, _ in chunk
             ]
             batch = model.collate(encoded).to(device)
-            aux_lambdas = torch.tensor(
-                [rng.random() for _ in chunk],
-                dtype=torch.float32, device=device,
-            )
-            logits, act_logit, hp_logit, aux_hp_logit = model(
-                batch, value_logits=True, horizon_lambda=current_lambda,
-                auxiliary_lambda=aux_lambdas,
-            )
-            # Report non-finite values *before* launching CUDA BCE kernels;
-            # a failed CUDA device assertion invalidates the whole process.
+            if act_only:
+                logits, act_logit, hp_logit = model(
+                    batch, value_logits=True, horizon_lambda=current_lambda,
+                )
+            else:
+                aux_lambdas = torch.tensor(
+                    [rng.random() for _ in chunk],
+                    dtype=torch.float32, device=device,
+                )
+                logits, act_logit, hp_logit, aux_hp_logit = model(
+                    batch, value_logits=True, horizon_lambda=current_lambda,
+                    auxiliary_lambda=aux_lambdas,
+                )
+            # Check CUDA logits before launching BCE kernels.
             if (not bool(torch.isfinite(logits[batch.action_mask]).all())
                     or not bool(torch.isfinite(act_logit).all())
                     or not bool(torch.isfinite(hp_logit).all())
-                    or not bool(torch.isfinite(aux_hp_logit).all())):
+                    or (not act_only
+                        and not bool(torch.isfinite(aux_hp_logit).all()))):
                 phases = [enc.phase for enc in encoded]
                 floors = [
                     public_state(decision.observation).get("floor")
@@ -967,8 +1001,9 @@ def train_joint_cohort(
                     f"floors={floors}, action_lengths="
                     f"{[len(d.legal_actions) for d, _, _, _ in chunk]}"
                 )
-            hp_hat = torch.sigmoid(hp_logit)
-            aux_hp_hat = torch.sigmoid(aux_hp_logit)
+            if not act_only:
+                hp_hat = torch.sigmoid(hp_logit)
+                aux_hp_hat = torch.sigmoid(aux_hp_logit)
             offsets = torch.zeros_like(logits)
             for i, (decision, _, _, _) in enumerate(chunk):
                 offsets[i, :len(decision.macro_offset)] = torch.tensor(
@@ -987,43 +1022,55 @@ def train_joint_cohort(
             entropy = -(probabilities * logp).masked_fill(
                 ~batch.action_mask, 0.0,
             ).sum(dim=1).mean()
-            aux_values = aux_lambdas.detach().cpu().tolist()
-            targets = torch.tensor(
-                [
-                    [
-                        act,
-                        combat_shaped_hp_return(
-                            room_hp, act, current_lambda,
-                            combat_quality=quality,
-                            combat_credit_weight=combat_credit_weight,
-                        ),
-                        combat_shaped_hp_return(
-                            room_hp, act, aux,
-                            combat_quality=quality,
-                            combat_credit_weight=combat_credit_weight,
-                        ),
-                    ]
-                    for (_, act, room_hp, quality), aux in zip(
-                        chunk, aux_values, strict=True,
-                    )
-                ],
+            from torch.nn import functional as F
+            target_act = torch.tensor(
+                [act for _, act, _, _ in chunk],
                 dtype=logits.dtype, device=device,
             )
-            target_act, target_hp, target_aux_hp = (
-                targets[:, 0], targets[:, 1], targets[:, 2],
-            )
-            from torch.nn import functional as F
-            # Logit-space BCE avoids the fragile CUDA probability-range
-            # assertion and retains gradients at saturated predictions.
+            # Terminal Act-clear is the only H24 Act-only critic target.
             act_loss = F.binary_cross_entropy_with_logits(
                 act_logit, target_act,
             )
-            hp_loss = (
-                F.mse_loss(hp_hat, target_hp)
-                + auxiliary_horizon_weight * F.mse_loss(aux_hp_hat, target_aux_hp)
-            )
-            mixed_target = target_hp
-            mixed_value = hp_hat.detach()
+            if act_only:
+                hp_loss = act_loss.new_zeros(())
+                mixed_target = torch.tensor(
+                    [
+                        ((1.0 - combat_credit_weight) * act
+                         + combat_credit_weight * quality)
+                        if quality is not None else act
+                        for _, act, _, quality in chunk
+                    ], dtype=logits.dtype, device=device,
+                )
+                mixed_value = torch.sigmoid(act_logit).detach()
+            else:
+                aux_values = aux_lambdas.detach().cpu().tolist()
+                targets = torch.tensor(
+                    [
+                        [
+                            combat_shaped_hp_return(
+                                room_hp, act, current_lambda,
+                                combat_quality=quality,
+                                combat_credit_weight=combat_credit_weight,
+                            ),
+                            combat_shaped_hp_return(
+                                room_hp, act, aux,
+                                combat_quality=quality,
+                                combat_credit_weight=combat_credit_weight,
+                            ),
+                        ]
+                        for (_, act, room_hp, quality), aux in zip(
+                            chunk, aux_values, strict=True,
+                        )
+                    ], dtype=logits.dtype, device=device,
+                )
+                hp_loss = (
+                    F.mse_loss(hp_hat, targets[:, 0])
+                    + auxiliary_horizon_weight * F.mse_loss(
+                        aux_hp_hat, targets[:, 1],
+                    )
+                )
+                mixed_target = targets[:, 0]
+                mixed_value = hp_hat.detach()
             ordinary: dict[str, list[Tensor]] = {"macro": [], "combat": []}
             search_ce: list[Tensor] = []
             for i, ((decision, _, _, _), enc) in enumerate(zip(chunk, encoded, strict=True)):
@@ -1090,6 +1137,7 @@ def train_joint_cohort(
         "loss_progress_cap": loss_progress_cap,
         "horizon_lambda": current_lambda,
         "hp_reference": hp_reference,
+        **({"value_objective": "act_clear_only"} if act_only else {}),
         "effective_horizon": (1.0 / (1.0 - current_lambda)
                               if current_lambda < 1.0 else None),
     }

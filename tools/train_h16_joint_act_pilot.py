@@ -22,8 +22,10 @@ import os
 import random
 import tempfile
 import time
-from concurrent.futures import ProcessPoolExecutor
+from collections.abc import Callable
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from contextlib import nullcontext
+from dataclasses import asdict
 from dataclasses import replace as dataclass_replace
 from pathlib import Path
 from typing import Any
@@ -59,6 +61,9 @@ from sts2_ai.training.h17_replay import (
     sample_replay,
     write_replay,
 )
+from sts2_ai.training.h24_applicability import ResourceConstraintSelection
+from sts2_ai.training.h24_joint_act_model import H24_SCHEMA, H24JointActPilotNet
+from sts2_ai.training.h24_resource_monotone import SafeResourceVocabulary
 
 _WORKER: dict[str, Any] = {}
 
@@ -121,6 +126,8 @@ def _worker_init(config: dict[str, Any]) -> None:
         remote_actor=remote,
         combat_credit_weight=config["combat_credit_weight"],
         loss_progress_cap=config["loss_progress_cap"],
+        h24_selection=config.get("h24_selection"),
+        h24_vocabulary=config.get("h24_vocabulary"),
     )
     emulator = JsonlEmulatorBackend(
         repo_root=Path(config["ai_root"]),
@@ -180,10 +187,19 @@ def _worker_run(seed: str) -> PilotEpisode:
 def collect(
     args: argparse.Namespace, checkpoint: Path, *,
     seeds: list[str], horizon_lambda: float, search: bool,
+    heartbeat: Callable[[dict[str, Any]], None] | None = None,
 ) -> list[PilotEpisode]:
     cfg = {
         "checkpoint": str(checkpoint.resolve()),
         "representation": getattr(args, "representation", "h16"),
+        "h24_selection": (
+            asdict(ResourceConstraintSelection()) if getattr(args, "h24", False)
+            else None
+        ),
+        "h24_vocabulary": (
+            asdict(SafeResourceVocabulary()) if getattr(args, "h24", False)
+            else None
+        ),
         "checkpoint_sha256": sha256(checkpoint),
         "macro_model": str(args.macro_model.resolve()) if args.macro_model else None,
         "ai_root": str(args.ai_root.resolve()),
@@ -238,7 +254,42 @@ def collect(
             mp_context=multiprocessing.get_context("spawn"),
             initializer=_worker_init, initargs=(cfg,),
         ) as pool:
-            episodes = list(pool.map(_worker_run, seeds, chunksize=1))
+            if heartbeat is None:
+                episodes = list(pool.map(_worker_run, seeds, chunksize=1))
+            else:
+                started = time.perf_counter()
+                pending = {
+                    pool.submit(_worker_run, seed): i
+                    for i, seed in enumerate(seeds)
+                }
+                ordered: list[PilotEpisode | None] = [None] * len(seeds)
+                completed = searches = search_transitions = inference_calls = 0
+                def emit() -> None:
+                    heartbeat({
+                        "elapsed_seconds": round(time.perf_counter() - started, 1),
+                        "completed_episodes": completed,
+                        "total_episodes": len(seeds),
+                        "unfinished_episodes": len(pending),
+                        "search_roots_finished_episodes": searches,
+                        "search_transitions_finished_episodes": search_transitions,
+                        "actor_inference_calls_finished_episodes": inference_calls,
+                    })
+                emit()
+                while pending:
+                    done, _ = wait(
+                        pending, timeout=args.progress_heartbeat_seconds,
+                        return_when=FIRST_COMPLETED,
+                    )
+                    for future in done:
+                        i = pending.pop(future)
+                        episode = future.result()
+                        ordered[i] = episode
+                        completed += 1
+                        searches += episode.searches
+                        search_transitions += episode.search_transitions
+                        inference_calls += episode.actor_inference_calls
+                    emit()
+                episodes = [episode for episode in ordered if episode is not None]
     if shared is not None and episodes:
         episodes[0] = dataclass_replace(
             episodes[0], actor_service_profile=shared.metrics,
@@ -435,6 +486,16 @@ def main() -> None:
     start.add_argument("--initial-h22", type=Path,
                        help="Initialize a fresh H21 training run from a trained H22 model")
     p.add_argument("--macro-model", type=Path, default=None)
+    p.add_argument(
+        "--h24", action="store_true",
+        help="Opt-in H24 hard monotone Act-clear critic (HP+gold only initially; "
+             "certified potion list empty; relics OFF). Requires --initial-h22.",
+    )
+    p.add_argument(
+        "--h24-search-act-mix", type=float, default=0.0,
+        help="Experimental Act-clear critic blend in PUCT leaf values (0 is "
+             "controlled HP-only search; H22 default behavior unchanged).",
+    )
     p.add_argument("--representation", choices=("h16", "h21"), default="h16",
                    help="Opt-in H21 owner-linked map/offer graph codec and joint model")
     p.add_argument("--emulator-root", type=Path, required=True)
@@ -465,6 +526,10 @@ def main() -> None:
              "the elapsed wall budget is exceeded; never interrupt a round.",
     )
     p.add_argument("--workers", type=int, default=15)
+    p.add_argument(
+        "--progress-heartbeat-seconds", type=float, default=20.0,
+        help="Live per-stage progress heartbeat; operational, not part of fingerprint",
+    )
     p.add_argument(
         "--rollout-transport", choices=("legacy", "fused"), default="fused",
         help="Compare original multi-request frames to fused rollout frames.",
@@ -503,6 +568,11 @@ def main() -> None:
                    help="Combat-win/loss-progress share of combat horizon target")
     p.add_argument("--loss-progress-cap", type=float, default=0.2,
                    help="Max combat progress label on defeat; victory label is 1")
+    p.add_argument(
+        "--h24-act-only", action="store_true",
+        help="H24 only: train terminal Act-clear critic; use monotone Act value "
+             "for PUCT and policy baselines; remove all future-HP losses",
+    )
     p.add_argument("--auxiliary-horizon-weight", type=float, default=0.5,
                    help="Weight of extra random-lambda critic regression")
     p.add_argument("--macro-prior-weight", type=float, default=0.5)
@@ -549,6 +619,8 @@ def main() -> None:
             args.max_decisions, args.search_start_round,
             args.simulations, args.max_simulation_steps, args.minibatch, args.epochs,
             args.actor_max_batch) <= 0
+            or not math.isfinite(args.progress_heartbeat_seconds)
+            or args.progress_heartbeat_seconds <= 0
             or args.search_depth < 0
             or (args.search_depth == 0 and not args.h17_adaptive)
             or not 0 <= args.ascension <= 10
@@ -595,6 +667,12 @@ def main() -> None:
         p.error("Invalid H16 pilot configuration")
     if args.initial_h22 is not None and args.representation != "h21":
         p.error("--initial-h22 requires --representation h21")
+    if (args.h24 and (args.initial_h22 is None or args.representation != "h21")
+            or not 0 <= args.h24_search_act_mix <= 1
+            or (not args.h24 and (args.h24_search_act_mix != 0.0
+                                   or args.h24_act_only))
+            or (args.h24_act_only and args.h24_search_act_mix != 1.0)):
+        p.error("H24 requires --initial-h22, H21, and a valid H24-only Act mix")
     if args.h17_adaptive:
         AdaptiveSearch(args.h17_search_p16, args.h17_search_p64)
         if args.initial_h16 is None and args.initial_h22 is None:
@@ -605,7 +683,8 @@ def main() -> None:
         if path is not None and not path.is_file():
             p.error(f"Missing checkpoint: {path}")
     source = {
-        "schema": H22_SCHEMA if args.representation == "h21" else SCHEMA,
+        "schema": (H24_SCHEMA if args.h24
+                   else H22_SCHEMA if args.representation == "h21" else SCHEMA),
         "map_profile": (
             EXPERIMENTAL_FIXED_ROUTE_PROFILE
             if args.map_profile == "fixed-route"
@@ -626,6 +705,7 @@ def main() -> None:
                 "initial_h16", "initial_h22", "macro_model",
                 "emulator_root", "ai_root", "device",
                 "stop_after_round", "max_wall_seconds",
+                "progress_heartbeat_seconds",
             ) and (key != "actor_fixed_shape_batch_size" or value != 0) and (
                 key != "actor_h21_collator" or value != "reference"
             ) and (
@@ -636,6 +716,8 @@ def main() -> None:
                 key != "heldout_every_rounds" or value != 1
             ) and (
                 key != "representation" or value != "h16"
+            ) and (
+                key not in ("h24", "h24_search_act_mix", "h24_act_only") or args.h24
             ) and (
                 key not in ("ascension", "map_profile")
                 or args.ascension != 10
@@ -686,13 +768,29 @@ def main() -> None:
         model = JointActPilotNet.load(committed_model, device=args.device)
         if model.representation != args.representation:
             p.error("Resume checkpoint representation differs from experiment")
+        if bool(getattr(model, "h24_enabled", False)) != args.h24:
+            p.error("Resume checkpoint H24 critic schema differs from experiment")
+        if bool(getattr(model, "h24_act_only", False)) != args.h24_act_only:
+            p.error("Resume checkpoint H24 objective differs from experiment")
     else:
         if progress_path.exists() or optimizer_path.exists():
             p.error("Output contains an existing run; use --resume or a new directory")
         if args.representation == "h21":
             if args.initial_h22 is not None:
                 try:
-                    model = load_h22_initial(args.initial_h22, device=args.device)
+                    initial_h22_model = load_h22_initial(
+                        args.initial_h22, device=args.device,
+                    )
+                    model = (
+                        H24JointActPilotNet.warmstart_h22(
+                            initial_h22_model,
+                            selection=ResourceConstraintSelection(),
+                            vocabulary=SafeResourceVocabulary(),
+                            search_act_mix=args.h24_search_act_mix,
+                            act_only=args.h24_act_only,
+                        ).to(args.device)
+                        if args.h24 else initial_h22_model
+                    )
                 except ValueError as error:
                     p.error(str(error))
             else:
@@ -738,10 +836,19 @@ def main() -> None:
             fingerprint=fingerprint, expected_round=len(history),
         ) if args.h17_adaptive and history else []
     )
+    def live_monitor(stage: str, round_number: int) -> Callable[[dict[str, Any]], None]:
+        def emit(metrics: dict[str, Any]) -> None:
+            write_json(root / "live.json", {
+                "stage": stage, "round": round_number,
+                "timestamp_unix": time.time(), **metrics,
+            })
+        return emit
+
     if not history:
         model.save(actor_path)
         baseline = collect(
             args, actor_path, seeds=heldout,
+            heartbeat=live_monitor("baseline", 0) if args.h24 else None,
             horizon_lambda=(
                 args.evaluation_horizon_lambda
                 if args.evaluation_horizon_lambda is not None else 0.0
@@ -771,6 +878,7 @@ def main() -> None:
         collect_started = time.perf_counter()
         train = collect(
             args, actor_path, horizon_lambda=horizon_lambda,
+            heartbeat=live_monitor("training", round_index + 1) if args.h24 else None,
             seeds=[
                 f"{namespace}-train-{args.study_seed}-r{round_index}-{i}"
                 for i in range(args.runs_per_round)
@@ -784,6 +892,8 @@ def main() -> None:
                 "All Act trajectories censored; no valid terminal labels"
             )
         update_started = time.perf_counter()
+        if args.h24:
+            live_monitor("optimization", round_index + 1)({})
         report = train_joint_cohort(
             model, optimizer, completed,
             horizon_lambda=horizon_lambda,
@@ -834,6 +944,7 @@ def main() -> None:
         evaluation = (
             collect(
                 args, actor_path, seeds=heldout,
+                heartbeat=live_monitor("heldout", round_index + 1) if args.h24 else None,
                 horizon_lambda=(
                     args.evaluation_horizon_lambda
                     if args.evaluation_horizon_lambda is not None else horizon_lambda
@@ -906,6 +1017,11 @@ def main() -> None:
         if args.h17_adaptive and len(history) >= 3:
             prior = root / "replay" / f"r{len(history)-2:04d}.json.gz"
             prior.unlink(missing_ok=True)
+        if args.h24:
+            live_monitor("round_committed", round_index + 1)({
+                "completed_rounds": len(history),
+                "checkpoint": str(model_path),
+            })
         print("[h16-act1-joint] " + json.dumps(row, sort_keys=True), flush=True)
         if (args.max_wall_seconds is not None
                 and time.perf_counter() - wall_started >= args.max_wall_seconds):

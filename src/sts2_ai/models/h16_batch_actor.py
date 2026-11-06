@@ -271,9 +271,14 @@ def _serve(
                             batch_histogram[count_key] = (
                                 batch_histogram.get(count_key, 0) + 1
                             )
-                        host = (h21_collate(frames, **padding)
-                                if model.representation == "h21"
-                                else prepare_h7_actor_packed(frames, **padding))
+                        host = (
+                            model.collate(frames, packed=(h21_collator == "packed"),
+                                          **padding)
+                            if getattr(model, "h24_enabled", False)
+                            else (h21_collate(frames, **padding)
+                                  if model.representation == "h21"
+                                  else prepare_h7_actor_packed(frames, **padding))
+                        )
                         host_elapsed = time.perf_counter() - started
                         stats["host_collate_seconds"] += host_elapsed
                         observe("host_collate_ms", host_elapsed)
@@ -296,8 +301,13 @@ def _serve(
                         if (verify_batch_parity and len(actual_work) > 1
                                 and parity["samples"] < parity["limit"]):
                             sample = real_frames[0]
-                            single = (h21_collate([sample]) if model.representation == "h21"
-                                      else prepare_h7_actor_packed([sample])).to(device)
+                            single = (
+                                model.collate([sample], packed=(h21_collator == "packed"))
+                                if getattr(model, "h24_enabled", False)
+                                else (h21_collate([sample])
+                                      if model.representation == "h21"
+                                      else prepare_h7_actor_packed([sample]))
+                            ).to(device)
                             single_logits, _, single_hp = model(
                                 single, horizon_lambda=horizon_lambda,
                             )
