@@ -77,6 +77,27 @@ def _atomic_torch_save(value: dict[str, Any], path: Path) -> None:
     os.replace(pending, path)
 
 
+def prune_h25_checkpoints(
+    root: Path, *, newest: int, keep_last: int = 3, archive_every: int = 25,
+) -> list[str]:
+    """After commit, retain recent checkpoints and periodic historical samples."""
+    if newest < 1 or keep_last < 1 or archive_every < 1:
+        raise ValueError("Invalid H25 checkpoint retention")
+    removed: list[str] = []
+    for path in (root / "models").glob("*.pt"):
+        prefix, sep, suffix = path.stem.rpartition("-r")
+        if not sep or prefix not in ("macro", "combat", "optimizers"):
+            continue
+        if not suffix.isdigit():
+            continue
+        number = int(suffix)
+        if number >= newest - keep_last + 1 or number % archive_every == 0:
+            continue
+        path.unlink()
+        removed.append(path.name)
+    return removed
+
+
 def _stable_identity(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "schema": H25_SCHEMA,
@@ -219,6 +240,10 @@ def _args() -> argparse.Namespace:
     p.add_argument("--max-simulation-steps", type=int, default=512)
     p.add_argument("--max-decisions", type=int, default=4096)
     p.add_argument("--heartbeat-seconds", type=float, default=20.0)
+    p.add_argument("--keep-last-rounds", type=int, default=3,
+                   help="Keep latest N immutable checkpoints for recovery")
+    p.add_argument("--archive-every-rounds", type=int, default=25,
+                   help="Retain periodic historical checkpoints every N rounds")
     p.add_argument("--device", default="cuda")
     p.add_argument("--max-wall-seconds", type=float, default=None,
                    help="Stop after a committed round at cumulative active wall budget")
@@ -238,6 +263,7 @@ def _args() -> argparse.Namespace:
             or not math.isfinite(args.heartbeat_seconds)
             or args.heartbeat_seconds <= 0 or args.lr <= 0
             or args.study_seed < 0
+            or min(args.keep_last_rounds, args.archive_every_rounds) <= 0
             or (args.max_wall_seconds is not None
                 and (not math.isfinite(args.max_wall_seconds)
                      or args.max_wall_seconds <= 0))):
@@ -414,6 +440,11 @@ def main() -> None:
             "elapsed_wall_seconds": elapsed_total,
             "rounds": history,
         })
+        # Retention runs only after the latest progress.json commit.
+        pruned = prune_h25_checkpoints(
+            root, newest=round_number, keep_last=args.keep_last_rounds,
+            archive_every=args.archive_every_rounds,
+        )
         print("[h25] " + json.dumps({
             "round": round_number,
             "train_cleared": row["train"]["cleared"],
@@ -424,6 +455,7 @@ def main() -> None:
             "macro_steps": macro_update["steps"] if macro_update else 0,
             "collection_seconds": collection_seconds,
             "elapsed_wall_seconds": round(elapsed_total, 1),
+            "pruned_checkpoints": len(pruned),
         }), flush=True)
         if (args.max_wall_seconds is not None
                 and elapsed_total >= args.max_wall_seconds):
