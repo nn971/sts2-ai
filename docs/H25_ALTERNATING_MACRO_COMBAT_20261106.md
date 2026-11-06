@@ -1,6 +1,6 @@
 # H25 — alternating macro reinforcement / full-depth combat distillation
 
-**Stage:** isolated experimental pilot on H24. Draft PR #175, stacked on
+**Stage:** isolated experimental pilot on H24; v2 adds a separate macro floor-progress critic. Draft PR #175, stacked on
 H24 PR #174. Source checkpoint: trained H22/H21 R95
 `results/h22-h21-packed-a0-long-v1/models/joint-r0095.pt`.
 
@@ -54,11 +54,43 @@ This HP bias is a learning prior, **not proof that the imperfect macro
 critic ranks all successor states correctly**.
 
 The combat actor learns only from PUCT visit-target cross-entropy.
-The macro actor learns only from terminal Act-clear policy gradient and
-BCE; no future-HP regression objective. Full-Act samples use no combat
+The macro policy learns from both terminal Act-clear reinforcement and graded
+future floor progression, using **two separately calibrated critics**. The
+Act-clear critic is binary BCE and remains the exclusive macro continuation
+value for combat PUCT. The auxiliary floor-progress critic uses MSE and is
+never used by PUCT. No future-HP regression is trained. Full-Act samples use no combat
 PUCT. This is a phase-alternating experiment, not per-round end-to-end
 joint backpropagation. Any PUCT actions are root-conditioned experimental
 targets, potentially privileged under native chance.
+
+## Dense macro supervision (H25 v2)
+
+At a macro decision on floor `f_i` in a completed run, with `F_i`
+the greatest future floor reached, the graded label is
+
+`P_i = clamp((F_i - f_i)/max(1,16-f_i), 0, 1)`.
+
+It takes a nonzero value on many *defeated* runs. A new macro-only head
+`V_progress(s)` estimates `P_i` by MSE. The macro policy advantage is
+
+`A_i = (W - V_clear(s_i)) + 0.25*(P_i - V_progress(s_i))`,
+
+where `W=1` only for a completed Act clear. These values are detached
+during the policy update. The Act-clear critic is trained separately by BCE;
+the progress critic's weight is 0.5 by default. This adds gradient from
+intermediate floor progress while keeping the macro continuation critic's
+meaning precise.
+
+The auxiliary progress target is a heuristic for efficient learning.
+It may prefer a path that reaches a later floor but reduces eventual Act
+clear probability. Its coefficient is deliberately limited, and its
+benefit must be checked against held-out Act clear and floor reach.
+The H24 HP/gold monotonicity applies to the Act-clear critic, not to
+the auxiliary progress head.
+
+The v2 experiment has a new fingerprint and a separate output root.
+Previously committed H25 v1 checkpoints must remain on their own branch/run
+configuration.
 
 ## Very small local test (fish)
 
@@ -83,11 +115,12 @@ The first command prints the fingerprint without executing. Add
 can be significantly more expensive than the H24 smoke; this pilot
 tests replay fidelity and training integration, not high throughput.
 
-For a bounded 15-worker first experiment, use a distinct `--output-root`,
-`--workers 15 --runs-per-round 8 --heldout-runs 4 --rounds 4`,
-`--combat-fights-per-run 1 --combat-simulations 16` and fixed-shape
-batch 4. It contains up to 8 searched fights per round, but *unlimited
-eligible roots within each sampled fight*.
+For the v2 production experiment, use a distinct `--output-root`,
+`--workers 15 --runs-per-round 64 --heldout-runs 16`, and at least
+`--combat-simulations 64`. A separate 128-simulation experiment can be
+run under another output root. All eligible roots within each sampled fight
+receive the selected fixed simulation budget. An isolated 8-simulation
+configuration remains valid **only for cheap integration smoke tests**.
 
 ### Live monitoring
 
@@ -105,25 +138,28 @@ Round-level outcomes and model checkpoints are committed to
 ## Eight-hour combat-first experiment (fish)
 
 This uses a **new study seed** instead of the H22 R95 selection/evaluation
-cohort, 15 workers, a fixed 16-simulation budget at **every** eligible
-decision in one sampled fight from each full-Act run, and no tree search
-during full-Act rollout. The macro network updates every fourth round.
+cohort, 15 workers, **64 full-Act runs per round**, and **64 simulations
+at every eligible decision** in one sampled fight per run (128 can be tested
+in a separate experiment). Full-Act collection does no PUCT. The macro
+network updates every fourth round, using a dense floor-progress auxiliary
+signal in addition to terminal Act-clear outcomes.
 
     cd ~/projects/sts2-ai
     git pull --ff-only
     set emu ~/projects/sts2-emulator
     set rev (git -C $emu rev-parse HEAD)
     set h22 results/h22-h21-packed-a0-long-v1/models/joint-r0095.pt
-    set long_out results/h25-a0-combat-first-8h-v1
+    set long_out results/h25-a0-combat-first-8h-v2-p64
     set long_args \\
         --initial-h22 $h22 \\
         --emulator-root $emu --emulator-revision $rev \\
         --output-root $long_out \\
         --rounds 4096 --max-wall-seconds 28800 \\
-        --runs-per-round 16 --heldout-runs 8 --workers 15 \\
+        --runs-per-round 64 --heldout-runs 16 --workers 15 \\
         --study-seed 20261209 \\
-        --combat-fights-per-run 1 --combat-simulations 16 \\
+        --combat-fights-per-run 1 --combat-simulations 64 \\
         --combat-hp-bias 0.15 --macro-update-every 4 \\
+        --macro-progress-weight 0.25 --macro-progress-loss-weight 0.5 \\
         --actor-max-batch 4 --actor-fixed-shape-batch-size 4 \\
         --heartbeat-seconds 20 \\
         --keep-last-rounds 3 --archive-every-rounds 25 \\
@@ -131,7 +167,7 @@ during full-Act rollout. The macro network updates every fourth round.
 
     python tools/train_h25_alternating_a0.py $long_args
     python -u tools/train_h25_alternating_a0.py \\
-        $long_args --execute 2>&1 | tee results/h25-a0-combat-first-8h-v1.log
+        $long_args --execute 2>&1 | tee results/h25-a0-combat-first-8h-v2-p64.log
 
 The dry run prints the fingerprint. The executable call should run in tmux
 (or an equivalently persistent terminal). For interruption recovery, repeat
@@ -143,12 +179,12 @@ is **total committed training wall time** across resumes.
 A dashboard in another terminal:
 
     python -u tools/monitor_h25.py \\
-        --root results/h25-a0-combat-first-8h-v1 --interval 30
+        --root results/h25-a0-combat-first-8h-v2-p64 --interval 30
 
 One-shot output:
 
     python tools/monitor_h25.py \\
-        --root results/h25-a0-combat-first-8h-v1 --once
+        --root results/h25-a0-combat-first-8h-v2-p64 --once
 
 The dashboard shows round clear counts, heldout floor reach, PUCT roots,
 transitions, update steps, live worker completion, and the most recent
