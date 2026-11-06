@@ -5,9 +5,9 @@ from dataclasses import replace
 import pytest
 
 from sts2_ai.training.h24_applicability import (
+    REQUIRED,
     ResourceAuthority,
     ResourceConstraintSelection,
-    REQUIRED,
     audit_public_pair,
 )
 
