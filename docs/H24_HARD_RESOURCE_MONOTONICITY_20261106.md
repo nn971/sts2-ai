@@ -59,9 +59,10 @@ resource-neutral context, prove its equality on synthetic certified public
 pairs, and fail closed on any field or relationship that still leaks x.
 Retain full H21 policy/action input. Record the resulting actor speed cost.
 
-The Act-clear head receives selected certified coordinates. **Default H24 resource switches:** HP on, gold on, certified potion presence on, **relic hard monotonicity off**. The potion list starts empty until audited, so the default gives no unconditional potion inequality. Relics remain fully visible to policy and unconstrained-value features; a separate explicit opt-in and item-specific mechanics proof are required for a relic-monotone head. The geometric
-future-HP head receives certified HP only; its existing horizon-conditioning,
-random-horizon auxiliary loss and bounded combat-credit target remain.
+The Act-clear head receives selected certified coordinates. **Default H24 resource switches:** HP on, gold on, certified potion presence on, **relic hard monotonicity off**. The potion list starts empty until audited, so the default gives no unconditional potion inequality. Relics remain fully visible to policy and unconstrained-value features; a separate explicit opt-in and item-specific mechanics proof are required for a relic-monotone head. The geometric future-HP head remains unchanged in the initial H24 pilot:
+its behavior-dependent shaped targets are not certified monotone by the
+Act-clear value ordering. Retain its existing horizon-conditioning,
+random-horizon auxiliary loss and bounded combat-credit target.
 The actor retains H22 behavior/search supervision, without fixed per-action
 bonuses that promote hoarding.
 
