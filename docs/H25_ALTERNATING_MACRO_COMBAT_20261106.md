@@ -101,6 +101,59 @@ sampled fight. One individual full-depth root may still run for a long time.
 Round-level outcomes and model checkpoints are committed to
 `progress.json` and `models/` after heldout evaluation.
 
+
+## Eight-hour combat-first experiment (fish)
+
+This uses a **new study seed** instead of the H22 R95 selection/evaluation
+cohort, 15 workers, a fixed 16-simulation budget at **every** eligible
+decision in one sampled fight from each full-Act run, and no tree search
+during full-Act rollout. The macro network updates every fourth round.
+
+    cd ~/projects/sts2-ai
+    git pull --ff-only
+    set emu ~/projects/sts2-emulator
+    set rev (git -C $emu rev-parse HEAD)
+    set h22 results/h22-h21-packed-a0-long-v1/models/joint-r0095.pt
+    set long_out results/h25-a0-combat-first-8h-v1
+    set long_args \\
+        --initial-h22 $h22 \\
+        --emulator-root $emu --emulator-revision $rev \\
+        --output-root $long_out \\
+        --rounds 4096 --max-wall-seconds 28800 \\
+        --runs-per-round 16 --heldout-runs 8 --workers 15 \\
+        --study-seed 20261209 \\
+        --combat-fights-per-run 1 --combat-simulations 16 \\
+        --combat-hp-bias 0.15 --macro-update-every 4 \\
+        --actor-max-batch 4 --actor-fixed-shape-batch-size 4 \\
+        --heartbeat-seconds 20 \\
+        --keep-last-rounds 3 --archive-every-rounds 25 \\
+        --device cuda
+
+    python tools/train_h25_alternating_a0.py $long_args
+    python -u tools/train_h25_alternating_a0.py \\
+        $long_args --execute 2>&1 | tee results/h25-a0-combat-first-8h-v1.log
+
+The dry run prints the fingerprint. The executable call should run in tmux
+(or an equivalently persistent terminal). For interruption recovery, repeat
+the exact parameters with `--resume --execute`; operational wall/heartbeat
+controls are excluded from experiment identity. It resumes from the most
+recent committed macro, combat, and optimizer state. The eight-hour target
+is **total committed training wall time** across resumes.
+
+A dashboard in another terminal:
+
+    python -u tools/monitor_h25.py \\
+        --root results/h25-a0-combat-first-8h-v1 --interval 30
+
+One-shot output:
+
+    python tools/monitor_h25.py \\
+        --root results/h25-a0-combat-first-8h-v1 --once
+
+The dashboard shows round clear counts, heldout floor reach, PUCT roots,
+transitions, update steps, live worker completion, and the most recent
+per-worker root counts. It is read-only and can be stopped independently.
+
 ## Tests and outstanding gates
 
 - Focused CPU unit tests: policy routing, independent macro/combat
@@ -114,6 +167,16 @@ Round-level outcomes and model checkpoints are committed to
 - The initial design **does not auto-switch training focus**. Set
   `--macro-update-every 4` initially; promote to every round only
   after analyzing heldout combat metrics and Act-clear performance.
-- Checkpoint/resume support needs an explicit committed optimizer
-  state protocol before long-duration training. This is a bounded
-  *pilot* entrypoint, not the six-hour production trainer.
+- Every committed round contains separate immutable macro, combat and
+  optimizer snapshots, each SHA-256 verified on resume; the atomic
+  `progress.json` write is the final round-commit marker.
+- `--max-wall-seconds` uses cumulative active wall time across resumes
+  and stops at the **next complete round boundary**. A single unusually
+  long round can exceed the target time; stopping mid-root would discard
+  that round's uncommitted work.
+- To bound disk usage, retain the latest three rounds and checkpoints
+  every 25 rounds by default. Historical metrics are retained in
+  `progress.json`, even for checkpoints pruned from `models/`.
+- Native full-depth scaling is still experimental. Validate the first
+  15-worker cohort's throughput, memory and root progress before leaving
+  the experiment running unattended.
