@@ -32,7 +32,7 @@ Status: first evaluation analyzed; follow-up RNG-isolated boss experiment prepar
 
 ## H23 corrective follow-up
 
-The H23 diagnostic code now accepts opt-in `independent_search_rng` and derives the PUCT seed from (native run seed, decision index) using BLAKE2b, without advancing the outer player action sampler. The historical trainer and older PUCT behavior remain the default. The boss comparison runner opts into independent search RNG, adds the RNG provenance to its identity, and records the first boss root's visit distribution/argmax/chosen probability.
+The H23 diagnostic code now accepts opt-in `independent_search_rng` and derives the PUCT seed from (native run seed, decision index) using BLAKE2b, without advancing the outer player action sampler. The historical trainer and older PUCT behavior remain the default. The boss comparison runner opts into independent search RNG, adds the RNG provenance to its identity, and records the first boss root's search distribution/argmax/chosen probability alongside the frozen actor's action distribution. The report computes total-variation distance between the two policies and whether their greedy actions differ.
 
 Run the follow-up on a **different seed tag and output root**, avoiding collisions with old artifacts:
 
@@ -58,7 +58,7 @@ python -u tools/diagnose_h22_boss_search.py \
     --tag h23-boss-rngisolated-v2 --output-root $boss_out --execute
 ```
 
-The pairwise action-prefix and boss-entry hash checks remain mandatory. Evaluate `boss-comparison.json` for first-action differences, boss wins, enemy HP removed conditional on both losses, visit probabilities, and transition cost. If the search distributions differ but sampled first actions do not, a deliberately separate deterministic-action intervention (e.g. teacher argmax at root) may be needed to identify the teacher's advantage. Do not modify the player's normal evaluation distribution in-place.
+The pairwise action-prefix and boss-entry hash checks remain mandatory. Evaluate `boss-comparison.json` for first-action differences, boss wins, enemy HP removed conditional on both losses, actor-versus-PUCT probability shifts, and transition cost. If the search distributions differ but sampled first actions do not, a deliberately separate deterministic-action intervention (e.g. teacher argmax at root) may be needed to identify the teacher's advantage. Do not modify the player's normal evaluation distribution in-place.
 
 ## Decision
 
