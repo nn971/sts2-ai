@@ -61,6 +61,18 @@ def describe_episode(episode: Any) -> dict[str, Any]:
     ]
     prefix = action_ids if index is None else action_ids[:index]
     first = episode.frames[index] if index is not None else None
+    first_decision = (
+        episode.decisions[index]
+        if index is not None and index < len(episode.decisions)
+        else None
+    )
+    root_policy = (
+        first_decision.search_policy if first_decision is not None else None
+    )
+    root_argmax = (
+        max(range(len(root_policy)), key=lambda i: root_policy[i])
+        if root_policy is not None else None
+    )
     boss_fights = [
         result for result in combat_results(episode.frames, episode.outcome)
         if result.floor == 16
@@ -82,6 +94,23 @@ def describe_episode(episode: Any) -> dict[str, Any]:
         "boss_won": (boss.won if boss is not None else None),
         "first_boss_action": (
             action_ids[index] if index is not None and index < len(action_ids)
+            else None
+        ),
+        "boss_root_legal_actions": (
+            len(first_decision.legal_actions)
+            if first_decision is not None else None
+        ),
+        "boss_root_search_policy": (
+            list(root_policy) if root_policy is not None else None
+        ),
+        "boss_root_search_argmax": (
+            first_decision.legal_actions[root_argmax].action_id
+            if first_decision is not None and root_argmax is not None
+            else None
+        ),
+        "boss_root_search_chosen_mass": (
+            root_policy[first_decision.chosen_index]
+            if root_policy is not None and first_decision is not None
             else None
         ),
         "search_roots": episode.searches,
@@ -135,6 +164,25 @@ def summarize_arm(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "search_roots": sum(r["search_roots"] for r in rows),
         "search_transitions": sum(r["search_transitions"] for r in rows),
         "search_overrides": sum(r["search_overrides"] for r in rows),
+        "boss_roots_with_search_distribution": sum(
+            r["boss_root_search_policy"] is not None for r in reached
+        ),
+        "mean_boss_root_chosen_mass": (
+            statistics.mean(
+                r["boss_root_search_chosen_mass"] for r in reached
+                if r["boss_root_search_chosen_mass"] is not None
+            )
+            if any(r["boss_root_search_chosen_mass"] is not None for r in reached)
+            else None
+        ),
+        "mean_boss_root_max_mass": (
+            statistics.mean(
+                max(r["boss_root_search_policy"]) for r in reached
+                if r["boss_root_search_policy"] is not None
+            )
+            if any(r["boss_root_search_policy"] is not None for r in reached)
+            else None
+        ),
     }
 
 
