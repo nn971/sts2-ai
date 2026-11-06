@@ -739,6 +739,11 @@ def should_search_combat(
     return search_probability >= 1 or rng.random() < search_probability
 
 
+def search_floor_allows(state: dict[str, Any], floor: int | None) -> bool:
+    """Pure H23 eligibility check; call before any PUCT selection RNG draw."""
+    return floor is None or state.get("floor") == floor
+
+
 def collect_act_episode(
     backend: EmulatorBackend, policy: PilotPolicy, *,
     seed: str, ascension: int, max_decisions: int,
@@ -802,7 +807,7 @@ def collect_act_episode(
             search_policy = None
             # H23 diagnostic: preserve the exact unsearched player/RNG
             # prefix before the selected boss floor, including RNG draws.
-            if search_floor is not None and public.get("floor") != search_floor:
+            if not search_floor_allows(public, search_floor):
                 budget = 0
             elif adaptive_search is None:
                 budget = (
