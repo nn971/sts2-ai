@@ -665,6 +665,8 @@ def main() -> None:
             ) and (
                 key != "representation" or value != "h16"
             ) and (
+                key not in ("h24", "h24_search_act_mix") or args.h24
+            ) and (
                 key not in ("ascension", "map_profile")
                 or args.ascension != 10
                 or args.map_profile != "fixed-route"
