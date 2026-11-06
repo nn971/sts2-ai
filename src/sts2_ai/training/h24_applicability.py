@@ -44,6 +44,29 @@ REQUIRED = {
 
 
 @dataclass(frozen=True)
+class ResourceConstraintSelection:
+    """Prospective H24 value constraints; relic ordering is opt-in.
+
+    This does not turn on H24 training. Individual comparisons still need
+    independent authority and pinned mechanics verification.
+    """
+
+    hp: bool = True
+    gold: bool = True
+    potion: bool = True
+    relic: bool = False
+
+    def __post_init__(self) -> None:
+        if any(type(getattr(self, name)) is not bool for name in REQUIRED):
+            raise ValueError("H24 resource switches must be booleans")
+
+    def is_enabled(self, resource: str) -> bool:
+        if resource not in REQUIRED:
+            raise ValueError("Unknown resource")
+        return getattr(self, resource)
+
+
+@dataclass(frozen=True)
 class ResourceAuthority:
     """Separate human verdict from mechanics proof; defaults to none.
 
@@ -76,11 +99,12 @@ class PairAudit:
     missing_user_verdict: tuple[str, ...]
     missing_mechanics_review: tuple[str, ...]
     added_item: str | None = None
+    disabled_by_config: bool = False
 
     @property
     def eligible(self) -> bool:
-        return not (self.structural_failures or self.missing_user_verdict
-                    or self.missing_mechanics_review)
+        return not (self.disabled_by_config or self.structural_failures
+                    or self.missing_user_verdict or self.missing_mechanics_review)
 
 
 def _number(value: Any) -> bool:
@@ -123,6 +147,7 @@ def audit_public_pair(
     lower: Mapping[str, Any], higher: Mapping[str, Any], *,
     resource: str, authority: ResourceAuthority | None = None,
     emulator_revision: str,
+    selection: ResourceConstraintSelection | None = None,
 ) -> PairAudit:
     """Pure structural comparison plus explicit approval/review gates.
 
@@ -135,6 +160,10 @@ def audit_public_pair(
     if not isinstance(lower, Mapping) or not isinstance(higher, Mapping):
         raise TypeError("Need two public state mappings")
     auth = authority or ResourceAuthority()
+    selected = selection if selection is not None else ResourceConstraintSelection()
+    if not isinstance(selected, ResourceConstraintSelection):
+        raise TypeError("Expected H24 resource constraint selection")
+    enabled = selected.is_enabled(resource)
     fail: list[str] = []
     added: str | None = None
     if not emulator_revision or auth.emulator_revision != emulator_revision:
@@ -196,4 +225,4 @@ def audit_public_pair(
             if added not in auth.verified_relics:
                 mechanics_missing.append("R2:item:" + added)
     return PairAudit(resource, tuple(fail), tuple(user_missing),
-                     tuple(mechanics_missing), added)
+                     tuple(mechanics_missing), added, not enabled)
