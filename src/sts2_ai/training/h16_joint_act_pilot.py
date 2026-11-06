@@ -10,6 +10,7 @@ public-history fair posterior. No hidden state is passed to the network.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import random
@@ -389,6 +390,8 @@ class PilotDecision:
     search_policy: tuple[float, ...] | None = None
     predicted_value: float | None = None
     search_simulations: int = 0
+    # Populated only for H23 isolated-RNG root audits; excluded from training.
+    search_actor_reference_policy: tuple[float, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -739,6 +742,19 @@ def should_search_combat(
     return search_probability >= 1 or rng.random() < search_probability
 
 
+def search_floor_allows(state: dict[str, Any], floor: int | None) -> bool:
+    """Pure H23 eligibility check; call before any PUCT selection RNG draw."""
+    return floor is None or state.get("floor") == floor
+
+
+def independent_search_seed(run_seed: str, decision_index: int) -> int:
+    """Isolate H23 PUCT simulation randomness from player action sampling."""
+    if not run_seed or decision_index < 0:
+        raise ValueError("Invalid independent PUCT search seed coordinates")
+    data = f"h23-search-seed-v1|{run_seed}|{decision_index}".encode()
+    return int.from_bytes(hashlib.blake2b(data, digest_size=8).digest(), "big") % (2**63)
+
+
 def collect_act_episode(
     backend: EmulatorBackend, policy: PilotPolicy, *,
     seed: str, ascension: int, max_decisions: int,
@@ -747,6 +763,8 @@ def collect_act_episode(
     rng: random.Random, rollout_transport: str = "fused",
     max_simulation_steps: int = 512,
     adaptive_search: AdaptiveSearch | None = None,
+    search_floor: int | None = None,
+    independent_search_rng: bool = False,
     card_exposure: Mapping[str, int] | None = None,
     map_profile_id: str | None = EXPERIMENTAL_FIXED_ROUTE_PROFILE,
     compact_card_selection: bool = False,
@@ -761,7 +779,10 @@ def collect_act_episode(
             and max_simulation_steps > 0
             and rollout_transport in ("legacy", "fused")
             and type(p2_prefix_cache_handles) is int
-            and p2_prefix_cache_handles >= 0):
+            and p2_prefix_cache_handles >= 0
+            and (search_floor is None or
+                 (type(search_floor) is int and 1 <= search_floor <= 16))
+            and type(independent_search_rng) is bool):
         raise ValueError("Invalid Act collection settings")
     state = reset_training_run(
         backend, seed, NATIVE_OVERGROWTH, ascension,
@@ -797,7 +818,11 @@ def collect_act_episode(
                 raise RuntimeError("Nonterminal run has no legal player actions")
             scores, predicted_value, offsets = policy.infer(observation, actions)
             search_policy = None
-            if adaptive_search is None:
+            # H23 diagnostic: preserve the exact unsearched player/RNG
+            # prefix before the selected boss floor, including RNG draws.
+            if not search_floor_allows(public, search_floor):
+                budget = 0
+            elif adaptive_search is None:
                 budget = (
                     simulations if should_search_combat(
                         public, actions, searches=searches,
@@ -820,7 +845,8 @@ def collect_act_episode(
                 search_policy, count = local_combat_puct(
                     backend, state, observation, actions, policy,
                     simulations=budget, depth=search_depth,
-                    seed=rng.randrange(2**63),
+                    seed=(independent_search_seed(seed, len(decisions))
+                          if independent_search_rng else rng.randrange(2**63)),
                     rollout_transport=rollout_transport,
                     max_simulation_steps=max_simulation_steps,
                     search_profile=search_profile, search_report=search_profiles,
@@ -849,6 +875,8 @@ def collect_act_episode(
             decisions.append(PilotDecision(
                 observation, actions, chosen, offsets, search_policy, predicted_value,
                 budget,
+                (_softmax(scores, policy.temperature)
+                 if independent_search_rng and budget else None),
             ))
             if rollout_transport == "fused":
                 (next_frame,) = backend.batch_rollout_step_frame(

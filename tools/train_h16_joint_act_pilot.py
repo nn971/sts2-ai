@@ -164,6 +164,8 @@ def _worker_run(seed: str) -> PilotEpisode:
         max_simulation_steps=cfg["max_simulation_steps"],
         adaptive_search=(AdaptiveSearch(**cfg["adaptive_search"])
                          if cfg["adaptive_search"] is not None else None),
+        search_floor=cfg.get("search_floor"),
+        independent_search_rng=cfg.get("independent_search_rng", False),
         card_exposure=cfg["card_exposure"],
     )
     return dataclass_replace(
@@ -203,6 +205,9 @@ def collect(
         "search_depth": (
             None if args.search_depth == 0 else args.search_depth
         ),
+        # H23 evaluation-only injected field; ordinary trainer omits it.
+        "search_floor": getattr(args, "search_floor", None),
+        "independent_search_rng": getattr(args, "independent_search_rng", False),
         "max_simulation_steps": args.max_simulation_steps,
         "study_seed": args.study_seed,
         "rollout_transport": args.rollout_transport,
