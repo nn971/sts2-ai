@@ -14,6 +14,8 @@ import hashlib
 import json
 import math
 import multiprocessing
+import os
+import tempfile
 import time
 from collections.abc import Sequence
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
@@ -55,6 +57,24 @@ except ModuleNotFoundError:
     )
 
 H25_SCHEMA = "sts2-h25-independent-macro-combat-all-root-full-depth-v1"
+
+
+def _atomic_torch_save(value: dict[str, Any], path: Path) -> None:
+    """Stage optimizer data in the destination directory and publish atomically."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="wb", dir=path.parent, prefix="." + path.name + "-",
+        suffix=".tmp", delete=False,
+    ) as stream:
+        pending = Path(stream.name)
+        try:
+            torch.save(value, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        except BaseException:
+            pending.unlink(missing_ok=True)
+            raise
+    os.replace(pending, path)
 
 
 def _stable_identity(args: argparse.Namespace) -> dict[str, Any]:
@@ -199,6 +219,10 @@ def _args() -> argparse.Namespace:
     p.add_argument("--max-decisions", type=int, default=4096)
     p.add_argument("--heartbeat-seconds", type=float, default=20.0)
     p.add_argument("--device", default="cuda")
+    p.add_argument("--max-wall-seconds", type=float, default=None,
+                   help="Stop after a committed round at cumulative active wall budget")
+    p.add_argument("--resume", action="store_true",
+                   help="Restore both models and optimizers from the last committed round")
     p.add_argument("--execute", action="store_true")
     args = p.parse_args()
     if (min(args.rounds, args.runs_per_round, args.heldout_runs, args.workers,
@@ -212,7 +236,10 @@ def _args() -> argparse.Namespace:
             or args.actor_fixed_shape_batch_size > args.actor_max_batch
             or not math.isfinite(args.heartbeat_seconds)
             or args.heartbeat_seconds <= 0 or args.lr <= 0
-            or args.study_seed < 0):
+            or args.study_seed < 0
+            or (args.max_wall_seconds is not None
+                and (not math.isfinite(args.max_wall_seconds)
+                     or args.max_wall_seconds <= 0))):
         p.error("Invalid H25 training configuration")
     for name in ("initial_h22", "emulator_root"):
         path = getattr(args, name)
