@@ -33,6 +33,7 @@ from sts2_ai.training.h24_joint_act_model import H24JointActPilotNet
 from sts2_ai.training.h25_alternating import fit_macro_reinforce
 from sts2_ai.training.h26_combat_rl import fit_search_free_combat
 from sts2_ai.training.h26_public_intent_law import (
+    public_intent_coverage,
     validate_public_intent_catalog,
 )
 
@@ -461,6 +462,12 @@ def main() -> None:
             "round": round_number, "train": summarize(train),
             "heldout": summarize(held),
             "combat_search": search,
+            **({
+                "intent_law_coverage": {
+                    "train": public_intent_coverage(train, args._intent_catalog),
+                    "heldout": public_intent_coverage(held, args._intent_catalog),
+                },
+            } if args._intent_catalog is not None else {}),
             "combat_update": combat_update,
             "macro_update": macro_update,
             "timing": {
