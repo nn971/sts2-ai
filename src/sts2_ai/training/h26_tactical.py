@@ -19,6 +19,7 @@ from sts2_ai.models.shared_game_objects import (
     _numbers,
 )
 from sts2_ai.training.h16_episode_metrics import _is_minion
+from sts2_ai.training.h21_macro_offer_codec import H21_OBJECT_LIMIT
 from sts2_ai.training.h24_joint_act_model import H24EncodedDecision
 
 
@@ -96,8 +97,11 @@ def attach_visible_threat(
         numeric=values,
         observed=masks,
     )
-    if len(encoded.objects) >= 256:
-        raise ValueError("H26 tactical token exceeds public object cap")
+    # H21 has an independent 1,536-object limit (H7's legacy cap is 256).
+    # H26 contributes exactly one extra policy object. Appending preserves
+    # all H21 owner indices, relation endpoints and action pointers.
+    if len(encoded.objects) > H21_OBJECT_LIMIT:
+        raise ValueError("Malformed H21 decision already exceeds its object cap")
     return H24EncodedDecision(
         encoded.schema, encoded.phase,
         encoded.objects + (marker,), encoded.actions, encoded.relations,
