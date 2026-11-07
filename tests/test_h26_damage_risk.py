@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+
 from test_h26_intent_law import _catalog
 from test_h26_searchfree import _combat, _models
 
