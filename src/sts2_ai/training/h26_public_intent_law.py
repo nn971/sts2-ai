@@ -10,7 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-SCHEMA = "sts2-h26-public-intent-rules-v1"
+SCHEMA = "sts2-h26-public-intent-rules-v2"
+PREVIOUS_SCHEMA = "sts2-h26-public-intent-rules-v1"
 
 
 @dataclass(frozen=True)
@@ -27,7 +28,9 @@ class PublicNextIntentLaw:
 
 def validate_public_intent_catalog(raw: dict[str, Any]) -> dict[str, Any]:
     """Validate integer grid weights and move identities before training."""
-    if not isinstance(raw, dict) or raw.get("schema") != SCHEMA:
+    if not isinstance(raw, dict) or raw.get("schema") not in (
+        SCHEMA, PREVIOUS_SCHEMA,
+    ):
         raise ValueError("Unexpected H26 public intent rule schema")
     denominator = raw.get("probability_denominator")
     if type(denominator) is not int or denominator <= 0:
@@ -55,6 +58,40 @@ def validate_public_intent_catalog(raw: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("Invalid H26 enemy rule identity or policy")
         seen.add(eid)
         maximum = max(maximum, len(moves))
+        ai = entry.get("ai")
+        if policy == "StateMachine" and raw["schema"] == SCHEMA:
+            if (not isinstance(ai, dict)
+                    or not isinstance(ai.get("initial_state_id"), str)
+                    or not isinstance(ai.get("states"), list)):
+                raise ValueError("V2 state machines require public source AI graph")
+        if ai is not None:
+            if not isinstance(ai, dict):
+                raise ValueError("Malformed public AI graph")
+            states = ai.get("states")
+            if not isinstance(states, list):
+                raise ValueError("Malformed public AI states")
+            state_ids = set()
+            for state in states:
+                if (not isinstance(state, dict)
+                        or not isinstance(state.get("id"), str)
+                        or state["id"] in state_ids
+                        or state.get("kind") not in
+                        ("Move", "Random", "Conditional")
+                        or not isinstance(state.get("branches"), list)
+                        or not isinstance(state.get("conditional_branches"), list)):
+                    raise ValueError("Invalid public AI state")
+                state_ids.add(state["id"])
+                if state["kind"] == "Random":
+                    weights = state["branches"]
+                    total = sum(
+                        b["weight"] for b in weights
+                        if isinstance(b, dict)
+                        and type(b.get("weight")) is int
+                        and b["weight"] > 0
+                    )
+                    maximum = max(maximum, min(total, 256))
+            if ai["initial_state_id"] not in state_ids:
+                raise ValueError("Unknown initial public AI state")
         opener = entry.get("opening_move_indices")
         if (not isinstance(opener, list) or not opener
                 or any(type(x) is not int or not 0 <= x < len(moves)
@@ -64,9 +101,17 @@ def validate_public_intent_catalog(raw: dict[str, Any]) -> dict[str, Any]:
                        for x in ("move_loop_start_index",
                                  "random_move_pool_start_index"))):
             raise ValueError("Invalid H26 enemy move indices")
-    for n in range(1, maximum + 1):
+    # V2 can expose ticket bounds above the move pool size. They are
+    # required only for eligible weighted branches during evaluation.
+    for n in range(1, max(len(e["move_ids"]) for e in entries) + 1):
         mass = weights.get(str(n))
         if (not isinstance(mass, list) or len(mass) != n
+                or any(type(w) is not int or w <= 0 for w in mass)
+                or sum(mass) != denominator):
+            raise ValueError("Native NextInt grid masses do not sum to one")
+    for bound, mass in weights.items():
+        if (not bound.isdigit() or int(bound) <= 0
+                or not isinstance(mass, list) or len(mass) != int(bound)
                 or any(type(w) is not int or w <= 0 for w in mass)
                 or sum(mass) != denominator):
             raise ValueError("Native NextInt grid masses do not sum to one")
@@ -96,8 +141,207 @@ def _mass(
     return result
 
 
+
+def _weighted_mass(
+    candidates: list[tuple[str, int]], catalog: dict[str, Any],
+) -> PublicNextIntentLaw:
+    """Native integer-ticket weights, respecting ordered branch intervals."""
+    total = sum(weight for _, weight in candidates)
+    weights = catalog["native_next_int_weights"].get(str(total))
+    if weights is None:
+        return _unavailable("native_weighted_ticket_bound_unavailable")
+    items: dict[str, int] = {}
+    start = 0
+    for move, raw in candidates:
+        items[move] = items.get(move, 0) + sum(weights[start:start + raw])
+        start += raw
+    if start != total:
+        raise ValueError("Incorrect Native weighted branch interval")
+    return PublicNextIntentLaw(
+        "CONDITIONAL_EXACT",
+        "current_intent_executes_normally_public_conditions_unchanged",
+        catalog["probability_denominator"], tuple(sorted(items.items())),
+    )
+
+
+def _branch_eligibility(
+    branch: dict[str, Any], move_id: str, current: str,
+    executed_moves: tuple[str, ...] | None,
+) -> bool | None:
+    if branch.get("requires_available_summon"):
+        return None  # source additionally uses private coordinated counters
+    repeat = branch.get("repeat_rule")
+    if repeat == "CanRepeatForever":
+        return True
+    if repeat == "CannotRepeat":
+        return move_id != current
+    if repeat == "CanRepeatXTimes":
+        maximum = branch.get("max_times")
+        if type(maximum) is not int or maximum <= 0:
+            return False
+        if move_id != current:
+            return True
+        if maximum == 1:
+            return False
+        if executed_moves is None:
+            return None
+        # The most recent currently announced move is assumed to execute.
+        # Previous moves are recorded only when public turns were observed.
+        n = 1
+        for observed in reversed(executed_moves):
+            if observed != current:
+                break
+            n += 1
+        return n < maximum
+    if repeat == "UseOnlyOnce":
+        if move_id == current:
+            return False
+        if executed_moves is None:
+            return None
+        return move_id not in executed_moves
+    return None
+
+
+def _state_machine_law(
+    rule: dict[str, Any], current: str,
+    catalog: dict[str, Any], *,
+    executed_moves: tuple[str, ...] | None = None,
+    public_enemies: list[dict[str, Any]] | None = None,
+    enemy: dict[str, Any] | None = None,
+) -> PublicNextIntentLaw:
+    ai = rule.get("ai")
+    if not isinstance(ai, dict):
+        return _unavailable("state_machine_public_history_needed")
+    moves = rule["move_ids"]
+    states = ai["states"]
+    by_id = {s["id"]: s for s in states}
+    matches = [
+        s for s in states if s["kind"] == "Move"
+        and type(s.get("move_index")) is int
+        and 0 <= s["move_index"] < len(moves)
+        and moves[s["move_index"]] == current
+    ]
+    # Different move states may have the same visible move ID. In that
+    # case retain only next states uniquely reconstructible from sight.
+    next_ids = {s.get("next_state_id") for s in matches}
+    if not matches or len(next_ids) != 1:
+        return _unavailable("state_machine_current_state_ambiguous")
+    state_id = next(iter(next_ids)) or ai["initial_state_id"]
+    for _ in range(32):
+        state = by_id.get(state_id)
+        if state is None:
+            return _unavailable("state_machine_invalid_next_state")
+        if state["kind"] == "Move":
+            index = state.get("move_index")
+            if type(index) is not int or not 0 <= index < len(moves):
+                return _unavailable("state_machine_invalid_move")
+            return _mass([index], moves, catalog)
+        if state["kind"] == "Random":
+            candidates: list[tuple[str, int]] = []
+            for branch in state["branches"]:
+                target = by_id.get(branch.get("target_state_id"))
+                if target is None or target["kind"] != "Move":
+                    return _unavailable("state_machine_random_target_unverified")
+                index = target.get("move_index")
+                weight = branch.get("weight")
+                if (type(index) is not int or not 0 <= index < len(moves)
+                        or type(weight) is not int):
+                    return _unavailable("state_machine_random_branch_invalid")
+                if weight <= 0:
+                    continue
+                eligible = _branch_eligibility(
+                    branch, moves[index], current, executed_moves,
+                )
+                if eligible is None:
+                    return _unavailable("state_machine_branch_history_needed")
+                if eligible:
+                    candidates.append((moves[index], weight))
+            if not candidates:
+                return _unavailable("state_machine_no_legal_branch")
+            return _weighted_mass(candidates, catalog)
+        if state["kind"] == "Conditional":
+            branches = state["conditional_branches"]
+            selection: str | None = None
+            for branch in branches:
+                outcome = _public_condition(
+                    branch, enemy, public_enemies, executed_moves,
+                    current,
+                )
+                if outcome is None:
+                    return _unavailable("state_machine_condition_history_needed")
+                if outcome:
+                    selection = branch["target_state_id"]
+                    break
+            if selection is None:
+                return _unavailable("state_machine_no_matching_condition")
+            state_id = selection
+            continue
+        return _unavailable("state_machine_unknown_state_kind")
+    return _unavailable("state_machine_resolution_depth_exceeded")
+
+
+def _public_condition(
+    branch: dict[str, Any], enemy: dict[str, Any] | None,
+    enemies: list[dict[str, Any]] | None,
+    executed_moves: tuple[str, ...] | None, current: str,
+) -> bool | None:
+    """Source graph conditions requiring public *post-execution* state.
+
+    If the input only describes the current (pre-execution) player turn,
+    a conditional law assumes those listed public attributes do not
+    change before the next intent is committed.
+    """
+    if enemy is None:
+        return None
+    kind = branch.get("condition")
+    value = branch.get("value")
+    if kind in ("MoveUsedFewerThan", "MoveUsedAtLeast"):
+        if executed_moves is None or not isinstance(value, str) or ":" not in value:
+            return None
+        move, count = value.rsplit(":", 1)
+        if not count.isdigit():
+            return None
+        uses = executed_moves.count(move) + int(move == current)
+        return uses < int(count) if kind == "MoveUsedFewerThan" else uses >= int(count)
+    if kind in ("HpAtLeastHalf", "HpBelowHalf"):
+        hp, maximum = enemy.get("hp"), enemy.get("max_hp")
+        if type(hp) is not int or type(maximum) is not int or maximum <= 0:
+            return None
+        half = maximum // 2
+        return hp >= half if kind == "HpAtLeastHalf" else hp < half
+    if kind in ("HasEnemyPower", "LacksEnemyPower"):
+        powers = enemy.get("powers")
+        if not isinstance(powers, list) or not isinstance(value, str):
+            return None
+        present = any(
+            isinstance(p, dict) and p.get("power_id") == value
+            and type(p.get("stacks")) is int and p["stacks"] > 0
+            for p in powers
+        )
+        return present if kind == "HasEnemyPower" else not present
+    if enemies is None or any(not isinstance(x, dict) for x in enemies):
+        return None
+    living = [e for e in enemies if type(e.get("hp")) is int and e["hp"] > 0]
+    if kind == "IsAlone":
+        return len(living) == 1
+    if kind in ("LivingEnemiesAtMost", "LivingEnemiesGreaterThan"):
+        if not isinstance(value, str) or not value.isdigit():
+            return None
+        return (
+            len(living) <= int(value) if kind == "LivingEnemiesAtMost"
+            else len(living) > int(value)
+        )
+    if kind in ("HasLivingEnemyId", "LacksLivingEnemyId"):
+        present = any(e.get("enemy_id") == value for e in living)
+        return present if kind == "HasLivingEnemyId" else not present
+    # Formation position/slot names and off-balance status need a proved
+    # player-public source projection; decline rather than guess.
+    return None
+
 def next_intent_law(
-    enemy: dict[str, Any], catalog: dict[str, Any],
+    enemy: dict[str, Any], catalog: dict[str, Any], *,
+    executed_moves: tuple[str, ...] | None = None,
+    public_enemies: list[dict[str, Any]] | None = None,
 ) -> PublicNextIntentLaw:
     """Return a certified law only when the visible intent uniquely conditions.
 
@@ -132,9 +376,9 @@ def next_intent_law(
         )
         return _mass([next_index], moves, catalog)
     if policy == "StateMachine":
-        return (
-            _mass([0], moves, catalog) if len(moves) == 1
-            else _unavailable("state_machine_public_history_needed")
+        return _state_machine_law(
+            rule, current, catalog, executed_moves=executed_moves,
+            public_enemies=public_enemies, enemy=enemy,
         )
     if policy != "UniformRandomAfterOpener":
         return _unavailable("unsupported_enemy_policy")
@@ -173,8 +417,18 @@ def next_intent_law(
 
 def summarize_next_intents(
     enemies: list[dict[str, Any]], catalog: dict[str, Any],
+    *, histories: dict[int, tuple[str, ...]] | None = None,
 ) -> tuple[PublicNextIntentLaw, ...]:
-    return tuple(next_intent_law(enemy, catalog) for enemy in enemies)
+    return tuple(
+        next_intent_law(
+            enemy, catalog, public_enemies=enemies,
+            executed_moves=(
+                histories.get(enemy.get("instance_id"))
+                if histories is not None else None
+            ),
+        )
+        for enemy in enemies
+    )
 
 
 def public_intent_coverage(
