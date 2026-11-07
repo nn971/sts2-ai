@@ -32,6 +32,9 @@ from sts2_ai.training.h16_joint_act_pilot import (
 from sts2_ai.training.h24_joint_act_model import H24JointActPilotNet
 from sts2_ai.training.h25_alternating import fit_macro_reinforce
 from sts2_ai.training.h26_combat_rl import fit_search_free_combat
+from sts2_ai.training.h26_public_intent_law import (
+    validate_public_intent_catalog,
+)
 
 try:
     from tools.train_h16_joint_act_pilot import (
@@ -104,6 +107,8 @@ def _stable_identity(args: argparse.Namespace) -> dict[str, Any]:
         "initial_h25_combat_sha256": (
             sha256(args.initial_h25_combat) if args.initial_h25_combat else None
         ),
+        **({"intent_catalog_sha256": sha256(args.intent_catalog)}
+           if args.intent_catalog is not None else {}),
         "emulator_revision": args.emulator_revision,
         "ascension": 0, "map": "native-overgrowth-generated-default-v111",
         "rounds": args.rounds, "runs_per_round": args.runs_per_round,
@@ -145,6 +150,7 @@ def _collect(
         "h25_max_combat_decisions": 256,
         "h26_no_search": True,
         "h26_tactical": True,
+        "h26_intent_catalog": getattr(args, "_intent_catalog", None),
         "max_decisions": args.max_decisions,
         "max_simulation_steps": 512,
         "rollout_transport": "fused",
@@ -221,6 +227,9 @@ def _args() -> argparse.Namespace:
     p.add_argument("--initial-h22", type=Path, required=True)
     p.add_argument("--initial-h25-macro", type=Path)
     p.add_argument("--initial-h25-combat", type=Path)
+    p.add_argument("--intent-catalog", type=Path,
+                   help="Source-defined public enemy intent catalog JSON from "
+                        "emulator public-intent-catalog-v111 CLI")
     p.add_argument("--emulator-root", type=Path, required=True)
     p.add_argument("--emulator-revision", required=True)
     p.add_argument("--output-root", type=Path, required=True)
@@ -276,7 +285,8 @@ def _args() -> argparse.Namespace:
                      or args.max_wall_seconds <= 0))):
         p.error("Invalid H26 training configuration")
     for name in (
-        "initial_h22", "emulator_root", "initial_h25_macro", "initial_h25_combat",
+        "initial_h22", "emulator_root", "initial_h25_macro",
+        "initial_h25_combat", "intent_catalog",
     ):
         path = getattr(args, name)
         if path is not None and not path.exists():
@@ -286,7 +296,15 @@ def _args() -> argparse.Namespace:
 
 def main() -> None:
     args = _args()
+    if args.intent_catalog is not None:
+        args._intent_catalog = validate_public_intent_catalog(
+            json.loads(args.intent_catalog.read_text())
+        )
+    else:
+        args._intent_catalog = None
     identity = _stable_identity(args)
+    if args._intent_catalog is not None:
+        identity["schema"] = "sts2-h26-search-free-exact-conditional-intent-v2"
     fingerprint = hashlib.sha256(
         json.dumps(identity, sort_keys=True).encode(),
     ).hexdigest()
@@ -339,7 +357,9 @@ def main() -> None:
                 or getattr(macro, "macro_progress_head", None) is None
                 or getattr(combat, "macro_progress_head", None) is not None
                 or not getattr(combat, "h26_tactical", False)
-                or getattr(macro, "h26_tactical", False)):
+                or getattr(macro, "h26_tactical", False)
+                or (getattr(combat, "h26_intent_catalog", None)
+                    != args._intent_catalog)):
             raise ValueError("H26 resume requires Act-only H24 checkpoints")
         macro_optimizer = torch.optim.AdamW(macro.parameters(), lr=args.lr)
         combat_optimizer = torch.optim.AdamW(combat.parameters(), lr=args.lr)
@@ -373,6 +393,8 @@ def main() -> None:
             del source
         macro.h26_tactical = False
         combat.h26_tactical = True
+        macro.h26_intent_catalog = None
+        combat.h26_intent_catalog = args._intent_catalog
         macro_optimizer = torch.optim.AdamW(macro.parameters(), lr=args.lr)
         combat_optimizer = torch.optim.AdamW(combat.parameters(), lr=args.lr)
         macro.save(macro_path)
