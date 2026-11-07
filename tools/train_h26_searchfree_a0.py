@@ -270,6 +270,9 @@ def _args() -> argparse.Namespace:
     p.add_argument("--initial-h22", type=Path, required=True)
     p.add_argument("--initial-h25-macro", type=Path)
     p.add_argument("--initial-h25-combat", type=Path)
+    p.add_argument("--require-forecast-features", action="store_true",
+                   help="Long-run safeguard: require v3 source intent forecast "
+                        "and enabled next-turn gross-damage features")
     p.add_argument("--disable-next-damage-risk", action="store_true",
                    help="Matched ablation: use the identical v3 intent law "
                         "and seeds without conditional damage-risk tokens")
@@ -348,6 +351,16 @@ def main() -> None:
         )
     else:
         args._intent_catalog = None
+    if args.require_forecast_features and (
+        args._intent_catalog is None
+        or args._intent_catalog.get("schema")
+            != "sts2-h26-public-intent-rules-v3"
+        or args.disable_next_damage_risk
+    ):
+        raise ValueError(
+            "Long H26 forecast run requires a v3 public intent/damage "
+            "catalog with damage-risk features enabled"
+        )
     identity = _stable_identity(args)
     if args._intent_catalog is not None:
         identity["schema"] = (
