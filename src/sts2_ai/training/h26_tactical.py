@@ -83,6 +83,7 @@ def visible_incoming_threat(state: dict[str, Any]) -> VisibleIncomingThreat:
 def attach_visible_threat(
     encoded: H24EncodedDecision, state: dict[str, Any],
     *, intent_catalog: dict[str, Any] | None = None,
+    intent_histories: dict[int, tuple[str, ...]] | None = None,
 ) -> H24EncodedDecision:
     """Add current threat and optional source-grid next-intent support tokens.
 
@@ -129,7 +130,10 @@ def attach_visible_threat(
         if len(enemy_indices) != len(enemies):
             raise ValueError("H26 enemy law ownership differs from H21 codec")
         for owner, law in zip(
-            enemy_indices, summarize_next_intents(enemies, intent_catalog),
+            enemy_indices,
+            summarize_next_intents(
+                enemies, intent_catalog, histories=intent_histories,
+            ),
             strict=True,
         ):
             # Explicitly mark unsupported/ambiguous law cases. No guessed
