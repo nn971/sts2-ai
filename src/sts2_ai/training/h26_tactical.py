@@ -117,6 +117,10 @@ def attach_visible_threat(
     # all H21 owner indices, relation endpoints and action pointers.
     if len(encoded.objects) > H21_OBJECT_LIMIT:
         raise ValueError("Malformed H21 decision already exceeds its object cap")
+    if len(encoded.objects) == H21_OBJECT_LIMIT:
+        # Preserve all grounded H21 objects and action pointers. Optional
+        # tactical features cannot exceed the model's encoded object budget.
+        return encoded
     extra: list[ObjectToken] = [marker]
     edges: list[RelationToken] = []
     if intent_catalog is not None:
@@ -138,6 +142,10 @@ def attach_visible_threat(
             ),
             strict=True,
         ):
+            # Treat each enemy's forecast as an indivisible object group.
+            # An incomplete support would falsely suggest impossible moves.
+            previous_objects = len(extra)
+            previous_edges = len(edges)
             risk = (
                 conditional_next_gross_damage(
                     state, enemy, intent_catalog,
@@ -211,6 +219,9 @@ def attach_visible_threat(
                     owner=owner,
                 ))
                 edges.append(RelationToken(VISIBLE_VALUE, owner, pos))
+            if len(encoded.objects) + len(extra) > H21_OBJECT_LIMIT:
+                del extra[previous_objects:]
+                del edges[previous_edges:]
     return H24EncodedDecision(
         encoded.schema, encoded.phase,
         encoded.objects + tuple(extra), encoded.actions,
