@@ -91,6 +91,47 @@ H25's monitor uses compatible round summaries and recognizes the
 zero-search counters. The model outputs should be assessed on independent
 heldout seeds rather than on the collected training trajectories.
 
+## H26-C: source-defined next-intent law (opt-in)
+
+The companion emulator branch `research/h26-public-intent-law-20261107`
+exports the **immutable, player-knowable enemy rule catalog** plus exact
+Native `NextInt` grid masses (not a peek at future outcomes). Generate it
+once from the same emulator source revision as training:
+
+```fish
+set emu ~/projects/sts2-emulator
+git -C $emu fetch origin
+git -C $emu switch research/h26-public-intent-law-20261107
+set rev (git -C $emu rev-parse HEAD)
+mkdir -p results/h26-intent
+dotnet run --project $emu/src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj \
+    -- public-intent-catalog-v111 \
+    > results/h26-intent/native-source-catalog.json
+```
+
+Then run the existing smoke with the additional argument
+`--intent-catalog results/h26-intent/native-source-catalog.json`
+and **the new emulator revision** `--emulator-revision $rev` under a new
+output root. This switches to a separate H26 v2 experiment fingerprint.
+
+At each combat observation, H26 obtains the next-intent candidate masses
+from the source rule catalog and the **currently displayed move**.
+For a uniquely determined selection, it adds enemy-owned tokens containing
+the known next move and its exact integer probability on the Native grid.
+For ambiguous opener-vs-pool states, multi-use repetition history, and
+multi-state AI, it emits an explicit `UNAVAILABLE` token.
+
+The law is **conditional on the current announced intent executing normally**
+and the enemy surviving to select another move; it is not a prediction of
+which enemy or action will remain after unexecuted player choices. Existing
+H21 state/action pointers and H24 monotone value encoding are retained.
+
+The output `progress.json` includes
+`rounds[].intent_law_coverage.train` and `.heldout` with exact-conditional
+coverage rates and the reasons for unavailable forecasts. Review this before
+enlarging the experiment. Native engine parity and full player-history
+reconstruction for advanced state machines are still separate tests.
+
 ## Constraints and remaining verification
 
 - The new tactical damage token supplies current displayed damage only.
