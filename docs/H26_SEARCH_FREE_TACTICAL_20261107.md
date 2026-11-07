@@ -143,11 +143,92 @@ subsequent publicly observed moves under unchanged visible conditions.
 Review this before enlarging the experiment. Source/native parity for
 exceptional stun, spawn, formation and phase transitions remains gated.
 
+## H26-D: source conditional gross-damage law (v3)
+
+The companion emulator's `public-intent-catalog-v111` now emits
+`sts2-h26-public-intent-rules-v3`, adding source move damage effects
+(including act/ascension adjustments and hit counts), public enemy/player
+power multipliers, legacy weak-status mappings and relic modifiers. All
+coefficients come from immutable source definitions; the export reads no
+canonical combat state or future RNG outcome.
+
+For each publicly supported next-intent outcome, H26-D computes its
+**gross pre-Block attack damage under the observed public modifier
+snapshot**. The combat policy gets per-move damage/hit amounts and a
+separate enemy-owned summary token containing expected gross damage,
+gross-damage standard deviation, and
+`P(gross damage >= current HP)`.
+
+A source effect that requires a private stored damage amount, uncertain
+prior move counts, earlier modifier-changing effects, or an unprojected
+power value is `UNAVAILABLE`. Conditional HP thresholds describe
+**unblocked gross damage**, not an unconditional death probability.
+The forecaster recomputes from each newly observed public state, including
+states *after an executed card or potion*. It does not simulate all
+unexecuted action alternatives or forecast future Block gains, status
+decay, changed formation, or intervening power effects.
+
+The run identity now includes `ai_source_sha256`, a content hash of the
+actual encoder, intent/damage evaluators, actor trainer, and runner, so
+changed inference logic cannot accidentally reuse an older result
+fingerprint.
+
+### Minimal native A/B smoke (fish)
+
+```fish
+cd ~/projects/sts2-ai
+git fetch origin
+git switch research/h26-search-free-tactical-20261107
+git pull --ff-only
+
+set emu ~/projects/sts2-emulator
+git -C $emu fetch origin
+git -C $emu switch research/h26-public-intent-law-20261107
+git -C $emu pull --ff-only
+set rev (git -C $emu rev-parse HEAD)
+
+set catalog results/h26-public-intent-catalog-v3.json
+dotnet run --project $emu/src/Sts2Emulator.Cli/Sts2Emulator.Cli.csproj \
+    -c Release -- public-intent-catalog-v111 > $catalog
+
+set h22 results/h22-h21-packed-a0-long-v1/models/joint-r0095.pt
+set prior results/h25-a0-combat-first-8h-v2-p64/models
+
+for mode in damage intent-only
+    set out results/h26-damage-ablation-smoke-$mode
+    set extra
+    if test $mode = intent-only
+        set extra --disable-next-damage-risk
+    end
+    python -u tools/train_h26_searchfree_a0.py \
+        --initial-h22 $h22 \
+        --initial-h25-macro $prior/macro-r0003.pt \
+        --initial-h25-combat $prior/combat-r0003.pt \
+        --intent-catalog $catalog \
+        --emulator-root $emu --emulator-revision $rev \
+        --output-root $out --rounds 1 \
+        --runs-per-round 4 --heldout-runs 2 \
+        --workers 2 --max-combat-samples 256 \
+        --device cuda $extra --execute
+end
+```
+
+Inspect `rounds[-1].damage_risk_coverage`, especially
+`train.current_hud_preview_parity` and
+`heldout.current_hud_preview_parity`. Any nonzero preview mismatch
+requires a source-law fidelity fix before a long comparison.
+
+The intent-only ablation uses the exact **same v3 catalog and seeds**;
+`--disable-next-damage-risk` omits damage features while keeping
+next-intent probabilities. Each mode has its own checkpoint/fingerprint.
+
 ## Constraints and remaining verification
 
-- The tactical damage token supplies current displayed damage; next-turn
-  intent probabilities are exact only where public conditioning is resolved.
-  This does not imply the future attack-damage distribution is computed.
+- Next-intent probabilities are exact where public conditioning
+  is resolved. H26-D damage is conditional on frozen visible modifiers;
+  actual future damage may change after intervening effects and Block.
+- Only source-supported gross attack damage contributes numerical risk;
+  unsupported dynamic effects are masked rather than fabricated.
 - A 0.1-scale potential is dense but bounded. Reward ordering and calibration
   should be evaluated against complete Act outcomes and heldout HP.
 - CPU unit tests and CLI compile are the first gate; an actual pinned native
