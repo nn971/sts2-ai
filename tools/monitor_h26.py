@@ -52,8 +52,12 @@ def render_h26(root: Path, *, now: float | None = None) -> str:
         if (identity.get("next_damage_risk_enabled") is not True
                 or not identity.get("intent_catalog_sha256")):
             lines.append("WARNING: committed experiment lacks complete forecast features!")
+        mode = (
+            "damage + intent"
+            if identity.get("next_damage_risk_enabled") else "intent only"
+        )
         lines.append(
-            f"Mode: {'damage + intent' if identity.get('next_damage_risk_enabled') else 'intent only'}"
+            f"Mode: {mode}"
             f" | A{identity.get('ascension', '?')}"
             f" | workers {identity.get('workers', '?')}"
             f" | train/heldout {identity.get('runs_per_round', '?')}/"
