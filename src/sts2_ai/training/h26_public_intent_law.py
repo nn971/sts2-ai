@@ -476,8 +476,10 @@ class PublicIntentHistory:
             for instance_id, move in self._last.items():
                 if instance_id in now:
                     self._moves.setdefault(instance_id, []).append(move)
+        for instance_id in now:
+            self._moves.setdefault(instance_id, [])
         self._floor, self._turn, self._last = floor, turn, now
-        return {k: tuple(v) for k, v in self._moves.items()}
+        return {k: tuple(self._moves[k]) for k in now}
 
 
 def public_intent_coverage(
