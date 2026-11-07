@@ -75,16 +75,22 @@ def encode_h24_joint_decision(
     state: dict[str, Any], actions: Sequence[LegalAction], *,
     selection: ResourceConstraintSelection | None = None,
     vocabulary: SafeResourceVocabulary | None = None,
+    tactical: bool = False,
 ) -> H24EncodedDecision:
     """Worker-safe H24 RPC encoding without allocating a neural network."""
     normal = encode_joint_decision(state, actions, representation="h21")
     neutral = encode_h24_neutral_value(
         state, selection=selection, vocabulary=vocabulary,
     )
-    return H24EncodedDecision(
+    encoded = H24EncodedDecision(
         normal.schema, normal.phase, normal.objects, normal.actions,
         normal.relations, neutral,
     )
+    if tactical:
+        from sts2_ai.training.h26_tactical import attach_visible_threat
+
+        return attach_visible_threat(encoded, state)
+    return encoded
 
 
 class H24JointActPilotNet(JointActPilotNet):
@@ -99,6 +105,7 @@ class H24JointActPilotNet(JointActPilotNet):
         search_act_mix: float = 0.0,
         act_only: bool = False,
         macro_progress: bool = False,
+        tactical: bool = False,
     ) -> None:
         if not isinstance(backbone, H21GroundedMacroTransformer):
             raise TypeError("H24 requires H21 grounded backbone")
@@ -111,6 +118,7 @@ class H24JointActPilotNet(JointActPilotNet):
             raise ValueError("Act-only H24 must use the monotone Act critic for PUCT")
         self.search_act_mix = search_act_mix
         self.h24_act_only = act_only
+        self.h26_tactical = tactical
         if macro_progress and not act_only:
             raise ValueError("Macro progress head requires Act-only mode")
         self.macro_progress_head = (
@@ -125,6 +133,7 @@ class H24JointActPilotNet(JointActPilotNet):
         self.monotone_act = build_h24_monotone_head(
             backbone.config.width, selection=self.selection,
             vocabulary=self.vocabulary,
+            tactical=self.h26_tactical,
         )
 
     @classmethod
@@ -135,13 +144,14 @@ class H24JointActPilotNet(JointActPilotNet):
         search_act_mix: float = 0.0,
         act_only: bool = False,
         macro_progress: bool = False,
+        tactical: bool = False,
     ) -> H24JointActPilotNet:
         if (source.representation != "h21"
                 or isinstance(source, H24JointActPilotNet)):
             raise ValueError("H24 warmstart requires an ordinary H22 model")
         model = cls(source.backbone, selection=selection, vocabulary=vocabulary,
                     search_act_mix=search_act_mix, act_only=act_only,
-                    macro_progress=macro_progress)
+                    macro_progress=macro_progress, tactical=tactical)
         model.horizon_head.load_state_dict(source.horizon_head.state_dict())
         model.act_clear.load_state_dict(source.act_clear.state_dict())
         # Reuse the H22 Act-clear linear head as the initial neutral base.
@@ -267,6 +277,7 @@ class H24JointActPilotNet(JointActPilotNet):
             "search_act_mix": self.search_act_mix,
             "act_only": self.h24_act_only,
             "macro_progress": self.macro_progress_head is not None,
+            "h26_tactical": self.h26_tactical,
             "state_dict": self.state_dict(),
         }, path)
 
@@ -290,6 +301,7 @@ class H24JointActPilotNet(JointActPilotNet):
             search_act_mix=checkpoint["search_act_mix"],
             act_only=checkpoint.get("act_only", False),
             macro_progress=checkpoint.get("macro_progress", False),
+            tactical=checkpoint.get("h26_tactical", False),
         )
         model.load_state_dict(checkpoint["state_dict"], strict=True)
         return model.to(device)
