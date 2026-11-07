@@ -2,13 +2,22 @@
 from __future__ import annotations
 
 import copy
+import json
+from pathlib import Path
 
 from test_h26_intent_law import _catalog
 from test_h26_searchfree import _combat, _models
 
-from sts2_ai.emulator.protocol import LegalAction
-from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet
-from sts2_ai.training.h26_damage_risk import conditional_next_gross_damage
+from sts2_ai.emulator.protocol import LegalAction, Observation
+from sts2_ai.training.h16_joint_act_pilot import (
+    JointActPilotNet,
+    PilotDecision,
+    PilotEpisode,
+)
+from sts2_ai.training.h26_damage_risk import (
+    conditional_next_gross_damage,
+    public_damage_risk_coverage,
+)
 from sts2_ai.training.h26_public_intent_law import (
     DAMAGE_SCHEMA,
     validate_public_intent_catalog,
@@ -185,3 +194,46 @@ def test_source_hash_is_deterministic_and_digest_shaped():
     value = _h26_ai_source_sha256()
     assert len(value) == 64
     assert value == _h26_ai_source_sha256()
+
+
+def test_current_damage_hud_parity_detects_source_disagreement():
+    catalog = _catalog_v3()
+    state = _state()
+    state["combat"]["enemies"][0]["move_id"] = "stab"
+    state["combat"]["enemies"][0]["intent_damage"] = 9
+    state["combat"]["enemies"][0]["intent_hits"] = 2
+    def report(frame):
+        decisions = (PilotDecision(
+            Observation("prototype-fair-v0", json.dumps(frame), "risk-hud"),
+            (LegalAction("wait", "end_turn", "{}"),),
+            0, (0.0,), h26_public_intent_history={2: ()},
+        ),)
+        episode = PilotEpisode(
+            "source-hud", decisions, (frame, {**frame, "combat": None}),
+            "defeat", 0, 0,
+        )
+        return public_damage_risk_coverage([episode], catalog, ascension=0)
+    good = report(state)
+    assert good["available"] == 1
+    assert good["current_hud_preview_parity"] == {
+        "checked": 1, "mismatched": 0, "examples": [],
+    }
+    state["combat"]["enemies"][0]["intent_damage"] = 8
+    bad = report(state)
+    assert bad["current_hud_preview_parity"]["mismatched"] == 1
+    assert bad["current_hud_preview_parity"]["examples"][0]["source"] == [18, 2]
+
+
+def test_ai_source_digest_changes_when_encoder_changes(monkeypatch):
+    before = _h26_ai_source_sha256()
+    original = Path.read_bytes
+
+    def patched(path):
+        content = original(path)
+        return (
+            content + b"\n# altered logic\n"
+            if path.name == "h26_damage_risk.py" else content
+        )
+
+    monkeypatch.setattr(Path, "read_bytes", patched)
+    assert _h26_ai_source_sha256() != before
