@@ -9,6 +9,8 @@ on:
       - 'src/sts2_ai/training/h16_joint_act_pilot.py'
       - 'tools/train_h16_joint_act_pilot.py'
       - 'tools/train_h26_*.py'
+      - 'tools/monitor_h26.py'
+      - 'scripts/h26_forecast_long.fish'
       - 'tests/test_h26_*.py'
       - '.github/workflows/h26-searchfree.yml'
   workflow_dispatch:
@@ -32,9 +34,10 @@ jobs:
           python -m pip install -e '.[dev]'
       - name: Lint, compile, and CLI introspection
         run: |
-          python -m ruff check src/sts2_ai/training/h26_tactical.py src/sts2_ai/training/h26_combat_rl.py src/sts2_ai/training/h26_public_intent_law.py src/sts2_ai/training/h26_damage_risk.py tools/train_h26_searchfree_a0.py tests/test_h26_*.py
+          python -m ruff check src/sts2_ai/training/h26_tactical.py src/sts2_ai/training/h26_combat_rl.py src/sts2_ai/training/h26_public_intent_law.py src/sts2_ai/training/h26_damage_risk.py tools/train_h26_searchfree_a0.py tools/monitor_h26.py tests/test_h26_*.py
           python -m compileall -q src/sts2_ai/training/h26_tactical.py src/sts2_ai/training/h26_combat_rl.py tools/train_h26_searchfree_a0.py
           python tools/train_h26_searchfree_a0.py --help > /dev/null
+          python tools/monitor_h26.py --help > /dev/null
       - name: Public feature, on-policy loss, and checkpoint tests
         run: |
           python -m pytest -q tests/test_h26_*.py tests/test_h24_joint_act_model.py tests/test_h25_alternating.py
