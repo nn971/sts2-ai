@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 SCHEMA = "sts2-h26-public-intent-rules-v2"
+DAMAGE_SCHEMA = "sts2-h26-public-intent-rules-v3"
 PREVIOUS_SCHEMA = "sts2-h26-public-intent-rules-v1"
 
 
@@ -29,7 +30,7 @@ class PublicNextIntentLaw:
 def validate_public_intent_catalog(raw: dict[str, Any]) -> dict[str, Any]:
     """Validate integer grid weights and move identities before training."""
     if not isinstance(raw, dict) or raw.get("schema") not in (
-        SCHEMA, PREVIOUS_SCHEMA,
+        DAMAGE_SCHEMA, SCHEMA, PREVIOUS_SCHEMA,
     ):
         raise ValueError("Unexpected H26 public intent rule schema")
     denominator = raw.get("probability_denominator")
@@ -59,7 +60,9 @@ def validate_public_intent_catalog(raw: dict[str, Any]) -> dict[str, Any]:
         seen.add(eid)
         maximum = max(maximum, len(moves))
         ai = entry.get("ai")
-        if policy == "StateMachine" and raw["schema"] == SCHEMA:
+        if policy == "StateMachine" and raw["schema"] in (
+            SCHEMA, DAMAGE_SCHEMA,
+        ):
             if (not isinstance(ai, dict)
                     or not isinstance(ai.get("initial_state_id"), str)
                     or not isinstance(ai.get("states"), list)):
@@ -115,6 +118,71 @@ def validate_public_intent_catalog(raw: dict[str, Any]) -> dict[str, Any]:
                 or any(type(w) is not int or w <= 0 for w in mass)
                 or sum(mass) != denominator):
             raise ValueError("Native NextInt grid masses do not sum to one")
+    if raw["schema"] == DAMAGE_SCHEMA:
+        powers = raw.get("damage_powers")
+        relics = raw.get("damage_relics")
+        statuses = raw.get("enemy_status_power_ids")
+        if (not isinstance(powers, list) or not isinstance(relics, list)
+                or not isinstance(statuses, dict)
+                or not isinstance(raw.get("tainted_power_id"), str)
+                or not isinstance(raw.get("surrounded_power_id"), str)):
+            raise ValueError("H26-D source damage metadata is incomplete")
+        for rule in entries:
+            moves = rule.get("move_damage")
+            if (not isinstance(moves, list)
+                    or len(moves) != len(rule["move_ids"])):
+                raise ValueError("H26-D move damage source definitions missing")
+            for i, move in enumerate(moves):
+                if (not isinstance(move, dict)
+                        or move.get("move_id") != rule["move_ids"][i]
+                        or not isinstance(move.get("effects"), list)):
+                    raise ValueError("H26-D invalid source damage move")
+                for effect in move["effects"]:
+                    if not isinstance(effect, dict):
+                        raise ValueError("Malformed H26-D source effect")
+                    for key in (
+                        "amount", "amount_per_act", "repetitions",
+                        "extra_amount_per_prior_move_use",
+                    ):
+                        if type(effect.get(key)) is not int:
+                            raise ValueError("Malformed H26-D numeric effect")
+                    for key in (
+                        "ascension_deltas", "repetition_ascension_deltas",
+                    ):
+                        if not isinstance(effect.get(key), list):
+                            raise ValueError("Malformed H26-D scaling rule")
+                    for key in (
+                        "is_attack", "use_stored_enemy_damage",
+                        "earlier_non_damage_effect",
+                    ):
+                        if type(effect.get(key)) is not bool:
+                            raise ValueError("Malformed H26-D effect flags")
+        power_ids = [item.get("power_id") for item in powers
+                     if isinstance(item, dict)]
+        if (len(power_ids) != len(powers)
+                or any(not isinstance(pid, str) for pid in power_ids)
+                or len(set(power_ids)) != len(power_ids)):
+            raise ValueError("Invalid public damage power rules")
+        for power in powers:
+            for key in (
+                "enemy_attack_damage_bonus_per_stack",
+                "enemy_outgoing_damage_numerator",
+                "enemy_outgoing_damage_denominator",
+                "enemy_outgoing_powered_attack_numerator",
+                "enemy_outgoing_powered_attack_denominator",
+                "player_incoming_attack_damage_numerator",
+                "player_incoming_attack_damage_denominator",
+                "player_incoming_damage_cap",
+                "player_max_hp_loss_on_unblocked_attack_hit_per_stack",
+            ):
+                if type(power.get(key)) is not int:
+                    raise ValueError("Malformed public damage power modifier")
+        if any(
+            not isinstance(x, dict) or not isinstance(x.get("relic_id"), str)
+            or type(x.get("weak_attack_damage_reduction_percent")) is not int
+            for x in relics
+        ):
+            raise ValueError("Malformed public damage relic modifier")
     return raw
 
 
