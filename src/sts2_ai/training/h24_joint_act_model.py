@@ -77,6 +77,7 @@ def encode_h24_joint_decision(
     vocabulary: SafeResourceVocabulary | None = None,
     tactical: bool = False,
     intent_catalog: dict[str, Any] | None = None,
+    intent_histories: dict[int, tuple[str, ...]] | None = None,
 ) -> H24EncodedDecision:
     """Worker-safe H24 RPC encoding without allocating a neural network."""
     normal = encode_joint_decision(state, actions, representation="h21")
@@ -92,6 +93,7 @@ def encode_h24_joint_decision(
 
         return attach_visible_threat(
             encoded, state, intent_catalog=intent_catalog,
+            intent_histories=intent_histories,
         )
     return encoded
 
@@ -172,11 +174,13 @@ class H24JointActPilotNet(JointActPilotNet):
 
     def encode_decision(
         self, state: dict[str, Any], actions: Sequence[LegalAction],
+        *, intent_histories: dict[int, tuple[str, ...]] | None = None,
     ) -> H24EncodedDecision:
         return encode_h24_joint_decision(
             state, actions, selection=self.selection,
             vocabulary=self.vocabulary, tactical=self.h26_tactical,
             intent_catalog=self.h26_intent_catalog,
+            intent_histories=intent_histories,
         )
 
     def collate(
