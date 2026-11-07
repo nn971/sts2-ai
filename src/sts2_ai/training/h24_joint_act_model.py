@@ -133,7 +133,6 @@ class H24JointActPilotNet(JointActPilotNet):
         self.monotone_act = build_h24_monotone_head(
             backbone.config.width, selection=self.selection,
             vocabulary=self.vocabulary,
-            tactical=self.h26_tactical,
         )
 
     @classmethod
@@ -164,7 +163,7 @@ class H24JointActPilotNet(JointActPilotNet):
     ) -> H24EncodedDecision:
         return encode_h24_joint_decision(
             state, actions, selection=self.selection,
-            vocabulary=self.vocabulary,
+            vocabulary=self.vocabulary, tactical=self.h26_tactical,
         )
 
     def collate(
