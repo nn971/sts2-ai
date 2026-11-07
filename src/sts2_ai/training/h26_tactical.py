@@ -25,8 +25,8 @@ from sts2_ai.training.h21_macro_offer_codec import (
     VISIBLE_VALUE,
 )
 from sts2_ai.training.h24_joint_act_model import H24EncodedDecision
-from sts2_ai.training.h26_public_intent_law import summarize_next_intents
 from sts2_ai.training.h26_damage_risk import conditional_next_gross_damage
+from sts2_ai.training.h26_public_intent_law import summarize_next_intents
 
 
 @dataclass(frozen=True)
