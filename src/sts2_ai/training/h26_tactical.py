@@ -26,6 +26,7 @@ from sts2_ai.training.h21_macro_offer_codec import (
 )
 from sts2_ai.training.h24_joint_act_model import H24EncodedDecision
 from sts2_ai.training.h26_public_intent_law import summarize_next_intents
+from sts2_ai.training.h26_damage_risk import conditional_next_gross_damage
 
 
 @dataclass(frozen=True)
@@ -84,6 +85,7 @@ def attach_visible_threat(
     encoded: H24EncodedDecision, state: dict[str, Any],
     *, intent_catalog: dict[str, Any] | None = None,
     intent_histories: dict[int, tuple[str, ...]] | None = None,
+    damage_ascension: int | None = None,
 ) -> H24EncodedDecision:
     """Add current threat and optional source-grid next-intent support tokens.
 
@@ -129,13 +131,30 @@ def attach_visible_threat(
         ]
         if len(enemy_indices) != len(enemies):
             raise ValueError("H26 enemy law ownership differs from H21 codec")
-        for owner, law in zip(
-            enemy_indices,
+        for owner, enemy, law in zip(
+            enemy_indices, enemies,
             summarize_next_intents(
                 enemies, intent_catalog, histories=intent_histories,
             ),
             strict=True,
         ):
+            risk = (
+                conditional_next_gross_damage(
+                    state, enemy, intent_catalog,
+                    ascension=damage_ascension,
+                    executed_moves=(
+                        intent_histories.get(enemy.get("instance_id"))
+                        if intent_histories is not None else None
+                    ),
+                    intent_law=law,
+                )
+                if damage_ascension is not None
+                else None
+            )
+            by_move = (
+                {outcome.move_id: outcome for outcome in risk.outcomes}
+                if risk is not None and risk.available else {}
+            )
             # Explicitly mark unsupported/ambiguous law cases. No guessed
             # zero threat or falsely uniform distribution reaches the model.
             outcomes = (
@@ -144,9 +163,12 @@ def attach_visible_threat(
             )
             for move_id, numerator in outcomes:
                 if law.available:
-                    numeric, observed = _numbers({
-                        "count": 10.0 * numerator / law.denominator,
-                    })
+                    fields = {"count": 10.0 * numerator / law.denominator}
+                    damage = by_move.get(move_id)
+                    if damage is not None:
+                        fields["intent_damage"] = damage.gross_damage
+                        fields["intent_hits"] = damage.hits
+                    numeric, observed = _numbers(fields)
                 else:
                     numeric, observed = _numbers({"count": 0})
                 pos = len(encoded.objects) + len(extra)
@@ -156,6 +178,33 @@ def attach_visible_threat(
                         "h26.next-intent.v1:" + move_id,
                         IDENTITY_BUCKETS,
                     ),
+                    zone=ZONES.index("enemy"),
+                    numeric=numeric,
+                    observed=observed,
+                    owner=owner,
+                ))
+                edges.append(RelationToken(VISIBLE_VALUE, owner, pos))
+            if risk is not None:
+                # A separate summary token distinguishes the expected gross
+                # pre-Block threat from current displayed incoming damage.
+                # Its two damage scales are mean and standard deviation;
+                # "count" encodes 10 times the gross>=HP probability.
+                if risk.available:
+                    numeric, observed = _numbers({
+                        "intent_damage": risk.expected_gross_damage,
+                        "intent_base_damage": math.sqrt(
+                            risk.variance_gross_damage,
+                        ),
+                        "count": 10.0 * risk.probability_gross_at_least_hp,
+                    })
+                    identity = "h26.next-gross-risk.v1"
+                else:
+                    numeric, observed = _numbers({})
+                    identity = "h26.next-gross-unavailable.v1"
+                pos = len(encoded.objects) + len(extra)
+                extra.append(ObjectToken(
+                    kind=KINDS.index("status"),
+                    identity=_bucket(identity, IDENTITY_BUCKETS),
                     zone=ZONES.index("enemy"),
                     numeric=numeric,
                     observed=observed,
