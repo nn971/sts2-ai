@@ -48,6 +48,15 @@ def _catalog():
                 "move_loop_start_index": 0,
             },
             {
+                "enemy_id": "proto.enemy.max2",
+                "move_policy": "UniformRandomAfterOpener",
+                "move_ids": ["opener", "stab", "guard"],
+                "max_consecutive_uses": [0, 2, 0],
+                "opening_move_indices": [0],
+                "random_move_pool_start_index": 1,
+                "move_loop_start_index": 0,
+            },
+            {
                 "enemy_id": "proto.enemy.ambiguous",
                 "move_policy": "UniformRandomAfterOpener",
                 "move_ids": ["slash", "stab", "guard"],
@@ -84,8 +93,11 @@ def test_ambiguous_or_private_conditioning_is_explicit_unavailable():
         _enemy("proto.enemy.ambiguous", "stab"), catalog,
     ).available
     assert next_intent_law(
-        _enemy("proto.enemy.ambiguous", "guard"), catalog,
+        _enemy("proto.enemy.max2", "stab"), catalog,
     ).reason == "consecutive_move_history_needed"
+    assert next_intent_law(
+        _enemy("proto.enemy.ambiguous", "guard"), catalog,
+    ).available
     assert next_intent_law(
         _enemy("proto.enemy.random", "not-a-move"), catalog,
     ).status == "UNAVAILABLE"
