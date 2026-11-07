@@ -18,6 +18,7 @@ from sts2_ai.models.shared_game_objects import (
     _bucket,
     _numbers,
 )
+from sts2_ai.training.h16_episode_metrics import _is_minion
 from sts2_ai.training.h24_joint_act_model import H24EncodedDecision
 
 
@@ -142,7 +143,7 @@ def combat_dense_rewards(
         for e in combat.get("enemies", [])
         if isinstance(e, dict) and type(e.get("instance_id")) is int
         and type(e.get("hp")) is int and e["hp"] > 0
-        and not e.get("is_minion", False)
+        and not _is_minion(e)
     }
     hp_ref = first.get("max_hp")
     if type(hp_ref) is not int or hp_ref <= 0:
