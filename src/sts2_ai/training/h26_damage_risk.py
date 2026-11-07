@@ -99,6 +99,7 @@ def _gross_move_damage(
     power_rules: dict[str, dict[str, Any]],
     ascension: int,
     executed_moves: tuple[str, ...] | None,
+    include_current_intent: bool = True,
 ) -> tuple[int, int] | None:
     act = state.get("act")
     if type(act) is not int or act < 1:
@@ -141,7 +142,8 @@ def _gross_move_damage(
             return None
         prior_uses = (
             executed_moves.count(move["move_id"]) +
-            int(enemy.get("move_id") == move["move_id"])
+            int(include_current_intent
+                and enemy.get("move_id") == move["move_id"])
             if executed_moves is not None else 0
         )
         amount = _scaled(
@@ -295,3 +297,136 @@ def conditional_next_gross_damage(
         "frozen_public_modifiers_before_next_enemy_action_pre_block",
         law.denominator, tuple(values), expectation, variance, threshold,
     )
+
+
+def public_damage_risk_coverage(
+    episodes: list[Any], catalog: dict[str, Any], *, ascension: int,
+) -> dict[str, Any]:
+    """Distinct public enemy-turn risk coverage plus native-HUD preview parity.
+
+    The current-intent HUD is computed by the emulator's authoritative
+    EnemyHitDamage path. Comparing that current attack against this public
+    source-template evaluator is a stricter safety check than observing only
+    whether a sampled next intent lies in the predicted support.
+    """
+    from sts2_ai.training.h16_joint_act_pilot import public_state
+
+    if catalog.get("schema") != "sts2-h26-public-intent-rules-v3":
+        raise ValueError("Damage-risk coverage requires v3 source catalog")
+    seen: set[tuple[Any, ...]] = set()
+    reasons: dict[str, int] = {}
+    by_enemy: dict[str, dict[str, Any]] = {}
+    checked = mismatched = total = available = 0
+    examples: list[dict[str, Any]] = []
+    for episode in episodes:
+        for decision in episode.decisions:
+            state = public_state(decision.observation)
+            combat = state.get("combat")
+            if not isinstance(combat, dict):
+                continue
+            enemies = combat.get("enemies")
+            if not isinstance(enemies, list):
+                continue
+            history = decision.h26_public_intent_history or {}
+            for enemy in enemies:
+                if not isinstance(enemy, dict):
+                    continue
+                if type(enemy.get("hp")) is not int or enemy["hp"] <= 0:
+                    continue
+                name = str(enemy.get("enemy_id", "UNKNOWN"))
+                key = (
+                    episode.seed, state.get("floor"), combat.get("turn"),
+                    enemy.get("instance_id"), enemy.get("move_id"),
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                total += 1
+                bucket = by_enemy.setdefault(
+                    name, {
+                        "total": 0, "available": 0,
+                        "unavailable_reasons": {},
+                        "preview_checked": 0, "preview_mismatched": 0,
+                    },
+                )
+                bucket["total"] += 1
+                moves = history.get(enemy.get("instance_id"))
+                risk = conditional_next_gross_damage(
+                    state, enemy, catalog,
+                    ascension=ascension, executed_moves=moves,
+                )
+                if risk.available:
+                    available += 1
+                    bucket["available"] += 1
+                else:
+                    reasons[risk.reason] = reasons.get(risk.reason, 0) + 1
+                    bucket["unavailable_reasons"][risk.reason] = (
+                        bucket["unavailable_reasons"].get(risk.reason, 0) + 1
+                    )
+                hud_damage, hud_hits = (
+                    enemy.get("intent_damage"), enemy.get("intent_hits")
+                )
+                if (type(hud_damage) is not int
+                        or type(hud_hits) is not int or hud_hits <= 0
+                        or moves is None):
+                    continue
+                rule = next(
+                    (r for r in catalog["enemies"]
+                     if r["enemy_id"] == enemy.get("enemy_id")), None,
+                )
+                if rule is None:
+                    continue
+                candidates = [
+                    m for m in rule["move_damage"]
+                    if m["move_id"] == enemy.get("move_id")
+                ]
+                if (not candidates or any(
+                        m["effects"] != candidates[0]["effects"]
+                        for m in candidates)):
+                    continue
+                powers = _effective_enemy_powers(enemy, catalog)
+                player = _positive_power_stacks(combat.get("player_powers"))
+                if powers is None or player is None:
+                    continue
+                preview = _gross_move_damage(
+                    candidates[0], state=state, enemy=enemy, catalog=catalog,
+                    powers=powers, player_powers=player,
+                    power_rules={
+                        p["power_id"]: p for p in catalog["damage_powers"]
+                    },
+                    ascension=ascension, executed_moves=moves,
+                    include_current_intent=False,
+                )
+                if preview is None:
+                    continue
+                checked += 1
+                bucket["preview_checked"] += 1
+                if preview != (hud_damage * hud_hits, hud_hits):
+                    mismatched += 1
+                    bucket["preview_mismatched"] += 1
+                    if len(examples) < 8:
+                        examples.append({
+                            "enemy_id": name, "floor": state.get("floor"),
+                            "turn": combat.get("turn"),
+                            "move_id": enemy.get("move_id"),
+                            "source": list(preview),
+                            "hud": [hud_damage * hud_hits, hud_hits],
+                        })
+    for bucket in by_enemy.values():
+        bucket["availability_rate"] = (
+            bucket["available"] / bucket["total"] if bucket["total"]
+            else None
+        )
+        bucket["unavailable_reasons"] = dict(
+            sorted(bucket["unavailable_reasons"].items())
+        )
+    return {
+        "available": available, "total": total,
+        "availability_rate": available / total if total else None,
+        "unavailable_reasons": dict(sorted(reasons.items())),
+        "by_enemy": dict(sorted(by_enemy.items())),
+        "current_hud_preview_parity": {
+            "checked": checked, "mismatched": mismatched,
+            "examples": examples,
+        },
+    }
