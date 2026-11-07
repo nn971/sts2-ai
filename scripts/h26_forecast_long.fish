@@ -33,12 +33,19 @@ if not test (git -C $emu branch --show-current) = research/h26-public-intent-law
     echo 'Expected emulator branch research/h26-public-intent-law-20261107' >&2
     exit 2
 end
-set -l ai_dirty (git -C $ai status --porcelain --untracked-files=no)
-set -l emu_dirty (git -C $emu status --porcelain --untracked-files=no)
-if test (count $ai_dirty) -gt 0
+# The AI repo also has an 'emulator' submodule pointer. The training
+# source is checked out separately at $emu and its exact SHA is fingerprinted.
+# Ignore only that redundant gitlink difference; preserve dirty-source checks
+# for every other tracked AI file, both staged and unstaged.
+if not git -C $ai diff --quiet -- . ':(exclude)emulator'
     echo 'AI sources contain uncommitted changes; commit or restore before a long run.' >&2
     exit 2
 end
+if not git -C $ai diff --cached --quiet -- . ':(exclude)emulator'
+    echo 'AI index contains staged changes; commit or restore before a long run.' >&2
+    exit 2
+end
+set -l emu_dirty (git -C $emu status --porcelain --untracked-files=no)
 if test (count $emu_dirty) -gt 0
     echo 'Emulator sources contain uncommitted changes; commit or restore before a long run.' >&2
     exit 2
