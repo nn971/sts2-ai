@@ -462,6 +462,7 @@ class PilotPolicy:
         h24_vocabulary: dict[str, tuple[str, ...]] | None = None,
         h26_tactical: bool = False,
         h26_intent_catalog: dict[str, Any] | None = None,
+        h26_damage_ascension: int | None = None,
     ) -> None:
         if not 0 <= horizon_lambda <= 1 or temperature <= 0 or macro_prior_weight < 0:
             raise ValueError("Invalid pilot continuation/policy weighting")
@@ -488,6 +489,15 @@ class PilotPolicy:
                 raise ValueError("H26 intent rules require tactical actor")
             validate_public_intent_catalog(h26_intent_catalog)
         self.h26_intent_catalog = h26_intent_catalog
+        if h26_damage_ascension is not None and (
+            type(h26_damage_ascension) is not int
+            or h26_damage_ascension < 0
+            or h26_intent_catalog is None
+            or h26_intent_catalog.get("schema")
+                != "sts2-h26-public-intent-rules-v3"
+        ):
+            raise ValueError("H26 source damage requires v3 catalog and ascension")
+        self.h26_damage_ascension = h26_damage_ascension
         self.representation = representation
         self.model = model.eval() if model is not None else None
         self.remote_actor = remote_actor
@@ -541,6 +551,7 @@ class PilotPolicy:
                 tactical=self.h26_tactical,
                 intent_catalog=self.h26_intent_catalog,
                 intent_histories=intent_histories,
+                damage_ascension=self.h26_damage_ascension,
             )
         else:
             encoded = encode_joint_decision(
