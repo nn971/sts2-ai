@@ -17,7 +17,9 @@ from torch.nn import functional as F
 
 from sts2_ai.training.h16_episode_metrics import combat_results
 from sts2_ai.training.h16_joint_act_pilot import (
-    PilotDecision, PilotEpisode, public_state,
+    PilotDecision,
+    PilotEpisode,
+    public_state,
 )
 from sts2_ai.training.h26_tactical import combat_dense_rewards
 
