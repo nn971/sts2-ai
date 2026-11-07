@@ -78,6 +78,7 @@ def encode_h24_joint_decision(
     tactical: bool = False,
     intent_catalog: dict[str, Any] | None = None,
     intent_histories: dict[int, tuple[str, ...]] | None = None,
+    damage_ascension: int | None = None,
 ) -> H24EncodedDecision:
     """Worker-safe H24 RPC encoding without allocating a neural network."""
     normal = encode_joint_decision(state, actions, representation="h21")
@@ -94,6 +95,7 @@ def encode_h24_joint_decision(
         return attach_visible_threat(
             encoded, state, intent_catalog=intent_catalog,
             intent_histories=intent_histories,
+            damage_ascension=damage_ascension,
         )
     return encoded
 
@@ -112,6 +114,7 @@ class H24JointActPilotNet(JointActPilotNet):
         macro_progress: bool = False,
         tactical: bool = False,
         intent_catalog: dict[str, Any] | None = None,
+        damage_ascension: int | None = None,
     ) -> None:
         if not isinstance(backbone, H21GroundedMacroTransformer):
             raise TypeError("H24 requires H21 grounded backbone")
@@ -133,6 +136,13 @@ class H24JointActPilotNet(JointActPilotNet):
                 raise ValueError("H26 next-turn law requires tactical policy")
             validate_public_intent_catalog(intent_catalog)
         self.h26_intent_catalog = intent_catalog
+        if damage_ascension is not None and (
+            type(damage_ascension) is not int or damage_ascension < 0
+            or not tactical or intent_catalog is None
+            or intent_catalog.get("schema") != "sts2-h26-public-intent-rules-v3"
+        ):
+            raise ValueError("H26 source damage requires v3 catalog and run ascension")
+        self.h26_damage_ascension = damage_ascension
         if macro_progress and not act_only:
             raise ValueError("Macro progress head requires Act-only mode")
         self.macro_progress_head = (
@@ -181,6 +191,7 @@ class H24JointActPilotNet(JointActPilotNet):
             vocabulary=self.vocabulary, tactical=self.h26_tactical,
             intent_catalog=self.h26_intent_catalog,
             intent_histories=intent_histories,
+            damage_ascension=self.h26_damage_ascension,
         )
 
     def collate(
@@ -295,6 +306,7 @@ class H24JointActPilotNet(JointActPilotNet):
             "macro_progress": self.macro_progress_head is not None,
             "h26_tactical": self.h26_tactical,
             "h26_intent_catalog": self.h26_intent_catalog,
+            "h26_damage_ascension": self.h26_damage_ascension,
             "state_dict": self.state_dict(),
         }, path)
 
@@ -320,6 +332,7 @@ class H24JointActPilotNet(JointActPilotNet):
             macro_progress=checkpoint.get("macro_progress", False),
             tactical=checkpoint.get("h26_tactical", False),
             intent_catalog=checkpoint.get("h26_intent_catalog"),
+            damage_ascension=checkpoint.get("h26_damage_ascension"),
         )
         model.load_state_dict(checkpoint["state_dict"], strict=True)
         return model.to(device)
