@@ -141,7 +141,9 @@ def _stable_identity(args: argparse.Namespace) -> dict[str, Any]:
            if args.intent_catalog is not None else {}),
         "emulator_revision": args.emulator_revision,
         "next_damage_risk_enabled": (
-            args.intent_catalog is not None
+            getattr(args, "_intent_catalog", None) is not None
+            and args._intent_catalog["schema"]
+                == "sts2-h26-public-intent-rules-v3"
             and not args.disable_next_damage_risk
         ),
         "ascension": 0, "map": "native-overgrowth-generated-default-v111",
