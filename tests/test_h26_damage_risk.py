@@ -2,9 +2,6 @@
 from __future__ import annotations
 
 import copy
-from dataclasses import replace
-
-import pytest
 from test_h26_intent_law import _catalog
 from test_h26_searchfree import _combat, _models
 
@@ -12,7 +9,8 @@ from sts2_ai.emulator.protocol import LegalAction
 from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet
 from sts2_ai.training.h26_damage_risk import conditional_next_gross_damage
 from sts2_ai.training.h26_public_intent_law import (
-    DAMAGE_SCHEMA, validate_public_intent_catalog,
+    DAMAGE_SCHEMA,
+    validate_public_intent_catalog,
 )
 from sts2_ai.training.h26_tactical import attach_visible_threat
 from tools.train_h26_searchfree_a0 import _h26_ai_source_sha256
