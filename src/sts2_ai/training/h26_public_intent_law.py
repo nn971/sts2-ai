@@ -47,7 +47,6 @@ def validate_public_intent_catalog(raw: dict[str, Any]) -> dict[str, Any]:
         if (not isinstance(eid, str) or not eid or eid in seen
                 or not isinstance(moves, list) or not moves
                 or any(not isinstance(m, str) or not m for m in moves)
-                or len(moves) != len(set(moves))
                 or not isinstance(limits, list)
                 or len(limits) != len(moves)
                 or any(type(x) is not int or x < 0 for x in limits)
@@ -122,6 +121,8 @@ def next_intent_law(
     moves = rule["move_ids"]
     if current not in moves:
         return _unavailable("unrecognized_visible_intent")
+    if moves.count(current) != 1:
+        return _unavailable("duplicate_visible_move_id")
     current_index = moves.index(current)
     policy = rule["move_policy"]
     if policy == "SequentialLoop":
