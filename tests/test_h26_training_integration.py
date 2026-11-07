@@ -79,9 +79,12 @@ def _episodes():
     return macro_ep, fight_ep
 
 
-@pytest.mark.parametrize("with_damage_catalog", [False, True])
+@pytest.mark.parametrize(
+    ("with_damage_catalog", "disable_risk"),
+    [(False, False), (True, False), (True, True)],
+)
 def test_h26_one_round_is_searchfree_and_updates_both_models(
-    tmp_path, monkeypatch, with_damage_catalog,
+    tmp_path, monkeypatch, with_damage_catalog, disable_risk,
 ):
     torch.set_num_threads(1)
     source = JointActPilotNet(H21GroundedMacroTransformer(
@@ -121,6 +124,8 @@ def test_h26_one_round_is_searchfree_and_updates_both_models(
         path = tmp_path / "source-damage-catalog.json"
         path.write_text(json.dumps(_catalog_v3()))
         common.extend(["--intent-catalog", str(path)])
+        if disable_risk:
+            common.append("--disable-next-damage-risk")
     monkeypatch.setattr(sys, "argv", common)
     trainer.main()
     assert stages == ["search_free_full_acts", "heldout"]
@@ -134,6 +139,9 @@ def test_h26_one_round_is_searchfree_and_updates_both_models(
     assert row["macro_checkpoint_sha256"]
     assert row["optimizer_checkpoint_sha256"]
     assert len(saved["experiment"]["ai_source_sha256"]) == 64
+    assert saved["experiment"]["next_damage_risk_enabled"] == (
+        with_damage_catalog and not disable_risk
+    )
     if with_damage_catalog:
         assert saved["experiment"]["schema"] == (
             "sts2-h26-search-free-conditional-gross-damage-v3"
@@ -152,5 +160,5 @@ def test_h26_one_round_is_searchfree_and_updates_both_models(
     assert loaded_combat.macro_progress_head is None
     assert loaded_combat.h26_tactical
     assert loaded_combat.h26_damage_ascension == (
-        0 if with_damage_catalog else None
+        0 if with_damage_catalog and not disable_risk else None
     )
