@@ -459,6 +459,7 @@ class PilotPolicy:
         h24_selection: dict[str, bool] | None = None,
         h24_vocabulary: dict[str, tuple[str, ...]] | None = None,
         h26_tactical: bool = False,
+        h26_intent_catalog: dict[str, Any] | None = None,
     ) -> None:
         if not 0 <= horizon_lambda <= 1 or temperature <= 0 or macro_prior_weight < 0:
             raise ValueError("Invalid pilot continuation/policy weighting")
@@ -477,6 +478,14 @@ class PilotPolicy:
         if h26_tactical and h24_selection is None:
             raise ValueError("H26 tactical actor requires H24 resource features")
         self.h26_tactical = h26_tactical
+        if h26_intent_catalog is not None:
+            from sts2_ai.training.h26_public_intent_law import (
+                validate_public_intent_catalog,
+            )
+            if not h26_tactical:
+                raise ValueError("H26 intent rules require tactical actor")
+            validate_public_intent_catalog(h26_intent_catalog)
+        self.h26_intent_catalog = h26_intent_catalog
         self.representation = representation
         self.model = model.eval() if model is not None else None
         self.remote_actor = remote_actor
@@ -522,6 +531,7 @@ class PilotPolicy:
                 selection=ResourceConstraintSelection(**self.h24_selection),
                 vocabulary=SafeResourceVocabulary(**self.h24_vocabulary),
                 tactical=self.h26_tactical,
+                intent_catalog=self.h26_intent_catalog,
             )
         else:
             encoded = encode_joint_decision(
