@@ -33,11 +33,13 @@ if not test (git -C $emu branch --show-current) = research/h26-public-intent-law
     echo 'Expected emulator branch research/h26-public-intent-law-20261107' >&2
     exit 2
 end
-if test -n (git -C $ai status --porcelain --untracked-files=no | string collect)
+set -l ai_dirty (git -C $ai status --porcelain --untracked-files=no)
+set -l emu_dirty (git -C $emu status --porcelain --untracked-files=no)
+if test (count $ai_dirty) -gt 0
     echo 'AI sources contain uncommitted changes; commit or restore before a long run.' >&2
     exit 2
 end
-if test -n (git -C $emu status --porcelain --untracked-files=no | string collect)
+if test (count $emu_dirty) -gt 0
     echo 'Emulator sources contain uncommitted changes; commit or restore before a long run.' >&2
     exit 2
 end
@@ -132,8 +134,10 @@ if test $mode = start
         exit 2
     end
     python -u tools/train_h26_searchfree_a0.py $args --execute 2>&1 | tee $log
+    set -l exit_code $pipestatus[1]
+    exit $exit_code
 else
     python -u tools/train_h26_searchfree_a0.py $args --resume --execute 2>&1 | tee -a $log
+    set -l exit_code $pipestatus[1]
+    exit $exit_code
 end
-set -l exit_code $pipestatus[1]
-exit $exit_code
