@@ -32,6 +32,7 @@ from sts2_ai.training.h16_joint_act_pilot import (
 from sts2_ai.training.h24_joint_act_model import H24JointActPilotNet
 from sts2_ai.training.h25_alternating import fit_macro_reinforce
 from sts2_ai.training.h26_combat_rl import fit_search_free_combat
+from sts2_ai.training.h26_damage_risk import public_damage_risk_coverage
 from sts2_ai.training.h26_public_intent_law import (
     public_intent_coverage,
     validate_public_intent_catalog,
@@ -109,6 +110,7 @@ def _h26_ai_source_sha256() -> str:
         "tools/train_h26_searchfree_a0.py",
         "tools/train_h16_joint_act_pilot.py",
         "src/sts2_ai/training/h26_public_intent_law.py",
+        "src/sts2_ai/training/h26_damage_risk.py",
         "src/sts2_ai/training/h26_tactical.py",
         "src/sts2_ai/training/h26_combat_rl.py",
         "src/sts2_ai/training/h25_alternating.py",
@@ -519,6 +521,18 @@ def main() -> None:
                     "heldout": public_intent_coverage(held, args._intent_catalog),
                 },
             } if args._intent_catalog is not None else {}),
+            **({
+                "damage_risk_coverage": {
+                    "train": public_damage_risk_coverage(
+                        train, args._intent_catalog, ascension=0,
+                    ),
+                    "heldout": public_damage_risk_coverage(
+                        held, args._intent_catalog, ascension=0,
+                    ),
+                },
+            } if args._intent_catalog is not None
+               and args._intent_catalog["schema"]
+                   == "sts2-h26-public-intent-rules-v3" else {}),
             "combat_update": combat_update,
             "macro_update": macro_update,
             "timing": {
