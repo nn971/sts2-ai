@@ -130,6 +130,7 @@ def fit_search_free_combat(
                 combat_model.encode_decision(
                     public_state(sample.decision.observation),
                     sample.decision.legal_actions,
+                    intent_histories=sample.decision.h26_public_intent_history,
                 ) for sample in chunk
             ]
             batch = combat_model.collate(encoded).to(device)
