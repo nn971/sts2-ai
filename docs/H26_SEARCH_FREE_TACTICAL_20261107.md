@@ -114,12 +114,21 @@ Then run the existing smoke with the additional argument
 and **the new emulator revision** `--emulator-revision $rev` under a new
 output root. This switches to a separate H26 v2 experiment fingerprint.
 
-At each combat observation, H26 obtains the next-intent candidate masses
-from the source rule catalog and the **currently displayed move**.
-For a uniquely determined selection, it adds enemy-owned tokens containing
-the known next move and its exact integer probability on the Native grid.
-For ambiguous opener-vs-pool states, multi-use repetition history, and
-multi-state AI, it emits an explicit `UNAVAILABLE` token.
+The v2 catalog exports each enemy's **full source-defined AI state
+graph**: move states and their successors, weighted random branches,
+repetition restrictions, and conditional branches. H26 reconstructs the
+successor AI state from the uniquely visible current move and, when
+necessary, a per-episode history of previously announced intents across
+completed turns. This history is recorded with each rollout decision
+and reused unchanged during actor-critic updates.
+
+State-machine random branches use exact Native `NextInt` integer-ticket
+masses. Conditional branches use only public HP, powers, and formation
+facts; rules requiring unrepresented formation slots, off-balance flags,
+summon budgets, or ambiguous prior state remain `UNAVAILABLE`.
+The encoder adds enemy-owned probability tokens or one explicit
+`UNAVAILABLE` marker. Existing H21 pointers, H24 monotone values,
+and H25 rollouts are unchanged.
 
 The law is **conditional on the current announced intent executing normally**
 and the enemy surviving to select another move; it is not a prediction of
@@ -127,15 +136,18 @@ which enemy or action will remain after unexecuted player choices. Existing
 H21 state/action pointers and H24 monotone value encoding are retained.
 
 The output `progress.json` includes
-`rounds[].intent_law_coverage.train` and `.heldout` with exact-conditional
-coverage rates and the reasons for unavailable forecasts. Review this before
-enlarging the experiment. Native engine parity and full player-history
-reconstruction for advanced state machines are still separate tests.
+`rounds[].intent_law_coverage.train` and `.heldout`, including
+`living_availability_rate`, `by_enemy` with unavailable reasons, and
+`next_turn_support_audit`: a conservative consistency probe against
+subsequent publicly observed moves under unchanged visible conditions.
+Review this before enlarging the experiment. Source/native parity for
+exceptional stun, spawn, formation and phase transitions remains gated.
 
 ## Constraints and remaining verification
 
-- The new tactical damage token supplies current displayed damage only.
-  It does not encode exact future-turn intent probabilities yet.
+- The tactical damage token supplies current displayed damage; next-turn
+  intent probabilities are exact only where public conditioning is resolved.
+  This does not imply the future attack-damage distribution is computed.
 - A 0.1-scale potential is dense but bounded. Reward ordering and calibration
   should be evaluated against complete Act outcomes and heldout HP.
 - CPU unit tests and CLI compile are the first gate; an actual pinned native
