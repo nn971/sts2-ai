@@ -179,6 +179,12 @@ def _collect(
         "h26_no_search": True,
         "h26_tactical": True,
         "h26_intent_catalog": getattr(args, "_intent_catalog", None),
+        "h26_damage_ascension": (
+            0 if getattr(args, "_intent_catalog", None) is not None
+            and args._intent_catalog["schema"]
+                == "sts2-h26-public-intent-rules-v3"
+            else None
+        ),
         "max_decisions": args.max_decisions,
         "max_simulation_steps": 512,
         "rollout_transport": "fused",
@@ -332,7 +338,12 @@ def main() -> None:
         args._intent_catalog = None
     identity = _stable_identity(args)
     if args._intent_catalog is not None:
-        identity["schema"] = "sts2-h26-search-free-exact-conditional-intent-v2"
+        identity["schema"] = (
+            "sts2-h26-search-free-conditional-gross-damage-v3"
+            if args._intent_catalog["schema"]
+                == "sts2-h26-public-intent-rules-v3"
+            else "sts2-h26-search-free-exact-conditional-intent-v2"
+        )
     fingerprint = hashlib.sha256(
         json.dumps(identity, sort_keys=True).encode(),
     ).hexdigest()
@@ -387,7 +398,13 @@ def main() -> None:
                 or not getattr(combat, "h26_tactical", False)
                 or getattr(macro, "h26_tactical", False)
                 or (getattr(combat, "h26_intent_catalog", None)
-                    != args._intent_catalog)):
+                    != args._intent_catalog)
+                or (getattr(combat, "h26_damage_ascension", None) != (
+                    0 if args._intent_catalog is not None
+                    and args._intent_catalog["schema"]
+                        == "sts2-h26-public-intent-rules-v3"
+                    else None
+                ))):
             raise ValueError("H26 resume requires Act-only H24 checkpoints")
         macro_optimizer = torch.optim.AdamW(macro.parameters(), lr=args.lr)
         combat_optimizer = torch.optim.AdamW(combat.parameters(), lr=args.lr)
@@ -423,6 +440,13 @@ def main() -> None:
         combat.h26_tactical = True
         macro.h26_intent_catalog = None
         combat.h26_intent_catalog = args._intent_catalog
+        macro.h26_damage_ascension = None
+        combat.h26_damage_ascension = (
+            0 if args._intent_catalog is not None
+            and args._intent_catalog["schema"]
+                == "sts2-h26-public-intent-rules-v3"
+            else None
+        )
         macro_optimizer = torch.optim.AdamW(macro.parameters(), lr=args.lr)
         combat_optimizer = torch.optim.AdamW(combat.parameters(), lr=args.lr)
         macro.save(macro_path)
