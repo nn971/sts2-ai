@@ -202,6 +202,32 @@ def _branch_eligibility(
     return None
 
 
+def _replay_deterministic_move_history(
+    ai: dict[str, Any], moves: list[str],
+    executed_moves: tuple[str, ...] | None, current: str,
+) -> str | None:
+    """Resolve duplicate move IDs by replaying a wholly deterministic AI path.
+
+    A public sequence begins at the enemy's initial move-state. We only
+    certify it when every intervening state is a concrete Move state, so
+    this never guesses a random/conditional branch or a hidden phase change.
+    """
+    if executed_moves is None:
+        return None
+    by_id = {s["id"]: s for s in ai["states"]}
+    state_id = ai["initial_state_id"]
+    for observed in (*executed_moves, current):
+        state = by_id.get(state_id)
+        if state is None or state.get("kind") != "Move":
+            return None
+        index = state.get("move_index")
+        if (type(index) is not int or not 0 <= index < len(moves)
+                or moves[index] != observed):
+            return None
+        state_id = state.get("next_state_id") or ai["initial_state_id"]
+    return state_id
+
+
 def _state_machine_law(
     rule: dict[str, Any], current: str,
     catalog: dict[str, Any], *,
@@ -224,9 +250,19 @@ def _state_machine_law(
     # Different move states may have the same visible move ID. In that
     # case retain only next states uniquely reconstructible from sight.
     next_ids = {s.get("next_state_id") for s in matches}
-    if not matches or len(next_ids) != 1:
+    if not matches:
         return _unavailable("state_machine_current_state_ambiguous")
-    state_id = next(iter(next_ids)) or ai["initial_state_id"]
+    if len(next_ids) == 1:
+        state_id = next(iter(next_ids)) or ai["initial_state_id"]
+    else:
+        # Fuzzy Wurm Crawler (and other deterministic loops) can have
+        # several states with one displayed move. The complete public
+        # sequence disambiguates their successors without private counters.
+        state_id = _replay_deterministic_move_history(
+            ai, moves, executed_moves, current,
+        )
+        if state_id is None:
+            return _unavailable("state_machine_current_state_ambiguous")
     for _ in range(32):
         state = by_id.get(state_id)
         if state is None:
@@ -365,7 +401,7 @@ def next_intent_law(
     moves = rule["move_ids"]
     if current not in moves:
         return _unavailable("unrecognized_visible_intent")
-    if moves.count(current) != 1:
+    if moves.count(current) != 1 and rule["move_policy"] != "StateMachine":
         return _unavailable("duplicate_visible_move_id")
     current_index = moves.index(current)
     policy = rule["move_policy"]
