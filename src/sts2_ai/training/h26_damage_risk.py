@@ -166,21 +166,20 @@ def _gross_move_damage(
         )
         if any(pid not in power_rules for pid, _ in powers + player_powers):
             return None
-        for pid, _stacks in powers:
-            # Enemy weak/status outgoing multipliers apply when stacks > 0.
+        # Mirror EnemyHitDamage: status multipliers apply in the
+        # source's EnemyStatusPowerIds order, not arbitrary power order.
+        for status_id, pid in catalog["enemy_status_power_ids"].items():
+            if not any(power_id == pid for power_id, _ in powers):
+                continue
             rule = power_rules[pid]
             num = rule["enemy_outgoing_damage_numerator"]
             den = rule["enemy_outgoing_damage_denominator"]
             if den <= 0:
                 return None
-            if (pid == catalog["enemy_status_power_ids"].get("proto.status.weak")
-                    and bonus_weak):
+            if status_id == "proto.status.weak" and bonus_weak:
                 num = max(0, 100 * num - bonus_weak * den)
                 den *= 100
-            # In the source, these multipliers apply to enemy effect statuses
-            # only. Ordinary powers have their outgoing fraction at identity.
-            if num != den:
-                amount = amount * num // den
+            amount = amount * num // den
         for pid, _stacks in powers:
             rule = power_rules[pid]
             den = rule["enemy_outgoing_powered_attack_denominator"]
