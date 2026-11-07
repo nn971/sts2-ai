@@ -458,6 +458,7 @@ class PilotPolicy:
         representation: str = "h16",
         h24_selection: dict[str, bool] | None = None,
         h24_vocabulary: dict[str, tuple[str, ...]] | None = None,
+        h26_tactical: bool = False,
     ) -> None:
         if not 0 <= horizon_lambda <= 1 or temperature <= 0 or macro_prior_weight < 0:
             raise ValueError("Invalid pilot continuation/policy weighting")
@@ -473,6 +474,9 @@ class PilotPolicy:
             raise ValueError("H24 actor needs selection and vocabulary together")
         self.h24_selection = h24_selection
         self.h24_vocabulary = h24_vocabulary
+        if h26_tactical and h24_selection is None:
+            raise ValueError("H26 tactical actor requires H24 resource features")
+        self.h26_tactical = h26_tactical
         self.representation = representation
         self.model = model.eval() if model is not None else None
         self.remote_actor = remote_actor
@@ -517,6 +521,7 @@ class PilotPolicy:
                 public, actions,
                 selection=ResourceConstraintSelection(**self.h24_selection),
                 vocabulary=SafeResourceVocabulary(**self.h24_vocabulary),
+                tactical=self.h26_tactical,
             )
         else:
             encoded = encode_joint_decision(
