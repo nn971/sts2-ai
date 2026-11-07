@@ -587,6 +587,7 @@ def main() -> None:
         write_json(progress_path, {
             "fingerprint": fingerprint, "experiment": identity,
             "elapsed_wall_seconds": elapsed_total,
+            "wall_budget_seconds": args.max_wall_seconds,
             "rounds": history,
         })
         # Retention runs only after the latest progress.json commit.
