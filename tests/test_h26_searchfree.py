@@ -136,7 +136,9 @@ def test_h26_tactical_capacity_preserves_h21_actions_and_relations():
             ),
         )
         actual = attach_visible_threat(expanded, state)
-        assert len(actual.objects) == count + 1
+        # At full H21 capacity, optional tactical tokens are skipped
+        # so action pointers and all source relations remain intact.
+        assert len(actual.objects) == min(count + 1, 1536)
         assert actual.objects[:count] == expanded.objects
         assert actual.actions == expanded.actions
         assert actual.relations == expanded.relations
