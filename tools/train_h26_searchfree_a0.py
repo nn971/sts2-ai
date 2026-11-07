@@ -140,6 +140,10 @@ def _stable_identity(args: argparse.Namespace) -> dict[str, Any]:
         **({"intent_catalog_sha256": sha256(args.intent_catalog)}
            if args.intent_catalog is not None else {}),
         "emulator_revision": args.emulator_revision,
+        "next_damage_risk_enabled": (
+            args.intent_catalog is not None
+            and not args.disable_next_damage_risk
+        ),
         "ascension": 0, "map": "native-overgrowth-generated-default-v111",
         "rounds": args.rounds, "runs_per_round": args.runs_per_round,
         "heldout_runs": args.heldout_runs, "study_seed": args.study_seed,
@@ -185,6 +189,7 @@ def _collect(
             0 if getattr(args, "_intent_catalog", None) is not None
             and args._intent_catalog["schema"]
                 == "sts2-h26-public-intent-rules-v3"
+            and not args.disable_next_damage_risk
             else None
         ),
         "max_decisions": args.max_decisions,
@@ -263,6 +268,9 @@ def _args() -> argparse.Namespace:
     p.add_argument("--initial-h22", type=Path, required=True)
     p.add_argument("--initial-h25-macro", type=Path)
     p.add_argument("--initial-h25-combat", type=Path)
+    p.add_argument("--disable-next-damage-risk", action="store_true",
+                   help="Matched ablation: use the identical v3 intent law "
+                        "and seeds without conditional damage-risk tokens")
     p.add_argument("--intent-catalog", type=Path,
                    help="Source-defined public enemy intent catalog JSON from "
                         "emulator public-intent-catalog-v111 CLI")
@@ -405,6 +413,7 @@ def main() -> None:
                     0 if args._intent_catalog is not None
                     and args._intent_catalog["schema"]
                         == "sts2-h26-public-intent-rules-v3"
+                    and not args.disable_next_damage_risk
                     else None
                 ))):
             raise ValueError("H26 resume requires Act-only H24 checkpoints")
@@ -447,6 +456,7 @@ def main() -> None:
             0 if args._intent_catalog is not None
             and args._intent_catalog["schema"]
                 == "sts2-h26-public-intent-rules-v3"
+            and not args.disable_next_damage_risk
             else None
         )
         macro_optimizer = torch.optim.AdamW(macro.parameters(), lr=args.lr)
