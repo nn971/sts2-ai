@@ -431,15 +431,65 @@ def summarize_next_intents(
     )
 
 
+class PublicIntentHistory:
+    """Public displayed-intent history, keyed by encounter and enemy instance.
+
+    A move is recorded only on an observed player-turn transition while the
+    same enemy survives. Counts assume its announced intent executed normally,
+    which is stated explicitly in the resulting conditional law.
+    """
+
+    def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        self._floor: int | None = None
+        self._turn: int | None = None
+        self._last: dict[int, str] = {}
+        self._moves: dict[int, list[str]] = {}
+
+    def observe(self, state: dict[str, Any]) -> dict[int, tuple[str, ...]]:
+        combat = state.get("combat")
+        if not isinstance(combat, dict):
+            self.reset()
+            return {}
+        floor, turn = state.get("floor"), combat.get("turn")
+        if type(floor) is not int or type(turn) is not int:
+            self.reset()
+            return {}
+        if self._floor != floor or (
+            self._turn is not None and (turn < self._turn or turn > self._turn + 1)
+        ):
+            self.reset()
+        enemies = combat.get("enemies", [])
+        if not isinstance(enemies, list):
+            self.reset()
+            return {}
+        now = {
+            enemy["instance_id"]: enemy["move_id"]
+            for enemy in enemies if isinstance(enemy, dict)
+            and type(enemy.get("instance_id")) is int
+            and type(enemy.get("hp")) is int and enemy["hp"] > 0
+            and isinstance(enemy.get("move_id"), str)
+        }
+        if self._turn is not None and turn > self._turn:
+            for instance_id, move in self._last.items():
+                if instance_id in now:
+                    self._moves.setdefault(instance_id, []).append(move)
+        self._floor, self._turn, self._last = floor, turn, now
+        return {k: tuple(v) for k, v in self._moves.items()}
+
+
 def public_intent_coverage(
     episodes: list[Any], catalog: dict[str, Any],
 ) -> dict[str, Any]:
-    """Describe available exact-conditional laws at distinct visible turns."""
+    """Distinct visible turns, with per-enemy exact law coverage and reasons."""
     from sts2_ai.training.h16_joint_act_pilot import public_state
 
     seen: set[tuple[Any, ...]] = set()
     reasons: dict[str, int] = {}
-    available = total = 0
+    by_enemy: dict[str, dict[str, Any]] = {}
+    available = total = living = living_available = 0
     for episode in episodes:
         for decision in episode.decisions:
             state = public_state(decision.observation)
@@ -449,9 +499,11 @@ def public_intent_coverage(
             enemies = combat.get("enemies")
             if not isinstance(enemies, list):
                 continue
+            history = getattr(decision, "h26_public_intent_history", None)
             for enemy in enemies:
                 if not isinstance(enemy, dict):
                     continue
+                name = str(enemy.get("enemy_id", "UNKNOWN"))
                 key = (
                     episode.seed, state.get("floor"), combat.get("turn"),
                     enemy.get("instance_id"), enemy.get("move_id"),
@@ -459,15 +511,51 @@ def public_intent_coverage(
                 if key in seen:
                     continue
                 seen.add(key)
-                law = next_intent_law(enemy, catalog)
+                law = next_intent_law(
+                    enemy, catalog, public_enemies=enemies,
+                    executed_moves=(
+                        history.get(enemy.get("instance_id"))
+                        if isinstance(history, dict) else None
+                    ),
+                )
                 total += 1
+                bucket = by_enemy.setdefault(
+                    name, {"total": 0, "available": 0,
+                           "living": 0, "living_available": 0,
+                           "unavailable_reasons": {}},
+                )
+                bucket["total"] += 1
+                alive = type(enemy.get("hp")) is int and enemy["hp"] > 0
+                if alive:
+                    living += 1
+                    bucket["living"] += 1
                 if law.available:
                     available += 1
+                    bucket["available"] += 1
+                    if alive:
+                        living_available += 1
+                        bucket["living_available"] += 1
                 else:
                     reasons[law.reason] = reasons.get(law.reason, 0) + 1
+                    bucket["unavailable_reasons"][law.reason] = (
+                        bucket["unavailable_reasons"].get(law.reason, 0) + 1
+                    )
+    for record in by_enemy.values():
+        record["living_availability_rate"] = (
+            record["living_available"] / record["living"]
+            if record["living"] else None
+        )
+        record["unavailable_reasons"] = dict(
+            sorted(record["unavailable_reasons"].items()),
+        )
     return {
-        "available": available,
-        "total": total,
+        "available": available, "total": total,
         "availability_rate": available / total if total else None,
+        "living": living,
+        "living_available": living_available,
+        "living_availability_rate": (
+            living_available / living if living else None
+        ),
         "unavailable_reasons": dict(sorted(reasons.items())),
+        "by_enemy": dict(sorted(by_enemy.items())),
     }
