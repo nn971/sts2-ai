@@ -175,3 +175,45 @@ def summarize_next_intents(
     enemies: list[dict[str, Any]], catalog: dict[str, Any],
 ) -> tuple[PublicNextIntentLaw, ...]:
     return tuple(next_intent_law(enemy, catalog) for enemy in enemies)
+
+
+def public_intent_coverage(
+    episodes: list[Any], catalog: dict[str, Any],
+) -> dict[str, Any]:
+    """Describe available exact-conditional laws at distinct visible turns."""
+    from sts2_ai.training.h16_joint_act_pilot import public_state
+
+    seen: set[tuple[Any, ...]] = set()
+    reasons: dict[str, int] = {}
+    available = total = 0
+    for episode in episodes:
+        for decision in episode.decisions:
+            state = public_state(decision.observation)
+            combat = state.get("combat")
+            if not isinstance(combat, dict):
+                continue
+            enemies = combat.get("enemies")
+            if not isinstance(enemies, list):
+                continue
+            for enemy in enemies:
+                if not isinstance(enemy, dict):
+                    continue
+                key = (
+                    episode.seed, state.get("floor"), combat.get("turn"),
+                    enemy.get("instance_id"), enemy.get("move_id"),
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                law = next_intent_law(enemy, catalog)
+                total += 1
+                if law.available:
+                    available += 1
+                else:
+                    reasons[law.reason] = reasons.get(law.reason, 0) + 1
+    return {
+        "available": available,
+        "total": total,
+        "availability_rate": available / total if total else None,
+        "unavailable_reasons": dict(sorted(reasons.items())),
+    }
