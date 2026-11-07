@@ -151,6 +151,7 @@ def _worker_init(config: dict[str, Any]) -> None:
             h24_selection=config.get("h24_selection"),
             h24_vocabulary=config.get("h24_vocabulary"),
             h26_tactical=config.get("h26_tactical", False),
+            h26_intent_catalog=config.get("h26_intent_catalog"),
         )
         policy = SplitPilotPolicy(
             macro_policy, combat_policy, hp_bias=config["h25_hp_bias"],
