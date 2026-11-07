@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
+from dataclasses import replace
 
 import pytest
 import torch
@@ -21,6 +22,7 @@ from sts2_ai.training.h26_combat_rl import (
     fit_search_free_combat,
 )
 from sts2_ai.training.h26_tactical import (
+    attach_visible_threat,
     combat_dense_rewards,
     visible_incoming_threat,
 )
@@ -117,6 +119,35 @@ def test_h26_tactical_token_is_policy_only_and_checkpointed(tmp_path):
     assert restored.h26_tactical
     assert len(restored.encode_decision(state, actions).objects) == len(altered.objects)
     assert not macro.h26_tactical
+
+
+def test_h26_tactical_capacity_preserves_h21_actions_and_relations():
+    # Regression: full H21 frames routinely exceed legacy H7's 256 objects.
+    macro, _ = _models()
+    state = _combat()
+    actions = (LegalAction("wait", "end_turn", "{}"),)
+    base = macro.encode_decision(state, actions)
+    assert base.objects
+    for count in (256, 257, 1024, 1536):
+        expanded = replace(
+            base,
+            objects=base.objects + (base.objects[-1],) * (
+                count - len(base.objects)
+            ),
+        )
+        actual = attach_visible_threat(expanded, state)
+        assert len(actual.objects) == count + 1
+        assert actual.objects[:count] == expanded.objects
+        assert actual.actions == expanded.actions
+        assert actual.relations == expanded.relations
+        assert actual.neutral_value == expanded.neutral_value
+    oversized = replace(
+        base, objects=base.objects * (
+            1 + 1536 // len(base.objects)
+        ),
+    )
+    with pytest.raises(ValueError, match="exceeds its object cap"):
+        attach_visible_threat(oversized, state)
 
 
 def test_combat_shaping_and_searchfree_returns(monkeypatch):
