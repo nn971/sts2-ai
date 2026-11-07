@@ -7,7 +7,6 @@ and the enemy surviving to its next selection. Ambiguous states are UNAVAILABLE.
 """
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from typing import Any
 
