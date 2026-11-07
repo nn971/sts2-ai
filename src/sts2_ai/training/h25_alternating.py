@@ -129,9 +129,14 @@ class SplitPilotPolicy:
             self._h26_history.observe(state)
             if self._h26_history is not None else None
         )
-        scores, combat_value, offsets = self.combat.infer(
-            observation, actions, intent_histories=self.public_intent_history,
-        )
+        if self.public_intent_history is not None:
+            scores, combat_value, offsets = self.combat.infer(
+                observation, actions, intent_histories=self.public_intent_history,
+            )
+        else:
+            scores, combat_value, offsets = self.combat.infer(
+                observation, actions,
+            )
         if self.rollout_no_value:
             # No tree search in H26: skip the otherwise unused macro value RPC.
             return scores, combat_value, offsets
