@@ -11,7 +11,9 @@ from sts2_ai.models.shared_game_objects import KINDS, ZONES
 from sts2_ai.training.h16_joint_act_pilot import JointActPilotNet
 from sts2_ai.training.h26_public_intent_law import (
     SCHEMA,
+    PublicIntentHistory,
     next_intent_law,
+    public_intent_coverage,
     validate_public_intent_catalog,
 )
 from sts2_ai.training.h26_tactical import attach_visible_threat
@@ -146,3 +148,120 @@ def test_next_intent_tokens_are_enemy_owned_and_do_not_change_value(tmp_path):
     assert restored.encode_decision(state, actions) == enhanced
     # No next-turn source data enters monotone neutral value encoding.
     assert restored.encode_decision(state, actions).neutral_value == original.neutral_value
+
+
+def _machine_catalog():
+    raw = copy.deepcopy(_catalog())
+    raw["enemies"].append({
+        "enemy_id": "proto.enemy.machine",
+        "move_policy": "StateMachine",
+        "move_ids": ["first", "a", "b", "end"],
+        "max_consecutive_uses": [0, 0, 0, 0],
+        "opening_move_indices": [0],
+        "random_move_pool_start_index": 0,
+        "move_loop_start_index": 0,
+        "ai": {
+            "initial_state_id": "first_move",
+            "states": [
+                {"id": "first_move", "kind": "Move", "move_index": 0,
+                 "next_state_id": "lottery", "branches": [],
+                 "conditional_branches": []},
+                {"id": "lottery", "kind": "Random", "move_index": None,
+                 "next_state_id": None, "branches": [
+                     {"target_state_id": "a_move", "weight": 1,
+                      "repeat_rule": "CanRepeatForever",
+                      "max_times": 0, "requires_available_summon": False},
+                     {"target_state_id": "b_move", "weight": 2,
+                      "repeat_rule": "CannotRepeat",
+                      "max_times": 0, "requires_available_summon": False},
+                 ], "conditional_branches": []},
+                {"id": "a_move", "kind": "Move", "move_index": 1,
+                 "next_state_id": "after_a", "branches": [],
+                 "conditional_branches": []},
+                {"id": "b_move", "kind": "Move", "move_index": 2,
+                 "next_state_id": "lottery", "branches": [],
+                 "conditional_branches": []},
+                {"id": "after_a", "kind": "Conditional", "move_index": None,
+                 "next_state_id": None, "branches": [],
+                 "conditional_branches": [
+                     {"condition": "IsAlone", "target_state_id": "end_move",
+                      "value": None},
+                 ]},
+                {"id": "end_move", "kind": "Move", "move_index": 3,
+                 "next_state_id": "lottery", "branches": [],
+                 "conditional_branches": []},
+            ],
+        },
+    })
+    raw["native_next_int_weights"]["4"] = [2, 2, 2, 2]
+    return validate_public_intent_catalog(raw)
+
+
+def test_public_state_machine_weighted_and_conditional_transitions():
+    catalog = _machine_catalog()
+    first = _enemy("proto.enemy.machine", "first")
+    law = next_intent_law(first, catalog)
+    assert law.available
+    assert dict(law.outcomes) == {"a": 3, "b": 5}
+    assert sum(weight for _, weight in law.outcomes) == 8
+    after_b = next_intent_law(
+        _enemy("proto.enemy.machine", "b"), catalog,
+    )
+    assert dict(after_b.outcomes) == {"a": 8}
+    after_a = next_intent_law(
+        _enemy("proto.enemy.machine", "a"), catalog,
+        public_enemies=[_enemy("proto.enemy.machine", "a")],
+    )
+    assert dict(after_a.outcomes) == {"end": 8}
+    without_formation = next_intent_law(
+        _enemy("proto.enemy.machine", "a"), catalog,
+    )
+    assert not without_formation.available
+    assert without_formation.reason == "state_machine_condition_history_needed"
+
+
+def test_public_intent_history_turn_boundary_and_reset():
+    tracker = PublicIntentHistory()
+    first = _combat()
+    first["combat"]["enemies"][0]["move_id"] = "a"
+    first["combat"]["enemies"][0]["hp"] = 20
+    initial = tracker.observe(first)
+    assert initial == {2: ()}
+    assert tracker.observe(first) == initial
+    second = copy.deepcopy(first)
+    second["combat"]["turn"] = 2
+    second["combat"]["enemies"][0]["move_id"] = "b"
+    assert tracker.observe(second) == {2: ("a",)}
+    third = copy.deepcopy(second)
+    third["combat"]["turn"] = 3
+    third["combat"]["enemies"][0]["move_id"] = "b"
+    assert tracker.observe(third) == {2: ("a", "b")}
+    event = copy.deepcopy(first)
+    event["combat"] = None
+    assert tracker.observe(event) == {}
+
+
+def test_per_enemy_coverage_reports_unavailable_reasons():
+    import json
+
+    from sts2_ai.emulator.protocol import Observation
+    from sts2_ai.training.h16_joint_act_pilot import PilotDecision, PilotEpisode
+
+    catalog = _machine_catalog()
+    state = _combat()
+    state["combat"]["enemies"][0]["enemy_id"] = "proto.enemy.machine"
+    state["combat"]["enemies"][0]["move_id"] = "first"
+    action = (LegalAction("wait", "end_turn", "{}"),)
+    decision = PilotDecision(
+        Observation("prototype-fair-v0", json.dumps(state), "public"),
+        action, 0, (0.0,), h26_public_intent_history={2: ()},
+    )
+    episode = PilotEpisode(
+        "example", (decision,), (state, {**state, "combat": None}),
+        "defeat", 0, 0,
+    )
+    result = public_intent_coverage([episode], catalog)
+    assert result["living"] == 1
+    assert result["living_available"] == 1
+    assert result["by_enemy"]["proto.enemy.machine"]["available"] == 1
+    assert result["by_enemy"]["proto.enemy.machine"]["living_availability_rate"] == 1
