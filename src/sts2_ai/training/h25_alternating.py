@@ -71,6 +71,13 @@ class SplitPilotPolicy:
         self.combat = combat
         self.hp_bias = hp_bias
         self.rollout_no_value = rollout_no_value
+        self._h26_history = None
+        if rollout_no_value and combat.h26_intent_catalog is not None:
+            from sts2_ai.training.h26_public_intent_law import (
+                PublicIntentHistory,
+            )
+            self._h26_history = PublicIntentHistory()
+        self.public_intent_history: dict[int, tuple[str, ...]] | None = None
         self.temperature = macro.temperature
         self.combat_credit_weight = combat.combat_credit_weight
         self.loss_progress_cap = combat.loss_progress_cap
@@ -103,13 +110,28 @@ class SplitPilotPolicy:
         fraction = min(1.0, max(0.0, hp / maximum))
         return (1.0 - self.hp_bias) * continuation + self.hp_bias * fraction
 
+    def reset_episode(self) -> None:
+        if self._h26_history is not None:
+            self._h26_history.reset()
+        self.public_intent_history = None
+
     def infer(
         self, observation: Observation, actions: tuple[LegalAction, ...],
     ) -> tuple[tuple[float, ...], float, tuple[float, ...]]:
-        combat = isinstance(public_state(observation).get("combat"), dict)
+        state = public_state(observation)
+        combat = isinstance(state.get("combat"), dict)
         if not combat:
+            if self._h26_history is not None:
+                self._h26_history.observe(state)
+            self.public_intent_history = None
             return self.macro.infer(observation, actions)
-        scores, combat_value, offsets = self.combat.infer(observation, actions)
+        self.public_intent_history = (
+            self._h26_history.observe(state)
+            if self._h26_history is not None else None
+        )
+        scores, combat_value, offsets = self.combat.infer(
+            observation, actions, intent_histories=self.public_intent_history,
+        )
         if self.rollout_no_value:
             # No tree search in H26: skip the otherwise unused macro value RPC.
             return scores, combat_value, offsets
