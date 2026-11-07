@@ -11,7 +11,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from sts2_ai.models.shared_game_objects import (
-    IDENTITY_BUCKETS, KINDS, ZONES, ObjectToken, _bucket, _numbers,
+    IDENTITY_BUCKETS,
+    KINDS,
+    ZONES,
+    ObjectToken,
+    _bucket,
+    _numbers,
 )
 from sts2_ai.training.h24_joint_act_model import H24EncodedDecision
 
