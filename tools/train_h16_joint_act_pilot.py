@@ -150,9 +150,11 @@ def _worker_init(config: dict[str, Any]) -> None:
             loss_progress_cap=config["loss_progress_cap"],
             h24_selection=config.get("h24_selection"),
             h24_vocabulary=config.get("h24_vocabulary"),
+            h26_tactical=config.get("h26_tactical", False),
         )
         policy = SplitPilotPolicy(
             macro_policy, combat_policy, hp_bias=config["h25_hp_bias"],
+            rollout_no_value=config.get("h26_no_search", False),
         )
     else:
         policy = macro_policy
@@ -249,7 +251,8 @@ def _worker_run_h25(seed: str) -> dict[str, Any]:
         actor_inference_seconds=policy.inference_seconds,
     )
     sampled = sample_fight_starts(
-        episode, count=cfg["h25_fights_per_run"],
+        episode, count=0 if cfg.get("h26_no_search", False)
+        else cfg["h25_fights_per_run"],
         seed=rng.randrange(2**63),
     )
     examples = []
