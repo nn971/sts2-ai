@@ -15,12 +15,17 @@ from sts2_ai.models.shared_game_objects import (
     KINDS,
     ZONES,
     ObjectToken,
+    RelationToken,
     _bucket,
     _numbers,
 )
 from sts2_ai.training.h16_episode_metrics import _is_minion
-from sts2_ai.training.h21_macro_offer_codec import H21_OBJECT_LIMIT
+from sts2_ai.training.h21_macro_offer_codec import (
+    H21_OBJECT_LIMIT,
+    VISIBLE_VALUE,
+)
 from sts2_ai.training.h24_joint_act_model import H24EncodedDecision
+from sts2_ai.training.h26_public_intent_law import summarize_next_intents
 
 
 @dataclass(frozen=True)
@@ -77,8 +82,15 @@ def visible_incoming_threat(state: dict[str, Any]) -> VisibleIncomingThreat:
 
 def attach_visible_threat(
     encoded: H24EncodedDecision, state: dict[str, Any],
+    *, intent_catalog: dict[str, Any] | None = None,
 ) -> H24EncodedDecision:
-    """Add a distinct tactical policy token; keep value-neutral encoding intact."""
+    """Add current threat and optional source-grid next-intent support tokens.
+
+    Candidate identity encodes the publicly known move ID, its observed
+    probability is a numeric feature, and ownership joins it to the
+    corresponding visible enemy. Existing pointers and neutral value encoding
+    remain unchanged.
+    """
     if not isinstance(state.get("combat"), dict):
         return encoded
     threat = visible_incoming_threat(state)
@@ -102,9 +114,54 @@ def attach_visible_threat(
     # all H21 owner indices, relation endpoints and action pointers.
     if len(encoded.objects) > H21_OBJECT_LIMIT:
         raise ValueError("Malformed H21 decision already exceeds its object cap")
+    extra: list[ObjectToken] = [marker]
+    edges: list[RelationToken] = []
+    if intent_catalog is not None:
+        enemies = state["combat"].get("enemies")
+        if not isinstance(enemies, list):
+            raise ValueError("Malformed public enemy list for H26 intents")
+        # H21 combat augmentation certifies the per-enemy token correspondence.
+        enemy_indices = [
+            index for index, token in enumerate(encoded.objects)
+            if token.kind == KINDS.index("enemy")
+            and token.zone == ZONES.index("enemy")
+        ]
+        if len(enemy_indices) != len(enemies):
+            raise ValueError("H26 enemy law ownership differs from H21 codec")
+        for owner, law in zip(
+            enemy_indices, summarize_next_intents(enemies, intent_catalog),
+            strict=True,
+        ):
+            # Explicitly mark unsupported/ambiguous law cases. No guessed
+            # zero threat or falsely uniform distribution reaches the model.
+            outcomes = (
+                law.outcomes if law.available
+                else (("UNAVAILABLE", 0),)
+            )
+            for move_id, numerator in outcomes:
+                if law.available:
+                    numeric, observed = _numbers({
+                        "count": 10.0 * numerator / law.denominator,
+                    })
+                else:
+                    numeric, observed = _numbers({"count": 0})
+                pos = len(encoded.objects) + len(extra)
+                extra.append(ObjectToken(
+                    kind=KINDS.index("status"),
+                    identity=_bucket(
+                        "h26.next-intent.v1:" + move_id,
+                        IDENTITY_BUCKETS,
+                    ),
+                    zone=ZONES.index("enemy"),
+                    numeric=numeric,
+                    observed=observed,
+                    owner=owner,
+                ))
+                edges.append(RelationToken(VISIBLE_VALUE, owner, pos))
     return H24EncodedDecision(
         encoded.schema, encoded.phase,
-        encoded.objects + (marker,), encoded.actions, encoded.relations,
+        encoded.objects + tuple(extra), encoded.actions,
+        encoded.relations + tuple(edges),
         encoded.neutral_value,
     )
 
