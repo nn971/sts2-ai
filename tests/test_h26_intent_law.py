@@ -265,3 +265,53 @@ def test_per_enemy_coverage_reports_unavailable_reasons():
     assert result["living_available"] == 1
     assert result["by_enemy"]["proto.enemy.machine"]["available"] == 1
     assert result["by_enemy"]["proto.enemy.machine"]["living_availability_rate"] == 1
+
+
+def test_fuzzy_wurm_duplicate_acid_state_resolved_by_public_history():
+    """Source cycle: acid_1 -> inhale -> acid_2 -> acid_1, two acid states."""
+    catalog = copy.deepcopy(_machine_catalog())
+    catalog["enemies"].append({
+        "enemy_id": "proto.enemy.fuzzy_wurm_crawler",
+        "move_policy": "StateMachine",
+        "move_ids": ["acid_goop", "inhale"],
+        "max_consecutive_uses": [0, 0],
+        "opening_move_indices": [0],
+        "random_move_pool_start_index": 0,
+        "move_loop_start_index": 0,
+        "ai": {
+            "initial_state_id": "acid_1",
+            "states": [
+                {"id": "acid_1", "kind": "Move", "move_index": 0,
+                 "next_state_id": "inhale", "branches": [],
+                 "conditional_branches": []},
+                {"id": "inhale", "kind": "Move", "move_index": 1,
+                 "next_state_id": "acid_2", "branches": [],
+                 "conditional_branches": []},
+                {"id": "acid_2", "kind": "Move", "move_index": 0,
+                 "next_state_id": "acid_1", "branches": [],
+                 "conditional_branches": []},
+            ],
+        },
+    })
+    validate_public_intent_catalog(catalog)
+    enemy = _enemy("proto.enemy.fuzzy_wurm_crawler", "acid_goop")
+    expected = [
+        ((), "inhale"),
+        (("acid_goop", "inhale"), "acid_goop"),
+        (("acid_goop", "inhale", "acid_goop"), "inhale"),
+        (("acid_goop", "inhale", "acid_goop", "acid_goop",
+          "inhale"), "acid_goop"),
+    ]
+    for history, following in expected:
+        law = next_intent_law(
+            enemy, catalog, executed_moves=history,
+        )
+        assert law.available, (history, law)
+        assert dict(law.outcomes) == {following: 8}
+    # Missing or inconsistent public history stays explicitly unknown.
+    assert next_intent_law(enemy, catalog).reason == (
+        "state_machine_current_state_ambiguous"
+    )
+    assert not next_intent_law(
+        enemy, catalog, executed_moves=("inhale",),
+    ).available
