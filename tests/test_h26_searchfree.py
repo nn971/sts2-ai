@@ -41,6 +41,7 @@ def _combat(*, known: bool = True, block: int = 5, hp: int = 60):
         "potion_slots_occupied": 0,
         "combat": {
             "turn": 1, "energy": 3, "player_block": block,
+            "history": {},
             "hand": [], "discard_pile": [], "exhaust_pile": [],
             "enemies": [enemy],
         },
