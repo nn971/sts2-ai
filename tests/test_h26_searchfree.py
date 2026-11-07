@@ -37,6 +37,7 @@ def _combat(*, known: bool = True, block: int = 5, hp: int = 60):
     return {
         "hp": hp, "max_hp": 70, "gold": 30,
         "floor": 5, "deck": [], "relics": [], "potions": [],
+        "map": [], "current_map_node_id": None,
         "potion_slot_capacity": 3, "potion_slots_empty": 3,
         "potion_slots_occupied": 0,
         "combat": {
