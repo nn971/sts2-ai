@@ -84,6 +84,16 @@ def _effective_enemy_powers(
     return result
 
 
+def _trunc_div(numerator: int, denominator: int) -> int:
+    """Match C# signed integer division (toward zero, not Python floor)."""
+    if denominator <= 0:
+        raise ValueError("Invalid source damage modifier denominator")
+    return (
+        abs(numerator) // denominator
+        if numerator >= 0 else -(abs(numerator) // denominator)
+    )
+
+
 def _scaled(base: int, deltas: list[dict[str, Any]], ascension: int) -> int:
     return base + sum(
         item["delta"] for item in deltas
@@ -179,21 +189,23 @@ def _gross_move_damage(
             if status_id == "proto.status.weak" and bonus_weak:
                 num = max(0, 100 * num - bonus_weak * den)
                 den *= 100
-            amount = amount * num // den
+            amount = _trunc_div(amount * num, den)
         for pid, _stacks in powers:
             rule = power_rules[pid]
             den = rule["enemy_outgoing_powered_attack_denominator"]
             if den <= 0:
                 return None
             amount = (
-                amount * rule["enemy_outgoing_powered_attack_numerator"] // den
+                _trunc_div(amount * rule["enemy_outgoing_powered_attack_numerator"], den)
             )
         for pid, _stacks in player_powers:
             rule = power_rules[pid]
             den = rule["player_incoming_attack_damage_denominator"]
             if den <= 0:
                 return None
-            amount = amount * rule["player_incoming_attack_damage_numerator"] // den
+            amount = _trunc_div(
+                amount * rule["player_incoming_attack_damage_numerator"], den,
+            )
         tainted = catalog.get("tainted_power_id")
         amount += sum(n for pid, n in player_powers if pid == tainted)
         caps = [
