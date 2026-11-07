@@ -63,7 +63,7 @@ def combat_return_samples(
         raise ValueError("Invalid H26 combat target configuration")
     samples: list[CombatReturnSample] = []
     for fight in combat_results(episode.frames, episode.outcome):
-        a, b = fight.start_decision, fight.end_decision
+        a, b = fight.start, fight.end
         if b <= a:
             continue
         segment = list(episode.frames[a:b + 1])
