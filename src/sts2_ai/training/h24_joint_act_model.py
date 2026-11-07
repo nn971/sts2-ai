@@ -75,16 +75,29 @@ def encode_h24_joint_decision(
     state: dict[str, Any], actions: Sequence[LegalAction], *,
     selection: ResourceConstraintSelection | None = None,
     vocabulary: SafeResourceVocabulary | None = None,
+    tactical: bool = False,
+    intent_catalog: dict[str, Any] | None = None,
+    intent_histories: dict[int, tuple[str, ...]] | None = None,
+    damage_ascension: int | None = None,
 ) -> H24EncodedDecision:
     """Worker-safe H24 RPC encoding without allocating a neural network."""
     normal = encode_joint_decision(state, actions, representation="h21")
     neutral = encode_h24_neutral_value(
         state, selection=selection, vocabulary=vocabulary,
     )
-    return H24EncodedDecision(
+    encoded = H24EncodedDecision(
         normal.schema, normal.phase, normal.objects, normal.actions,
         normal.relations, neutral,
     )
+    if tactical:
+        from sts2_ai.training.h26_tactical import attach_visible_threat
+
+        return attach_visible_threat(
+            encoded, state, intent_catalog=intent_catalog,
+            intent_histories=intent_histories,
+            damage_ascension=damage_ascension,
+        )
+    return encoded
 
 
 class H24JointActPilotNet(JointActPilotNet):
@@ -99,6 +112,9 @@ class H24JointActPilotNet(JointActPilotNet):
         search_act_mix: float = 0.0,
         act_only: bool = False,
         macro_progress: bool = False,
+        tactical: bool = False,
+        intent_catalog: dict[str, Any] | None = None,
+        damage_ascension: int | None = None,
     ) -> None:
         if not isinstance(backbone, H21GroundedMacroTransformer):
             raise TypeError("H24 requires H21 grounded backbone")
@@ -111,6 +127,22 @@ class H24JointActPilotNet(JointActPilotNet):
             raise ValueError("Act-only H24 must use the monotone Act critic for PUCT")
         self.search_act_mix = search_act_mix
         self.h24_act_only = act_only
+        self.h26_tactical = tactical
+        if intent_catalog is not None:
+            from sts2_ai.training.h26_public_intent_law import (
+                validate_public_intent_catalog,
+            )
+            if not tactical:
+                raise ValueError("H26 next-turn law requires tactical policy")
+            validate_public_intent_catalog(intent_catalog)
+        self.h26_intent_catalog = intent_catalog
+        if damage_ascension is not None and (
+            type(damage_ascension) is not int or damage_ascension < 0
+            or not tactical or intent_catalog is None
+            or intent_catalog.get("schema") != "sts2-h26-public-intent-rules-v3"
+        ):
+            raise ValueError("H26 source damage requires v3 catalog and run ascension")
+        self.h26_damage_ascension = damage_ascension
         if macro_progress and not act_only:
             raise ValueError("Macro progress head requires Act-only mode")
         self.macro_progress_head = (
@@ -135,13 +167,14 @@ class H24JointActPilotNet(JointActPilotNet):
         search_act_mix: float = 0.0,
         act_only: bool = False,
         macro_progress: bool = False,
+        tactical: bool = False,
     ) -> H24JointActPilotNet:
         if (source.representation != "h21"
                 or isinstance(source, H24JointActPilotNet)):
             raise ValueError("H24 warmstart requires an ordinary H22 model")
         model = cls(source.backbone, selection=selection, vocabulary=vocabulary,
                     search_act_mix=search_act_mix, act_only=act_only,
-                    macro_progress=macro_progress)
+                    macro_progress=macro_progress, tactical=tactical)
         model.horizon_head.load_state_dict(source.horizon_head.state_dict())
         model.act_clear.load_state_dict(source.act_clear.state_dict())
         # Reuse the H22 Act-clear linear head as the initial neutral base.
@@ -151,10 +184,14 @@ class H24JointActPilotNet(JointActPilotNet):
 
     def encode_decision(
         self, state: dict[str, Any], actions: Sequence[LegalAction],
+        *, intent_histories: dict[int, tuple[str, ...]] | None = None,
     ) -> H24EncodedDecision:
         return encode_h24_joint_decision(
             state, actions, selection=self.selection,
-            vocabulary=self.vocabulary,
+            vocabulary=self.vocabulary, tactical=self.h26_tactical,
+            intent_catalog=self.h26_intent_catalog,
+            intent_histories=intent_histories,
+            damage_ascension=self.h26_damage_ascension,
         )
 
     def collate(
@@ -267,6 +304,9 @@ class H24JointActPilotNet(JointActPilotNet):
             "search_act_mix": self.search_act_mix,
             "act_only": self.h24_act_only,
             "macro_progress": self.macro_progress_head is not None,
+            "h26_tactical": self.h26_tactical,
+            "h26_intent_catalog": self.h26_intent_catalog,
+            "h26_damage_ascension": self.h26_damage_ascension,
             "state_dict": self.state_dict(),
         }, path)
 
@@ -290,6 +330,9 @@ class H24JointActPilotNet(JointActPilotNet):
             search_act_mix=checkpoint["search_act_mix"],
             act_only=checkpoint.get("act_only", False),
             macro_progress=checkpoint.get("macro_progress", False),
+            tactical=checkpoint.get("h26_tactical", False),
+            intent_catalog=checkpoint.get("h26_intent_catalog"),
+            damage_ascension=checkpoint.get("h26_damage_ascension"),
         )
         model.load_state_dict(checkpoint["state_dict"], strict=True)
         return model.to(device)

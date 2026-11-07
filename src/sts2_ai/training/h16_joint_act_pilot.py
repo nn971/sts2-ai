@@ -394,6 +394,8 @@ class PilotDecision:
     search_policy: tuple[float, ...] | None = None
     predicted_value: float | None = None
     search_simulations: int = 0
+    # Derived solely from displayed prior enemy intents on completed turns.
+    h26_public_intent_history: dict[int, tuple[str, ...]] | None = None
 
 
 @dataclass(frozen=True)
@@ -458,6 +460,9 @@ class PilotPolicy:
         representation: str = "h16",
         h24_selection: dict[str, bool] | None = None,
         h24_vocabulary: dict[str, tuple[str, ...]] | None = None,
+        h26_tactical: bool = False,
+        h26_intent_catalog: dict[str, Any] | None = None,
+        h26_damage_ascension: int | None = None,
     ) -> None:
         if not 0 <= horizon_lambda <= 1 or temperature <= 0 or macro_prior_weight < 0:
             raise ValueError("Invalid pilot continuation/policy weighting")
@@ -473,6 +478,26 @@ class PilotPolicy:
             raise ValueError("H24 actor needs selection and vocabulary together")
         self.h24_selection = h24_selection
         self.h24_vocabulary = h24_vocabulary
+        if h26_tactical and h24_selection is None:
+            raise ValueError("H26 tactical actor requires H24 resource features")
+        self.h26_tactical = h26_tactical
+        if h26_intent_catalog is not None:
+            from sts2_ai.training.h26_public_intent_law import (
+                validate_public_intent_catalog,
+            )
+            if not h26_tactical:
+                raise ValueError("H26 intent rules require tactical actor")
+            validate_public_intent_catalog(h26_intent_catalog)
+        self.h26_intent_catalog = h26_intent_catalog
+        if h26_damage_ascension is not None and (
+            type(h26_damage_ascension) is not int
+            or h26_damage_ascension < 0
+            or h26_intent_catalog is None
+            or h26_intent_catalog.get("schema")
+                != "sts2-h26-public-intent-rules-v3"
+        ):
+            raise ValueError("H26 source damage requires v3 catalog and ascension")
+        self.h26_damage_ascension = h26_damage_ascension
         self.representation = representation
         self.model = model.eval() if model is not None else None
         self.remote_actor = remote_actor
@@ -502,13 +527,19 @@ class PilotPolicy:
 
     def infer(
         self, observation: Observation, actions: tuple[LegalAction, ...],
+        *, intent_histories: dict[int, tuple[str, ...]] | None = None,
     ) -> tuple[tuple[float, ...], float, tuple[float, ...]]:
         if not actions:
             raise ValueError("Nonterminal inference needs a legal menu")
         started = time.perf_counter()
         public = public_state(observation)
         if self.model is not None:
-            encoded = self.model.encode_decision(public, actions)
+            if intent_histories is not None and self.h26_tactical:
+                encoded = self.model.encode_decision(
+                    public, actions, intent_histories=intent_histories,
+                )
+            else:
+                encoded = self.model.encode_decision(public, actions)
         elif self.h24_selection is not None:
             from sts2_ai.training.h24_applicability import ResourceConstraintSelection
             from sts2_ai.training.h24_joint_act_model import encode_h24_joint_decision
@@ -517,6 +548,10 @@ class PilotPolicy:
                 public, actions,
                 selection=ResourceConstraintSelection(**self.h24_selection),
                 vocabulary=SafeResourceVocabulary(**self.h24_vocabulary),
+                tactical=self.h26_tactical,
+                intent_catalog=self.h26_intent_catalog,
+                intent_histories=intent_histories,
+                damage_ascension=self.h26_damage_ascension,
             )
         else:
             encoded = encode_joint_decision(
@@ -793,6 +828,9 @@ def collect_act_episode(
         map_profile_id=map_profile_id,
         **({"compact_card_selection": True} if compact_card_selection else {}),
     )
+    reset_history = getattr(policy, "reset_episode", None)
+    if callable(reset_history):
+        reset_history()
     decisions: list[PilotDecision] = []
     frames: list[dict[str, Any]] = []
     searches = search_transitions = search_overrides = 0
@@ -874,6 +912,7 @@ def collect_act_episode(
             decisions.append(PilotDecision(
                 observation, actions, chosen, offsets, search_policy, predicted_value,
                 budget,
+                getattr(policy, "public_intent_history", None),
             ))
             if rollout_transport == "fused":
                 (next_frame,) = backend.batch_rollout_step_frame(
