@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 
 import pytest
+from test_h26_searchfree import _combat, _models
 
 from sts2_ai.emulator.protocol import LegalAction
 from sts2_ai.models.shared_game_objects import KINDS, ZONES
@@ -14,8 +15,6 @@ from sts2_ai.training.h26_public_intent_law import (
     validate_public_intent_catalog,
 )
 from sts2_ai.training.h26_tactical import attach_visible_threat
-
-from test_h26_searchfree import _combat, _models
 
 
 def _catalog():
