@@ -164,7 +164,7 @@ def _gross_move_damage(
         )
         if any(pid not in power_rules for pid, _ in powers + player_powers):
             return None
-        for pid, stacks in powers:
+        for pid, _stacks in powers:
             # Enemy weak/status outgoing multipliers apply when stacks > 0.
             rule = power_rules[pid]
             num = rule["enemy_outgoing_damage_numerator"]
@@ -179,7 +179,7 @@ def _gross_move_damage(
             # only. Ordinary powers have their outgoing fraction at identity.
             if num != den:
                 amount = amount * num // den
-        for pid, stacks in powers:
+        for pid, _stacks in powers:
             rule = power_rules[pid]
             den = rule["enemy_outgoing_powered_attack_denominator"]
             if den <= 0:
@@ -187,7 +187,7 @@ def _gross_move_damage(
             amount = (
                 amount * rule["enemy_outgoing_powered_attack_numerator"] // den
             )
-        for pid, stacks in player_powers:
+        for pid, _stacks in player_powers:
             rule = power_rules[pid]
             den = rule["player_incoming_attack_damage_denominator"]
             if den <= 0:
