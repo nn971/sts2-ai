@@ -4,7 +4,9 @@ from __future__ import annotations
 import json
 import sys
 
+import pytest
 import torch
+from test_h26_damage_risk import _catalog_v3
 
 from sts2_ai.emulator.protocol import LegalAction, Observation
 from sts2_ai.models.shared_macro_transformer_v2 import H21GroundedMacroTransformer
@@ -77,8 +79,9 @@ def _episodes():
     return macro_ep, fight_ep
 
 
+@pytest.mark.parametrize("with_damage_catalog", [False, True])
 def test_h26_one_round_is_searchfree_and_updates_both_models(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, with_damage_catalog,
 ):
     torch.set_num_threads(1)
     source = JointActPilotNet(H21GroundedMacroTransformer(
@@ -114,6 +117,10 @@ def test_h26_one_round_is_searchfree_and_updates_both_models(
         "--workers", "1", "--minibatch", "2", "--device", "cpu",
         "--execute",
     ]
+    if with_damage_catalog:
+        path = tmp_path / "source-damage-catalog.json"
+        path.write_text(json.dumps(_catalog_v3()))
+        common.extend(["--intent-catalog", str(path)])
     monkeypatch.setattr(sys, "argv", common)
     trainer.main()
     assert stages == ["search_free_full_acts", "heldout"]
@@ -126,6 +133,14 @@ def test_h26_one_round_is_searchfree_and_updates_both_models(
     assert row["combat_checkpoint_sha256"]
     assert row["macro_checkpoint_sha256"]
     assert row["optimizer_checkpoint_sha256"]
+    assert len(saved["experiment"]["ai_source_sha256"]) == 64
+    if with_damage_catalog:
+        assert saved["experiment"]["schema"] == (
+            "sts2-h26-search-free-conditional-gross-damage-v3"
+        )
+        assert "damage_risk_coverage" in row
+    else:
+        assert "damage_risk_coverage" not in row
     loaded_macro = JointActPilotNet.load(
         output / "models" / "macro-r0001.pt", device="cpu",
     )
@@ -136,3 +151,6 @@ def test_h26_one_round_is_searchfree_and_updates_both_models(
     assert not loaded_macro.h26_tactical
     assert loaded_combat.macro_progress_head is None
     assert loaded_combat.h26_tactical
+    assert loaded_combat.h26_damage_ascension == (
+        0 if with_damage_catalog else None
+    )
