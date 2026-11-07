@@ -82,9 +82,9 @@ def validate_public_intent_catalog(raw: dict[str, Any]) -> dict[str, Any]:
                     raise ValueError("Invalid public AI state")
                 state_ids.add(state["id"])
                 if state["kind"] == "Random":
-                    weights = state["branches"]
+                    branches = state["branches"]
                     total = sum(
-                        b["weight"] for b in weights
+                        b["weight"] for b in branches
                         if isinstance(b, dict)
                         and type(b.get("weight")) is int
                         and b["weight"] > 0
