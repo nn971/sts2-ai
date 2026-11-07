@@ -550,6 +550,73 @@ def public_intent_coverage(
         record["unavailable_reasons"] = dict(
             sorted(record["unavailable_reasons"].items()),
         )
+    # A conservative public-only consistency probe: observe the actual next
+    # announced intent only when the enemy survived with unchanged visible
+    # HP/effects and no formation membership change. This detects support
+    # contradictions but is not a source/native parity certification.
+    checked = contradictions = 0
+    examples: list[dict[str, Any]] = []
+    for episode in episodes:
+        for i in range(len(episode.decisions)):
+            previous, following = episode.frames[i:i + 2]
+            past = previous.get("combat")
+            future = following.get("combat")
+            if (not isinstance(past, dict)
+                    or not isinstance(future, dict)
+                    or previous.get("floor") != following.get("floor")
+                    or type(past.get("turn")) is not int
+                    or future.get("turn") != past["turn"] + 1):
+                continue
+            past_enemies, new_enemies = past.get("enemies"), future.get("enemies")
+            if not isinstance(past_enemies, list) or not isinstance(new_enemies, list):
+                continue
+            previous_ids = {
+                enemy.get("instance_id") for enemy in past_enemies
+                if isinstance(enemy, dict) and type(enemy.get("hp")) is int
+                and enemy["hp"] > 0
+            }
+            future_by_id = {
+                enemy.get("instance_id"): enemy for enemy in new_enemies
+                if isinstance(enemy, dict) and type(enemy.get("hp")) is int
+                and enemy["hp"] > 0
+            }
+            if previous_ids != set(future_by_id):
+                continue
+            histories = getattr(
+                episode.decisions[i], "h26_public_intent_history", None,
+            )
+            for enemy in past_enemies:
+                if not isinstance(enemy, dict):
+                    continue
+                actual = future_by_id.get(enemy.get("instance_id"))
+                if actual is None or any(
+                    enemy.get(key) != actual.get(key)
+                    for key in ("hp", "powers", "statuses")
+                ):
+                    continue
+                law = next_intent_law(
+                    enemy, catalog, public_enemies=past_enemies,
+                    executed_moves=(
+                        histories.get(enemy.get("instance_id"))
+                        if isinstance(histories, dict) else None
+                    ),
+                )
+                if not law.available or not isinstance(actual.get("move_id"), str):
+                    continue
+                checked += 1
+                if actual["move_id"] not in {
+                    move for move, mass in law.outcomes if mass > 0
+                }:
+                    contradictions += 1
+                    if len(examples) < 8:
+                        examples.append({
+                            "enemy_id": enemy.get("enemy_id"),
+                            "floor": previous.get("floor"),
+                            "turn": past["turn"],
+                            "before": enemy.get("move_id"),
+                            "after": actual["move_id"],
+                            "supported": [m for m, _ in law.outcomes],
+                        })
     return {
         "available": available, "total": total,
         "availability_rate": available / total if total else None,
@@ -560,4 +627,9 @@ def public_intent_coverage(
         ),
         "unavailable_reasons": dict(sorted(reasons.items())),
         "by_enemy": dict(sorted(by_enemy.items())),
+        "next_turn_support_audit": {
+            "checked": checked,
+            "out_of_support": contradictions,
+            "examples": examples,
+        },
     }
