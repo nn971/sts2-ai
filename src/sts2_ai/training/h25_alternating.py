@@ -62,6 +62,7 @@ class SplitPilotPolicy:
     def __init__(
         self, macro: PilotPolicy, combat: PilotPolicy, *,
         hp_bias: float = 0.15,
+        rollout_no_value: bool = False,
     ) -> None:
         if (not math.isfinite(hp_bias) or not 0 <= hp_bias <= 1
                 or macro.temperature != combat.temperature):
@@ -69,6 +70,7 @@ class SplitPilotPolicy:
         self.macro = macro
         self.combat = combat
         self.hp_bias = hp_bias
+        self.rollout_no_value = rollout_no_value
         self.temperature = macro.temperature
         self.combat_credit_weight = combat.combat_credit_weight
         self.loss_progress_cap = combat.loss_progress_cap
@@ -107,7 +109,10 @@ class SplitPilotPolicy:
         combat = isinstance(public_state(observation).get("combat"), dict)
         if not combat:
             return self.macro.infer(observation, actions)
-        scores, _, offsets = self.combat.infer(observation, actions)
+        scores, combat_value, offsets = self.combat.infer(observation, actions)
+        if self.rollout_no_value:
+            # No tree search in H26: skip the otherwise unused macro value RPC.
+            return scores, combat_value, offsets
         _, macro_value, _ = self.macro.infer(observation, actions)
         return scores, self._combat_value(observation, macro_value), offsets
 
