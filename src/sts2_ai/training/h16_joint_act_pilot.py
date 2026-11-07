@@ -394,6 +394,8 @@ class PilotDecision:
     search_policy: tuple[float, ...] | None = None
     predicted_value: float | None = None
     search_simulations: int = 0
+    # Derived solely from displayed prior enemy intents on completed turns.
+    h26_public_intent_history: dict[int, tuple[str, ...]] | None = None
 
 
 @dataclass(frozen=True)
@@ -515,13 +517,19 @@ class PilotPolicy:
 
     def infer(
         self, observation: Observation, actions: tuple[LegalAction, ...],
+        *, intent_histories: dict[int, tuple[str, ...]] | None = None,
     ) -> tuple[tuple[float, ...], float, tuple[float, ...]]:
         if not actions:
             raise ValueError("Nonterminal inference needs a legal menu")
         started = time.perf_counter()
         public = public_state(observation)
         if self.model is not None:
-            encoded = self.model.encode_decision(public, actions)
+            if intent_histories is not None and self.h26_tactical:
+                encoded = self.model.encode_decision(
+                    public, actions, intent_histories=intent_histories,
+                )
+            else:
+                encoded = self.model.encode_decision(public, actions)
         elif self.h24_selection is not None:
             from sts2_ai.training.h24_applicability import ResourceConstraintSelection
             from sts2_ai.training.h24_joint_act_model import encode_h24_joint_decision
@@ -532,6 +540,7 @@ class PilotPolicy:
                 vocabulary=SafeResourceVocabulary(**self.h24_vocabulary),
                 tactical=self.h26_tactical,
                 intent_catalog=self.h26_intent_catalog,
+                intent_histories=intent_histories,
             )
         else:
             encoded = encode_joint_decision(
@@ -808,6 +817,9 @@ def collect_act_episode(
         map_profile_id=map_profile_id,
         **({"compact_card_selection": True} if compact_card_selection else {}),
     )
+    reset_history = getattr(policy, "reset_episode", None)
+    if callable(reset_history):
+        reset_history()
     decisions: list[PilotDecision] = []
     frames: list[dict[str, Any]] = []
     searches = search_transitions = search_overrides = 0
@@ -889,6 +901,7 @@ def collect_act_episode(
             decisions.append(PilotDecision(
                 observation, actions, chosen, offsets, search_policy, predicted_value,
                 budget,
+                getattr(policy, "public_intent_history", None),
             ))
             if rollout_transport == "fused":
                 (next_frame,) = backend.batch_rollout_step_frame(
