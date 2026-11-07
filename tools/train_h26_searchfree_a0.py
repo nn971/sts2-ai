@@ -98,9 +98,36 @@ def prune_h25_checkpoints(
     return removed
 
 
+def _h26_ai_source_sha256() -> str:
+    """Fingerprint executable H26 logic, not just the run arguments.
+
+    In particular, the same catalog and seeds under revised public-history
+    inference must produce a DIFFERENT experiment identity and resume gate.
+    """
+    root = Path(__file__).resolve().parents[1]
+    relative = (
+        "tools/train_h26_searchfree_a0.py",
+        "tools/train_h16_joint_act_pilot.py",
+        "src/sts2_ai/training/h26_public_intent_law.py",
+        "src/sts2_ai/training/h26_tactical.py",
+        "src/sts2_ai/training/h26_combat_rl.py",
+        "src/sts2_ai/training/h25_alternating.py",
+        "src/sts2_ai/training/h24_joint_act_model.py",
+        "src/sts2_ai/training/h16_joint_act_pilot.py",
+    )
+    digest = hashlib.sha256()
+    for path in relative:
+        source = root / path
+        digest.update(path.encode("utf-8"))
+        digest.update(b"\x00")
+        digest.update(hashlib.sha256(source.read_bytes()).digest())
+    return digest.hexdigest()
+
+
 def _stable_identity(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "schema": H26_SCHEMA,
+        "ai_source_sha256": _h26_ai_source_sha256(),
         "initial_h22_sha256": sha256(args.initial_h22),
         "initial_h25_macro_sha256": (
             sha256(args.initial_h25_macro) if args.initial_h25_macro else None
